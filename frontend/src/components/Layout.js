@@ -551,6 +551,7 @@ export const Layout = ({ children }) => {
   //   1. Section-level featureKey  — hides the entire section
   //   2. item.subFeature           — hides items within a feature category (nested format)
   //   3. item.featureKey           — hides individual items using a flat flag
+  //   4. item.minRole              — hides items that require a higher role than current user
   const filterNavSections = (sections) => {
     return sections
       .filter(section => {
@@ -559,6 +560,8 @@ export const Layout = ({ children }) => {
       })
       .map(section => {
         const filteredItems = section.items.filter(item => {
+          // minRole guard: hide super-admin-only items from tenants/agents/cashiers
+          if (item.minRole === 'super_admin' && !isSuperAdmin) return false;
           // Section-scoped sub-feature check (plan-level nested format)
           if (section.featureKey && item.subFeature) {
             if (!isFeatureEnabled(section.featureKey, item.subFeature)) return false;

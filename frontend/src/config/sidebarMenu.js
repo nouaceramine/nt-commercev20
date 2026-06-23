@@ -222,7 +222,7 @@ export const defaultMenuSections = [
       { id: 'settings', path: '/settings', icon: 'Settings', labelAr: 'الإعدادات', labelFr: 'Paramètres', visible: true },
       { id: 'backup-system', path: '/backup-system', icon: 'Shield', labelAr: 'النسخ الاحتياطي', labelFr: 'Sauvegardes', visible: true },
       { id: 'data-import-export', path: '/data-import-export', icon: 'FileText', labelAr: 'استيراد/تصدير', labelFr: 'Import/Export', visible: true },
-      { id: 'motherboard', path: '/motherboard', icon: 'Settings', labelAr: 'اللوحة الأم', labelFr: 'Carte mère', visible: true },
+      { id: 'motherboard', path: '/motherboard', icon: 'Settings', labelAr: 'اللوحة الأم', labelFr: 'Carte mère', visible: true, minRole: 'super_admin' },
       { id: 'sidebar-settings', path: '/settings/sidebar', icon: 'LayoutDashboard', labelAr: 'ترتيب القائمة', labelFr: 'Ordre menu', visible: true },
     ]
   },

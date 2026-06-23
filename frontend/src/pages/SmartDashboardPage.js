@@ -185,7 +185,7 @@ export default function SmartDashboardPage() {
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {financialHealth.health_indicators?.map((indicator, index) => (
-                    <div key={`stat-${stat.label || index}`} className="text-center">
+                    <div key={`stat-${indicator.name || index}`} className="text-center">
                       <div className={`text-2xl font-bold ${
                         indicator.status === 'good' ? 'text-emerald-500' : 
                         indicator.status === 'warning' ? 'text-yellow-500' : 'text-red-500'

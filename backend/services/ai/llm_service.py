@@ -42,7 +42,6 @@ def _get_openai_client():
     """
     base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
     if not base_url:
-        logger.warning("AI_INTEGRATIONS_OPENAI_BASE_URL not set — AI integration not configured")
         return None
     try:
         from openai import AsyncOpenAI
@@ -55,6 +54,23 @@ def _get_openai_client():
     )
 
 
+def _get_emergent_chat(system_message: str):
+    """Build an LlmChat from emergentintegrations when EMERGENT_LLM_KEY is configured.
+    This is the preferred path for this deployment (single key for OpenAI/Claude/Gemini)."""
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not key:
+        return None
+    try:
+        from emergentintegrations.llm.chat import LlmChat
+    except ImportError:
+        return None
+    import uuid as _uuid
+    return (
+        LlmChat(api_key=key, session_id=f"ntc-{_uuid.uuid4()}", system_message=system_message)
+        .with_model("openai", "gpt-4o-mini")
+    )
+
+
 class _ChatAdapter:
     """Adapter exposing send_message() so existing LLMService methods keep working unchanged."""
 
@@ -63,18 +79,29 @@ class _ChatAdapter:
 
     async def send_message(self, message) -> str:
         text = message.text if hasattr(message, "text") else str(message)
+        # 1. Prefer Replit AI integration if configured (back-compat)
         client = _get_openai_client()
-        if client is None:
-            raise RuntimeError("AI integration not configured")
-        response = await client.chat.completions.create(
-            model=AI_MODEL,
-            messages=[
-                {"role": "system", "content": self.system_message},
-                {"role": "user", "content": text},
-            ],
-            max_completion_tokens=8192,
-        )
-        return response.choices[0].message.content or ""
+        if client is not None:
+            response = await client.chat.completions.create(
+                model=AI_MODEL,
+                messages=[
+                    {"role": "system", "content": self.system_message},
+                    {"role": "user", "content": text},
+                ],
+                max_completion_tokens=8192,
+            )
+            return response.choices[0].message.content or ""
+        # 2. Fall back to Emergent LLM key via emergentintegrations
+        chat = _get_emergent_chat(self.system_message)
+        if chat is not None:
+            try:
+                from emergentintegrations.llm.chat import UserMessage as _EmUserMessage
+                resp = await chat.send_message(_EmUserMessage(text=text))
+                return resp if isinstance(resp, str) else getattr(resp, "content", str(resp))
+            except Exception as exc:
+                logger.error("Emergent LLM chat failed: %s", exc)
+                raise
+        raise RuntimeError("AI integration not configured")
 
 
 class LLMService:
