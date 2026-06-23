@@ -99,7 +99,11 @@ export default function PricingPage() {
 
   const getFeatureCount = (features) => {
     if (!features) return 0;
-    return Object.values(features).filter(f => f?.enabled).length;
+    return Object.entries(features).filter(([k, v]) => {
+      if (typeof v === 'boolean') return v === true;
+      if (v && typeof v === 'object' && 'enabled' in v) return v.enabled === true;
+      return false;
+    }).length;
   };
 
   const t = {
