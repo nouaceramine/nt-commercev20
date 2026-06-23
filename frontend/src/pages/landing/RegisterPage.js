@@ -105,9 +105,9 @@ export default function RegisterPage() {
 
   const getPrice = (plan) => {
     switch (billingCycle) {
-      case '6months': return plan?.price_6months || 0;
-      case 'yearly': return plan?.price_yearly || 0;
-      default: return plan?.price_monthly || 0;
+      case '6months': return plan?.six_month_price ?? plan?.price_6months ?? 0;
+      case 'yearly': return plan?.yearly_price ?? plan?.price_yearly ?? 0;
+      default: return plan?.monthly_price ?? plan?.price_monthly ?? 0;
     }
   };
 

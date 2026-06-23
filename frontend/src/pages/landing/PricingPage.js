@@ -261,7 +261,7 @@ export default function PricingPage() {
           ) : (
             <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
               {plans.map((plan, index) => {
-                const price = billingCycle === 'yearly' ? plan.price_yearly : plan.price_monthly;
+                const price = billingCycle === 'yearly' ? (plan.yearly_price ?? plan.price_yearly ?? 0) : (plan.monthly_price ?? plan.price_monthly ?? 0);
                 const featureCount = getFeatureCount(plan.features);
                 
                 return (

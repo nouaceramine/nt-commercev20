@@ -179,9 +179,9 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
                 plan_commission_rate = 10.0 if _rate is None else float(_rate)
                 commission_fixed = agent_doc.get("commission_fixed", 0) or 0
                 price_map = {
-                    "monthly": plan.get("price_monthly", 0),
-                    "6months": plan.get("price_6months", 0),
-                    "yearly": plan.get("price_yearly", 0),
+                    "monthly": plan.get("monthly_price", plan.get("price_monthly", 0)) or 0,
+                    "6months": plan.get("six_month_price", plan.get("price_6months", 0)) or 0,
+                    "yearly": plan.get("yearly_price", plan.get("price_yearly", 0)) or 0,
                 }
                 subscription_price = price_map.get(tenant_doc["subscription_type"], 0) or 0
                 comm_amount = (subscription_price * plan_commission_rate / 100) + commission_fixed

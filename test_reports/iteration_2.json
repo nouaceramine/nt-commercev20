@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 2 re-test of nt-commercev16 after main agent's field-name and toast fixes. All three HIGH/MEDIUM issues from iteration_1 are CONFIRMED FIXED. Backend test_saas_core.py: 13/13 PASS (100%). Frontend: /pricing shows real DZD prices (2,900 / 5,900 / 9,900 monthly; 27,900 / 54,900 / 94,900 yearly) with no NaN. /register wizard shows real prices (2,900 / 5,900 / 9,900) and toggles for monthly/6months/yearly. No global 'ليس لديك صلاحية' toast appears on /landing, /pricing, /register, /portal. Super admin login (admin@ntcommerce.com) -> /saas-admin still works and lists tenants. Backend tenant commission price_map now reads new field names (monthly_price / six_month_price / yearly_price) with legacy fallback - verified by code review and confirmed plans collection holds the new names; commission calc will now produce non-zero amounts for agent-attributed tenants.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/pricing", "issues": ["Each plan card shows 'الميزات (0)' (feature count = 0). getFeatureCount() in PricingPage.js still iterates expecting nested {enabled: true} per feature, but backend returns flat booleans (has_pos, has_inventory, etc.). Cosmetic, not part of iteration_2 scope but worth noting."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_saas_core.py",
+    "/app/test_reports/pytest/iteration_2_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Update PricingPage.js getFeatureCount() to read the flat boolean schema returned by /api/saas/plans/public (has_pos, has_inventory, has_reports, ...). Currently shows 'الميزات (0)' for every plan.",
+    "OPTIONAL: Consider returning HTTP 201 instead of 200 from POST /api/saas/tenants (REST convention)."
+  ],
+  "critical_code_review_comments": [
+    "Field naming inconsistency between backend (monthly_price / six_month_price / yearly_price) and several frontend pages (SaasAdminPage, AgentDashboardPage, FeatureFlagsPage) which still reference legacy price_monthly / price_yearly / price_6months. Now all read-paths use the ?? fallback so they will still display, but it's worth a one-shot rename across the codebase for consistency.",
+    "PricingPage.js mock fallback (lines 56-90) still uses legacy field names price_monthly / price_yearly. Harmless because the live API works, but if the API ever fails the fallback will silently show wrong/no prices.",
+    "apiClient PUBLIC_PATHS uses window.location.pathname directly; works but tight coupling to browser globals - consider passing route context from the consumer or using a React-Router-aware check."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "Super admin: admin@ntcommerce.com / Admin@2024 (confirmed working). Test tenants left in DB: TEST_tenant_0e54f6b5@example.com and TEST_tenant_2619fa6a@example.com (created by previous and current backend test runs).",
+  "seed_data_creation": "Backend test_create_tenant added one new TEST tenant via POST /api/saas/tenants (Starter, monthly). Visible in SaaS admin dashboard alongside the iteration_1 tenant.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 2 PASSED all three previously-reported issues. Backend test suite at /app/backend/tests/test_saas_core.py: 13/13 PASS. Re-run with: pytest /app/backend/tests/test_saas_core.py -v. Public URL: https://nt-v16-staging.preview.emergentagent.com. Public pages (/landing /pricing /register /portal) no longer show the permission-denied toast. Both /pricing and /register show correct DZD prices. Outstanding minor: PricingPage feature-count shows '(0)' due to schema mismatch - cosmetic only.",
+  "rca of the issue": "All three iteration_1 issues confirmed fixed: (1) /pricing PriceCard line 264 now uses `plan.yearly_price ?? plan.price_yearly ?? 0` so it picks the correct backend field; verified rendering 2,900/5,900/9,900 DZD monthly and 27,900/54,900/94,900 DZD yearly. (2) /register getPrice() in lines 106-112 reads `monthly_price / six_month_price / yearly_price` with legacy fallback; verified rendering correct DZD prices in the wizard. (3) apiClient response interceptor now checks `isPublicRoute()` against PUBLIC_PATHS = ['/landing', '/pricing', '/register', '/portal', '/login', '/tenant-login', '/agent-login', '/shop'] before showing the 403 toast or redirecting on 401 - verified no toast on all 4 tested public pages even though background 403s still appear in console (they are silently swallowed which is correct UX). (4) Backend tenants_routes.create_tenant price_map (lines 181-185) now reads `monthly_price / six_month_price / yearly_price` first with `price_monthly / price_6months / price_yearly` fallback - confirmed by code review; plans in DB have the new field names with non-zero values (2900, 14900, 27900 etc.), so agent commissions will compute correctly going forward."
+}

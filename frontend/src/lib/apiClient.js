@@ -23,16 +23,27 @@ apiClient.interceptors.request.use((config) => {
 });
 
 // Response interceptor - handle errors globally
+const PUBLIC_PATHS = ['/landing', '/pricing', '/register', '/portal', '/login', '/tenant-login', '/agent-login', '/shop'];
+const isPublicRoute = () => {
+  const p = window.location.pathname;
+  return PUBLIC_PATHS.some((pub) => p === pub || p.startsWith(`${pub}/`));
+};
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
+    const onPublic = isPublicRoute();
     if (status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      if (!onPublic) {
+        window.location.href = '/portal';
+      }
     } else if (status === 403) {
-      toast.error('ليس لديك صلاحية للوصول');
+      if (!onPublic) {
+        toast.error('ليس لديك صلاحية للوصول');
+      }
     } else if (status === 429) {
       toast.error('طلبات كثيرة. حاول لاحقاً');
     } else if (status >= 500) {
