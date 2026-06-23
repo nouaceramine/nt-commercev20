@@ -248,9 +248,23 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         tenant_user = await tenant_db_conn.users.find_one(
                             {"role": "admin"}, {"_id": 0, "id": 1, "role": 1, "name": 1}
                         )
-                    
+                    # If still missing (db was initialized but admin user was never seeded),
+                    # create one on-the-fly so tenant-scoped endpoints can locate the user.
+                    if not tenant_user:
+                        new_uid = str(uuid.uuid4())
+                        await tenant_db_conn.users.insert_one({
+                            "id": new_uid,
+                            "name": tenant.get("name", email),
+                            "email": email,
+                            "hashed_password": stored_password,
+                            "role": "admin",
+                            "permissions": {},
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        })
+                        tenant_user = {"id": new_uid, "role": "admin", "name": tenant.get("name", "")}
+
                     # Use the tenant user's id as sub so get_current_user can find them
-                    actual_user_id = tenant_user["id"] if tenant_user else tenant_id
+                    actual_user_id = tenant_user["id"]
 
                     token_data = {
                         "sub": actual_user_id,

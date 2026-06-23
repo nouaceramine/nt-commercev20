@@ -203,7 +203,6 @@ async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
                 ),
             )
             .with_model("openai", "gpt-4o-mini")
-            .with_max_tokens(1500)
         )
         ai = await chat.send_message(UserMessage(text=f"حلّل سجل الأخطاء التالي:\n{report}"))
         text = ai if isinstance(ai, str) else getattr(ai, "content", str(ai))

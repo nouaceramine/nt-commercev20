@@ -69,7 +69,20 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
                 return user
-        
+            # Fallback: user_id might equal tenant_id (legacy tokens) -> build user from saas_tenants
+            tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
+            if tenant:
+                set_tenant_context(tenant_db)
+                return {
+                    "id": tenant["id"],
+                    "email": tenant.get("email", ""),
+                    "name": tenant.get("name", ""),
+                    "role": "admin",
+                    "tenant_id": tenant_id,
+                    "user_type": "tenant",
+                    "company_name": tenant.get("company_name", ""),
+                }
+
         raise HTTPException(status_code=401, detail="User not found")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

@@ -53,6 +53,20 @@ export function DateFormatProvider({ children }) {
   // تحميل الإعدادات من السيرفر
   const loadSettings = useCallback(async () => {
     try {
+      // /settings/datetime is tenant-scoped. Avoid the 403 noise for super-admin/agent.
+      let userRole = null;
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) userRole = JSON.parse(stored)?.role || null;
+      } catch (_) {}
+      const tenantRoles = ['tenant', 'admin', 'user', 'cashier', 'manager'];
+      const isTenantUser = userRole && tenantRoles.includes(userRole);
+      const token = localStorage.getItem('token');
+      if (!token || !isTenantUser) {
+        setConfig(defaultSettings);
+        setLoading(false);
+        return;
+      }
       const res = await apiClient.get(`/settings/datetime`);
       const serverSettings = {
         shortDateFormat: res.data.short_date_format || 'yyyy-MM-dd',

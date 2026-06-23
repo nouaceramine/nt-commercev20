@@ -214,19 +214,20 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
         user_type = payload.get("type")  # admin, agent, tenant
+        role = payload.get("role")
         tenant_id = payload.get("tenant_id")
-        
+
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
+
         # For tenant users, get from tenant database
         if user_type == "tenant" and tenant_id:
             tenant_db = get_tenant_db(tenant_id)
             user = await tenant_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
-            
+
             # Get tenant info from main_db to get plan features
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
-            
+
             if user is None:
                 # Check main tenant record (always in main_db)
                 if tenant:
@@ -238,7 +239,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                         "tenant_id": tenant_id,
                         "user_type": "tenant",
                         "company_name": tenant.get("company_name", ""),
-                        "created_at": tenant.get("created_at", datetime.now(timezone.utc).isoformat())
+                        "created_at": tenant.get("created_at", datetime.now(timezone.utc).isoformat()),
                     }
                 else:
                     raise HTTPException(status_code=401, detail="User not found")
@@ -247,7 +248,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 user["user_type"] = "tenant"
                 if not user.get("created_at"):
                     user["created_at"] = datetime.now(timezone.utc).isoformat()
-            
+
             # Add plan features and limits for tenant users
             if tenant:
                 plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
@@ -255,15 +256,32 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     user["features"] = {**plan.get("features", {}), **tenant.get("features_override", {})}
                     user["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
                 user["company_name"] = tenant.get("company_name", "")
-        else:
-            # For admin users, get from main database
-            user = await main_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
-            if user is None:
-                raise HTTPException(status_code=401, detail="User not found")
-            user["user_type"] = user_type or "admin"
-            if tenant_id:
-                user["tenant_id"] = tenant_id
-        
+            return user
+
+        # Agent users -> live in main_db.saas_agents (different collection)
+        if user_type == "agent" or role == "agent":
+            agent = await main_db.saas_agents.find_one(
+                {"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0}
+            )
+            if not agent:
+                raise HTTPException(status_code=401, detail="Agent not found")
+            agent["user_type"] = "agent"
+            agent["role"] = "agent"
+            return agent
+
+        # Admin / super-admin -> main_db.users (super_admins as fallback)
+        user = await main_db.users.find_one(
+            {"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0}
+        )
+        if user is None:
+            user = await main_db.super_admins.find_one(
+                {"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0}
+            )
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        user["user_type"] = user_type or "admin"
+        if tenant_id:
+            user["tenant_id"] = tenant_id
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

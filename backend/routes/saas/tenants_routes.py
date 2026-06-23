@@ -28,7 +28,7 @@ def _assert_safe_bridge_url(url: str) -> None:
     if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
         raise HTTPException(status_code=400, detail="رابط الجسر يشير إلى عنوان شبكة داخلية غير مسموح")
 
-from config.database import db, main_db, client, init_tenant_database
+from config.database import db, main_db, client, init_tenant_database, get_tenant_db
 from .schemas import TenantCreate, TenantUpdate, TenantResponse, SubscriptionPayment
 from .helpers import get_super_admin, create_access_token
 from services.wallet_service import credit_wallet, get_or_create_wallet
@@ -90,13 +90,54 @@ async def impersonate_tenant(tenant_id: str, admin: dict = Depends(get_super_adm
     if not tenant.get("is_active"):
         raise HTTPException(status_code=400, detail="حساب المشترك معطل")
 
+    # Make sure the tenant DB exists (lazy init like the unified-login flow).
+    tenant_db = get_tenant_db(tenant_id)
+    if not tenant.get("database_initialized", False):
+        tenant_db = await init_tenant_database(tenant_id)
+        await main_db.saas_tenants.update_one(
+            {"id": tenant_id},
+            {"$set": {
+                "database_initialized": True,
+                "first_login_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
+    # Resolve a *real* user inside the tenant DB so /auth/me can look it up.
+    tenant_user = await tenant_db.users.find_one(
+        {"email": tenant["email"]}, {"_id": 0, "id": 1, "role": 1, "name": 1}
+    )
+    if not tenant_user:
+        tenant_user = await tenant_db.users.find_one(
+            {"role": "admin"}, {"_id": 0, "id": 1, "role": 1, "name": 1}
+        )
+    if not tenant_user:
+        # Last resort: create an admin user from the tenant record so impersonation can proceed.
+        new_uid = str(uuid.uuid4())
+        await tenant_db.users.insert_one({
+            "id": new_uid,
+            "name": tenant.get("name", tenant["email"]),
+            "email": tenant["email"],
+            "hashed_password": tenant.get("hashed_password", ""),
+            "role": "admin",
+            "permissions": {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        tenant_user = {"id": new_uid, "role": "admin", "name": tenant.get("name", "")}
+
+    actual_user_id = tenant_user["id"]
+
     access_token = create_access_token({
-        "sub": tenant_id,
+        "sub": actual_user_id,           # <-- real user id in tenant_db.users
         "email": tenant["email"],
-        "role": "admin",
+        "role": "tenant_admin",          # match the regular tenant login role
         "type": "tenant",
-        "tenant_id": tenant_id
+        "tenant_id": tenant_id,
+        "impersonated_by": admin.get("id"),
     })
+
+    plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
+    features = {**(plan.get("features") or {}), **(tenant.get("features_override") or {})} if plan else {}
+    limits = {**(plan.get("limits") or {}), **(tenant.get("limits_override") or {})} if plan else {}
 
     return {
         "access_token": access_token,
@@ -107,14 +148,17 @@ async def impersonate_tenant(tenant_id: str, admin: dict = Depends(get_super_adm
         "tenant_id": tenant_id,
         "user_type": "tenant",
         "user": {
-            "id": tenant_id,
+            "id": actual_user_id,
             "email": tenant["email"],
             "name": tenant.get("name", ""),
-            "role": "admin",
+            "role": "tenant_admin",
+            "user_type": "tenant",
             "tenant_id": tenant_id,
             "company_name": tenant.get("company_name", ""),
-            "database_name": tenant.get("database_name", "")
-        }
+            "database_name": f"tenant_{tenant_id.replace('-', '_')}",
+            "features": features,
+            "limits": limits,
+        },
     }
 
 
