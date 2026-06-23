@@ -746,7 +746,7 @@ async def notify_repair_status_change(repair_id: str, user: dict = Depends(requi
 
     # Send the message
     whatsapp_msg = WhatsAppMessage(phone=repair.get("customer_phone", ""), message=message)
-    return await send_whatsapp_message(whatsapp_msg, user)
+    return await send_whatsapp_message_v2(whatsapp_msg, user)
 
 @router.get("/whatsapp/logs")
 async def get_whatsapp_logs(

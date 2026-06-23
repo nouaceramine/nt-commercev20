@@ -121,7 +121,7 @@ export default function SystemTab() {
     try {
       
       const formData = new FormData(); formData.append('file', file);
-      await apiClient.post(`/backup/restore`, formData, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } });
+      await apiClient.post(`/backup/restore`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(language === 'ar' ? 'تم استعادة البيانات بنجاح' : 'Data restored successfully');
       window.location.reload();
     } catch (error) { toast.error(language === 'ar' ? 'فشل في استعادة البيانات' : 'Failed to restore data'); }

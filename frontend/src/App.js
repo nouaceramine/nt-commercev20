@@ -22,7 +22,6 @@ const CASHIER_ALLOWED_PATHS = defaultMenuSections.flatMap(section =>
 );
 
 // Pages
-import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";

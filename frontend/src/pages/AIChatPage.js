@@ -241,7 +241,7 @@ export default function AIChatPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                   {suggestedQuestions.map((q, index) => (
                     <Button
-                      key={`msg-user-${msg.id || index}`}
+                      key={`suggested-q-${index}`}
                       variant="outline"
                       className="justify-start text-sm h-auto py-3 px-4"
                       onClick={() => sendMessage(q.text)}

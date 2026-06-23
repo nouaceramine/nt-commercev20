@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter
 import uuid
 import os
+import io
 import logging
 import pandas as pd
 
@@ -474,8 +475,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         return {"success": True}
 
     @router.put("/notifications/mark-all-read")
-    async def mark_all_notifications_read(user: dict = Depends(require_tenant)):
-        """Mark all notifications as read"""
+    async def mark_all_notifications_read_v2(user: dict = Depends(require_tenant)):
         await db.notifications.update_many(
             {"read": False},
             {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}

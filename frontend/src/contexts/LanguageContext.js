@@ -523,7 +523,6 @@ const translations = {
     dashboard: 'لوحة التحكم',
     products: 'المنتجات',
     addProduct: 'إضافة منتج',
-    settings: 'الإعدادات',
     users: 'المستخدمين',
     userManagement: 'إدارة المستخدمين',
     customers: 'الزبائن',

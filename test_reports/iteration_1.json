@@ -1,0 +1,59 @@
+{
+  "summary": "First end-to-end test pass for NT Commerce SaaS POS after GitHub import. Backend 13/13 tests passed (100%). Frontend critical SaaS flows (landing, super-admin login, SaaS admin dashboard, tenant creation via UI/API, tenant login, fresh tenant products) all WORKING. Two field-name mismatch bugs found on /pricing (shows NaN 'ليس رقمًا') and /register wizard (shows 0 DZD) - same pattern that was already fixed for LandingPage but not propagated to these two pages. Also a noisy global 'permission denied' toast appears on public pages due to axios 403 interceptor firing on background /api/auth/me calls.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "PricingPage (/pricing)",
+        "issue": "All plan prices display as 'ليس رقمًا' (NaN). Code reads plan.price_monthly / plan.price_yearly but backend GET /api/saas/plans returns monthly_price / yearly_price / six_month_price.",
+        "selector": "/app/frontend/src/pages/landing/PricingPage.js lines 61-84 (mock fallback) and line 264 (display)",
+        "priority": "HIGH"
+      },
+      {
+        "component": "RegisterPage (/register) plan selection wizard",
+        "issue": "All plans show '0 دج' for monthly/6months/yearly. Code reads plan.price_monthly / plan.price_yearly / plan.price_6months but backend returns monthly_price / yearly_price / six_month_price.",
+        "selector": "/app/frontend/src/pages/landing/RegisterPage.js lines 108-110 (getPrice switch)",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Global toast / public pages",
+        "issue": "A red toast 'ليس لديك صلاحية للوصول' (no permission to access) appears at the top of public pages (/landing, /pricing, /register, /portal) for unauthenticated visitors. Likely an axios response interceptor firing for background 403s (e.g., /api/auth/me, /api/notifications) on routes that should not trigger auth calls. Console shows 4x 'Failed to load resource: 403' on these pages.",
+        "selector": "axios interceptor or AuthContext bootstrap (showing toast on 401/403 without route guard)",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_saas_core.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix /app/frontend/src/pages/landing/PricingPage.js: replace plan.price_monthly -> plan.monthly_price and plan.price_yearly -> plan.yearly_price (line 264). Also update mock fallback objects on lines 61-84 to use monthly_price/yearly_price/six_month_price for consistency.",
+    "Fix /app/frontend/src/pages/landing/RegisterPage.js getPrice() switch (lines 108-110): six_month_price, yearly_price, monthly_price instead of price_6months/price_yearly/price_monthly. Also verify any 'savings %' or 'discount' calculations against new field names.",
+    "Suppress/scope the global permission-denied toast for public routes (/landing, /pricing, /register, /portal) or do not bootstrap /api/auth/me when no JWT is present in storage."
+  ],
+  "critical_code_review_comments": [
+    "Field naming inconsistency: SaaS plan price fields exist in TWO conventions in the codebase — backend returns {monthly_price, yearly_price, six_month_price}, but PricingPage/RegisterPage/SaasAdminPage/AgentDashboardPage/FeatureFlagsPage all still reference {price_monthly, price_yearly, price_6months}. The tenants_routes.create_tenant commission-calc block also reads plan.get('price_monthly'/'price_6months'/'price_yearly') (lines 182-184) which means agent commissions will be computed as 0 for every plan. Recommend a one-shot rename across the codebase to monthly_price/yearly_price/six_month_price.",
+    "Global axios 403 toast fires on public pages → poor first-impression UX. Bootstrap auth only when token present.",
+    "saas_routes.py only includes sub-routers; no inline endpoints — fine, but route registration depth is large; consider central docs.",
+    "tenants_routes.create_tenant returns 200 instead of 201 for resource creation (works, but inconsistent with REST conventions)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_saas_core.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "70%"
+  },
+  "test_credentials": "Super admin: admin@ntcommerce.com / Admin@2024 (worked). Test tenant created during this run: TEST_tenant_<uuid>@example.com / TenantPass@2024 (left in DB).",
+  "seed_data_creation": "Backend test created one TEST tenant via POST /api/saas/tenants (plan=Starter, subscription_type=monthly). Visible as 'TEST Tenant 2619fa6a' in SaaS admin dashboard screenshot. Not cleaned up; safe to delete from /saas-admin.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite at /app/backend/tests/test_saas_core.py covers health, plans schema, super-admin auth, products auth guard, tenant CRUD, tenant login, fresh tenant products (empty). Run: pytest /app/backend/tests/test_saas_core.py -v. Public URL: https://nt-v16-staging.preview.emergentagent.com. Admin login at /portal with admin@ntcommerce.com / Admin@2024 -> redirects to /saas-admin. /landing works correctly with monthly/6months/yearly toggling (2900/14900/27900 etc). The PricingPage and RegisterPage field-name fixes are pending; verify them after main agent fix. Also verify agent commission calc in /app/backend/routes/saas/tenants_routes.py lines 182-184 (uses old price_* keys).",
+  "rca of the issue": "PricingPage/RegisterPage NaN/0 prices: Backend GET /api/saas/plans returns the new normalized field names (monthly_price, yearly_price, six_month_price) — confirmed via curl. Frontend pages still reference the legacy keys (price_monthly, price_yearly, price_6months). The earlier fix the main agent applied to LandingPage was correct but was not propagated to sibling files. Reproduction: open /pricing in browser → all 3 plan cards show 'ليس رقمًا دج / شهر'; open /register → all 3 plans show '0 دج'. Mitigation: rename the 3 field accesses to backend names (or expose both names in the backend response for backward-compat). Same legacy keys also exist in backend tenants_routes.create_tenant commission calculation — those will silently compute 0 commission for any agent-attributed tenant."
+}

@@ -35,23 +35,24 @@ export default function LandingPage() {
 
   const getPrice = (plan) => {
     switch (billingCycle) {
-      case '6months': return plan.price_6months;
-      case 'yearly': return plan.price_yearly;
-      default: return plan.price_monthly;
+      case '6months': return plan.six_month_price ?? 0;
+      case 'yearly': return plan.yearly_price ?? 0;
+      default: return plan.monthly_price ?? 0;
     }
   };
 
   const getSavings = (plan) => {
-    const monthly = plan.price_monthly;
+    const monthly = plan.monthly_price ?? 0;
+    if (!monthly) return 0;
     if (billingCycle === '6months') {
-      const sixMonthPrice = plan.price_6months;
+      const sixMonthPrice = plan.six_month_price ?? 0;
       const wouldBe = monthly * 6;
-      return Math.round(((wouldBe - sixMonthPrice) / wouldBe) * 100);
+      return wouldBe ? Math.round(((wouldBe - sixMonthPrice) / wouldBe) * 100) : 0;
     }
     if (billingCycle === 'yearly') {
-      const yearlyPrice = plan.price_yearly;
+      const yearlyPrice = plan.yearly_price ?? 0;
       const wouldBe = monthly * 12;
-      return Math.round(((wouldBe - yearlyPrice) / wouldBe) * 100);
+      return wouldBe ? Math.round(((wouldBe - yearlyPrice) / wouldBe) * 100) : 0;
     }
     return 0;
   };
@@ -293,30 +294,41 @@ export default function LandingPage() {
                     </div>
 
                     <ul className="space-y-3 text-right mb-6">
-                      {Object.entries(plan.features || {}).filter(([_, v]) => v).slice(0, 6).map(([key, _], i) => (
+                      {Object.entries(plan.features || {}).filter(([k, v]) => v === true && typeof v === 'boolean').slice(0, 6).map(([key], i) => (
                         <li key={`item-${i}`} className="flex items-center gap-2">
                           <Check className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-gray-700">
-                            {key === 'pos' ? 'نقطة البيع' :
-                             key === 'reports' ? 'التقارير' :
-                             key === 'ai_tips' ? 'نصائح AI' :
-                             key === 'multi_warehouse' ? 'تعدد المخازن' :
-                             key === 'smart_reports' ? 'تقارير ذكية' :
-                             key === 'employee_alerts' ? 'تنبيهات الموظفين' :
-                             key}
+                            {key === 'has_pos' ? 'نقطة البيع' :
+                             key === 'has_inventory' ? 'إدارة المخزون' :
+                             key === 'has_reports' ? 'التقارير' :
+                             key === 'has_multi_warehouse' ? 'تعدد المخازن' :
+                             key === 'has_api_access' ? 'الوصول للـ API' :
+                             key === 'has_ecommerce' ? 'متجر إلكتروني' :
+                             key === 'has_advanced_reports' ? 'تقارير متقدمة' :
+                             key === 'has_employee_management' ? 'إدارة الموظفين' :
+                             key === 'has_debt_management' ? 'إدارة الديون' :
+                             key === 'has_customer_loyalty' ? 'برنامج الولاء' :
+                             key === 'has_supplier_management' ? 'إدارة الموردين' :
+                             key === 'has_email_notifications' ? 'إشعارات البريد' :
+                             key === 'has_sms_notifications' ? 'إشعارات SMS' :
+                             key.replace(/^has_/, '').replace(/_/g, ' ')}
                           </span>
                         </li>
                       ))}
-                      {plan.limits?.max_products && (
+                      {plan.features?.max_products != null && (
                         <li className="flex items-center gap-2">
                           <Package className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                          <span className="text-gray-700">حتى {plan.limits.max_products} منتج</span>
+                          <span className="text-gray-700">
+                            {plan.features.max_products === -1 ? 'منتجات غير محدودة' : `حتى ${plan.features.max_products} منتج`}
+                          </span>
                         </li>
                       )}
-                      {plan.limits?.max_users && (
+                      {plan.features?.max_users != null && (
                         <li className="flex items-center gap-2">
                           <Users className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                          <span className="text-gray-700">حتى {plan.limits.max_users} مستخدم</span>
+                          <span className="text-gray-700">
+                            {plan.features.max_users === -1 ? 'مستخدمون غير محدودون' : `حتى ${plan.features.max_users} مستخدم`}
+                          </span>
                         </li>
                       )}
                     </ul>
