@@ -43,7 +43,7 @@ const Carousel = React.forwardRef((
 
     setCanScrollPrev(api.canScrollPrev())
     setCanScrollNext(api.canScrollNext())
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollPrev = React.useCallback(() => {
     api?.scrollPrev()
@@ -51,7 +51,7 @@ const Carousel = React.forwardRef((
 
   const scrollNext = React.useCallback(() => {
     api?.scrollNext()
-  }, [api])
+  }, [api]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleKeyDown = React.useCallback((event) => {
     if (event.key === "ArrowLeft") {
@@ -61,7 +61,7 @@ const Carousel = React.forwardRef((
       event.preventDefault()
       scrollNext()
     }
-  }, [scrollPrev, scrollNext])
+  }, [scrollPrev, scrollNext]) // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     if (!api || !setApi) {
@@ -69,7 +69,7 @@ const Carousel = React.forwardRef((
     }
 
     setApi(api)
-  }, [api, setApi])
+  }, [api, setApi]) // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     if (!api) {
@@ -83,7 +83,7 @@ const Carousel = React.forwardRef((
     return () => {
       api?.off("select", onSelect)
     };
-  }, [api, onSelect])
+  }, [api, onSelect]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <CarouselContext.Provider

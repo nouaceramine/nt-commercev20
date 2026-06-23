@@ -1,0 +1,6 @@
+pyserial>=3.5
+requests>=2.28.0
+python-dotenv>=1.0.0
+# Optional — needed for the Windows tray icon (.exe only, not for server use)
+pystray>=0.19.0
+Pillow>=9.0.0

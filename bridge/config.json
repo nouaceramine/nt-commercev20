@@ -1,0 +1,35 @@
+{
+  "_comment": "ملف إعداد جسر NT Commerce — انسخ هذا الملف واملأ القيم الصحيحة",
+
+  "cloud_url":     "https://your-app.replit.app",
+  "tenant_id":     "ضع هنا معرّف المستأجر (tenant_id) من لوحة الإدارة",
+  "bridge_secret": "ضع هنا المفتاح السري من إعدادات الشحن ← مفتاح الجسر",
+
+  "modems": [
+    {
+      "network":      "mobilis",
+      "port":         "COM3",
+      "pin":          "",
+      "balance_ussd": "*100#",
+      "slot_id":      1
+    },
+    {
+      "network":      "djezzy",
+      "port":         "COM4",
+      "pin":          "",
+      "balance_ussd": "*555#",
+      "slot_id":      2
+    },
+    {
+      "network":      "ooredoo",
+      "port":         "COM5",
+      "pin":          "",
+      "balance_ussd": "*555#",
+      "slot_id":      3
+    }
+  ],
+
+  "poll_interval":    5,
+  "balance_interval": 3600,
+  "log_max_lines":    1000
+}

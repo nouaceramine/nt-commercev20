@@ -1,0 +1,31 @@
+root@srv1774015:/var/www/nt-commerce/backend# cd /var/www/nt-commerce/backend && venv/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | head -30
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/__main__.py", line 4, in <module>
+    uvicorn.main()
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/click/core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/click/core.py", line 1406, in main
+    rv = self.invoke(ctx)
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/click/core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/click/core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/main.py", line 416, in main
+    run(
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/main.py", line 587, in run
+    server.run()
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/server.py", line 61, in run
+    return asyncio.run(self.serve(sockets=sockets))
+  File "/usr/lib/python3.10/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/lib/python3.10/asyncio/base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/server.py", line 68, in serve
+    config.load()
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/config.py", line 467, in load
+    self.loaded_app = import_from_string(self.app)
+  File "/var/www/nt-commerce/backend/venv/lib/python3.10/site-packages/uvicorn/importer.py", line 21, in import_from_string

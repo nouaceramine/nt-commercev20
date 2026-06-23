@@ -1,0 +1,54 @@
+root@srv1774015:/var/www/nt-commerce/backend# ls /var/www/nt-commerce/backend/venv/bin/uvicorn 2>/dev/null || echo "venv غير موجود - هل انتهى pip install?"
+venv غير موجود - هل انتهى pip install?
+root@srv1774015:/var/www/nt-commerce/backend# cd /var/www/nt-commerce/backend && python3 -m venv venv && venv/bin/pip install --upgrade pip --quiet && venv/bin/pip install -r requirements.txt --quiet && echo "✅ تم التثبيت" && systemctl restart nt-backend && sleep 3 && systemctl status nt-backend --no-pager | head -6
+The virtual environment was not created successfully because ensurepip is not
+available.  On Debian/Ubuntu systems, you need to install the python3-venv
+package using the following command.
+
+    apt install python3.10-venv
+
+You may need to use sudo with that command.  After installing the python3-venv
+package, recreate your virtual environment.
+
+Failing command: /var/www/nt-commerce/backend/venv/bin/python3
+
+root@srv1774015:/var/www/nt-commerce/backend# apt install -y python3.10-venv && cd /var/www/nt-commerce/backend && python3 -m venv venv && venv/bin/pip install --upgrade pip --quiet && venv/bin/pip install -r requirements.txt --quiet && echo "✅ تم التثبيت" && systemctl restart nt-backend && sleep 3 && systemctl status nt-backend --no-pager | head -6
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  python3-pip-whl python3-setuptools-whl
+The following NEW packages will be installed:
+  python3-pip-whl python3-setuptools-whl python3.10-venv
+0 upgraded, 3 newly installed, 0 to remove and 0 not upgraded.
+Need to get 2478 kB of archives.
+After this operation, 2891 kB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3-pip-whl all 22.0.2+dfsg-1ubuntu0.7 [1683 kB]
+Get:2 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3-setuptools-whl all 59.6.0-1.2ubuntu0.22.04.3 [789 kB]
+Get:3 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 python3.10-venv amd64 3.10.12-1~22.04.15 [5714 B]
+Fetched 2478 kB in 0s (32.5 MB/s)
+Selecting previously unselected package python3-pip-whl.
+(Reading database ... 106881 files and directories currently installed.)
+Preparing to unpack .../python3-pip-whl_22.0.2+dfsg-1ubuntu0.7_all.deb ...
+Unpacking python3-pip-whl (22.0.2+dfsg-1ubuntu0.7) ...
+Selecting previously unselected package python3-setuptools-whl.
+Preparing to unpack .../python3-setuptools-whl_59.6.0-1.2ubuntu0.22.04.3_all.deb ...
+Unpacking python3-setuptools-whl (59.6.0-1.2ubuntu0.22.04.3) ...
+Selecting previously unselected package python3.10-venv.
+Preparing to unpack .../python3.10-venv_3.10.12-1~22.04.15_amd64.deb ...
+Unpacking python3.10-venv (3.10.12-1~22.04.15) ...
+Setting up python3-setuptools-whl (59.6.0-1.2ubuntu0.22.04.3) ...
+Setting up python3-pip-whl (22.0.2+dfsg-1ubuntu0.7) ...
+Setting up python3.10-venv (3.10.12-1~22.04.15) ...
+Scanning processes...
+Scanning linux images...
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.

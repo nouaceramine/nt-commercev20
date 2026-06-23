@@ -1,0 +1,267 @@
+root@srv1774015:/var/www/nt-commerce# git checkout backend/requirements.txt && git pull && chmod -R 755 frontend/build && systemctl reload nginx
+Updated 1 path from the index
+Updating 1d3d92c..fcfa8ff
+Fast-forward
+ .github/workflows/deploy.yml                               |  24 ++
+ .gitignore                                                 |   2 +-
+ ...cStart-usr-bin-python3-m-uvicorn-main_1782077278029.txt |  35 ++
+ ...a2-3-1-6-py3-none-any-whl-134-kB-Coll_1782072846695.txt |  50 +++
+ ...query-3-6-0-dfsg-3-5-13-1-Setting-up-_1782072232522.txt |  58 +++
+ ...r-www-nt-commerce-backend-cd-var-www-_1782073099178.txt | 224 +++++++++++
+ ...r-www-nt-commerce-backend-sed-i-s-pan_1782072949314.txt | 496 +++++++++++++++++++++++++
+ ...r-www-nt-commerce-backend-sed-i-s-pan_1782072983138.txt | 496 +++++++++++++++++++++++++
+ attached_assets/image_1782077376958.png                    | Bin 0 -> 45596 bytes
+ backend/requirements.txt                                   |   8 +-
+ frontend/.gitignore                                        |   2 +-
+ frontend/build/asset-manifest.json                         | 111 ++++++
+ frontend/build/icon-192.png                                | Bin 0 -> 724779 bytes
+ frontend/build/icon-512.png                                | Bin 0 -> 739417 bytes
+ frontend/build/index.html                                  |   1 +
+ frontend/build/manifest.json                               |  40 ++
+ frontend/build/service-worker.js                           |  72 ++++
+ frontend/build/static/css/main.377ad585.css                |   6 +
+ frontend/build/static/css/main.377ad585.css.map            |   1 +
+ frontend/build/static/js/101.bb69a824.chunk.js             |   3 +
+ frontend/build/static/js/101.bb69a824.chunk.js.LICENSE.txt |   6 +
+ frontend/build/static/js/101.bb69a824.chunk.js.map         |   1 +
+ frontend/build/static/js/135.18185497.chunk.js             |   2 +
+ frontend/build/static/js/135.18185497.chunk.js.map         |   1 +
+ frontend/build/static/js/245.030d0476.chunk.js             |   2 +
+ frontend/build/static/js/245.030d0476.chunk.js.map         |   1 +
+ frontend/build/static/js/252.5a65c1c4.chunk.js             |   2 +
+ frontend/build/static/js/252.5a65c1c4.chunk.js.map         |   1 +
+ frontend/build/static/js/270.d872a4e9.chunk.js             |   2 +
+ frontend/build/static/js/270.d872a4e9.chunk.js.map         |   1 +
+ frontend/build/static/js/276.2911d4b5.chunk.js             |   2 +
+ frontend/build/static/js/276.2911d4b5.chunk.js.map         |   1 +
+ frontend/build/static/js/279.758b65a6.chunk.js             |   2 +
+ frontend/build/static/js/279.758b65a6.chunk.js.map         |   1 +
+ frontend/build/static/js/365.4a530475.chunk.js             |   2 +
+ frontend/build/static/js/365.4a530475.chunk.js.map         |   1 +
+ frontend/build/static/js/666.71ac4d53.chunk.js             |   2 +
+ frontend/build/static/js/666.71ac4d53.chunk.js.map         |   1 +
+ frontend/build/static/js/main.48965a68.js                  |   3 +
+ frontend/build/static/js/main.48965a68.js.LICENSE.txt      | 112 ++++++
+ frontend/build/static/js/main.48965a68.js.map              |   1 +
+ .../cairo-arabic-400-normal.058cbf3782fbcd1fa0b4.woff2     | Bin 0 -> 13292 bytes
+ .../cairo-arabic-400-normal.99e0837583f42c3d9f15.woff      | Bin 0 -> 16808 bytes
+ .../cairo-arabic-500-normal.d22f6daf67076e92a213.woff      | Bin 0 -> 17340 bytes
+ .../cairo-arabic-500-normal.d4986f28b3336cf87071.woff2     | Bin 0 -> 13892 bytes
+ .../cairo-arabic-600-normal.be8054f40fa48bd61c91.woff2     | Bin 0 -> 13896 bytes
+ .../cairo-arabic-600-normal.f113ae8462fc8e14cf2b.woff      | Bin 0 -> 17336 bytes
+ .../cairo-arabic-700-normal.833c204bc148c91e6f8f.woff      | Bin 0 -> 17260 bytes
+ .../cairo-arabic-700-normal.b4370cf49720a94bc6af.woff2     | Bin 0 -> 13952 bytes
+ .../cairo-latin-400-normal.115755d5d85ea3aa10e4.woff2      | Bin 0 -> 15016 bytes
+ .../media/cairo-latin-400-normal.d3523213d13374faa2a1.woff | Bin 0 -> 19488 bytes
+ .../cairo-latin-500-normal.29cf781742a103221c52.woff2      | Bin 0 -> 15236 bytes
+ .../media/cairo-latin-500-normal.e971535d806fad95ecda.woff | Bin 0 -> 19664 bytes
+ .../cairo-latin-600-normal.33b518da7c6f76c0fb00.woff2      | Bin 0 -> 15280 bytes
+ .../media/cairo-latin-600-normal.419a3c3be65957a53d84.woff | Bin 0 -> 19684 bytes
+ .../media/cairo-latin-700-normal.5bbf44cdc3094d062b81.woff | Bin 0 -> 19744 bytes
+ .../cairo-latin-700-normal.de3ee125ce756c30135b.woff2      | Bin 0 -> 15284 bytes
+ .../cairo-latin-ext-400-normal.32c4aa2581621bf09b6f.woff2  | Bin 0 -> 7336 bytes
+ .../cairo-latin-ext-400-normal.ee585dee436c5f3a7547.woff   | Bin 0 -> 10164 bytes
+ .../cairo-latin-ext-500-normal.85571aa0061cbb638f72.woff   | Bin 0 -> 10264 bytes
+ .../cairo-latin-ext-500-normal.e1e9d5168e36155807e4.woff2  | Bin 0 -> 7464 bytes
+ .../cairo-latin-ext-600-normal.a62adcca7dab052ef11f.woff   | Bin 0 -> 10244 bytes
+ .../cairo-latin-ext-600-normal.ad58b257fa4f7970f483.woff2  | Bin 0 -> 7484 bytes
+ .../cairo-latin-ext-700-normal.2fe5ba9277e1148985d7.woff   | Bin 0 -> 10252 bytes
+ .../cairo-latin-ext-700-normal.eb6ea9f90796014147d2.woff2  | Bin 0 -> 7464 bytes
+ .../manrope-cyrillic-400-normal.67d2f5cd27a74c066bb7.woff2 | Bin 0 -> 7840 bytes
+ .../manrope-cyrillic-400-normal.803cbd0e719151df3d8f.woff  | Bin 0 -> 10032 bytes
+ .../manrope-cyrillic-500-normal.8bc39612bab147b548a0.woff2 | Bin 0 -> 7872 bytes
+ .../manrope-cyrillic-500-normal.d9a670e709ce916c1b2f.woff  | Bin 0 -> 10012 bytes
+ .../manrope-cyrillic-600-normal.09ed6ca36d257b1a4881.woff  | Bin 0 -> 10060 bytes
+ .../manrope-cyrillic-600-normal.fc7005426b89f1e8a5a0.woff2 | Bin 0 -> 7872 bytes
+ .../manrope-cyrillic-700-normal.682e60cb17fbaab47031.woff2 | Bin 0 -> 7852 bytes
+ .../manrope-cyrillic-700-normal.b3861ca8cfacc88c54ff.woff  | Bin 0 -> 10004 bytes
+ ...nrope-cyrillic-ext-400-normal.d706d6c43b0214bfb650.woff | Bin 0 -> 2200 bytes
+ ...rope-cyrillic-ext-400-normal.dd6629a5ac96b1b9496b.woff2 | Bin 0 -> 1624 bytes
+ ...nrope-cyrillic-ext-500-normal.7de3a9dc24887eb97e02.woff | Bin 0 -> 2184 bytes
+ ...rope-cyrillic-ext-500-normal.c803169a005534ccd3ce.woff2 | Bin 0 -> 1604 bytes
+ ...rope-cyrillic-ext-600-normal.089722617bc2a1516cec.woff2 | Bin 0 -> 1612 bytes
+ ...nrope-cyrillic-ext-600-normal.4bbf09a9b13d319bf5fd.woff | Bin 0 -> 2192 bytes
+ ...rope-cyrillic-ext-700-normal.4ee2708831b279ef20f1.woff2 | Bin 0 -> 1568 bytes
+ ...nrope-cyrillic-ext-700-normal.b2b2b1d8ddf951e3ba37.woff | Bin 0 -> 2176 bytes
+ .../manrope-greek-400-normal.91c29e2e99de39ffd2db.woff2    | Bin 0 -> 5280 bytes
+ .../manrope-greek-400-normal.94e36a3348e01178daa1.woff     | Bin 0 -> 6772 bytes
+ .../manrope-greek-500-normal.3ca2b78cc08d41506266.woff2    | Bin 0 -> 5252 bytes
+ .../manrope-greek-500-normal.f712727ba6c6af22d46b.woff     | Bin 0 -> 6764 bytes
+ .../manrope-greek-600-normal.5fc8a48033a208313724.woff     | Bin 0 -> 6740 bytes
+ .../manrope-greek-600-normal.728f66dc2faf2d2a642d.woff2    | Bin 0 -> 5232 bytes
+ .../manrope-greek-700-normal.8b5144f5aa9ba2f87b92.woff2    | Bin 0 -> 5236 bytes
+ .../manrope-greek-700-normal.f68cae99ba31ccd12a09.woff     | Bin 0 -> 6744 bytes
+ .../manrope-latin-400-normal.0d1ad757ee42bab20614.woff     | Bin 0 -> 18292 bytes
+ .../manrope-latin-400-normal.84d41d78bb782fb0f969.woff2    | Bin 0 -> 14108 bytes
+ .../manrope-latin-500-normal.c7736fa36f1acc702e19.woff2    | Bin 0 -> 14044 bytes
+ .../manrope-latin-500-normal.d6d9a6ff354d8f532ed3.woff     | Bin 0 -> 18240 bytes
+ .../manrope-latin-600-normal.2b64d70a40d9de82bb19.woff     | Bin 0 -> 18384 bytes
+ .../manrope-latin-600-normal.af1782c892c03046369d.woff2    | Bin 0 -> 14172 bytes
+ .../manrope-latin-700-normal.86549a2403b1726731ce.woff     | Bin 0 -> 18412 bytes
+ .../manrope-latin-700-normal.bee86ea645ea6bd5d499.woff2    | Bin 0 -> 14212 bytes
+ .../manrope-latin-ext-400-normal.5519f7a0fd74c0aa3aac.woff | Bin 0 -> 11316 bytes
+ ...manrope-latin-ext-400-normal.a05ad2a2eb9002767f90.woff2 | Bin 0 -> 8292 bytes
+ ...manrope-latin-ext-500-normal.7e0789a3289d22727ab3.woff2 | Bin 0 -> 8192 bytes
+ .../manrope-latin-ext-500-normal.cb08765add2357d17048.woff | Bin 0 -> 11248 bytes
+ .../manrope-latin-ext-600-normal.16b78ad10143191b033d.woff | Bin 0 -> 11248 bytes
+ ...manrope-latin-ext-600-normal.908f435aaf9ae938320e.woff2 | Bin 0 -> 8304 bytes
+ ...manrope-latin-ext-700-normal.7559db14fbd483e845ce.woff2 | Bin 0 -> 8276 bytes
+ .../manrope-latin-ext-700-normal.d75558844f2c31e07286.woff | Bin 0 -> 11352 bytes
+ ...anrope-vietnamese-400-normal.07b7f29f8b0fb89c929a.woff2 | Bin 0 -> 4464 bytes
+ ...manrope-vietnamese-400-normal.96dac2f6286e1a04f9b9.woff | Bin 0 -> 6108 bytes
+ ...anrope-vietnamese-500-normal.9d5e4c2f4b8f26f4504e.woff2 | Bin 0 -> 4320 bytes
+ ...manrope-vietnamese-500-normal.c9bee1b7182072d8d1de.woff | Bin 0 -> 6060 bytes
+ ...anrope-vietnamese-600-normal.7b668eb50143b685afd7.woff2 | Bin 0 -> 4468 bytes
+ ...manrope-vietnamese-600-normal.a240bc5d3e2b56b8dd99.woff | Bin 0 -> 6140 bytes
+ ...manrope-vietnamese-700-normal.1d5cbbeae3c8b8b0b3fa.woff | Bin 0 -> 6364 bytes
+ ...anrope-vietnamese-700-normal.5d5f32888990c62b5471.woff2 | Bin 0 -> 4552 bytes
+ .../outfit-latin-400-normal.72f8b6c4166f1d2268cf.woff      | Bin 0 -> 18232 bytes
+ .../outfit-latin-400-normal.d5e5803d0c85b54aaaa1.woff2     | Bin 0 -> 14032 bytes
+ .../outfit-latin-500-normal.7337398630a7c5a5a076.woff2     | Bin 0 -> 13528 bytes
+ .../outfit-latin-500-normal.b97c264d2330ad0fe4e1.woff      | Bin 0 -> 17688 bytes
+ .../outfit-latin-ext-400-normal.906838c3d2734b257465.woff  | Bin 0 -> 8640 bytes
+ .../outfit-latin-ext-400-normal.a15560ed108017192e3a.woff2 | Bin 0 -> 6380 bytes
+ .../outfit-latin-ext-500-normal.698cdf01ce1895d288b0.woff2 | Bin 0 -> 6244 bytes
+ .../outfit-latin-ext-500-normal.7f4b51f71bae8cea48f6.woff  | Bin 0 -> 8492 bytes
+ scripts/setup-vps.sh                                       | 105 ++++++
+ 122 files changed, 1875 insertions(+), 6 deletions(-)
+ create mode 100644 .github/workflows/deploy.yml
+ create mode 100644 attached_assets/Pasted--Process-13488-ExecStart-usr-bin-python3-m-uvicorn-main_1782077278029.txt
+ create mode 100644 attached_assets/Pasted--Using-cached-jinja2-3-1-6-py3-none-any-whl-134-kB-Coll_1782072846695.txt
+ create mode 100644 attached_assets/Pasted-Setting-up-libjs-jquery-3-6-0-dfsg-3-5-13-1-Setting-up-_1782072232522.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-cd-var-www-_1782073099178.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-sed-i-s-pan_1782072949314.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-sed-i-s-pan_1782072983138.txt
+ create mode 100644 attached_assets/image_1782077376958.png
+ create mode 100644 frontend/build/asset-manifest.json
+ create mode 100644 frontend/build/icon-192.png
+ create mode 100644 frontend/build/icon-512.png
+ create mode 100644 frontend/build/index.html
+ create mode 100644 frontend/build/manifest.json
+ create mode 100644 frontend/build/service-worker.js
+ create mode 100644 frontend/build/static/css/main.377ad585.css
+ create mode 100644 frontend/build/static/css/main.377ad585.css.map
+ create mode 100644 frontend/build/static/js/101.bb69a824.chunk.js
+ create mode 100644 frontend/build/static/js/101.bb69a824.chunk.js.LICENSE.txt
+ create mode 100644 frontend/build/static/js/101.bb69a824.chunk.js.map
+ create mode 100644 frontend/build/static/js/135.18185497.chunk.js
+ create mode 100644 frontend/build/static/js/135.18185497.chunk.js.map
+ create mode 100644 frontend/build/static/js/245.030d0476.chunk.js
+ create mode 100644 frontend/build/static/js/245.030d0476.chunk.js.map
+ create mode 100644 frontend/build/static/js/252.5a65c1c4.chunk.js
+ create mode 100644 frontend/build/static/js/252.5a65c1c4.chunk.js.map
+ create mode 100644 frontend/build/static/js/270.d872a4e9.chunk.js
+ create mode 100644 frontend/build/static/js/270.d872a4e9.chunk.js.map
+ create mode 100644 frontend/build/static/js/276.2911d4b5.chunk.js
+ create mode 100644 frontend/build/static/js/276.2911d4b5.chunk.js.map
+ create mode 100644 frontend/build/static/js/279.758b65a6.chunk.js
+ create mode 100644 frontend/build/static/js/279.758b65a6.chunk.js.map
+ create mode 100644 frontend/build/static/js/365.4a530475.chunk.js
+ create mode 100644 frontend/build/static/js/365.4a530475.chunk.js.map
+ create mode 100644 frontend/build/static/js/666.71ac4d53.chunk.js
+ create mode 100644 frontend/build/static/js/666.71ac4d53.chunk.js.map
+ create mode 100644 frontend/build/static/js/main.48965a68.js
+ create mode 100644 frontend/build/static/js/main.48965a68.js.LICENSE.txt
+ create mode 100644 frontend/build/static/js/main.48965a68.js.map
+ create mode 100644 frontend/build/static/media/cairo-arabic-400-normal.058cbf3782fbcd1fa0b4.woff2
+ create mode 100644 frontend/build/static/media/cairo-arabic-400-normal.99e0837583f42c3d9f15.woff
+ create mode 100644 frontend/build/static/media/cairo-arabic-500-normal.d22f6daf67076e92a213.woff
+ create mode 100644 frontend/build/static/media/cairo-arabic-500-normal.d4986f28b3336cf87071.woff2
+ create mode 100644 frontend/build/static/media/cairo-arabic-600-normal.be8054f40fa48bd61c91.woff2
+ create mode 100644 frontend/build/static/media/cairo-arabic-600-normal.f113ae8462fc8e14cf2b.woff
+ create mode 100644 frontend/build/static/media/cairo-arabic-700-normal.833c204bc148c91e6f8f.woff
+ create mode 100644 frontend/build/static/media/cairo-arabic-700-normal.b4370cf49720a94bc6af.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-400-normal.115755d5d85ea3aa10e4.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-400-normal.d3523213d13374faa2a1.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-500-normal.29cf781742a103221c52.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-500-normal.e971535d806fad95ecda.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-600-normal.33b518da7c6f76c0fb00.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-600-normal.419a3c3be65957a53d84.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-700-normal.5bbf44cdc3094d062b81.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-700-normal.de3ee125ce756c30135b.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-400-normal.32c4aa2581621bf09b6f.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-400-normal.ee585dee436c5f3a7547.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-500-normal.85571aa0061cbb638f72.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-500-normal.e1e9d5168e36155807e4.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-600-normal.a62adcca7dab052ef11f.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-600-normal.ad58b257fa4f7970f483.woff2
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-700-normal.2fe5ba9277e1148985d7.woff
+ create mode 100644 frontend/build/static/media/cairo-latin-ext-700-normal.eb6ea9f90796014147d2.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-400-normal.67d2f5cd27a74c066bb7.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-400-normal.803cbd0e719151df3d8f.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-500-normal.8bc39612bab147b548a0.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-500-normal.d9a670e709ce916c1b2f.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-600-normal.09ed6ca36d257b1a4881.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-600-normal.fc7005426b89f1e8a5a0.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-700-normal.682e60cb17fbaab47031.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-700-normal.b3861ca8cfacc88c54ff.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-400-normal.d706d6c43b0214bfb650.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-400-normal.dd6629a5ac96b1b9496b.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-500-normal.7de3a9dc24887eb97e02.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-500-normal.c803169a005534ccd3ce.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-600-normal.089722617bc2a1516cec.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-600-normal.4bbf09a9b13d319bf5fd.woff
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-700-normal.4ee2708831b279ef20f1.woff2
+ create mode 100644 frontend/build/static/media/manrope-cyrillic-ext-700-normal.b2b2b1d8ddf951e3ba37.woff
+ create mode 100644 frontend/build/static/media/manrope-greek-400-normal.91c29e2e99de39ffd2db.woff2
+ create mode 100644 frontend/build/static/media/manrope-greek-400-normal.94e36a3348e01178daa1.woff
+ create mode 100644 frontend/build/static/media/manrope-greek-500-normal.3ca2b78cc08d41506266.woff2
+ create mode 100644 frontend/build/static/media/manrope-greek-500-normal.f712727ba6c6af22d46b.woff
+ create mode 100644 frontend/build/static/media/manrope-greek-600-normal.5fc8a48033a208313724.woff
+ create mode 100644 frontend/build/static/media/manrope-greek-600-normal.728f66dc2faf2d2a642d.woff2
+ create mode 100644 frontend/build/static/media/manrope-greek-700-normal.8b5144f5aa9ba2f87b92.woff2
+ create mode 100644 frontend/build/static/media/manrope-greek-700-normal.f68cae99ba31ccd12a09.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-400-normal.0d1ad757ee42bab20614.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-400-normal.84d41d78bb782fb0f969.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-500-normal.c7736fa36f1acc702e19.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-500-normal.d6d9a6ff354d8f532ed3.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-600-normal.2b64d70a40d9de82bb19.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-600-normal.af1782c892c03046369d.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-700-normal.86549a2403b1726731ce.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-700-normal.bee86ea645ea6bd5d499.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-400-normal.5519f7a0fd74c0aa3aac.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-400-normal.a05ad2a2eb9002767f90.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-500-normal.7e0789a3289d22727ab3.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-500-normal.cb08765add2357d17048.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-600-normal.16b78ad10143191b033d.woff
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-600-normal.908f435aaf9ae938320e.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-700-normal.7559db14fbd483e845ce.woff2
+ create mode 100644 frontend/build/static/media/manrope-latin-ext-700-normal.d75558844f2c31e07286.woff
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-400-normal.07b7f29f8b0fb89c929a.woff2
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-400-normal.96dac2f6286e1a04f9b9.woff
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-500-normal.9d5e4c2f4b8f26f4504e.woff2
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-500-normal.c9bee1b7182072d8d1de.woff
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-600-normal.7b668eb50143b685afd7.woff2
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-600-normal.a240bc5d3e2b56b8dd99.woff
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-700-normal.1d5cbbeae3c8b8b0b3fa.woff
+ create mode 100644 frontend/build/static/media/manrope-vietnamese-700-normal.5d5f32888990c62b5471.woff2
+ create mode 100644 frontend/build/static/media/outfit-latin-400-normal.72f8b6c4166f1d2268cf.woff
+ create mode 100644 frontend/build/static/media/outfit-latin-400-normal.d5e5803d0c85b54aaaa1.woff2
+ create mode 100644 frontend/build/static/media/outfit-latin-500-normal.7337398630a7c5a5a076.woff2
+ create mode 100644 frontend/build/static/media/outfit-latin-500-normal.b97c264d2330ad0fe4e1.woff
+ create mode 100644 frontend/build/static/media/outfit-latin-ext-400-normal.906838c3d2734b257465.woff
+ create mode 100644 frontend/build/static/media/outfit-latin-ext-400-normal.a15560ed108017192e3a.woff2
+ create mode 100644 frontend/build/static/media/outfit-latin-ext-500-normal.698cdf01ce1895d288b0.woff2
+ create mode 100644 frontend/build/static/media/outfit-latin-ext-500-normal.7f4b51f71bae8cea48f6.woff
+ create mode 100755 scripts/setup-vps.sh
+root@srv1774015:/var/www/nt-commerce# journalctl -u nt-backend -n 50 --no-pager | grep -E "Error|error|Import|Module|Traceback" | head -20
+Jun 21 21:37:46 srv1774015 python3[13677]: ModuleNotFoundError: No module named 'fastapi'
+Jun 21 21:37:51 srv1774015 python3[13678]: Traceback (most recent call last):
+Jun 21 21:37:51 srv1774015 python3[13678]: ModuleNotFoundError: No module named 'fastapi'
+root@srv1774015:/var/www/nt-commerce# cd /var/www/nt-commerce/backend
+python3 -m venv venv
+venv/bin/pip install --upgrade pip
+venv/bin/pip install -r requirements.txt
+The virtual environment was not created successfully because ensurepip is not
+available.  On Debian/Ubuntu systems, you need to install the python3-venv
+package using the following command.
+
+    apt install python3.10-venv
+
+You may need to use sudo with that command.  After installing the python3-venv
+package, recreate your virtual environment.
+
+Failing command: /var/www/nt-commerce/backend/venv/bin/python3
+
+-bash: venv/bin/pip: No such file or directory
+-bash: venv/bin/pip: No such file or directory

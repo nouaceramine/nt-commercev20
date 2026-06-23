@@ -1,0 +1,50 @@
+root@srv1774015:/var/www/nt-commerce/backend# cd /var/www/nt-commerce && git pull && systemctl reload nginx
+remote: Enumerating objects: 58, done.
+remote: Counting objects: 100% (58/58), done.
+remote: Compressing objects: 100% (13/13), done.
+remote: Total 47 (delta 34), reused 47 (delta 34), pack-reused 0 (from 0)
+Unpacking objects: 100% (47/47), 4.12 MiB | 11.10 MiB/s, done.
+From https://github.com/nouaceramine/nt-commerce
+   fcfa8ff..cbeaa36  main       -> origin/main
+Updating fcfa8ff..cbeaa36
+error: Your local changes to the following files would be overwritten by merge:
+        frontend/build/asset-manifest.json
+        frontend/build/index.html
+        frontend/build/static/js/main.48965a68.js
+        frontend/build/static/js/main.48965a68.js.LICENSE.txt
+        frontend/build/static/js/main.48965a68.js.map
+Please commit your changes or stash them before you merge.
+Aborting
+root@srv1774015:/var/www/nt-commerce# git checkout -- frontend/build/ && git pull && systemctl reload nginx
+Updating fcfa8ff..cbeaa36
+Fast-forward
+ ...r-www-nt-commerce-backend-apt-install_1782078313062.txt |  47 +++++
+ ...r-www-nt-commerce-backend-cd-var-www-_1782078340616.txt |  31 +++
+ ...r-www-nt-commerce-backend-cd-var-www-_1782078533124.txt |  66 ++++++
+ ...r-www-nt-commerce-backend-ls-var-www-_1782078238004.txt |  54 +++++
+ ...r-www-nt-commerce-git-checkout-backen_1782077806465.txt | 247 +++++++++++++++++++++++
+ ...r-www-nt-commerce-git-checkout-backen_1782078109679.txt | 267 +++++++++++++++++++++++++
+ attached_assets/image_1782077847319.png                    | Bin 0 -> 506925 bytes
+ attached_assets/image_1782078593281.png                    | Bin 0 -> 55739 bytes
+ attached_assets/image_1782078882236.png                    | Bin 0 -> 37597 bytes
+ frontend/build/asset-manifest.json                         |   6 +-
+ frontend/build/index.html                                  |   2 +-
+ frontend/build/static/js/main.48965a68.js                  |   3 -
+ frontend/build/static/js/main.ad666af3.js                  |   3 +
+ ...8965a68.js.LICENSE.txt => main.ad666af3.js.LICENSE.txt} |   0
+ .../js/{main.48965a68.js.map => main.ad666af3.js.map}      |   2 +-
+ frontend/src/components/ErrorBoundary.js                   |   5 +
+ 16 files changed, 725 insertions(+), 8 deletions(-)
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-apt-install_1782078313062.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-cd-var-www-_1782078340616.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-cd-var-www-_1782078533124.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-backend-ls-var-www-_1782078238004.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-git-checkout-backen_1782077806465.txt
+ create mode 100644 attached_assets/Pasted-root-srv1774015-var-www-nt-commerce-git-checkout-backen_1782078109679.txt
+ create mode 100644 attached_assets/image_1782077847319.png
+ create mode 100644 attached_assets/image_1782078593281.png
+ create mode 100644 attached_assets/image_1782078882236.png
+ delete mode 100644 frontend/build/static/js/main.48965a68.js
+ create mode 100644 frontend/build/static/js/main.ad666af3.js
+ rename frontend/build/static/js/{main.48965a68.js.LICENSE.txt => main.ad666af3.js.LICENSE.txt} (100%)
+ rename frontend/build/static/js/{main.48965a68.js.map => main.ad666af3.js.map} (60%)

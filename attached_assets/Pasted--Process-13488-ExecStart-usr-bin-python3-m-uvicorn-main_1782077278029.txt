@@ -1,0 +1,35 @@
+   Process: 13488 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 (code=exited, status=1/FAILURE)
+   Main PID: 13488 (code=exited, status=1/FAILURE)
+        CPU: 17ms
+root@srv1774015:/var/www/nt-commerce# journalctl -u nt-backend -n 30 --no-pager
+Jun 21 21:27:22 srv1774015 systemd[1]: nt-backend.service: Scheduled restart job, restart counter is at 9.
+Jun 21 21:27:22 srv1774015 systemd[1]: Stopped NT Commerce Backend.
+Jun 21 21:27:22 srv1774015 systemd[1]: Started NT Commerce Backend.
+Jun 21 21:27:22 srv1774015 python3[13493]: /usr/bin/python3: No module named uvicorn
+Jun 21 21:27:22 srv1774015 systemd[1]: nt-backend.service: Main process exited, code=exited, status=1/FAILURE
+Jun 21 21:27:22 srv1774015 systemd[1]: nt-backend.service: Failed with result 'exit-code'.
+Jun 21 21:27:27 srv1774015 systemd[1]: nt-backend.service: Scheduled restart job, restart counter is at 10.
+Jun 21 21:27:27 srv1774015 systemd[1]: Stopped NT Commerce Backend.
+Jun 21 21:27:27 srv1774015 systemd[1]: Started NT Commerce Backend.
+Jun 21 21:27:27 srv1774015 python3[13494]: /usr/bin/python3: No module named uvicorn
+Jun 21 21:27:27 srv1774015 systemd[1]: nt-backend.service: Main process exited, code=exited, status=1/FAILURE
+Jun 21 21:27:27 srv1774015 systemd[1]: nt-backend.service: Failed with result 'exit-code'.
+Jun 21 21:27:32 srv1774015 systemd[1]: nt-backend.service: Scheduled restart job, restart counter is at 11.
+Jun 21 21:27:32 srv1774015 systemd[1]: Stopped NT Commerce Backend.
+Jun 21 21:27:32 srv1774015 systemd[1]: Started NT Commerce Backend.
+Jun 21 21:27:32 srv1774015 python3[13495]: /usr/bin/python3: No module named uvicorn
+Jun 21 21:27:32 srv1774015 systemd[1]: nt-backend.service: Main process exited, code=exited, status=1/FAILURE
+Jun 21 21:27:32 srv1774015 systemd[1]: nt-backend.service: Failed with result 'exit-code'.
+Jun 21 21:27:37 srv1774015 systemd[1]: nt-backend.service: Scheduled restart job, restart counter is at 12.
+Jun 21 21:27:37 srv1774015 systemd[1]: Stopped NT Commerce Backend.
+Jun 21 21:27:37 srv1774015 systemd[1]: Started NT Commerce Backend.
+Jun 21 21:27:37 srv1774015 python3[13496]: /usr/bin/python3: No module named uvicorn
+Jun 21 21:27:37 srv1774015 systemd[1]: nt-backend.service: Main process exited, code=exited, status=1/FAILURE
+Jun 21 21:27:38 srv1774015 systemd[1]: nt-backend.service: Failed with result 'exit-code'.
+Jun 21 21:27:43 srv1774015 systemd[1]: nt-backend.service: Scheduled restart job, restart counter is at 13.
+Jun 21 21:27:43 srv1774015 systemd[1]: Stopped NT Commerce Backend.
+Jun 21 21:27:43 srv1774015 systemd[1]: Started NT Commerce Backend.
+Jun 21 21:27:43 srv1774015 python3[13497]: /usr/bin/python3: No module named uvicorn
+Jun 21 21:27:43 srv1774015 systemd[1]: nt-backend.service: Main process exited, code=exited, status=1/FAILURE
+Jun 21 21:27:43 srv1774015 systemd[1]: nt-backend.service: Failed with result 'exit-code'.
+root@srv1774015:/var/www/nt-commerce#
