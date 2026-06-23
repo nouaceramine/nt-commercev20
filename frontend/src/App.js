@@ -16,6 +16,12 @@ import AccessDeniedPage from "./pages/AccessDeniedPage";
 // Import global date formatter to apply Western numerals system-wide
 import './utils/globalDateFormatter';
 
+// Initialize global error logger (capture frontend errors to /api/system-logs)
+import { initErrorLogger, attachAxiosLogger } from './utils/errorLogger';
+import apiClient from './lib/apiClient';
+initErrorLogger();
+attachAxiosLogger(apiClient);
+
 // Derive cashier-allowed paths from sidebarMenu.js (single source of truth via minRole)
 const CASHIER_ALLOWED_PATHS = defaultMenuSections.flatMap(section =>
   section.items.filter(item => item.minRole === 'cashier').map(item => item.path)
@@ -119,6 +125,7 @@ import SaasRegisterPage from "./pages/landing/RegisterPage";
 import PricingPage from "./pages/landing/PricingPage";
 import SaasAdminPage from "./pages/admin/SaasAdminPage";
 import FeatureFlagsPage from "./pages/admin/FeatureFlagsPage";
+import SystemLogsPage from "./pages/SystemLogsPage";
 import StoreManagementPage from "./pages/store/StoreManagementPage";
 import PublicStorePage from "./pages/store/PublicStorePage";
 import DataImportExportPage from "./pages/DataImportExportPage";
@@ -363,6 +370,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <FeatureFlagsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/saas-admin/system-logs"
+        element={
+          <ProtectedRoute>
+            <SystemLogsPage />
           </ProtectedRoute>
         }
       />

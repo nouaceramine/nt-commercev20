@@ -812,6 +812,15 @@ export default function SaasAdminPage() {
             <BarChart3 className="h-4 w-4" />
             التقارير التلقائية
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/saas-admin/system-logs')}
+            className="gap-2"
+            data-testid="go-to-system-logs-btn"
+          >
+            <AlertTriangle className="h-4 w-4" />
+            سجل الأخطاء
+          </Button>
         </div>
 
         {/* Stats */}

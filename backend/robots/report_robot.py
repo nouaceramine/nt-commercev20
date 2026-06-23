@@ -32,6 +32,7 @@ class ReportRobot:
         self.is_running = False
         self.last_run = None
         self.stats = {"checks": 0, "reports_generated": 0}
+        self.check_interval = 3600  # hourly check; actual scheduling uses time-of-day inside start()
 
     async def start(self) -> dict:
         self.is_running = True

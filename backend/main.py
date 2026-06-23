@@ -611,7 +611,7 @@ async def set_platform_feature(key: str, enabled: bool, admin: dict = Depends(ge
         raise HTTPException(status_code=404, detail=str(e))
 
 @app.get("/api/platform/features/public")
-async def get_public_features(current_user: dict = Depends(get_current_user)) -> dict:
+async def get_public_features() -> dict:
     mgr = get_feature_flag_manager()
     if mgr is None:
         return {"enabled": [f["key"] for f in PLATFORM_FEATURES if f["default"]]}
@@ -638,6 +638,21 @@ async def delete_cache_pattern(pattern: str, admin: dict = Depends(get_super_adm
     return {"message": f"تم مسح مفاتيح {pattern}"}
 
 app.include_router(cache_router, prefix="/api")  # Cache management routes
+
+# ============ SYSTEM LOGS ============
+from routes.system_logs_routes import router as system_logs_router, log_backend_exception
+app.include_router(system_logs_router, prefix="/api")
+
+@app.exception_handler(Exception)
+async def _global_exception_logger(request, exc):
+    """Capture any unhandled backend exception into system_logs and return JSON 500.
+    FastAPI's HTTPException is *not* routed here (it has its own handler)."""
+    try:
+        await log_backend_exception(exc, request)
+    except Exception:
+        pass
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 # Tenant context middleware - extracts tenant_id from JWT and sets ContextVar
 @app.middleware("http")
