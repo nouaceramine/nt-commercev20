@@ -10,7 +10,7 @@ import {
   Plus, Undo2, Users, Barcode,
   List, FolderTree, FileText, ArrowDownToLine,
   ArrowUpFromLine, BarChart3, ScrollText, CalendarDays,
-  Tag, Printer, PackagePlus,
+  Tag, Printer, PackagePlus, History,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,

@@ -348,7 +348,7 @@ function AppRoutes() {
       <Route path="/backup-system" element={<ProtectedRoute featureKey="backup"><BackupSystemPage /></ProtectedRoute>} />
       <Route path="/data-import-export" element={<ProtectedRoute><DataImportExportPage /></ProtectedRoute>} />
       <Route path="/security-dashboard" element={<ProtectedRoute><SecurityDashboardPage /></ProtectedRoute>} />
-      <Route path="/motherboard" element={<ProtectedRoute><MotherboardPage /></ProtectedRoute>} />
+      <Route path="/motherboard" element={<ProtectedRoute superAdminOnly><MotherboardPage /></ProtectedRoute>} />
       <Route path="/daily-report" element={<ProtectedRoute><DailyReportPage /></ProtectedRoute>} />
       <Route path="/wallet-management" element={<ProtectedRoute featureKey="wallet"><WalletPage /></ProtectedRoute>} />
       <Route path="/task-management" element={<ProtectedRoute><TaskManagementPage /></ProtectedRoute>} />
