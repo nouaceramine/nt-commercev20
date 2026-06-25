@@ -11,6 +11,16 @@ export const AuthProvider = ({ children }) => {
   
   // Check token on mount
   useEffect(() => {
+    // Clean up stale impersonation state: super_admin_token without is_impersonating flag
+    // indicates the user logged out or a stale token survived a refresh.
+    if (typeof window !== 'undefined') {
+      const hasFlag = localStorage.getItem('is_impersonating') === '1';
+      const hasSuperToken = !!localStorage.getItem('super_admin_token');
+      if (hasSuperToken && !hasFlag) {
+        localStorage.removeItem('super_admin_token');
+        localStorage.removeItem('super_admin_user');
+      }
+    }
     const verifyToken = async () => {
       if (!token) {
         setLoading(false);
@@ -74,6 +84,12 @@ export const AuthProvider = ({ children }) => {
   
   const logout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('user_type');
+    // Always clean up any impersonation context on logout
+    localStorage.removeItem('super_admin_token');
+    localStorage.removeItem('super_admin_user');
+    localStorage.removeItem('is_impersonating');
     setToken(null);
     setUser(null);
     setFeatures(null);
@@ -122,8 +138,11 @@ export const AuthProvider = ({ children }) => {
   const isTenant = user?.user_type === 'tenant' || user?.role === 'tenant_admin';
   const isAgent = user?.user_type === 'agent' || user?.role === 'agent';
   const isCashier = user?.role === 'cashier';
-  // Super-admin impersonating a tenant: original super-admin session was preserved in localStorage
-  const isImpersonating = typeof window !== 'undefined' && !!localStorage.getItem('super_admin_token');
+  // Super-admin impersonating a tenant: we require BOTH the preserved super-admin token
+  // AND an explicit is_impersonating flag to avoid stale state granting elevated access.
+  const isImpersonating = typeof window !== 'undefined'
+    && localStorage.getItem('is_impersonating') === '1'
+    && !!localStorage.getItem('super_admin_token');
   // Treat the impersonating user as super-admin for platform-page access (motherboard, etc.)
   const isEffectiveSuperAdmin = isSuperAdmin || isImpersonating;
 

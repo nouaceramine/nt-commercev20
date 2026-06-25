@@ -516,8 +516,10 @@ export const Layout = ({ children }) => {
           { path: '/settings', icon: Settings, label: t.settings },
           { path: '/backup-system', icon: Database, label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes', featureKey: 'backup' },
           { path: '/data-import-export', icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
-          { path: '/motherboard', icon: CircuitBoard, label: language === 'ar' ? 'اللوحة الأم' : 'Carte mère' },
           { path: '/settings/sidebar', icon: LayoutDashboard, label: language === 'ar' ? 'ترتيب القائمة' : 'Ordre menu' },
+        ] : []),
+        ...(isEffectiveSuperAdmin ? [
+          { path: '/motherboard', icon: CircuitBoard, label: language === 'ar' ? 'اللوحة الأم' : 'Carte mère', minRole: 'super_admin' },
         ] : [])
       ]
     },

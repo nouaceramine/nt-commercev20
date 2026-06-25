@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 6 — End-to-end frontend verification of Motherboard sidebar visibility fix and impersonation cleanup logic. All 6 review scenarios PASS via live UI against staging URL (no mocking). (A) PURE tenant admin (token+user+user_type only): zero anchors with href='/motherboard' in sidebar; direct nav to /motherboard correctly redirects to '/'. (B) ACTIVE impersonation (token+user+user_type=tenant + super_admin_token + super_admin_user + is_impersonating=1): exactly ONE /motherboard link present, impersonation banner rendered, click loads Motherboard page with the DB-connected indicator (متصلة) and component overview cards. (C) STALE super_admin_token (set without is_impersonating flag) is auto-removed on mount by AuthContext useEffect; super_admin_user also removed; motherboard count after cleanup = 0. (D) Stop-impersonation button restores token from super_admin_token, removes super_admin_token/super_admin_user/is_impersonating/user_type, redirects to /saas-admin (SaaS shell visible: 7 subscribers, all admin tabs render). (E) Logout from impersonation state clears ALL 6 keys (token,user,user_type,super_admin_token,super_admin_user,is_impersonating). (F) Dashboard cards still render with the expected labels: رصيد محفظة الزبون, ديون محفظة الزبون, مبيعات اليوم, إجمالي النقد, رصيد المحفظة, رصيد محفظة المستخدم, ديون محفظة المستخدم — all PRESENT.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Layout sidebar (any tenant route)", "issues": ["[CARRY-OVER from iter 5] React error: 'Encountered two children with the same key' for keys '/wallet-management' and '/customers' fires on every page mount. Cause: in tenantNavSections, '/wallet-management' appears in BOTH the 'services' section (line 449) and as the saas-admin's 'wallet-management' entry, AND '/customers' / '/wallet-management' duplication via customSidebarOrder builds. The Layout.js navSections.map((section) => section.items.map((item)) uses `key={item.path}` — when the same path appears twice in one section after custom-order merge or feature-flag dedup, React fires this warning. Non-blocking but pollutes console on every navigation."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_5.json"
+  ],
+  "action_items": [
+    "OPTIONAL (carry-over from iter 5, still present): de-duplicate sidebar items by path before rendering. In Layout.js navSections build, add `Array.from(new Map(section.items.map(i => [i.path, i])).values())` to drop duplicates, or change key to `${section.id}-${item.path}` so same path under different sections is allowed. Affected paths observed: /wallet-management, /customers."
+  ],
+  "critical_code_review_comments": [
+    "Layout.js:521-523 — Fix is correct: motherboard is now inside an `isEffectiveSuperAdmin ? [...]` block within the settings section, INSTEAD of inside the unguarded `isAdmin ? [...]` block. Combined with the minRole:'super_admin' guard in filterNavSections (line 567), this is now belt-and-suspenders — even if a future refactor accidentally drops the outer isEffectiveSuperAdmin gate, the minRole filter would still hide it for pure tenants.",
+    "AuthContext.js:14-23 — Stale-token cleanup on mount is correct and verified live: when localStorage.super_admin_token exists without is_impersonating==='1', both super_admin_token and super_admin_user are removed BEFORE the verifyToken call, preventing isImpersonating from latching true on subsequent renders.",
+    "AuthContext.js:143-145 — isImpersonating now requires BOTH localStorage.is_impersonating==='1' AND localStorage.super_admin_token — this fixes the prior loophole where setting only super_admin_token would grant elevated UI access.",
+    "AuthContext.js:85-97 — logout() now removes super_admin_token, super_admin_user, is_impersonating in addition to token/user/user_type. Verified live: all 6 keys gone after clicking logout-btn from an impersonated session.",
+    "Layout.js:521 — Minor: the `minRole:'super_admin'` guard on the motherboard item is now slightly redundant with the outer `isEffectiveSuperAdmin ? [...]` gate, but harmless and acts as defence-in-depth. Keep it."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not requested)", "frontend": "100%"},
+  "test_credentials": "Super admin: admin@ntcommerce.com / Admin@2024. Tenant impersonated: id=b4fde9b7-d1f2-46ec-b62a-f0971ca3deba (TEST TEST).",
+  "seed_data_creation": "None. No DB mutations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 6 PASSED. The Motherboard visibility bug is fully fixed and verified across all 6 explicitly requested scenarios (pure tenant ABSENT, active impersonation PRESENT-once, stale cleanup, stop-impersonation, logout, dashboard regression). Key test technique: simulate states by API-logging-in as super_admin then calling POST /api/saas/impersonate/{tid} to grab a real tenant_admin token, then manipulating localStorage in browser context before page.goto('/'). Persistent (already-known from iter 5) console warning: React duplicate-key for '/wallet-management' and '/customers' — NOT a regression, pre-existed before this iteration's fix. Recommend the main agent dedupe the sidebar items array in Layout.js navSections build phase to silence it.",
+  "rca of the issue": "Original bug: Layout.js had `/motherboard` inside `isAdmin ? [...]` (true for all tenant_admin users) without an item-level minRole guard in that array, so it slipped past filterNavSections. Fix verified: moved to `isEffectiveSuperAdmin ? [...]` block. Auxiliary fix verified: isImpersonating now requires BOTH is_impersonating==='1' AND super_admin_token (prevents stale-token elevation); AuthContext useEffect auto-cleans super_admin_token/super_admin_user on mount when is_impersonating flag missing; logout broadened to remove all 3 impersonation keys."
+}
