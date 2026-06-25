@@ -330,12 +330,27 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         ref_type: Optional[str] = None,
         page: int = 1,
         page_size: int = 30,
-        admin: dict = Depends(get_super_admin),
+        current_user: dict = Depends(get_current_user),
     ):
-        """Return all wallet transfers (super-admin). Filterable by entity, date range, and reference type."""
+        """List wallet transfers.
+        - super_admin: sees all transfers (optionally filtered by entity_id)
+        - tenant     : sees only transfers involving their own tenant wallet
+        - agent      : sees only transfers involving their own agent wallet
+        """
+        role = current_user.get("role")
+        user_type = current_user.get("user_type") or current_user.get("type")
+        is_super = role == "super_admin" or user_type == "super_admin"
+
         query: dict = {}
-        if entity_id:
-            query["$or"] = [{"from_entity_id": entity_id}, {"to_entity_id": entity_id}]
+        if is_super:
+            if entity_id:
+                query["$or"] = [{"from_entity_id": entity_id}, {"to_entity_id": entity_id}]
+        else:
+            # Scope to the caller's own wallet
+            own_id = current_user.get("tenant_id") or current_user.get("id")
+            if not own_id:
+                return {"items": [], "total": 0, "page": page, "per_page": page_size, "total_pages": 0}
+            query["$or"] = [{"from_entity_id": own_id}, {"to_entity_id": own_id}]
         if ref_type:
             query["reference_type"] = ref_type
         if from_date or to_date:
