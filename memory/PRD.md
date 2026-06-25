@@ -77,3 +77,20 @@ See `/app/memory/test_credentials.md`
 - P3: Invoice printing for `platform_cards` sold from POS.
 - Minor: Investigate React duplicate-key console warning on dashboard navigation (non-blocking).
 - Cleanup: extract `_plan_price + lookup` helper in `wallet_routes.py`.
+
+## S12 — Motherboard Sidebar Visibility Fix (2026-02 / iter 6)
+- **Root cause:** Layout.js `tenantNavSections.settings.items` had `/motherboard` inside the unguarded `isAdmin ? [...]` block — every tenant admin saw it; clicking redirected to / via `superAdminOnly` ProtectedRoute.
+- **Fix:** Moved `/motherboard` into a separate `isEffectiveSuperAdmin ? [{...minRole:'super_admin'}] : []` block. Defence-in-depth: both outer gate AND filterNavSections minRole guard.
+- **Hardening:**
+  - `isImpersonating` now requires BOTH `localStorage.is_impersonating==='1'` AND `super_admin_token`.
+  - `AuthContext` useEffect auto-cleans stale `super_admin_token`/`super_admin_user` on mount when `is_impersonating` flag is missing.
+  - `logout()` broadened to clear all impersonation keys.
+- **Tests:** Iteration 6 frontend testing 100% — all 6 scenarios pass (pure tenant absent, active impersonation present-once, stale cleanup, stop-impersonation, logout cleanup, dashboard regression).
+
+## Next Action Items
+- **P1:** تفعيل Redis للـ caching.
+- **P2:** "اختصارات POS افتراضية" للسوبر-أدمن.
+- **P3:** طباعة فواتير `platform_cards` المباعة من POS.
+- **Minor:** تحذير React duplicate-key (`/wallet-management`, `/customers`) — dedup sidebar items by path in Layout.js.
+- **Cleanup:** استخراج `_plan_price` helper في `wallet_routes.py`.
+- **Enhancement (queued):** `/customer-debts` quick PDF/Excel export + bulk SMS/WhatsApp reminder for indebted customers.
