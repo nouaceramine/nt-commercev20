@@ -41,6 +41,14 @@ See `/app/memory/test_credentials.md`
 - P3: لا يوجد POS مدمج بعد لبيع بطاقات `tenant_db.platform_cards` (المستأجر يراها لكن البيع للزبون يحتاج تكامل إضافي)
 - P3: ~200 react-hooks/exhaustive-deps warnings
 
+## S9 — Motherboard 403 + Theme Migration (2026-02 / iter 3)
+- **Bug A:** `/motherboard` returned 403 for super_admin — root cause: `install_motherboard(app, get_tenant_admin)` rejected users without `tenant_id`. Fix in `backend/main.py:867-868` → `install_motherboard(app, get_super_admin)`. All 6 diagnostic endpoints now 200 for super_admin.
+- **Bug B:** ~25 pages had hardcoded dark-mode classes (`bg-gray-800`, `text-white`, `text-gray-400`, `border-gray-700`, `border-gray-600`) which produced unreadable text in light theme. Migrated via Python script (`/tmp/fix_theme.py`) to theme-aware tokens (`bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `border-input`). `text-white` preserved on colored badges/buttons (bg-red-500 / bg-emerald-600 / etc.) by regex-guard.
+- **Files touched (frontend):** WalletPage, SmartNotificationsPage, AgentDashboardPage, SystemLogsPage, SmartDashboardPage, RepairTrackingPage, SimManagementPage, SaasAdminPage, SupplierTrackingPage, InternalChatPage, ExpensesPage, SecurityDashboardPage, FeaturesPage, BackupSystemPage, TwoFactorPage, EmailNotificationsPage, settings/EmailTab + WhatsAppTab + PermissionsTab + TemplateEditorPage, PriceHistoryPage, SystemAlertsSection, TaskManagementPage, NotificationsPage, CardsServicePage, DefectiveGoodsPage, admin/components/FinanceReportsSection + AgentsDashboard, tenant/FinanceReportsSection, pos/POSShortcuts, ProductSearchDropdown, BuyFromPlatform.
+- **Tests:** `/app/backend/tests/test_motherboard.py` added. Iteration 3 report: backend 100%, frontend 100%.
+
 ## Next Action Items
-- اختبار من واجهة المتصفح (الـ SaaS Admin يرفع كود ثم المستأجر يشتري)
-- (لاحقاً) دمج "بيع كود من tenant_db.platform_cards" في POSPage مع طباعة فاتورة
+- P1: Setup Redis caching (currently disabled — minor perf win).
+- P2: "Default POS Shortcuts" — super-admin defines default grid pushed to new cashiers.
+- P3: Invoice printing for `platform_cards` sold from POS.
+- P3: Visual QA tenant-side on /smart-notifications and /ai-agents (super-admin redirects to saas-admin shell).
