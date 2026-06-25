@@ -599,7 +599,11 @@ export const Layout = ({ children }) => {
 
   // Build navSections from customSidebarOrder if available
   const navSections = (() => {
-    if (!customSidebarOrder) return defaultNavSections;
+    const dedupeSections = (sections) => sections.map(section => ({
+      ...section,
+      items: Array.from(new Map(section.items.map(i => [i.path, i])).values()),
+    }));
+    if (!customSidebarOrder) return dedupeSections(defaultNavSections);
     
     // Create a map of default sections for quick lookup
     const defaultMap = {};
@@ -656,19 +660,19 @@ export const Layout = ({ children }) => {
       .filter(Boolean)
       .filter(section => section.items.length > 0);
 
-    // Distinguish a stale/incompatible saved order from an intentional "hide all".
-    // A saved section is resolvable only if it maps to a current default section
-    // or is a genuine custom section. If NONE are resolvable, the saved order
-    // references an OLD structure (e.g. the pre-restructure 4-section ids) — fall
-    // back to the current defaults so the sidebar is never empty. If some are
-    // resolvable but the user hid them all, respect that intent.
-    if (built.length === 0) {
+    // Final dedupe pass: ensure each section.items has unique paths. This
+    // silences the React duplicate-key warning when sections are merged from
+    // multiple sources (defaults + custom order + built-in items).
+    const dedupedBuilt = dedupeSections(built);
+    if (dedupedBuilt.length === 0) {
       const hasResolvableSavedSection = customSidebarOrder.some(
         customSection => defaultMap[customSection.id] || customSection.isCustom === true
       );
-      if (!hasResolvableSavedSection) return defaultNavSections;
+      if (!hasResolvableSavedSection) {
+        return dedupeSections(defaultNavSections);
+      }
     }
-    return built;
+    return dedupedBuilt;
   })();
 
   // Auto-expand section containing active page

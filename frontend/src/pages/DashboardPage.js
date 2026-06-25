@@ -173,7 +173,7 @@ export default function DashboardPage() {
         {isWidgetVisible('stats') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {statsCards.map((stat, index) => (
-            <Link key={stat.link} to={stat.link}>
+            <Link key={`stat-${index}-${stat.link}`} to={stat.link}>
               <Card className="stats-card cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-200" data-testid={`stat-card-${index}`}>
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
