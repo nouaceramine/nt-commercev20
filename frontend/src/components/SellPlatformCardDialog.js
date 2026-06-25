@@ -26,6 +26,8 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
   const [loading, setLoading] = useState(false);
   const [picked, setPicked] = useState(null);  // {operator?, denomination, type}
   const [customer, setCustomer] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [customers, setCustomers] = useState([]);
   const [sellPrice, setSellPrice] = useState("");
   const [pay, setPay] = useState("cash");
   const [result, setResult] = useState(null);  // {code, operator, denomination}
@@ -34,12 +36,16 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
   const reload = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get("/platform-cards/stock-summary");
-      const data = res.data || {};
+      const [s, c] = await Promise.all([
+        apiClient.get("/platform-cards/stock-summary"),
+        apiClient.get("/customers").catch(() => ({ data: [] })),
+      ]);
+      const data = s.data || {};
       setStock({
         cards: (data.cards || []).map((r) => ({ operator: r._id.operator, denomination: r._id.denomination, count: r.count })),
         idoom: (data.idoom || []).map((r) => ({ denomination: r._id.denomination, count: r.count })),
       });
+      setCustomers(Array.isArray(c.data) ? c.data : (c.data?.items || []));
     } catch (_e) {
       toast.error("فشل تحميل المخزون");
     } finally { setLoading(false); }
@@ -47,7 +53,7 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
 
   useEffect(() => {
     if (open) {
-      setPicked(null); setCustomer(""); setSellPrice(""); setPay("cash"); setResult(null);
+      setPicked(null); setCustomer(""); setSelectedCustomerId(""); setSellPrice(""); setPay("cash"); setResult(null);
       reload();
     }
   }, [open]);
@@ -63,11 +69,22 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
 
   const submit = async () => {
     if (!picked) return;
+    if (pay === "credit" && !selectedCustomerId) {
+      toast.error("يرجى اختيار الزبون للبيع الآجل");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = picked.type === "card"
-        ? { operator: picked.operator, denomination: picked.denomination, sell_price: sellPrice ? parseFloat(sellPrice) : picked.denomination, customer_phone: customer || null, payment_method: pay }
-        : null;  // idoom path uses /idoom/codes/sell (handled separately)
+        ? {
+            operator: picked.operator,
+            denomination: picked.denomination,
+            sell_price: sellPrice ? parseFloat(sellPrice) : picked.denomination,
+            customer_id: pay === "credit" ? selectedCustomerId : null,
+            customer_phone: customer || null,
+            payment_method: pay,
+          }
+        : null;
       if (picked.type !== "card") {
         toast.error("بيع Idoom من تبويب Idoom المنفصل");
         setSubmitting(false);
@@ -179,9 +196,34 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
               <Label>طريقة الدفع</Label>
               <select className="w-full border rounded px-2 py-2" value={pay} onChange={(e) => setPay(e.target.value)} data-testid="pay-method-select">
                 <option value="cash">نقدي</option>
-                <option value="credit">آجل</option>
+                <option value="credit">آجل (دَين على الزبون)</option>
               </select>
             </div>
+            {pay === "credit" && (
+              <div>
+                <Label>اختر الزبون <span className="text-red-500">*</span></Label>
+                <select
+                  className="w-full border rounded px-2 py-2"
+                  value={selectedCustomerId}
+                  onChange={(e) => {
+                    setSelectedCustomerId(e.target.value);
+                    const c = customers.find((x) => x.id === e.target.value);
+                    if (c?.phone && !customer) setCustomer(c.phone);
+                  }}
+                  data-testid="credit-customer-select"
+                >
+                  <option value="">-- اختر زبوناً --</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.phone ? ` (${c.phone})` : ""}
+                    </option>
+                  ))}
+                </select>
+                {customers.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">لا يوجد زبائن. أضف زبوناً من قائمة الزبائن أولاً.</p>
+                )}
+              </div>
+            )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setPicked(null)}>رجوع</Button>
               <Button onClick={submit} disabled={submitting} data-testid="confirm-sale-btn">

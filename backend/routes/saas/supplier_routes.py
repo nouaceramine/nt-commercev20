@@ -389,18 +389,23 @@ def build_supplier_router() -> APIRouter:
         operator: str
         denomination: float
         sell_price: Optional[float] = None  # what the customer paid; defaults to denomination
+        customer_id: Optional[str] = None
         customer_phone: Optional[str] = None
-        payment_method: str = "cash"
+        payment_method: str = "cash"  # cash | credit
 
     @router.post("/platform-cards/sell")
     async def sell_platform_card(body: SellPlatformCard, current_user: dict = Depends(get_current_user)):
         """Pop the next available card of the chosen (operator, denomination),
-        mark it sold, register a tenant-side sale + cash movement.
+        mark it sold, register a tenant-side sale + cash movement, and
+        ─ if credit ─ create a debt row in tenant_db.sales so the customer's
+        running balance shows up in /customers/{id}/debt.
+
         Returns the actual code so the POS can show & print it."""
         tenant_id = current_user.get("tenant_id") or current_user.get("id")
         if not tenant_id:
             raise HTTPException(status_code=403, detail="tenant required")
         tenant_db = get_tenant_db(tenant_id)
+
         # Atomically reserve & mark sold
         card = await tenant_db.platform_cards.find_one_and_update(
             {"operator": body.operator, "denomination": body.denomination, "status": "available"},
@@ -409,25 +414,110 @@ def build_supplier_router() -> APIRouter:
         )
         if not card:
             raise HTTPException(status_code=404, detail=f"لا توجد كروت متاحة من {body.operator} {body.denomination}")
+
         sell_price = float(body.sell_price) if body.sell_price else float(body.denomination)
-        # Insert a sale record (light-weight, just enough for reports)
+        is_credit = body.payment_method == "credit"
+
+        # If credit -> require customer_id and fetch their name
+        customer_name = ""
+        if is_credit:
+            if not body.customer_id:
+                # Rollback the card
+                await tenant_db.platform_cards.update_one(
+                    {"id": card["id"]},
+                    {"$set": {"status": "available", "sold_at": None, "sold_to": None}},
+                )
+                raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+            cust = await tenant_db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
+            if not cust:
+                await tenant_db.platform_cards.update_one(
+                    {"id": card["id"]},
+                    {"$set": {"status": "available", "sold_at": None, "sold_to": None}},
+                )
+                raise HTTPException(status_code=404, detail="الزبون غير موجود")
+            customer_name = cust.get("name", "")
+
+        # Insert a full sale row (so existing reports + /customers/{id}/debt pick it up)
         sale_id = str(uuid.uuid4())
-        sale_doc = {
+        sale_row = {
+            "id": sale_id,
+            "invoice_number": f"CARD-{sale_id[:6].upper()}",
+            "items": [{
+                "name": f"{body.operator} {body.denomination} دج",
+                "quantity": 1,
+                "price": sell_price,
+                "discount": 0,
+                "is_platform_card": True,
+                "card_code": card.get("code"),
+                "card_id": card.get("id"),
+            }],
+            "subtotal": sell_price,
+            "discount_total": 0,
+            "tax_total": 0,
+            "total": sell_price,
+            "paid_amount": 0 if is_credit else sell_price,
+            "debt_amount": sell_price if is_credit else 0,
+            "payment_method": "credit" if is_credit else "cash",
+            "customer_id": body.customer_id,
+            "customer_name": customer_name,
+            "customer_phone": body.customer_phone,
+            "type": "platform_card",
+            "source": "pos_quick_card",
+            "user_id": current_user.get("id"),
+            "user_name": current_user.get("name", ""),
+            "created_at": _now(),
+        }
+        await tenant_db.sales.insert_one(sale_row)
+
+        # Also keep the lighter platform_card_sales log for the cards reports
+        await tenant_db.platform_card_sales.insert_one({
             "id": sale_id,
             "type": "platform_card",
             "operator": body.operator,
             "denomination": body.denomination,
             "code": card.get("code"),
             "sell_price": sell_price,
-            "payment_method": body.payment_method,
+            "payment_method": "credit" if is_credit else "cash",
+            "customer_id": body.customer_id,
+            "customer_name": customer_name,
             "customer_phone": body.customer_phone,
             "card_id": card.get("id"),
             "created_at": _now(),
             "user_id": current_user.get("id"),
+        })
+
+        # Update the user's open daily session (best-effort; ignore if none)
+        try:
+            user_id_for_session = current_user.get("id")
+            if user_id_for_session:
+                inc = {"total_sales": sell_price, "sales_count": 1}
+                if is_credit:
+                    inc["credit_sales"] = sell_price
+                else:
+                    inc["cash_sales"] = sell_price
+                await tenant_db.daily_sessions.update_one(
+                    {"user_id": user_id_for_session, "status": "open"},
+                    {"$inc": inc},
+                )
+        except Exception as exc:
+            logger.warning("daily_sessions update failed: %s", exc)
+
+        return {
+            "sale": {
+                "id": sale_id,
+                "type": "platform_card",
+                "operator": body.operator,
+                "denomination": body.denomination,
+                "sell_price": sell_price,
+                "payment_method": "credit" if is_credit else "cash",
+                "customer_id": body.customer_id,
+                "customer_name": customer_name,
+                "is_credit": is_credit,
+                "debt_amount": sell_price if is_credit else 0,
+                "created_at": sale_row["created_at"],
+            },
+            "card": {"code": card.get("code"), "operator": card.get("operator"), "denomination": card.get("denomination")},
         }
-        await tenant_db.platform_card_sales.insert_one(sale_doc)
-        sale_doc.pop("_id", None)
-        return {"sale": sale_doc, "card": {"code": card.get("code"), "operator": card.get("operator"), "denomination": card.get("denomination")}}
 
     @router.get("/platform-cards/sales")
     async def platform_card_sales(
