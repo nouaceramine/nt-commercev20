@@ -47,8 +47,16 @@ See `/app/memory/test_credentials.md`
 - **Files touched (frontend):** WalletPage, SmartNotificationsPage, AgentDashboardPage, SystemLogsPage, SmartDashboardPage, RepairTrackingPage, SimManagementPage, SaasAdminPage, SupplierTrackingPage, InternalChatPage, ExpensesPage, SecurityDashboardPage, FeaturesPage, BackupSystemPage, TwoFactorPage, EmailNotificationsPage, settings/EmailTab + WhatsAppTab + PermissionsTab + TemplateEditorPage, PriceHistoryPage, SystemAlertsSection, TaskManagementPage, NotificationsPage, CardsServicePage, DefectiveGoodsPage, admin/components/FinanceReportsSection + AgentsDashboard, tenant/FinanceReportsSection, pos/POSShortcuts, ProductSearchDropdown, BuyFromPlatform.
 - **Tests:** `/app/backend/tests/test_motherboard.py` added. Iteration 3 report: backend 100%, frontend 100%.
 
+## S10 — Dashboard: User Wallet + Debts cards (2026-02 / iter 4)
+- **Backend:** `/api/wallet` enriched with `subscription_due` (numeric), `subscription_overdue` (bool), `subscription_ends_at` (ISO). Computed by comparing tenant's `subscription_ends_at` with `now()` and reading plan's price by `subscription_type`. Super-admin (no tenant_id) → zeros, no error.
+- **Frontend:** Two new tenant-dashboard cards inserted between "رصيد المحفظة" and "إجمالي المنتجات":
+  - "رصيد محفظة المستخدم" (User Wallet Balance) — link → `/wallet-management`, subtitle "محفظة المنصة"
+  - "ديون محفظة المستخدم" (User Wallet Debts) — link → `/wallet-management`. When overdue → red icon + subtitle "اشتراك متأخر"; otherwise neutral + "لا توجد ديون".
+- **Tests:** `backend/tests/test_wallet_enrichment.py` — 9/9 pytest pass. Iteration 4 report: backend 100% — frontend 100%.
+
 ## Next Action Items
 - P1: Setup Redis caching (currently disabled — minor perf win).
 - P2: "Default POS Shortcuts" — super-admin defines default grid pushed to new cashiers.
 - P3: Invoice printing for `platform_cards` sold from POS.
-- P3: Visual QA tenant-side on /smart-notifications and /ai-agents (super-admin redirects to saas-admin shell).
+- P3: Visual QA tenant-side on /smart-notifications and /ai-agents.
+- Cleanup: extract `_plan_price + lookup` helper in wallet_routes.py (currently duplicated with `_charge_subscription`).
