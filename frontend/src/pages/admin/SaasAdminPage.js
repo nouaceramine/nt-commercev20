@@ -125,7 +125,7 @@ export default function SaasAdminPage() {
   const [bridgeDialogOpen, setBridgeDialogOpen] = useState(false);
   const [walletChargeDialogOpen, setWalletChargeDialogOpen] = useState(false);
   const [walletChargeTenant, setWalletChargeTenant] = useState(null);
-  const [walletChargeForm, setWalletChargeForm] = useState({ amount: '', notes: '' });
+  const [walletChargeForm, setWalletChargeForm] = useState({ amount: '', notes: '', payment_method: 'cash' });
   const [walletChargeLoading, setWalletChargeLoading] = useState(false);
   const [walletInfo, setWalletInfo] = useState(null);
   const [walletInfoLoading, setWalletInfoLoading] = useState(false);
@@ -676,12 +676,17 @@ export default function SaasAdminPage() {
     }
     setWalletChargeLoading(true);
     try {
-      const res = await apiClient.post(`/saas/tenants/${walletChargeTenant.id}/wallet/credit`, {
+      // Use the central /wallet/add-funds endpoint which supports payment_method
+      const res = await apiClient.post('/wallet/add-funds', {
+        entity_id: walletChargeTenant.id,
         amount,
-        notes: walletChargeForm.notes || 'شحن من المدير العام',
+        payment_method: walletChargeForm.payment_method,
+        description: walletChargeForm.notes || (walletChargeForm.payment_method === 'cash' ? 'شحن نقدي من المدير العام' : 'شحن بالدين من المدير العام'),
       });
-      toast.success(`تم شحن المحفظة بنجاح — الرصيد الجديد: ${res.data.new_balance?.toLocaleString('ar-DZ')} دج`);
+      const methodLabel = walletChargeForm.payment_method === 'cash' ? 'نقداً' : 'بالدين';
+      toast.success(`تم شحن المحفظة ${methodLabel} — الرصيد الجديد: ${res.data.new_balance?.toLocaleString('ar-DZ')} دج`);
       setWalletChargeDialogOpen(false);
+      setWalletChargeForm({ amount: '', notes: '', payment_method: 'cash' });
     } catch (err) {
       toast.error(err.response?.data?.detail || 'حدث خطأ أثناء شحن المحفظة');
     } finally {
@@ -2635,7 +2640,38 @@ export default function SaasAdminPage() {
                     placeholder="مثال: 5000"
                     value={walletChargeForm.amount}
                     onChange={e => setWalletChargeForm({ ...walletChargeForm, amount: e.target.value })}
+                    data-testid="wallet-charge-amount-input"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>طريقة الدفع *</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setWalletChargeForm({ ...walletChargeForm, payment_method: 'cash' })}
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 text-sm transition ${walletChargeForm.payment_method === 'cash' ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-border hover:bg-muted/50'}`}
+                      data-testid="wallet-charge-method-cash"
+                    >
+                      <Banknote className={`h-5 w-5 ${walletChargeForm.payment_method === 'cash' ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+                      <span className="font-medium">نقداً (Cash)</span>
+                      <span className="text-xs text-muted-foreground">دفع فوري كامل</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWalletChargeForm({ ...walletChargeForm, payment_method: 'credit' })}
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 text-sm transition ${walletChargeForm.payment_method === 'credit' ? 'border-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'border-border hover:bg-muted/50'}`}
+                      data-testid="wallet-charge-method-credit"
+                    >
+                      <CreditCard className={`h-5 w-5 ${walletChargeForm.payment_method === 'credit' ? 'text-amber-600' : 'text-muted-foreground'}`} />
+                      <span className="font-medium">بالدين (Credit)</span>
+                      <span className="text-xs text-muted-foreground">يُحصّل لاحقاً</span>
+                    </button>
+                  </div>
+                  {walletChargeForm.payment_method === 'credit' && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 p-2 rounded">
+                      ⚠️ سيُسجّل هذا المبلغ كدين على التاجر — يجب تحصيله لاحقاً عبر "تسديد الدين".
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>ملاحظات (اختياري)</Label>
@@ -2644,6 +2680,7 @@ export default function SaasAdminPage() {
                     value={walletChargeForm.notes}
                     onChange={e => setWalletChargeForm({ ...walletChargeForm, notes: e.target.value })}
                     rows={2}
+                    data-testid="wallet-charge-notes-input"
                   />
                 </div>
               </div>
@@ -2655,6 +2692,7 @@ export default function SaasAdminPage() {
                 onClick={handleWalletCharge}
                 disabled={walletChargeLoading || !walletChargeForm.amount}
                 className="bg-green-600 hover:bg-green-700"
+                data-testid="wallet-charge-submit-btn"
               >
                 {walletChargeLoading
                   ? <><RefreshCw className="h-4 w-4 animate-spin me-2" />جاري الشحن...</>

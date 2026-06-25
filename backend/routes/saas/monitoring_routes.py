@@ -12,17 +12,35 @@ router = APIRouter(tags=["SaaS Monitoring"])
 
 @router.get("/saas/monitoring")
 async def get_monitoring_data(admin: dict = Depends(get_super_admin)):
+    now = datetime.now(timezone.utc)
+    seven_days_later = now + timedelta(days=7)
+
     tenants = await db.saas_tenants.find({}, {"_id": 0}).to_list(1000)
     monitoring_data = []
+    alerts: List[dict] = []
 
     for tenant in tenants:
         tenant_db = client[f"tenant_{tenant['id'].replace('-', '_')}"]
         products_count = await tenant_db.products.count_documents({})
         customers_count = await tenant_db.customers.count_documents({})
         sales_count = await tenant_db.sales.count_documents({})
+        users_count = await tenant_db.users.count_documents({})
+
+        # Total revenue = sum of all sales totals for this tenant
+        rev_agg = await tenant_db.sales.aggregate([
+            {"$group": {"_id": None, "total": {"$sum": "$total"}}}
+        ]).to_list(1)
+        total_revenue = float(rev_agg[0]["total"]) if rev_agg else 0.0
+
+        # Last activity = most recent sale created_at
+        last_sale = await tenant_db.sales.find_one(
+            {}, {"_id": 0, "created_at": 1}, sort=[("created_at", -1)]
+        )
+        last_activity = last_sale.get("created_at") if last_sale else tenant.get("created_at", "")
 
         monitoring_data.append({
             "tenant_id": tenant["id"],
+            "tenant_name": tenant.get("name", ""),
             "name": tenant.get("name", ""),
             "email": tenant.get("email", ""),
             "company_name": tenant.get("company_name", ""),
@@ -30,17 +48,58 @@ async def get_monitoring_data(admin: dict = Depends(get_super_admin)):
             "products_count": products_count,
             "customers_count": customers_count,
             "sales_count": sales_count,
+            "users_count": users_count,
+            "total_revenue": total_revenue,
             "subscription_ends_at": tenant.get("subscription_ends_at", ""),
-            "created_at": tenant.get("created_at", "")
+            "created_at": tenant.get("created_at", ""),
+            "last_activity": last_activity,
         })
+
+        # Alerts — subscription expiring in <=7 days OR overdue
+        sub_end = tenant.get("subscription_ends_at")
+        if sub_end and tenant.get("is_active", True):
+            try:
+                end_dt = datetime.fromisoformat(sub_end.replace("Z", "+00:00"))
+                days_left = (end_dt - now).days
+                if end_dt < now:
+                    alerts.append({
+                        "severity": "critical",
+                        "message": f"اشتراك {tenant.get('name', tenant['id'])} منتهي",
+                        "days_left": 0,
+                        "tenant_id": tenant["id"],
+                    })
+                elif end_dt <= seven_days_later:
+                    alerts.append({
+                        "severity": "warning",
+                        "message": f"اشتراك {tenant.get('name', tenant['id'])} ينتهي قريباً",
+                        "days_left": max(0, days_left),
+                        "tenant_id": tenant["id"],
+                    })
+            except Exception:
+                pass
 
     total_products = sum(t["products_count"] for t in monitoring_data)
     total_customers = sum(t["customers_count"] for t in monitoring_data)
     total_sales = sum(t["sales_count"] for t in monitoring_data)
+    total_revenue_all = sum(t["total_revenue"] for t in monitoring_data)
+    total_tenants_count = len(monitoring_data)
+    active_tenants_count = sum(1 for t in monitoring_data if t["is_active"])
+
+    summary = {
+        "total_tenants": total_tenants_count,
+        "active_tenants": active_tenants_count,
+        "total_products": total_products,
+        "total_customers": total_customers,
+        "total_sales": total_sales,
+        "total_revenue": total_revenue_all,
+    }
 
     return {
         "tenants": monitoring_data,
-        "totals": {"products": total_products, "customers": total_customers, "sales": total_sales}
+        "summary": summary,
+        "alerts": alerts,
+        # Legacy field — kept for backward compatibility with older consumers
+        "totals": {"products": total_products, "customers": total_customers, "sales": total_sales},
     }
 
 

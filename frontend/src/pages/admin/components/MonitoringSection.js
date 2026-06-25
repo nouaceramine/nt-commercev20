@@ -46,7 +46,7 @@ export const MonitoringSection = () => {
   if (loading) return <div className="text-center py-12 text-muted-foreground">جاري التحميل...</div>;
   if (!monitoringData) return null;
 
-  const { tenants, summary, alerts = [] } = monitoringData;
+  const { tenants = [], summary = {}, alerts = [] } = monitoringData;
   const sorted = [...tenants].sort((a, b) => (b[sortBy] || 0) - (a[sortBy] || 0));
 
   const formatDate = (d) => {
@@ -92,27 +92,27 @@ export const MonitoringSection = () => {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Card><CardContent className="p-4 text-center">
           <Users className="h-5 w-5 mx-auto mb-1 text-blue-500" />
-          <p className="text-2xl font-bold">{summary.total_tenants}</p>
+          <p className="text-2xl font-bold">{summary.total_tenants ?? 0}</p>
           <p className="text-xs text-muted-foreground">إجمالي المشتركين</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <UserCheck className="h-5 w-5 mx-auto mb-1 text-green-500" />
-          <p className="text-2xl font-bold text-green-600">{summary.active_tenants}</p>
+          <p className="text-2xl font-bold text-green-600">{summary.active_tenants ?? 0}</p>
           <p className="text-xs text-muted-foreground">نشط</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <Package className="h-5 w-5 mx-auto mb-1 text-purple-500" />
-          <p className="text-2xl font-bold">{summary.total_products}</p>
+          <p className="text-2xl font-bold">{summary.total_products ?? 0}</p>
           <p className="text-xs text-muted-foreground">إجمالي المنتجات</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <Users className="h-5 w-5 mx-auto mb-1 text-indigo-500" />
-          <p className="text-2xl font-bold">{summary.total_customers}</p>
+          <p className="text-2xl font-bold">{summary.total_customers ?? 0}</p>
           <p className="text-xs text-muted-foreground">إجمالي العملاء</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">
           <ShoppingCart className="h-5 w-5 mx-auto mb-1 text-amber-500" />
-          <p className="text-2xl font-bold">{summary.total_sales}</p>
+          <p className="text-2xl font-bold">{summary.total_sales ?? 0}</p>
           <p className="text-xs text-muted-foreground">إجمالي المبيعات</p>
         </CardContent></Card>
         <Card><CardContent className="p-4 text-center">

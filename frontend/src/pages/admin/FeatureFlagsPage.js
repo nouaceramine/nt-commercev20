@@ -33,7 +33,13 @@ import {
   Shield,
   Layers,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Smartphone,
+  Wifi,
+  Tv,
+  Bot,
+  Database,
+  Wallet
 } from 'lucide-react';
 
 // Feature categories with icons and labels
@@ -141,6 +147,93 @@ const FEATURE_CATEGORIES = {
       email_notifications: { label_ar: 'إشعارات البريد', label_en: 'Email Notifications' },
       sms_notifications: { label_ar: 'إشعارات SMS', label_en: 'SMS Notifications' }
     }
+  },
+  recharge: {
+    icon: Smartphone,
+    label_ar: 'شحن الجوال (Flexy)',
+    label_en: 'Mobile Recharge (Flexy)',
+    subFeatures: {
+      mobilis_flexy: { label_ar: 'فليكسي موبيليس', label_en: 'Mobilis Flexy' },
+      djezzy_flexy: { label_ar: 'فليكسي جيزي', label_en: 'Djezzy Flexy' },
+      ooredoo_flexy: { label_ar: 'فليكسي أوريدو', label_en: 'Ooredoo Flexy' },
+      flexy_history: { label_ar: 'سجل عمليات الشحن', label_en: 'Recharge History' },
+      quick_recharge: { label_ar: 'الشحن السريع في POS', label_en: 'Quick Recharge in POS' },
+    },
+  },
+  cards: {
+    icon: CreditCard,
+    label_ar: 'بطاقات التعبئة',
+    label_en: 'Recharge Cards',
+    subFeatures: {
+      mobilis_cards: { label_ar: 'بطاقات موبيليس', label_en: 'Mobilis Cards' },
+      djezzy_cards: { label_ar: 'بطاقات جيزي', label_en: 'Djezzy Cards' },
+      ooredoo_cards: { label_ar: 'بطاقات أوريدو', label_en: 'Ooredoo Cards' },
+      card_inventory: { label_ar: 'مخزون البطاقات', label_en: 'Card Inventory' },
+      buy_from_platform: { label_ar: 'شراء من المنصّة', label_en: 'Buy from Platform' },
+    },
+  },
+  internet: {
+    icon: Wifi,
+    label_ar: 'الانترنت المنزلي (Idoom)',
+    label_en: 'Home Internet (Idoom)',
+    subFeatures: {
+      idoom_recharge: { label_ar: 'شحن Idoom', label_en: 'Idoom Recharge' },
+      idoom_codes: { label_ar: 'أكواد Idoom', label_en: 'Idoom Codes' },
+      idoom_history: { label_ar: 'سجل Idoom', label_en: 'Idoom History' },
+    },
+  },
+  iptv: {
+    icon: Tv,
+    label_ar: 'IPTV',
+    label_en: 'IPTV',
+    subFeatures: {
+      iptv_subscriptions: { label_ar: 'اشتراكات IPTV', label_en: 'IPTV Subscriptions' },
+      iptv_renewals: { label_ar: 'تجديد الاشتراكات', label_en: 'Renewals' },
+    },
+  },
+  ai_assistant: {
+    icon: Bot,
+    label_ar: 'المساعد الذكي',
+    label_en: 'AI Assistant',
+    subFeatures: {
+      ai_chat: { label_ar: 'محادثة AI', label_en: 'AI Chat' },
+      ai_sales_forecast: { label_ar: 'توقع المبيعات', label_en: 'Sales Forecast' },
+      ai_restock_suggestions: { label_ar: 'اقتراحات الإعادة للمخزون', label_en: 'Restock Suggestions' },
+      ai_product_descriptions: { label_ar: 'أوصاف المنتجات', label_en: 'Product Descriptions' },
+      ai_customer_insights: { label_ar: 'رؤى الزبائن', label_en: 'Customer Insights' },
+    },
+  },
+  backup: {
+    icon: Database,
+    label_ar: 'النسخ الاحتياطي',
+    label_en: 'Backup',
+    subFeatures: {
+      manual_backup: { label_ar: 'نسخ يدوي', label_en: 'Manual Backup' },
+      auto_backup: { label_ar: 'نسخ تلقائي', label_en: 'Auto Backup' },
+      restore: { label_ar: 'الاستعادة', label_en: 'Restore' },
+      cloud_backup: { label_ar: 'نسخ سحابي', label_en: 'Cloud Backup' },
+    },
+  },
+  wallet: {
+    icon: Wallet,
+    label_ar: 'المحفظة والمدفوعات',
+    label_en: 'Wallet & Payments',
+    subFeatures: {
+      wallet_topup: { label_ar: 'شحن المحفظة', label_en: 'Wallet Top-up' },
+      auto_pay_subscription: { label_ar: 'الدفع التلقائي للاشتراك', label_en: 'Auto-pay Subscription' },
+      withdrawals: { label_ar: 'طلبات السحب', label_en: 'Withdrawals' },
+      transactions_history: { label_ar: 'سجل المعاملات', label_en: 'Transactions History' },
+    },
+  },
+  security: {
+    icon: Shield,
+    label_ar: 'الأمان',
+    label_en: 'Security',
+    subFeatures: {
+      two_factor: { label_ar: 'مصادقة ثنائية', label_en: '2FA' },
+      audit_log: { label_ar: 'سجل التدقيق', label_en: 'Audit Log' },
+      ip_whitelist: { label_ar: 'قائمة IP المسموحة', label_en: 'IP Whitelist' },
+    },
   }
 };
 

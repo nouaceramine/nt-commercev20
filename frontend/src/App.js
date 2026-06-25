@@ -155,7 +155,8 @@ const ProtectedRoute = ({ children, adminOnly = false, tenantOnly = false, super
   const superAdminAllowedPaths = [
     '/saas-admin', '/system-updates', '/robots', '/auto-reports',
     '/security-dashboard', '/backup-system', '/wallet-management',
-    '/payments', '/motherboard',
+    '/payments', '/motherboard', '/data-import-export', '/system-logs',
+    '/settings',
   ];
   if (isSuperAdmin && !superAdminAllowedPaths.some(p => window.location.pathname.startsWith(p))) {
     return <Navigate to="/saas-admin" replace />;

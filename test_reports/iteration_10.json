@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 10 — verified 6 super-admin bug fixes (#1 logs cleanup, #2 monitoring summary, #3 AI assistant 403, #4 feature-flag categories, #5 import/export redirect, #6 wallet credit top-up + settle-credit) and feature #6 UI dialog. Backend: 7/7 pytest cases PASS (test_iter10_bugs.py). Frontend Playwright: BUG2/3/4/5/6 all PASS — monitoring renders 6/6 summary cards with no ErrorBoundary; AI chat submits and returns reply with no 'حدث خطأ في الاتصال'; all 8 new FEATURE_CATEGORIES (recharge, cards, internet, IPTV, ai_assistant, backup, wallet, security) visible at /saas-admin/feature-flags; /data-import-export stays put (no redirect); wallet-charge dialog has all 5 expected data-testids (amount/cash/credit/notes/submit), amber credit warning appears when 'بالدين' selected, submit with amount=100 credit closes dialog with success toast. Regression /api/wallet still returns total_platform_debt.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Top search bar on /saas-admin", "issues": ["Console shows 'Search error: AxiosError: Request failed with status code 403' on initial saas-admin load — the global product-search endpoint is being called from super-admin context where it's not permitted. Not in this iter's scope but should be guarded so it doesn't fire for super_admin (or backend should return 200 with empty list for super_admin)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter10_bugs.py",
+    "/app/test_reports/pytest/iteration_10_bugs.xml"
+  ],
+  "action_items": [
+    "MINOR: The spec mentions opening '/feature-flags' as super_admin, but the actual mounted route is '/saas-admin/feature-flags' (App.js:371). The top-level path '/feature-flags' is NOT in superAdminAllowedPaths so super-admin gets redirected to /saas-admin. If the requirement is to allow '/feature-flags' directly, add it to superAdminAllowedPaths and/or mount a top-level Route. Currently the UI works fine at /saas-admin/feature-flags.",
+    "MINOR: The wallet-charge open button (Wallet icon at SaasAdminPage.js:1162) has no data-testid — only title='شحن المحفظة'. Consider adding data-testid={`wallet-charge-open-${tenant.id}`} for stable test selection.",
+    "MINOR (out of scope): suppress / fix the super_admin global product-search 403 console error (Search error: AxiosError: 403) on /saas-admin load."
+  ],
+  "critical_code_review_comments": [
+    "monitoring_routes.py:18-103 — looks good. Note: alerts loop calls datetime.fromisoformat on tenant.subscription_ends_at without checking type; the try/except guards against bad data. The per-tenant total_revenue is computed via a separate sales.aggregate per tenant — O(N) round-trips. For 100+ tenants this will slow down /saas/monitoring; consider a single aggregation joining by tenant_id or caching. Acceptable for current scale (8 tenants).",
+    "ai_assistant_routes.py:60-79 — context-data tenant_db queries are now wrapped in try/except: the function actually uses db.sales / db.products / db.customers (the main_db handle bound at create_ai_assistant_routes time). For super_admin with no tenant_db, db here is whichever db was passed in server.py — needs verification it doesn't accidentally return main_db tenant collections. The graceful try/except makes the test pass either way, but the context_data may always be empty for super_admin (effectively useless). Functional, not blocking.",
+    "wallet_routes.py:224-266 — add_funds now persists payment_method on the transaction and conditionally bumps credit_debt. Good. Two improvements: (1) the conditional credit_debt $inc is a second update — fold into the same $set above ({'balance': new_balance, '$inc': {credit_debt: amount}}); (2) settle-credit (line 269) checks amount > current_debt but does not allow exact equality settle (>= would still pass since strict >); ok.",
+    "App.js:155-160 — superAdminAllowedPaths is hardcoded. Consider extracting to a constant module so future allowlist additions don't get lost across PRs. /feature-flags itself was NOT added (only the spec mentions it but the file says /saas-admin/feature-flags is mounted).",
+    "SaasAdminPage.js:1162 — wallet-charge open button has title but no data-testid; adding one would prevent flaky title-attribute selectors in tests."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (5/5 bug UIs + regression)"},
+  "test_credentials": "admin@ntcommerce.com / Admin@2024 (super_admin)",
+  "seed_data_creation": "test_credit_topup_and_settle_flow added then settled 500 DZD credit_debt on tenant b4fde9b7-d1f2-46ec-b62a-f0971ca3deba and restored credit_debt to its pre-test value at the end. The /api/wallet/add-funds POST with amount=100 method=credit from the UI test ALSO added 100 to that tenant's wallet (balance ~+100, credit_debt +100). Main agent may want to settle-credit 100 on that tenant if a clean balance is desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 10 verified all 6 bug fixes. The wallet-charge-open button has no data-testid — tests must use button[title='شحن المحفظة']. The /feature-flags top-level path is NOT in the super-admin allowlist; the working URL is /saas-admin/feature-flags. AI assistant chat input/textarea has no specific data-testid; tests find it via [data-testid='ai-assistant-content'] textarea. After this iteration tenant b4fde9b7's wallet has +100 balance and +100 credit_debt from the UI submit step (acceptable seed data).",
+  "rca of the issue": "All 6 bugs root-caused and fixed by the main agent: (1) System logs only previously captured errors from BUG#2/#3 — once those are fixed they stop being recorded. (2) /saas/monitoring previously returned only a flat tenants list; now returns summary{} + alerts[]. UI MonitoringSection adds null-safe destructuring. (3) /ai-assistant/chat now depends on get_current_user (super_admin allowed) and wraps context-data lookups in try/except so missing tenant_db doesn't 500. (4) FEATURE_CATEGORIES dictionary extended with 8 new top-level keys with subFeatures. (5) App.js superAdminAllowedPaths extended with /data-import-export, /system-logs, /settings — prevents the auto-redirect to /saas-admin. (6) wallet_routes.py add-funds now accepts payment_method=credit and increments wallet.credit_debt for tenants; new /wallet/settle-credit endpoint decrements it; UI dialog adds method selector + amber warning."
+}

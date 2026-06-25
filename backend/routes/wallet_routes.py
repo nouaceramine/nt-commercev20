@@ -224,6 +224,9 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
     async def add_funds(data: dict, admin: dict = Depends(get_super_admin)):
         entity_id = data.get("entity_id", "")
         amount = data.get("amount", 0)
+        payment_method = (data.get("payment_method") or "cash").lower()
+        if payment_method not in ("cash", "credit"):
+            raise HTTPException(status_code=400, detail="payment_method يجب أن يكون cash أو credit")
         if amount <= 0:
             raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
@@ -232,25 +235,71 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         old_balance = wallet.get("balance", 0)
         new_balance = old_balance + amount
         await main_db.wallets.update_one({"entity_id": entity_id}, {"$set": {"balance": new_balance}})
+
+        # If credit, also increment the tenant's outstanding-debt-to-platform counter
+        if payment_method == "credit" and wallet.get("entity_type") == "tenant":
+            await main_db.wallets.update_one(
+                {"entity_id": entity_id},
+                {"$inc": {"credit_debt": float(amount)}},
+            )
+
         code = await generate_code(main_db, "wallet_transactions", "PF", 5, with_year=True)
+        default_desc = "إيداع نقدي إداري" if payment_method == "cash" else "إيداع بالدين (سيُحصّل لاحقاً)"
         txn = {
             "id": str(uuid.uuid4()),
             "code": code,
             "wallet_id": wallet["id"],
             "transaction_type": "credit",
+            "payment_method": payment_method,
             "amount": amount,
             "balance_before": old_balance,
             "balance_after": new_balance,
             "reference_type": "admin_deposit",
             "reference_id": "",
-            "description": data.get("description", "إيداع إداري"),
+            "description": data.get("description", default_desc),
             "status": "completed",
             "created_by": admin.get("name", admin.get("email", "")),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await main_db.wallet_transactions.insert_one(txn)
         txn.pop("_id", None)
-        return {"message": "تم الإيداع", "new_balance": new_balance, "transaction": txn}
+        return {"message": "تم الإيداع", "new_balance": new_balance, "payment_method": payment_method, "transaction": txn}
+
+    # ── Settle credit-debt: tenant pays back what super-admin fronted on credit ──
+    @router.post("/settle-credit")
+    async def settle_credit(data: dict, admin: dict = Depends(get_super_admin)):
+        entity_id = data.get("entity_id", "")
+        amount = float(data.get("amount", 0))
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
+        if not wallet:
+            raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
+        current_debt = float(wallet.get("credit_debt") or 0)
+        if amount > current_debt:
+            raise HTTPException(status_code=400, detail=f"المبلغ يفوق الدين المسجّل ({current_debt})")
+        new_debt = current_debt - amount
+        await main_db.wallets.update_one({"entity_id": entity_id}, {"$set": {"credit_debt": new_debt}})
+        code = await generate_code(main_db, "wallet_transactions", "PF", 5, with_year=True)
+        txn = {
+            "id": str(uuid.uuid4()),
+            "code": code,
+            "wallet_id": wallet["id"],
+            "transaction_type": "credit_settlement",
+            "payment_method": "cash",
+            "amount": amount,
+            "balance_before": wallet.get("balance", 0),
+            "balance_after": wallet.get("balance", 0),
+            "reference_type": "credit_settlement",
+            "reference_id": "",
+            "description": data.get("description", "تسديد دين"),
+            "status": "completed",
+            "created_by": admin.get("name", admin.get("email", "")),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await main_db.wallet_transactions.insert_one(txn)
+        txn.pop("_id", None)
+        return {"message": "تم التسديد", "credit_debt_remaining": new_debt, "transaction": txn}
 
     # ── Deduct Funds ──
     @router.post("/deduct")

@@ -46,7 +46,7 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
         return base_msg + ctx_map.get(context, "")
 
     @router.post("/chat", response_model=AIChatResponse)
-    async def ai_chat(request: AIChatRequest, user: dict = Depends(require_tenant)):
+    async def ai_chat(request: AIChatRequest, user: dict = Depends(get_current_user)):
         try:
             from emergentintegrations.llm.chat import LlmChat, UserMessage
         except ImportError:
@@ -56,19 +56,27 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
             raise HTTPException(status_code=500, detail="AI API key not configured")
         try:
             session_id = f"{user['id']}_{request.session_id}" if request.session_id else f"{user['id']}_default"
-            chat_history = await db.ai_chat_history.find_one({"session_id": session_id}, {"_id": 0})
+            try:
+                chat_history = await db.ai_chat_history.find_one({"session_id": session_id}, {"_id": 0})
+            except Exception:
+                chat_history = None
             chat = LlmChat(api_key=emergent_key, session_id=session_id, system_message=get_ai_system_message(request.context)).with_model("openai", "gpt-4o")
             context_data = ""
-            if request.context == "sales":
-                recent_sales = await db.sales.find({}, {"_id": 0}).sort("created_at", -1).limit(10).to_list(10)
-                total_today = sum(s.get("total", 0) for s in recent_sales if s.get("created_at", "").startswith(datetime.now(timezone.utc).strftime("%Y-%m-%d")))
-                context_data = f"\n\nبيانات المبيعات: إجمالي اليوم: {total_today} دج"
-            elif request.context == "inventory":
-                low_stock = await db.products.find({"quantity": {"$lt": 10}}, {"_id": 0}).to_list(20)
-                context_data = f"\n\nالمنتجات منخفضة المخزون: {len(low_stock)} منتج"
-            elif request.context == "customers":
-                total_customers = await db.customers.count_documents({})
-                context_data = f"\n\nإجمالي العملاء: {total_customers}"
+            try:
+                if request.context == "sales":
+                    recent_sales = await db.sales.find({}, {"_id": 0}).sort("created_at", -1).limit(10).to_list(10)
+                    total_today = sum(s.get("total", 0) for s in recent_sales if s.get("created_at", "").startswith(datetime.now(timezone.utc).strftime("%Y-%m-%d")))
+                    context_data = f"\n\nبيانات المبيعات: إجمالي اليوم: {total_today} دج"
+                elif request.context == "inventory":
+                    low_stock = await db.products.find({"quantity": {"$lt": 10}}, {"_id": 0}).to_list(20)
+                    context_data = f"\n\nالمنتجات منخفضة المخزون: {len(low_stock)} منتج"
+                elif request.context == "customers":
+                    total_customers = await db.customers.count_documents({})
+                    context_data = f"\n\nإجمالي العملاء: {total_customers}"
+            except Exception as ctx_err:
+                # Super-admin has no tenant_db context — skip context enrichment silently
+                logger.info(f"AI chat context skipped: {ctx_err}")
+                context_data = ""
             response = await chat.send_message(UserMessage(text=request.message + context_data))
             if not chat_history:
                 chat_history = {"session_id": session_id, "user_id": user['id'], "messages": [], "created_at": datetime.now(timezone.utc).isoformat()}
@@ -77,20 +85,24 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
             chat_history["updated_at"] = datetime.now(timezone.utc).isoformat()
             if len(chat_history["messages"]) > 50:
                 chat_history["messages"] = chat_history["messages"][-50:]
-            await db.ai_chat_history.update_one({"session_id": session_id}, {"$set": chat_history}, upsert=True)
+            try:
+                await db.ai_chat_history.update_one({"session_id": session_id}, {"$set": chat_history}, upsert=True)
+            except Exception as save_err:
+                # Super-admin or missing tenant DB — skip persistence
+                logger.info(f"AI chat history save skipped: {save_err}")
             return AIChatResponse(response=response, session_id=session_id)
         except Exception as e:
             logger.error(f"AI chat error: {str(e)}")
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.get("/chat-history/{session_id}")
-    async def get_ai_chat_history(session_id: str, user: dict = Depends(require_tenant)):
+    async def get_ai_chat_history(session_id: str, user: dict = Depends(get_current_user)):
         full_session_id = f"{user['id']}_{session_id}"
         history = await db.ai_chat_history.find_one({"session_id": full_session_id}, {"_id": 0})
         return {"messages": history.get("messages", []) if history else []}
 
     @router.delete("/chat-history/{session_id}")
-    async def clear_ai_chat_history(session_id: str, user: dict = Depends(require_tenant)):
+    async def clear_ai_chat_history(session_id: str, user: dict = Depends(get_current_user)):
         await db.ai_chat_history.delete_one({"session_id": f"{user['id']}_{session_id}"})
         return {"success": True}
 
