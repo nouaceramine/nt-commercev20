@@ -178,30 +178,68 @@ def create_recharge_sim_routes(db, main_db, require_tenant, get_tenant_admin, RE
         cashbox_updated = False
         txn_inserted = False
         bridge_task_inserted = False
+        is_credit_sale = recharge.payment_method == "credit"
         try:
             await db.recharges.insert_one(recharge_doc)
             recharge_inserted = True
 
-            # Update cash box (customer paid regardless of bridge outcome)
-            await db.cash_boxes.update_one(
-                {"id": recharge.payment_method},
-                {"$inc": {"balance": recharge.amount}, "$set": {"updated_at": now}}
-            )
-            cashbox_updated = True
+            if is_credit_sale:
+                # Credit (آجل) — register a debt sale row instead of cashbox income
+                if not recharge.customer_id:
+                    raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+                sale_id_credit = str(uuid.uuid4())
+                await db.sales.insert_one({
+                    "id": sale_id_credit,
+                    "invoice_number": f"FLEXY-{recharge_id[:6].upper()}",
+                    "items": [{
+                        "name": f"شحن {operator_config['name']} - {recharge.phone_number}",
+                        "quantity": 1, "price": recharge.amount, "discount": 0,
+                        "is_recharge": True, "recharge_id": recharge_id,
+                    }],
+                    "subtotal": recharge.amount, "discount_total": 0, "tax_total": 0,
+                    "total": recharge.amount, "paid_amount": 0, "debt_amount": recharge.amount,
+                    "payment_method": "credit",
+                    "customer_id": recharge.customer_id, "customer_name": customer_name,
+                    "type": "recharge_credit", "source": "pos_quick_flexy",
+                    "user_id": user.get("id"), "user_name": user.get("name", ""),
+                    "created_at": now,
+                })
+                # Update user's open daily session
+                try:
+                    await db.daily_sessions.update_one(
+                        {"user_id": user.get("id"), "status": "open"},
+                        {"$inc": {"total_sales": recharge.amount, "credit_sales": recharge.amount, "sales_count": 1}},
+                    )
+                except Exception as _se:
+                    pass
+            else:
+                # Cash / bank / wallet — update cashbox like before
+                await db.cash_boxes.update_one(
+                    {"id": recharge.payment_method},
+                    {"$inc": {"balance": recharge.amount}, "$set": {"updated_at": now}}
+                )
+                cashbox_updated = True
 
-            # Record transaction
-            await db.transactions.insert_one({
-                "id": txn_record_id,
-                "cash_box_id": recharge.payment_method,
-                "type": "income",
-                "amount": recharge.amount,
-                "description": f"شحن {operator_config['name']} - {recharge.phone_number}",
-                "reference_type": "recharge",
-                "reference_id": recharge_id,
-                "created_at": now,
-                "created_by": user["name"],
-            })
-            txn_inserted = True
+                await db.transactions.insert_one({
+                    "id": txn_record_id,
+                    "cash_box_id": recharge.payment_method,
+                    "type": "income",
+                    "amount": recharge.amount,
+                    "description": f"شحن {operator_config['name']} - {recharge.phone_number}",
+                    "reference_type": "recharge",
+                    "reference_id": recharge_id,
+                    "created_at": now,
+                    "created_by": user["name"],
+                })
+                txn_inserted = True
+                # Also update daily_sessions for cash sales
+                try:
+                    await db.daily_sessions.update_one(
+                        {"user_id": user.get("id"), "status": "open"},
+                        {"$inc": {"total_sales": recharge.amount, "cash_sales": recharge.amount, "sales_count": 1}},
+                    )
+                except Exception as _se:
+                    pass
 
             # --- Dispatch bridge task based on recharge_mode ---
             bridge_task_doc = {
@@ -907,8 +945,10 @@ def create_recharge_sim_routes(db, main_db, require_tenant, get_tenant_admin, RE
 
     class IdoomCodeSell(BaseModel):
         denomination: float
-        payment_method: str = "cash"
+        payment_method: str = "cash"  # cash | bank | wallet | credit
         customer_id: Optional[str] = None
+        customer_phone: Optional[str] = None
+        sell_price: Optional[float] = None  # custom price; defaults to denomination
         notes: Optional[str] = ""
 
     @router.get("/idoom/codes/stats")
@@ -1030,17 +1070,59 @@ def create_recharge_sim_routes(db, main_db, require_tenant, get_tenant_admin, RE
                 {"id": code_doc["id"]},
                 {"$set": {"status": "sold"}},
             )
-            if body.payment_method != "wallet":
+            sell_price = float(body.sell_price) if body.sell_price else float(body.denomination)
+            is_credit = body.payment_method == "credit"
+            customer_name = ""
+            if is_credit:
+                if not body.customer_id:
+                    raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+                cust = await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
+                customer_name = (cust or {}).get("name", "")
+                # Insert a sales row so customer debt picks it up
+                await db.sales.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "invoice_number": f"IDOOM-{txn_id[:6].upper()}",
+                    "items": [{
+                        "name": f"كود Idoom {body.denomination} دج",
+                        "quantity": 1, "price": sell_price, "discount": 0,
+                        "is_idoom": True, "idoom_code_id": code_doc["id"], "code": code_doc["code"],
+                    }],
+                    "subtotal": sell_price, "discount_total": 0, "tax_total": 0,
+                    "total": sell_price, "paid_amount": 0, "debt_amount": sell_price,
+                    "payment_method": "credit",
+                    "customer_id": body.customer_id, "customer_name": customer_name,
+                    "customer_phone": body.customer_phone,
+                    "type": "idoom_credit", "source": "pos_quick_idoom",
+                    "user_id": user.get("id"), "user_name": user.get("name", ""),
+                    "created_at": now,
+                })
+                # Daily session credit sales
+                try:
+                    await db.daily_sessions.update_one(
+                        {"user_id": user.get("id"), "status": "open"},
+                        {"$inc": {"total_sales": sell_price, "credit_sales": sell_price, "sales_count": 1}},
+                    )
+                except Exception:
+                    pass
+            elif body.payment_method != "wallet":
                 await db.cash_boxes.update_one(
                     {"id": body.payment_method},
-                    {"$inc": {"balance": body.denomination}, "$set": {"updated_at": now}},
+                    {"$inc": {"balance": sell_price}, "$set": {"updated_at": now}},
                 )
+                # Daily session cash sales
+                try:
+                    await db.daily_sessions.update_one(
+                        {"user_id": user.get("id"), "status": "open"},
+                        {"$inc": {"total_sales": sell_price, "cash_sales": sell_price, "sales_count": 1}},
+                    )
+                except Exception:
+                    pass
             await db.transactions.insert_one({
                 "id": str(uuid.uuid4()),
                 "cash_box_id": body.payment_method,
                 "type": "income",
-                "amount": body.denomination,
-                "description": f"بيع كود Idoom {body.denomination} دج",
+                "amount": sell_price,
+                "description": f"بيع كود Idoom {body.denomination} دج" + (f" (آجل - {customer_name})" if is_credit else ""),
                 "reference_type": "idoom_sell",
                 "reference_id": txn_id,
                 "created_at": now,

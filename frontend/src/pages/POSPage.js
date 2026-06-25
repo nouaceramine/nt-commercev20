@@ -123,6 +123,7 @@ export default function POSPage() {
   // Calculator
   const [showCalculator, setShowCalculator] = useState(false);
   const [showSellCardDialog, setShowSellCardDialog] = useState(false);
+  const flexyPanelRef = useRef(null);
 
   // Search Results
   const [showSearchResults, setShowSearchResults] = useState(false);
@@ -1178,7 +1179,7 @@ ${sale.paid_amount?`<div class="row" style="margin-top:4px"><span>${language==='
 
           {/* Quick Flexy / mobile recharge */}
           <div className="mb-2">
-            <QuickFlexyPanel language={language} />
+            <QuickFlexyPanel ref={flexyPanelRef} language={language} />
           </div>
 
           {/* Cart */}

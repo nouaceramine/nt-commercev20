@@ -1130,7 +1130,7 @@ class RechargeCreate(BaseModel):
     amount: float
     recharge_type: Literal["credit", "internet", "flexy"]  # credit=رصيد, internet=أنترنت, flexy=فليكسي
     customer_id: Optional[str] = None
-    payment_method: Literal["cash", "bank", "wallet"] = "cash"
+    payment_method: Literal["cash", "bank", "wallet", "credit"] = "cash"  # credit = آجل (debt on customer)
     notes: Optional[str] = ""
 
 class RechargeResponse(BaseModel):
