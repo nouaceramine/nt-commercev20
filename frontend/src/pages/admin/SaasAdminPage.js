@@ -43,7 +43,7 @@ import {
   Banknote, Wallet, PiggyBank, Receipt, Calculator, FileText, ArrowUpRight, ArrowDownRight,
   Database, Activity, BarChart3, ShoppingCart, UserCheck, LogIn, Bell, UserCog, Copy,
   AlertCircle, Bug, Shield, Zap, Server, Wrench, CheckCircle, XCircle, Download, Play, Pause,
-  Wifi, WifiOff, Sliders, Boxes, Tv, ShoppingBag as ShoppingBagIcon, Smartphone, ShieldCheck
+  Wifi, WifiOff, Sliders, Boxes, Tv, ShoppingBag as ShoppingBagIcon, Smartphone, ShieldCheck, LayoutDashboard
 } from 'lucide-react';
 import { DatabaseManager } from '../../components/DatabaseManager';
 import { AgentsDashboard } from './components/AgentsDashboard';
@@ -115,6 +115,11 @@ export default function SaasAdminPage() {
   const [impersonationLogs, setImpersonationLogs] = useState([]);
   const [impersonationLogsLoading, setImpersonationLogsLoading] = useState(false);
   const [impersonationActiveCount, setImpersonationActiveCount] = useState(0);
+  // Default POS shortcuts
+  const [defaultShortcuts, setDefaultShortcuts] = useState([]);
+  const [defaultShortcutsMeta, setDefaultShortcutsMeta] = useState({ updated_at: null, updated_by: null });
+  const [defaultShortcutsLoading, setDefaultShortcutsLoading] = useState(false);
+  const [defaultShortcutsSaving, setDefaultShortcutsSaving] = useState(false);
 
   // Bridge Mode State
   const [bridgeDialogOpen, setBridgeDialogOpen] = useState(false);
@@ -471,6 +476,54 @@ export default function SaasAdminPage() {
     } finally {
       setImpersonationLogsLoading(false);
     }
+  };
+
+  const loadDefaultShortcuts = async () => {
+    setDefaultShortcutsLoading(true);
+    try {
+      const res = await apiClient.get('/saas/default-pos-shortcuts');
+      const items = res.data?.shortcuts || [];
+      // Always render at least 8 slots so super-admin can fill them in
+      const padded = [...items];
+      while (padded.length < 8) padded.push({ productId: null, color: '#94a3b8', label: '' });
+      setDefaultShortcuts(padded);
+      setDefaultShortcutsMeta({ updated_at: res.data?.updated_at, updated_by: res.data?.updated_by });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل تحميل اختصارات POS الافتراضية');
+    } finally {
+      setDefaultShortcutsLoading(false);
+    }
+  };
+
+  const saveDefaultShortcuts = async () => {
+    setDefaultShortcutsSaving(true);
+    try {
+      // Save only the slots that have a non-empty label OR productId (drop empty slots)
+      const cleaned = defaultShortcuts.filter(s => (s.label && s.label.trim()) || s.productId);
+      await apiClient.put('/saas/default-pos-shortcuts', { shortcuts: cleaned });
+      toast.success(`تم حفظ ${cleaned.length} اختصار افتراضي`);
+      await loadDefaultShortcuts();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل الحفظ');
+    } finally {
+      setDefaultShortcutsSaving(false);
+    }
+  };
+
+  const updateShortcutSlot = (index, field, value) => {
+    setDefaultShortcuts(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const addShortcutSlot = () => {
+    setDefaultShortcuts(prev => [...prev, { productId: null, color: '#94a3b8', label: '' }]);
+  };
+
+  const removeShortcutSlot = (index) => {
+    setDefaultShortcuts(prev => prev.filter((_, i) => i !== index));
   };
 
   const loadPlatformCatalog = async () => {
@@ -984,6 +1037,10 @@ export default function SaasAdminPage() {
             <TabsTrigger value="impersonation-logs" className="gap-2" data-testid="impersonation-logs-tab" onClick={() => loadImpersonationLogs()}>
               <ShieldCheck className="h-4 w-4" />
               سجل الانتحال
+            </TabsTrigger>
+            <TabsTrigger value="default-pos-shortcuts" className="gap-2" data-testid="default-pos-shortcuts-tab" onClick={() => loadDefaultShortcuts()}>
+              <LayoutDashboard className="h-4 w-4" />
+              اختصارات POS الافتراضية
             </TabsTrigger>
           </TabsList>
 
@@ -1657,6 +1714,83 @@ export default function SaasAdminPage() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Default POS Shortcuts Tab */}
+          <TabsContent value="default-pos-shortcuts" className="space-y-4" data-testid="default-pos-shortcuts-content">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">اختصارات POS الافتراضية</h3>
+                <p className="text-sm text-muted-foreground">
+                  حدّد شبكة اختصارات افتراضية للمستأجرين الجدد. أي كاشير لم يُخصّص اختصاراته بعد سيرى هذه الشبكة عند فتح شاشة البيع.
+                </p>
+                {defaultShortcutsMeta.updated_at && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    آخر تحديث: {formatShortDate(defaultShortcutsMeta.updated_at)} — بواسطة {defaultShortcutsMeta.updated_by || '—'}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={addShortcutSlot} data-testid="add-shortcut-slot-btn">
+                  <Plus className="h-4 w-4 me-1" />
+                  إضافة خانة
+                </Button>
+                <Button variant="outline" size="sm" onClick={loadDefaultShortcuts} disabled={defaultShortcutsLoading} data-testid="refresh-default-shortcuts-btn">
+                  <RefreshCw className={`h-4 w-4 me-1 ${defaultShortcutsLoading ? 'animate-spin' : ''}`} />
+                  تحديث
+                </Button>
+                <Button onClick={saveDefaultShortcuts} disabled={defaultShortcutsSaving || defaultShortcutsLoading} data-testid="save-default-shortcuts-btn">
+                  {defaultShortcutsSaving ? 'جارٍ الحفظ…' : 'حفظ'}
+                </Button>
+              </div>
+            </div>
+
+            <Card>
+              <CardContent className="p-6">
+                {defaultShortcutsLoading ? (
+                  <div className="p-8 text-center text-muted-foreground">جارٍ التحميل…</div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4" data-testid="default-shortcuts-grid">
+                    {defaultShortcuts.map((slot, idx) => (
+                      <div key={`slot-${idx}`} className="rounded-lg border border-border p-3 space-y-2 bg-card" data-testid={`shortcut-slot-${idx}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">خانة #{idx + 1}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeShortcutSlot(idx)}
+                            className="text-xs text-red-600 hover:underline"
+                            data-testid={`remove-slot-${idx}-btn`}
+                          >
+                            حذف
+                          </button>
+                        </div>
+                        <Input
+                          value={slot.label || ''}
+                          onChange={(e) => updateShortcutSlot(idx, 'label', e.target.value)}
+                          placeholder="اسم المنتج"
+                          data-testid={`shortcut-label-${idx}`}
+                        />
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">اللون</span>
+                          <input
+                            type="color"
+                            value={slot.color || '#94a3b8'}
+                            onChange={(e) => updateShortcutSlot(idx, 'color', e.target.value)}
+                            className="h-8 w-12 rounded cursor-pointer"
+                            data-testid={`shortcut-color-${idx}`}
+                          />
+                          <div
+                            className="flex-1 h-8 rounded text-center text-white text-xs flex items-center justify-center font-medium"
+                            style={{ backgroundColor: slot.color || '#94a3b8' }}
+                          >
+                            {slot.label || '—'}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>

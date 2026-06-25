@@ -27,7 +27,7 @@ def register(app, ctx):
         prefix="/api",
     )
     app.include_router(
-        create_pos_settings_routes(ctx.db, ctx.get_current_user),
+        create_pos_settings_routes(ctx.db, ctx.main_db, ctx.get_current_user, ctx.get_super_admin),
         prefix="/api",
     )
     log.info("services component mounted (3 routers)")
