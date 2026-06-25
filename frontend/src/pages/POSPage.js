@@ -28,6 +28,7 @@ import POSShortcuts from './pos/POSShortcuts';
 import POSCart from './pos/POSCart';
 import PrintDocumentDialog from '../components/print/PrintDocumentDialog';
 import SellPlatformCardDialog from '../components/SellPlatformCardDialog';
+import QuickFlexyPanel from '../components/QuickFlexyPanel';
 
 // Color palette for product shortcuts
 const SHORTCUT_COLORS = [
@@ -1173,6 +1174,11 @@ ${sale.paid_amount?`<div class="row" style="margin-top:4px"><span>${language==='
               <CreditCard className="h-4 w-4" />
               {language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte de recharge'}
             </Button>
+          </div>
+
+          {/* Quick Flexy / mobile recharge */}
+          <div className="mb-2">
+            <QuickFlexyPanel language={language} />
           </div>
 
           {/* Cart */}
