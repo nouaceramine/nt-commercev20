@@ -41,7 +41,7 @@ export default function WhatsAppTab({ initialSettings }) {
         <div className="flex items-center justify-between p-4 border rounded-lg">
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-full ${settings.enabled ? 'bg-green-100' : 'bg-gray-100'}`}>
-              <MessageCircle className={`h-5 w-5 ${settings.enabled ? 'text-green-600' : 'text-gray-400'}`} />
+              <MessageCircle className={`h-5 w-5 ${settings.enabled ? 'text-green-600' : 'text-muted-foreground'}`} />
             </div>
             <div>
               <p className="font-medium">{language === 'ar' ? 'تفعيل إشعارات WhatsApp' : 'Activer les notifications WhatsApp'}</p>

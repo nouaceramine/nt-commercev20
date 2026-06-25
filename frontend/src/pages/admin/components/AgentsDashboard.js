@@ -319,7 +319,7 @@ export const AgentsDashboard = () => {
     <div className="space-y-6">
       {/* Stats Overview with Charts */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        <Card className="col-span-2 bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+        <Card className="col-span-2 bg-gradient-to-br from-blue-500 to-blue-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -332,7 +332,7 @@ export const AgentsDashboard = () => {
           </CardContent>
         </Card>
         
-        <Card className="col-span-2 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+        <Card className="col-span-2 bg-gradient-to-br from-emerald-500 to-emerald-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -345,7 +345,7 @@ export const AgentsDashboard = () => {
           </CardContent>
         </Card>
         
-        <Card className="col-span-2 bg-gradient-to-br from-purple-500 to-purple-600 text-white">
+        <Card className="col-span-2 bg-gradient-to-br from-purple-500 to-purple-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -358,7 +358,7 @@ export const AgentsDashboard = () => {
           </CardContent>
         </Card>
         
-        <Card className="col-span-2 bg-gradient-to-br from-red-500 to-red-600 text-white">
+        <Card className="col-span-2 bg-gradient-to-br from-red-500 to-red-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -406,7 +406,7 @@ export const AgentsDashboard = () => {
           <CardContent>
             {stats.topAgent ? (
               <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-white font-bold">
+                <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-foreground font-bold">
                   {stats.topAgent.name?.charAt(0)}
                 </div>
                 <div>
@@ -531,7 +531,7 @@ export const AgentsDashboard = () => {
                 <TableRow key={agent.id} className="hover:bg-muted/30" data-testid={`agent-row-${agent.id}`}>
                   <TableCell>
                     <div className="flex items-center gap-3">
-                      <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-white ${
+                      <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-foreground ${
                         agent.performance_score >= 70 ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' :
                         agent.performance_score >= 50 ? 'bg-gradient-to-br from-blue-400 to-blue-600' :
                         'bg-gradient-to-br from-gray-400 to-gray-600'
@@ -752,7 +752,7 @@ export const AgentsDashboard = () => {
             <div className="space-y-6">
               {/* Profile Header */}
               <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
-                <div className={`h-16 w-16 rounded-full flex items-center justify-center font-bold text-2xl text-white ${
+                <div className={`h-16 w-16 rounded-full flex items-center justify-center font-bold text-2xl text-foreground ${
                   selectedAgent.performance_score >= 70 ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' :
                   selectedAgent.performance_score >= 50 ? 'bg-gradient-to-br from-blue-400 to-blue-600' :
                   'bg-gradient-to-br from-gray-400 to-gray-600'

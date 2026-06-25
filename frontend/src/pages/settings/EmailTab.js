@@ -48,7 +48,7 @@ export default function EmailTab({ initialSettings }) {
           <div className="flex items-center justify-between p-4 border rounded-lg">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-full ${settings.enabled ? 'bg-blue-100' : 'bg-gray-100'}`}>
-                <Mail className={`h-5 w-5 ${settings.enabled ? 'text-blue-600' : 'text-gray-400'}`} />
+                <Mail className={`h-5 w-5 ${settings.enabled ? 'text-blue-600' : 'text-muted-foreground'}`} />
               </div>
               <div>
                 <p className="font-medium">{language === 'ar' ? 'تفعيل البريد الإلكتروني' : "Activer l'email"}</p>

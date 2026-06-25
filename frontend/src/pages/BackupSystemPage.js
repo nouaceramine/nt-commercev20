@@ -89,7 +89,7 @@ export default function BackupSystemPage() {
 
   const numBadgeColor = (num = '') => {
     const prefix = num.slice(0, 3);
-    return NUM_BADGE[prefix] || 'bg-gray-500/20 text-gray-300';
+    return NUM_BADGE[prefix] || 'bg-gray-500/20 text-muted-foreground';
   };
 
   // ── Create tenant backup ──

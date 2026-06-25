@@ -537,7 +537,7 @@ export default function FeaturesPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${feature.color} text-white`}>
+                      <div className={`p-2 rounded-lg ${feature.color} text-foreground`}>
                         <FeatureIcon className="h-5 w-5" />
                       </div>
                       <div>

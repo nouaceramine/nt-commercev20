@@ -109,7 +109,7 @@ export default function POSShortcuts({
                     style={{ backgroundColor: bgColor }}
                     className={`w-full py-1.5 px-1 rounded text-[9px] font-medium text-center leading-tight transition-all h-12 flex flex-col items-center justify-center gap-0.5 ${
                       shortcut.productId
-                        ? 'text-white hover:opacity-90 shadow-sm'
+                        ? 'text-foreground hover:opacity-90 shadow-sm'
                         : 'bg-muted text-muted-foreground hover:bg-muted/80 border border-dashed'
                     } ${editing && shortcut.productId ? 'cursor-move ring-2 ring-amber-300' : ''}`}
                     title={productName}
@@ -142,7 +142,7 @@ export default function POSShortcuts({
                   )}
                   {editing && shortcut.productId && (
                     <div className="absolute top-0 left-0 p-0.5 opacity-60 pointer-events-none">
-                      <GripVertical className="h-3 w-3 text-white" />
+                      <GripVertical className="h-3 w-3 text-foreground" />
                     </div>
                   )}
                 </div>

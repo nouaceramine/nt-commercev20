@@ -168,7 +168,7 @@ export const SystemAlertsSection = () => {
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Card><CardContent className="p-4 text-center">
-          <Bug className="h-5 w-5 mx-auto mb-1 text-gray-500" />
+          <Bug className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
           <p className="text-2xl font-bold">{stats.total}</p>
           <p className="text-xs text-muted-foreground">إجمالي الأخطاء</p>
         </CardContent></Card>
@@ -215,7 +215,7 @@ export const SystemAlertsSection = () => {
           </Select>
 
           <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
-            <Zap className={`h-4 w-4 ${autoFixEnabled ? 'text-green-500' : 'text-gray-400'}`} />
+            <Zap className={`h-4 w-4 ${autoFixEnabled ? 'text-green-500' : 'text-muted-foreground'}`} />
             <span className="text-sm">إصلاح تلقائي</span>
             <Switch checked={autoFixEnabled} onCheckedChange={setAutoFixEnabled} />
           </div>

@@ -89,7 +89,7 @@ function BlockVisual({ block, branding, accentColor, isA4, language }) {
         <div className="flex justify-center py-1">
           {logoUrl
             ? <img src={logoUrl} alt="logo" className="max-h-10 object-contain" />
-            : <div className="w-10 h-10 bg-gray-100 border rounded flex items-center justify-center text-gray-400 text-xs">🖼</div>
+            : <div className="w-10 h-10 bg-gray-100 border rounded flex items-center justify-center text-muted-foreground text-xs">🖼</div>
           }
         </div>
       );
@@ -97,7 +97,7 @@ function BlockVisual({ block, branding, accentColor, isA4, language }) {
     case 'store_name':
       return <div style={{ ...style, color: accentColor, fontWeight: 'bold', textAlign: 'center', fontSize: `${s.fontSize || 16}px` }}>{branding?.name || 'اسم المتجر'}</div>;
     case 'text':
-      return <div style={style}>{block.content || <span className="text-gray-400 italic text-xs">{ar ? '(نص فارغ)' : '(texte vide)'}</span>}</div>;
+      return <div style={style}>{block.content || <span className="text-muted-foreground italic text-xs">{ar ? '(نص فارغ)' : '(texte vide)'}</span>}</div>;
     case 'field': {
       const lbl = ar ? block.fieldLabel : (block.fieldLabelFr || block.fieldLabel);
       return (
@@ -113,11 +113,11 @@ function BlockVisual({ block, branding, accentColor, isA4, language }) {
         : ['Produit', 'Qté', 'Prix', 'Total'];
       return (
         <div style={style}>
-          <div className="grid grid-cols-4 gap-1 py-1 px-1 rounded-sm text-white text-[10px]" style={{ background: accentColor }}>
+          <div className="grid grid-cols-4 gap-1 py-1 px-1 rounded-sm text-foreground text-[10px]" style={{ background: accentColor }}>
             {cols.map(c => <span key={c}>{c}</span>)}
           </div>
           {[1, 2].map(i => (
-            <div key={i} className="grid grid-cols-4 gap-1 border-b border-gray-100 py-0.5 px-1 text-[10px] text-gray-500">
+            <div key={i} className="grid grid-cols-4 gap-1 border-b border-gray-100 py-0.5 px-1 text-[10px] text-muted-foreground">
               <span>----</span><span>1</span><span>--</span><span>--</span>
             </div>
           ))}
@@ -145,7 +145,7 @@ function BlockVisual({ block, branding, accentColor, isA4, language }) {
     case 'barcode':
       return (
         <div className="flex flex-col items-center gap-0.5">
-          <div className="text-[10px] text-gray-500">{ar ? block.fieldLabel : (block.fieldLabelFr || block.fieldLabel)}</div>
+          <div className="text-[10px] text-muted-foreground">{ar ? block.fieldLabel : (block.fieldLabelFr || block.fieldLabel)}</div>
           <div className="font-mono text-[9px] tracking-widest text-gray-800">▐▐▌▌▐▌▌▐▐▌▐▐▌▌▐</div>
         </div>
       );
@@ -153,14 +153,14 @@ function BlockVisual({ block, branding, accentColor, isA4, language }) {
       const size = Math.min(block.qrSize || 60, 80);
       return (
         <div className="flex justify-center">
-          <div style={{ width: size, height: size }} className="border border-gray-300 rounded bg-gray-50 flex items-center justify-center text-gray-400 text-xs font-mono">
+          <div style={{ width: size, height: size }} className="border border-gray-300 rounded bg-gray-50 flex items-center justify-center text-muted-foreground text-xs font-mono">
             QR
           </div>
         </div>
       );
     }
     default:
-      return <div className="text-gray-400 text-xs text-center">({block.type})</div>;
+      return <div className="text-muted-foreground text-xs text-center">({block.type})</div>;
   }
 }
 
@@ -745,7 +745,7 @@ export default function TemplateEditorPage() {
 
             {/* ── Center: Interactive paper canvas ── */}
             <div className="flex-1 overflow-auto bg-gray-200 flex flex-col items-center py-6 gap-2">
-              <div className="text-[10px] text-gray-500 mb-1">
+              <div className="text-[10px] text-muted-foreground mb-1">
                 {ar
                   ? `← اسحب الكتل هنا • انقر لتحرير • اسحب للترتيب →`
                   : `← Glisser ici • Cliquer pour éditer • Glisser pour réordonner →`
@@ -764,7 +764,7 @@ export default function TemplateEditorPage() {
                 emptyLabel={ar ? 'اسحب كتلة من اليسار\nلبدء تصميم القالب' : 'Glissez un bloc depuis la gauche\npour commencer le design'}
               />
               <div className="flex items-center gap-3 mt-2">
-                <span className="text-[10px] text-gray-500">
+                <span className="text-[10px] text-muted-foreground">
                   {paperWidth === 210 ? 'A4' : `${paperWidth}mm`}
                 </span>
                 {selectedBlock && (

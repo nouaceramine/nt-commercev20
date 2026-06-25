@@ -516,7 +516,7 @@ export default function RepairTrackingPage() {
           </Card>
           <Card>
             <CardContent className="p-4 text-center">
-              <p className="text-3xl font-bold text-gray-500">{stats.delivered}</p>
+              <p className="text-3xl font-bold text-muted-foreground">{stats.delivered}</p>
               <p className="text-sm text-muted-foreground">{language === 'ar' ? 'تم التسليم' : 'Livrés'}</p>
             </CardContent>
           </Card>
@@ -597,7 +597,7 @@ export default function RepairTrackingPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge className={`${statusInfo.color} text-white`}>
+                          <Badge className={`${statusInfo.color} text-foreground`}>
                             <StatusIcon className="h-3 w-3 me-1" />
                             {language === 'ar' ? statusInfo.label.ar : statusInfo.label.fr}
                           </Badge>
@@ -669,7 +669,7 @@ export default function RepairTrackingPage() {
                 <div className="p-4 bg-muted rounded-lg text-center">
                   <p className="text-sm text-muted-foreground">{language === 'ar' ? 'رقم التذكرة' : 'N° Ticket'}</p>
                   <p className="text-2xl font-bold font-mono">{selectedRepair.ticket_number}</p>
-                  <Badge className={`${getStatusInfo(selectedRepair.status).color} text-white mt-2`}>
+                  <Badge className={`${getStatusInfo(selectedRepair.status).color} text-foreground mt-2`}>
                     {language === 'ar' ? getStatusInfo(selectedRepair.status).label.ar : getStatusInfo(selectedRepair.status).label.fr}
                   </Badge>
                 </div>

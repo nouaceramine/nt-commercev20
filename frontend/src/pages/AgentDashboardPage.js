@@ -440,7 +440,7 @@ export default function AgentDashboardPage() {
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg shadow-primary/30">
-              <Truck className="h-6 w-6 text-white" />
+              <Truck className="h-6 w-6 text-foreground" />
             </div>
             <div>
               <h1 className="font-bold text-lg">NT Commerce</h1>
@@ -478,7 +478,7 @@ export default function AgentDashboardPage() {
         {/* Welcome & Balance Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Welcome Card */}
-          <Card className="lg:col-span-2 bg-gradient-to-br from-primary via-blue-600 to-indigo-700 text-white overflow-hidden relative">
+          <Card className="lg:col-span-2 bg-gradient-to-br from-primary via-blue-600 to-indigo-700 text-foreground overflow-hidden relative">
             <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-32 translate-x-32"></div>
             <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-24 -translate-x-24"></div>
             <CardContent className="p-6 relative z-10">
@@ -1200,7 +1200,7 @@ export default function AgentDashboardPage() {
                     <TableRow key={tenant.id} className="hover:bg-muted/30" data-testid={`tenant-row-${tenant.id}`}>
                       <TableCell>
                         <div className="flex items-center gap-3">
-                          <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold text-white ${
+                          <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold text-foreground ${
                             tenant.is_active ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-gray-400 to-gray-600'
                           }`}>
                             {tenant.name?.charAt(0)}
@@ -1523,7 +1523,7 @@ export default function AgentDashboardPage() {
           {selectedTenant && (
             <div className="space-y-4">
               <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
-                <div className={`h-14 w-14 rounded-lg flex items-center justify-center font-bold text-xl text-white ${
+                <div className={`h-14 w-14 rounded-lg flex items-center justify-center font-bold text-xl text-foreground ${
                   selectedTenant.is_active ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-gray-400 to-gray-600'
                 }`}>
                   {selectedTenant.name?.charAt(0)}

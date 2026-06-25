@@ -214,7 +214,7 @@ export default function SimManagementPage() {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-full ${getOperatorIcon(slot.operator)} text-white`}>
+                        <div className={`p-2 rounded-full ${getOperatorIcon(slot.operator)} text-foreground`}>
                           <Smartphone className="h-5 w-5" />
                         </div>
                         <div>

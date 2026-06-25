@@ -277,11 +277,11 @@ export default function PriceHistoryPage() {
                           ) : item.change_percent < 0 ? (
                             <TrendingDown className="h-4 w-4 text-red-600" />
                           ) : (
-                            <Minus className="h-4 w-4 text-gray-400" />
+                            <Minus className="h-4 w-4 text-muted-foreground" />
                           )}
                           <span className={`font-medium ${
                             item.change_percent > 0 ? 'text-green-600' : 
-                            item.change_percent < 0 ? 'text-red-600' : 'text-gray-400'
+                            item.change_percent < 0 ? 'text-red-600' : 'text-muted-foreground'
                           }`}>
                             {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
                           </span>

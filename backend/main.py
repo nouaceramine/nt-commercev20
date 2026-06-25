@@ -865,4 +865,4 @@ async def shutdown_db_client():
 # Modular self-diagnostics + per-component logging + central error handling.
 # See backend/core/ — each domain is an independent component with its own log file.
 from core import install_motherboard
-install_motherboard(app, get_tenant_admin)
+install_motherboard(app, get_super_admin)

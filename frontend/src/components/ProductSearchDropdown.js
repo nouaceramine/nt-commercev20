@@ -139,7 +139,7 @@ export function ProductSearchDropdown({
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center">
-                  <Package className="h-5 w-5 text-gray-400" />
+                  <Package className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div>
                   <p className="font-medium">{getProductName(product)}</p>

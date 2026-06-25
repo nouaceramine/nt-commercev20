@@ -1464,7 +1464,7 @@ export default function SaasAdminPage() {
                       <TableRow key={wr.id} data-testid={`withdrawal-row-${wr.id}`}>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-sm font-bold">
+                            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-foreground text-sm font-bold">
                               {wr.agent_name?.charAt(0) || '؟'}
                             </div>
                             <span className="font-medium">{wr.agent_name}</span>

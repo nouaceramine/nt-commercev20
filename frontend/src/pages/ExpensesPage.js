@@ -285,14 +285,14 @@ export default function ExpensesPage() {
                       className={`flex items-center justify-between p-3 rounded-lg ${
                         reminder.is_urgent 
                           ? 'bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800' 
-                          : 'bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-700'
+                          : 'bg-white dark:bg-card border border-amber-200 dark:border-amber-700'
                       }`}
                     >
                       <div className="flex items-center gap-3">
                         <div className={`p-1.5 rounded-lg ${getCategoryInfo(reminder.category).color}`}>
                           {(() => {
                             const Icon = getCategoryInfo(reminder.category).icon;
-                            return <Icon className="h-4 w-4 text-white" />;
+                            return <Icon className="h-4 w-4 text-foreground" />;
                           })()}
                         </div>
                         <div>
@@ -398,7 +398,7 @@ export default function ExpensesPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                <div className="p-2 bg-gray-100 dark:bg-card rounded-lg">
                   <Calendar className="h-5 w-5 text-gray-600" />
                 </div>
                 <div>
@@ -444,7 +444,7 @@ export default function ExpensesPage() {
                 return (
                   <div key={cat.id} className="p-3 border rounded-lg text-center hover:shadow-md transition-shadow">
                     <div className={`w-10 h-10 ${cat.color} rounded-full flex items-center justify-center mx-auto mb-2`}>
-                      <Icon className="h-5 w-5 text-white" />
+                      <Icon className="h-5 w-5 text-foreground" />
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{language === 'ar' ? cat.name_ar : cat.name_fr}</p>
                     <p className="font-bold text-sm">{formatCurrency(catStats?.total || 0)}</p>
@@ -553,7 +553,7 @@ export default function ExpensesPage() {
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <div className={`p-1.5 ${catInfo.color} rounded-lg`}>
-                              <Icon className="h-4 w-4 text-white" />
+                              <Icon className="h-4 w-4 text-foreground" />
                             </div>
                             <span className="text-sm">{language === 'ar' ? catInfo.name_ar : catInfo.name_fr}</span>
                           </div>

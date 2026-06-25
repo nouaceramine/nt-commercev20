@@ -241,7 +241,7 @@ export default function PermissionsTab() {
       accountant: language === 'ar' ? 'محاسب' : 'Comptable',
     };
     return (
-      <span className={`px-2 py-1 rounded-full text-xs ${colors[role] || 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'}`}>
+      <span className={`px-2 py-1 rounded-full text-xs ${colors[role] || 'bg-gray-100 text-gray-700 dark:bg-card dark:text-muted-foreground'}`}>
         {labels[role] || (language === 'ar' ? 'مستخدم' : 'User')}
       </span>
     );

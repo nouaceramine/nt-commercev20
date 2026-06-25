@@ -209,7 +209,7 @@ export default function NotificationsPage() {
       case 'cash_difference': return <AlertTriangle className="h-5 w-5 text-yellow-500" />;
       case 'repair': return <Wrench className="h-5 w-5 text-blue-500" />;
       case 'expense': return <Calendar className="h-5 w-5 text-purple-500" />;
-      default: return <Bell className="h-5 w-5 text-gray-500" />;
+      default: return <Bell className="h-5 w-5 text-muted-foreground" />;
     }
   };
 
@@ -491,7 +491,7 @@ export default function NotificationsPage() {
                     {settings.sound_enabled ? (
                       <Volume2 className="h-5 w-5 text-green-500" />
                     ) : (
-                      <VolumeX className="h-5 w-5 text-gray-400" />
+                      <VolumeX className="h-5 w-5 text-muted-foreground" />
                     )}
                     <div>
                       <Label className="text-base">{texts.soundEnabled}</Label>

@@ -71,7 +71,7 @@ export default function CardsServicePage() {
               <CreditCard className="h-6 w-6 text-blue-600" />
               {ar ? "بطاقات تعبئة" : "Cartes de recharge"}
             </h1>
-            <p className="text-sm text-gray-500">{ar ? "إدارة كروت Mobilis / Djezzy / Ooredoo" : "Gérer les cartes Mobilis / Djezzy / Ooredoo"}</p>
+            <p className="text-sm text-muted-foreground">{ar ? "إدارة كروت Mobilis / Djezzy / Ooredoo" : "Gérer les cartes Mobilis / Djezzy / Ooredoo"}</p>
           </div>
         </div>
 
@@ -109,7 +109,7 @@ export default function CardsServicePage() {
               <CardContent>
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <div className="relative flex-1 max-w-xs">
-                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input className="pr-8" placeholder={ar ? "بحث برقم الكود" : "Rechercher"} value={search} onChange={(e) => setSearch(e.target.value)} data-testid="search-input" />
                   </div>
                   <select className="border rounded px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} data-testid="status-filter">
@@ -123,9 +123,9 @@ export default function CardsServicePage() {
                   <Button variant="outline" size="sm" onClick={loadInventory}>{ar ? "تحديث" : "Actualiser"}</Button>
                 </div>
                 {loading ? (
-                  <div className="text-center py-8"><Loader2 className="animate-spin h-6 w-6 mx-auto text-gray-400" /></div>
+                  <div className="text-center py-8"><Loader2 className="animate-spin h-6 w-6 mx-auto text-muted-foreground" /></div>
                 ) : !filtered.length ? (
-                  <div className="text-center py-10 text-gray-500" data-testid="empty-inventory">{ar ? "لا توجد أكواد في المخزون. اطلب من تبويب الشراء." : "Pas de codes en stock."}</div>
+                  <div className="text-center py-10 text-muted-foreground" data-testid="empty-inventory">{ar ? "لا توجد أكواد في المخزون. اطلب من تبويب الشراء." : "Pas de codes en stock."}</div>
                 ) : (
                   <Table>
                     <TableHeader>

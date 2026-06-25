@@ -166,7 +166,7 @@ export default function SmartDashboardPage() {
                 <div className="flex items-center gap-6">
                   <div className="relative">
                     <div className={`w-24 h-24 rounded-full ${getScoreBgColor(financialHealth.overall_score)} flex items-center justify-center`}>
-                      <span className="text-3xl font-bold text-white">{Math.round(financialHealth.overall_score)}</span>
+                      <span className="text-3xl font-bold text-foreground">{Math.round(financialHealth.overall_score)}</span>
                     </div>
                     <Sparkles className="absolute -top-1 -right-1 h-6 w-6 text-yellow-400" />
                   </div>

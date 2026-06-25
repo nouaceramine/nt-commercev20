@@ -210,7 +210,7 @@ export default function WalletPage() {
     <Layout>
       <div className="p-4 md:p-6 space-y-6" data-testid="wallet-page">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-white">{isAr ? 'المحفظة' : 'Portefeuille'}</h1>
+          <h1 className="text-2xl font-bold text-foreground">{isAr ? 'المحفظة' : 'Portefeuille'}</h1>
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowSettings(true)} data-testid="wallet-settings-btn">
             <Settings className="h-4 w-4" />{isAr ? 'إعدادات' : 'Settings'}
           </Button>
@@ -232,8 +232,8 @@ export default function WalletPage() {
                 <div className="flex items-center gap-4">
                   <Wallet className="w-12 h-12 text-blue-400" />
                   <div>
-                    <p className="text-sm text-gray-300">{isAr ? 'الرصيد الحالي' : 'Solde actuel'}</p>
-                    <p className="text-4xl font-bold text-white">{(wallet.balance || 0).toLocaleString()} <span className="text-lg text-gray-400">{wallet.currency || 'DZD'}</span></p>
+                    <p className="text-sm text-muted-foreground">{isAr ? 'الرصيد الحالي' : 'Solde actuel'}</p>
+                    <p className="text-4xl font-bold text-foreground">{(wallet.balance || 0).toLocaleString()} <span className="text-lg text-muted-foreground">{wallet.currency || 'DZD'}</span></p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -251,7 +251,7 @@ export default function WalletPage() {
               {/* Subscription auto-pay (tenants) */}
               {!isSuperAdmin && (
                 <div className="mt-5 pt-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-sm text-gray-300">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CreditCard className="h-4 w-4 text-blue-400" />
                     {isAr ? 'دفع اشتراك المنصة من رصيد المحفظة' : 'Pay platform subscription from wallet'}
                   </div>
@@ -279,9 +279,9 @@ export default function WalletPage() {
               { label: isAr ? 'المعاملات' : 'Transactions', value: stats.total_transactions || 0, icon: TrendingUp, color: 'text-purple-400' },
               { label: isAr ? 'التحويلات' : 'Transferts', value: stats.total_transfers || 0, icon: ArrowLeftRight, color: 'text-amber-400' },
             ].map((s, i) => (
-              <Card key={`item-${i}`} className="bg-gray-800/50 border-gray-700"><CardContent className="p-4 flex items-center gap-3">
+              <Card key={`item-${i}`} className="bg-card border-border"><CardContent className="p-4 flex items-center gap-3">
                 <s.icon className={`w-8 h-8 ${s.color}`} />
-                <div><p className="text-xs text-gray-400">{s.label}</p><p className="text-xl font-bold text-white">{s.value}</p></div>
+                <div><p className="text-xs text-muted-foreground">{s.label}</p><p className="text-xl font-bold text-foreground">{s.value}</p></div>
               </CardContent></Card>
             ))}
           </div>
@@ -289,23 +289,23 @@ export default function WalletPage() {
 
         {/* Requests: approval queue (super admin) or my requests (tenant) */}
         <div>
-          <h2 className="text-lg font-semibold text-white mb-3">
+          <h2 className="text-lg font-semibold text-foreground mb-3">
             {isSuperAdmin ? (isAr ? 'طلبات الشحن/السحب المعلّقة' : 'Pending top-up/withdraw requests') : (isAr ? 'طلباتي' : 'My requests')}
           </h2>
           <div className="space-y-2">
             {requests.length === 0 ? (
-              <p className="text-gray-400 text-center py-6">{isAr ? 'لا توجد طلبات' : 'No requests'}</p>
+              <p className="text-muted-foreground text-center py-6">{isAr ? 'لا توجد طلبات' : 'No requests'}</p>
             ) : requests.map(r => (
-              <Card key={r.id} className="bg-gray-800/50 border-gray-700" data-testid={`req-${r.id}`}>
+              <Card key={r.id} className="bg-card border-border" data-testid={`req-${r.id}`}>
                 <CardContent className="p-3 flex flex-wrap justify-between items-center gap-3">
                   <div className="flex items-center gap-3">
                     {r.request_type === 'topup' ? <ArrowDownLeft className="w-5 h-5 text-emerald-400" /> : <ArrowUpRight className="w-5 h-5 text-red-400" />}
                     <div>
-                      <p className="text-white text-sm font-medium">
+                      <p className="text-foreground text-sm font-medium">
                         {r.request_type === 'topup' ? (isAr ? 'شحن' : 'Top-up') : (isAr ? 'سحب' : 'Withdraw')} — {r.amount?.toLocaleString()} DA
                         {isSuperAdmin && r.entity_name ? ` • ${r.entity_name}` : ''}
                       </p>
-                      <p className="text-xs text-gray-500">{r.note || ''} {new Date(r.created_at).toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">{r.note || ''} {new Date(r.created_at).toLocaleString()}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -330,7 +330,7 @@ export default function WalletPage() {
         {/* Services Catalog */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
               <Package className="h-5 w-5 text-blue-400" />
               {isAr ? 'الخدمات المدفوعة' : 'Services payants'}
             </h2>
@@ -341,23 +341,23 @@ export default function WalletPage() {
             )}
           </div>
           {services.length === 0 ? (
-            <p className="text-gray-400 text-center py-6">{isAr ? 'لا توجد خدمات متاحة حالياً' : 'No services available'}</p>
+            <p className="text-muted-foreground text-center py-6">{isAr ? 'لا توجد خدمات متاحة حالياً' : 'No services available'}</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {services.map(svc => (
-                <Card key={svc.id} className="bg-gray-800/50 border-gray-700" data-testid={`service-${svc.id}`}>
+                <Card key={svc.id} className="bg-card border-border" data-testid={`service-${svc.id}`}>
                   <CardContent className="p-4 flex flex-col h-full">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <p className="text-white font-medium">{svc.name_ar}</p>
-                        {svc.name_fr && <p className="text-xs text-gray-500">{svc.name_fr}</p>}
+                        <p className="text-foreground font-medium">{svc.name_ar}</p>
+                        {svc.name_fr && <p className="text-xs text-muted-foreground">{svc.name_fr}</p>}
                       </div>
                       {isSuperAdmin && (svc.is_active === false
                         ? <Badge variant="secondary">{isAr ? 'معطّلة' : 'Off'}</Badge>
                         : <Badge variant="default">{isAr ? 'مفعّلة' : 'On'}</Badge>)}
                     </div>
-                    {svc.description && <p className="text-sm text-gray-400 mt-1 flex-1">{svc.description}</p>}
-                    <p className="text-2xl font-bold text-emerald-400 mt-3">{(svc.price || 0).toLocaleString()} <span className="text-sm text-gray-400">{svc.currency || 'DZD'}</span></p>
+                    {svc.description && <p className="text-sm text-muted-foreground mt-1 flex-1">{svc.description}</p>}
+                    <p className="text-2xl font-bold text-emerald-400 mt-3">{(svc.price || 0).toLocaleString()} <span className="text-sm text-muted-foreground">{svc.currency || 'DZD'}</span></p>
                     {isSuperAdmin ? (
                       <div className="flex gap-2 mt-3">
                         <Button size="sm" variant="outline" className="gap-1 flex-1" onClick={() => openEditService(svc)} data-testid={`edit-service-${svc.id}`}>
@@ -385,16 +385,16 @@ export default function WalletPage() {
         {/* Service purchase history (tenant) */}
         {!isSuperAdmin && purchases.length > 0 && (
           <div>
-            <h2 className="text-lg font-semibold text-white mb-3">{isAr ? 'خدماتي المشتراة' : 'Mes services achetés'}</h2>
+            <h2 className="text-lg font-semibold text-foreground mb-3">{isAr ? 'خدماتي المشتراة' : 'Mes services achetés'}</h2>
             <div className="space-y-2">
               {purchases.map(p => (
-                <Card key={p.id} className="bg-gray-800/50 border-gray-700" data-testid={`purchase-${p.id}`}>
+                <Card key={p.id} className="bg-card border-border" data-testid={`purchase-${p.id}`}>
                   <CardContent className="p-3 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                       <Package className="w-5 h-5 text-blue-400" />
                       <div>
-                        <p className="text-white text-sm">{p.service_name}</p>
-                        <p className="text-xs text-gray-500">{new Date(p.created_at).toLocaleString()}</p>
+                        <p className="text-foreground text-sm">{p.service_name}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(p.created_at).toLocaleString()}</p>
                       </div>
                     </div>
                     <span className="font-bold text-red-400">-{(p.amount || 0).toLocaleString()} {p.currency || 'DA'}</span>
@@ -408,7 +408,7 @@ export default function WalletPage() {
         {/* Transfers ledger shortcut (super-admin) */}
         {isSuperAdmin && (
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">{isAr ? 'سجل مبيعات الرصيد' : 'Balance Sales Ledger'}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{isAr ? 'سجل مبيعات الرصيد' : 'Balance Sales Ledger'}</h2>
             <a href="/services/transfers">
               <Button variant="outline" size="sm" className="gap-2">
                 <ArrowLeftRight className="h-4 w-4" />
@@ -420,20 +420,20 @@ export default function WalletPage() {
 
         {/* Transactions */}
         <div>
-          <h2 className="text-lg font-semibold text-white mb-3">{isAr ? 'سجل المعاملات' : 'Historique'}</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-3">{isAr ? 'سجل المعاملات' : 'Historique'}</h2>
           <div className="space-y-2">
-            {loading ? <p className="text-gray-400 text-center py-8">{isAr ? 'جاري التحميل...' : 'Chargement...'}</p> :
-             transactions.length === 0 ? <p className="text-gray-400 text-center py-8">{isAr ? 'لا توجد معاملات' : 'Aucune transaction'}</p> :
+            {loading ? <p className="text-muted-foreground text-center py-8">{isAr ? 'جاري التحميل...' : 'Chargement...'}</p> :
+             transactions.length === 0 ? <p className="text-muted-foreground text-center py-8">{isAr ? 'لا توجد معاملات' : 'Aucune transaction'}</p> :
              transactions.map(t => {
                const Icon = txnIcon(t.transaction_type);
                return (
-                <Card key={t.id} className="bg-gray-800/50 border-gray-700" data-testid={`txn-${t.id}`}>
+                <Card key={t.id} className="bg-card border-border" data-testid={`txn-${t.id}`}>
                   <CardContent className="p-3 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                       <Icon className={`w-5 h-5 ${txnColor(t.transaction_type)}`} />
                       <div>
-                        <p className="text-white text-sm">{t.description || t.reference_type}</p>
-                        <p className="text-xs text-gray-500">{new Date(t.created_at).toLocaleString()}</p>
+                        <p className="text-foreground text-sm">{t.description || t.reference_type}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</p>
                       </div>
                     </div>
                     <span className={`font-bold ${txnColor(t.transaction_type)}`}>
@@ -456,11 +456,11 @@ export default function WalletPage() {
             <div className="space-y-4 py-2">
               <div>
                 <label className="text-sm font-medium">{isAr ? 'المبلغ (دج)' : 'Amount (DA)'}</label>
-                <input type="number" min="0" value={reqAmount} onChange={e => setReqAmount(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" data-testid="req-amount" />
+                <input type="number" min="0" value={reqAmount} onChange={e => setReqAmount(e.target.value)} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" data-testid="req-amount" />
               </div>
               <div>
                 <label className="text-sm font-medium">{isAr ? 'ملاحظة (اختياري)' : 'Note (optional)'}</label>
-                <input type="text" value={reqNote} onChange={e => setReqNote(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" />
+                <input type="text" value={reqNote} onChange={e => setReqNote(e.target.value)} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" />
               </div>
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" className="flex-1" onClick={() => setShowReqDialog(false)}>{isAr ? 'إلغاء' : 'Cancel'}</Button>
@@ -482,19 +482,19 @@ export default function WalletPage() {
             <div className="space-y-4 py-2">
               <div>
                 <label className="text-sm font-medium">{isAr ? 'اسم الخدمة (عربي)' : 'Service name (Arabic)'}</label>
-                <input type="text" value={svcForm.name_ar} onChange={e => setSvcForm(f => ({ ...f, name_ar: e.target.value }))} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" data-testid="svc-name-ar" />
+                <input type="text" value={svcForm.name_ar} onChange={e => setSvcForm(f => ({ ...f, name_ar: e.target.value }))} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" data-testid="svc-name-ar" />
               </div>
               <div>
                 <label className="text-sm font-medium">{isAr ? 'الاسم (فرنسي - اختياري)' : 'Name (French - optional)'}</label>
-                <input type="text" value={svcForm.name_fr} onChange={e => setSvcForm(f => ({ ...f, name_fr: e.target.value }))} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" />
+                <input type="text" value={svcForm.name_fr} onChange={e => setSvcForm(f => ({ ...f, name_fr: e.target.value }))} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" />
               </div>
               <div>
                 <label className="text-sm font-medium">{isAr ? 'الوصف (اختياري)' : 'Description (optional)'}</label>
-                <input type="text" value={svcForm.description} onChange={e => setSvcForm(f => ({ ...f, description: e.target.value }))} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" />
+                <input type="text" value={svcForm.description} onChange={e => setSvcForm(f => ({ ...f, description: e.target.value }))} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" />
               </div>
               <div>
                 <label className="text-sm font-medium">{isAr ? 'السعر (دج)' : 'Price (DA)'}</label>
-                <input type="number" min="0" value={svcForm.price} onChange={e => setSvcForm(f => ({ ...f, price: e.target.value }))} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" data-testid="svc-price" />
+                <input type="number" min="0" value={svcForm.price} onChange={e => setSvcForm(f => ({ ...f, price: e.target.value }))} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" data-testid="svc-price" />
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={svcForm.is_active} onChange={e => setSvcForm(f => ({ ...f, is_active: e.target.checked }))} />
@@ -520,7 +520,7 @@ export default function WalletPage() {
             <div className="space-y-4 py-2">
               <div>
                 <label className="text-sm font-medium">{isAr ? 'حد التنبيه عند انخفاض الرصيد (دج)' : 'Low-balance alert threshold (DA)'}</label>
-                <input type="number" min="0" value={threshold} onChange={e => setThreshold(e.target.value)} className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white" data-testid="threshold-input" />
+                <input type="number" min="0" value={threshold} onChange={e => setThreshold(e.target.value)} className="mt-1 block w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground" data-testid="threshold-input" />
               </div>
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" className="flex-1" onClick={() => setShowSettings(false)}>{isAr ? 'إلغاء' : 'Cancel'}</Button>

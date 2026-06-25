@@ -120,7 +120,7 @@ export default function SystemLogsPage() {
             <AlertTriangle className="h-6 w-6 text-amber-500" />
             سجل أخطاء النظام
           </h1>
-          <p className="text-sm text-gray-500">كل خطأ يحدث أثناء تصفحك يُسجَّل هنا. لا يتم تطبيق أي تصحيح تلقائياً.</p>
+          <p className="text-sm text-muted-foreground">كل خطأ يحدث أثناء تصفحك يُسجَّل هنا. لا يتم تطبيق أي تصحيح تلقائياً.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} data-testid="refresh-logs-btn">
@@ -141,7 +141,7 @@ export default function SystemLogsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Card data-testid="stats-total"><CardContent className="p-4">
-          <div className="text-xs text-gray-500">إجمالي السجلات</div>
+          <div className="text-xs text-muted-foreground">إجمالي السجلات</div>
           <div className="text-2xl font-bold">{stats?.total ?? 0}</div>
         </CardContent></Card>
         <Card data-testid="stats-errors"><CardContent className="p-4">
@@ -153,7 +153,7 @@ export default function SystemLogsPage() {
           <div className="text-2xl font-bold text-amber-700">{summary.warn}</div>
         </CardContent></Card>
         <Card data-testid="stats-last"><CardContent className="p-4">
-          <div className="text-xs text-gray-500">آخر تسجيل</div>
+          <div className="text-xs text-muted-foreground">آخر تسجيل</div>
           <div className="text-sm font-medium">{stats?.last_at ? new Date(stats.last_at).toLocaleString("ar") : "—"}</div>
         </CardContent></Card>
       </div>
@@ -164,7 +164,7 @@ export default function SystemLogsPage() {
             <CardTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-purple-600" />
               تحليل الذكاء الاصطناعي
-              <span className="text-xs text-gray-500 mr-2">({analysis.count} خطأ)</span>
+              <span className="text-xs text-muted-foreground mr-2">({analysis.count} خطأ)</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -176,7 +176,7 @@ export default function SystemLogsPage() {
                   <div key={i} className="bg-white border rounded p-3 text-sm">
                     <div className="font-medium">{i + 1}. {s.title || "—"}</div>
                     {s.action && <div className="text-gray-700 mt-1">{s.action}</div>}
-                    {s.file && <div className="text-xs text-gray-500 mt-1">📄 {s.file}</div>}
+                    {s.file && <div className="text-xs text-muted-foreground mt-1">📄 {s.file}</div>}
                   </div>
                 ))}
               </div>
@@ -210,10 +210,10 @@ export default function SystemLogsPage() {
         <CardContent>
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : logs.length === 0 ? (
-            <div className="text-center py-12 text-gray-500" data-testid="empty-state">لا توجد سجلات حالياً ✅</div>
+            <div className="text-center py-12 text-muted-foreground" data-testid="empty-state">لا توجد سجلات حالياً ✅</div>
           ) : (
             <div className="space-y-2" data-testid="logs-list">
               {logs.map((log) => (
@@ -230,21 +230,21 @@ export default function SystemLogsPage() {
                       {log.type && <Badge variant="outline" className="text-gray-600">{log.type}</Badge>}
                       {log.status_code && <Badge variant="outline">{log.status_code}</Badge>}
                     </div>
-                    <div className="text-xs text-gray-500">{new Date(log.created_at).toLocaleString("ar")}</div>
+                    <div className="text-xs text-muted-foreground">{new Date(log.created_at).toLocaleString("ar")}</div>
                   </div>
                   <div className="mt-2 text-sm break-words">{log.message}</div>
-                  {log.url && <div className="text-xs text-gray-500 mt-1 truncate">📍 {log.url}</div>}
+                  {log.url && <div className="text-xs text-muted-foreground mt-1 truncate">📍 {log.url}</div>}
                   {expanded === log.id && (
                     <div className="mt-3 space-y-2">
                       {log.stack && (
-                        <pre className="text-xs bg-gray-900 text-gray-100 p-3 rounded overflow-auto max-h-64">{log.stack}</pre>
+                        <pre className="text-xs bg-background text-foreground p-3 rounded overflow-auto max-h-64">{log.stack}</pre>
                       )}
                       {log.metadata && Object.keys(log.metadata).length > 0 && (
                         <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-40">
                           {JSON.stringify(log.metadata, null, 2)}
                         </pre>
                       )}
-                      {log.user_email && <div className="text-xs text-gray-500">👤 {log.user_email}</div>}
+                      {log.user_email && <div className="text-xs text-muted-foreground">👤 {log.user_email}</div>}
                     </div>
                   )}
                 </div>

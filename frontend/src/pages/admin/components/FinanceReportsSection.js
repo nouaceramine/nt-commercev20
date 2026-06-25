@@ -128,7 +128,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
 
       {/* Main Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white">
+        <Card className="bg-gradient-to-br from-green-500 to-green-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -139,7 +139,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+        <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -150,7 +150,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white">
+        <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -161,7 +161,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-red-500 to-red-600 text-white">
+        <Card className="bg-gradient-to-br from-red-500 to-red-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -172,7 +172,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+        <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -183,7 +183,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-amber-500 to-amber-600 text-white">
+        <Card className="bg-gradient-to-br from-amber-500 to-amber-600 text-foreground">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>

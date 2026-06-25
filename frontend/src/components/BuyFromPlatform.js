@@ -95,7 +95,7 @@ export default function BuyFromPlatform({ type, operator, onOrdered }) {
 
   if (loading) {
     return (
-      <Card><CardContent className="p-8 text-center"><Loader2 className="animate-spin h-6 w-6 mx-auto text-gray-400" /></CardContent></Card>
+      <Card><CardContent className="p-8 text-center"><Loader2 className="animate-spin h-6 w-6 mx-auto text-muted-foreground" /></CardContent></Card>
     );
   }
 
@@ -112,10 +112,10 @@ export default function BuyFromPlatform({ type, operator, onOrdered }) {
       </CardHeader>
       <CardContent>
         {!items.length ? (
-          <div className="text-center text-gray-500 py-6">لا توجد فئات متاحة. اطلب من السوبر-أدمن إضافتها.</div>
+          <div className="text-center text-muted-foreground py-6">لا توجد فئات متاحة. اطلب من السوبر-أدمن إضافتها.</div>
         ) : (
           <div className="space-y-2">
-            <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 px-2">
+            <div className="grid grid-cols-12 gap-2 text-xs text-muted-foreground px-2">
               {type === "card" && <div className="col-span-3">المشغّل</div>}
               <div className={type === "card" ? "col-span-2" : "col-span-3"}>الفئة</div>
               <div className="col-span-3">سعري</div>
@@ -146,7 +146,7 @@ export default function BuyFromPlatform({ type, operator, onOrdered }) {
               <div className="text-sm">
                 <span className="text-gray-600">المجموع: </span>
                 <span className="font-bold text-lg">{formatDZD(totals.total)}</span>
-                <span className="text-gray-500 mr-2">({totals.count} كود)</span>
+                <span className="text-muted-foreground mr-2">({totals.count} كود)</span>
               </div>
               <Button onClick={submit} disabled={submitting || totals.count === 0} data-testid="bfp-submit">
                 {submitting ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <ShoppingCart className="h-4 w-4 ml-2" />}
