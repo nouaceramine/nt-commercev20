@@ -94,3 +94,23 @@ See `/app/memory/test_credentials.md`
 - **Minor:** تحذير React duplicate-key (`/wallet-management`, `/customers`) — dedup sidebar items by path in Layout.js.
 - **Cleanup:** استخراج `_plan_price` helper في `wallet_routes.py`.
 - **Enhancement (queued):** `/customer-debts` quick PDF/Excel export + bulk SMS/WhatsApp reminder for indebted customers.
+
+## S13 — Impersonation Audit Log + Cleanups (2026-02 / iter 7-8)
+- **NEW FEATURE — Impersonation Audit Log:**
+  - Backend: `main_db.impersonation_logs` collection. POST `/api/saas/impersonate/{tenant_id}` records {id, admin_id+email+name, tenant_id+name+email, ip, user_agent, started_at, status='active'} and returns `impersonation_session_id` in the response.
+  - Backend: POST `/api/saas/impersonate/{session_id}/stop` (super-admin only, idempotent) closes the entry with stopped_at + duration_seconds.
+  - Backend: GET `/api/saas/impersonation-logs?limit&tenant_id&admin_id` returns `{total_active, items[]}` sorted by started_at DESC.
+  - Frontend: New tab `سجل الانتحال` in `/saas-admin` showing full audit table (super-admin, tenant, IP, started, ended, duration, status). Active session badge in tab header.
+  - Frontend: `stopImpersonation()` in `AuthContext` now calls the stop endpoint BEFORE clearing localStorage so the close logs successfully via super_admin_token.
+- **CLEANUP — `_lookup_plan_and_price` helper** extracted in `wallet_routes.py`; both `_charge_subscription` and `/api/wallet` GET now use it.
+- **MINOR — React duplicate-key warning ELIMINATED:**
+  - `Layout.js` sidebar items deduped by path; composite key `${section.id}-${item.path}`.
+  - `DashboardPage.js` line 176: Link key changed from `stat.link` to `stat-${index}-${stat.link}` (4 cards shared 2 links: /customers & /wallet-management).
+- **Tests:** Iter 7 backend 100% (30/30), Iter 8 frontend 100% (0 warnings across 5-hop navigation).
+
+## Next Action Items (in priority order)
+- **P1:** تفعيل Redis للـ caching.
+- **P2:** "اختصارات POS افتراضية" للسوبر-أدمن.
+- **P3:** طباعة فواتير `platform_cards` المباعة من POS.
+- **Enhancement queued:** صفحة `/customer-debts` — تصدير PDF/Excel سريع + تذكير SMS/WhatsApp جماعي.
+- **Polish:** Investigate 2 console 404s on tenant routes (unknown asset; non-blocking).
