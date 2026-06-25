@@ -1,141 +1,114 @@
 {
-  "identity": {
-    "name": "ScreenGuard Pro",
-    "persona": "The Precision Architect",
-    "tone": "Technical, Trustworthy, Efficient, Organized",
-    "aesthetics": "Swiss Minimalist x Medical Cleanliness",
-    "key_principles": [
-      "Clarity over Decoration: Data must be legible at a glance.",
-      "Bilingual Fluidity: Seamless switching between LTR and RTL.",
-      "Tactile Feedback: Interactions should feel crisp and responsive."
-    ]
+  "project_context": {
+    "domain": "SaaS POS (Point of Sale)",
+    "language": "RTL Arabic",
+    "core_problem": "The QuickFlexyPanel was squeezed into a narrow middle column, causing vertical stacking of amount buttons. The layout lacks responsiveness across mobile and tablet."
   },
+  "theme": "light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) - Modified for Soft Utility POS",
   "typography": {
-    "primary_font": "Manrope",
-    "secondary_font": "Outfit",
-    "arabic_font": "Cairo",
-    "scaling": {
-      "h1": "text-4xl md:text-5xl font-bold tracking-tight",
-      "h2": "text-3xl md:text-4xl font-semibold tracking-tight",
-      "h3": "text-2xl font-semibold",
-      "body": "text-base leading-relaxed",
-      "small": "text-sm text-muted-foreground",
-      "label": "text-xs font-medium uppercase tracking-wider text-muted-foreground"
+    "font_family": {
+      "headings": "Tajawal, IBM Plex Sans Arabic, or Cairo (Strong, legible Arabic sans-serif)",
+      "body": "Tajawal or Inter (with Arabic fallback)"
     },
-    "pairing_rules": "Use Manrope/Cairo(Bold) for Headings. Use Outfit/Cairo(Regular) for Body. Ensure Arabic line-height is 1.6x for readability."
+    "hierarchy": {
+      "h1": "text-2xl sm:text-3xl font-bold tracking-tight",
+      "h2": "text-xl sm:text-2xl font-bold",
+      "h3": "text-lg font-semibold",
+      "body": "text-base",
+      "small_labels": "text-sm font-medium tracking-wide"
+    }
   },
   "colors": {
-    "palette": {
+    "primary": {
+      "DEFAULT": "#2563EB",
+      "hover": "#1D4ED8",
+      "light": "#EFF6FF"
+    },
+    "surface": {
       "background": "#F8FAFC",
-      "foreground": "#0F172A",
-      "primary": "#2563EB",
-      "primary_foreground": "#FFFFFF",
-      "secondary": "#EFF6FF",
-      "secondary_foreground": "#1E40AF",
-      "muted": "#F1F5F9",
-      "muted_foreground": "#64748B",
-      "accent": "#F59E0B",
-      "accent_foreground": "#FFFBEB",
-      "destructive": "#EF4444",
-      "destructive_foreground": "#FFFFFF",
-      "border": "#E2E8F0",
-      "input": "#E2E8F0",
-      "ring": "#2563EB"
+      "card": "#FFFFFF",
+      "border": "#E2E8F0"
     },
-    "usage": {
-      "primary": "Main actions, Active states, Brand identity",
-      "secondary": "Backgrounds of active items, light badges",
-      "accent": "Warnings, Compatibility highlights, Important tags",
-      "background": "Global app background (Off-white, never pure white)"
+    "text": {
+      "primary": "#0F172A",
+      "secondary": "#64748B"
     },
-    "dark_mode_strategy": "System-preference based. Dark mode should use Slate-900 (#0F172A) as background, not pure black."
+    "semantic": {
+      "success": "#16A34A",
+      "danger": "#DC2626",
+      "warning": "#D97706"
+    }
   },
-  "layout_strategies": {
-    "dashboard_grid": "grid grid-cols-1 md:grid-cols-12 gap-6 p-6 md:p-8",
-    "card_grid": "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6",
-    "detail_view": "grid grid-cols-1 lg:grid-cols-3 gap-8",
-    "rtl_behavior": "Use logical properties (ps-*, pe-*) or Tailwind's rtl: modifier. Ensure sidebar flips to right in RTL mode.",
-    "spacing": "Generous padding (p-6 to p-10) inside containers. Gap-6 minimum for grids."
-  },
-  "components": {
-    "buttons": {
-      "style": "h-10 px-4 py-2 rounded-lg font-medium transition-all active:scale-95",
-      "variants": {
-        "default": "bg-primary text-primary-foreground hover:bg-primary/90 shadow-md hover:shadow-lg",
-        "outline": "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-        "ghost": "hover:bg-accent hover:text-accent-foreground"
+  "layout_strategy": {
+    "global_grid": "The POS should move from a rigid 3-column flex layout to a responsive 12-column CSS Grid.",
+    "breakpoints": {
+      "desktop_1920": {
+        "description": "Sidebar on Right (RTL). Main area split into 2 primary zones.",
+        "container_classes": "grid grid-cols-1 lg:grid-cols-12 gap-6 h-screen overflow-hidden p-4",
+        "cart_area": "lg:col-span-4 xl:col-span-3 flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-200",
+        "actions_area": "lg:col-span-8 xl:col-span-9 flex flex-col gap-6 h-full overflow-y-auto"
+      },
+      "tablet_768_1024": {
+        "description": "Sidebar collapsed to icons. Cart takes 40%, Actions take 60%.",
+        "container_classes": "grid grid-cols-1 md:grid-cols-12 gap-4 p-4",
+        "cart_area": "md:col-span-5 flex flex-col h-full bg-white rounded-xl shadow-sm",
+        "actions_area": "md:col-span-7 flex flex-col gap-4 overflow-y-auto"
+      },
+      "mobile_375_767": {
+        "description": "Single column vertical stack. Cart is hidden behind a Bottom Sheet or fixed bottom bar to save space.",
+        "container_classes": "flex flex-col gap-4 p-2 pb-24",
+        "cart_area": "fixed inset-x-0 bottom-0 z-50 bg-white border-t rounded-t-2xl shadow-lg transform transition-transform (can be toggled)",
+        "actions_area": "w-full flex flex-col gap-4"
       }
-    },
-    "cards": {
-      "style": "bg-card text-card-foreground rounded-xl border shadow-sm hover:shadow-md transition-shadow",
-      "product_card": "overflow-hidden flex flex-col h-full. Image area aspect-square bg-muted/20 relative."
-    },
-    "inputs": {
-      "style": "h-11 rounded-lg border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-    },
-    "badges": {
-      "style": "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-      "compatibility": "bg-blue-100 text-blue-800 border-blue-200"
     }
   },
-  "visual_enhancers": {
-    "glassmorphism": "backdrop-blur-md bg-white/70 border-white/20 shadow-sm (Use for sticky headers only)",
-    "shadows": "shadow-sm for cards, shadow-lg for dropdowns/modals. Avoid heavy shadows.",
-    "borders": "1px solid #E2E8F0. Use subtle borders to define structure.",
-    "radius": "rounded-lg (0.5rem) for inputs/buttons, rounded-xl (0.75rem) for cards/modals."
-  },
-  "motion": {
-    "hover": "transition-all duration-200 ease-in-out",
-    "entrance": "animate-in fade-in slide-in-from-bottom-4 duration-500",
-    "micro_interactions": "Active scale down (0.98) on buttons. Color shift on hover."
-  },
-  "images": {
-    "login_hero": {
-      "url": "https://images.unsplash.com/photo-1758631279366-8e8aeaf94082?crop=entropy&cs=srgb&fm=jpg&q=85",
-      "alt": "Modern Mobile Shop Interior",
-      "category": "Hero"
+  "component_guidelines": {
+    "QuickFlexyPanel": {
+      "issue": "Previously squeezed in an 80px wide vertical column.",
+      "solution": "Place it inside the main 'Actions Area' (the 8-col section) as a full-width horizontal card.",
+      "layout_classes": "bg-white rounded-xl border border-slate-200 p-4 shadow-sm w-full",
+      "internal_structure": {
+        "header_tabs": "flex gap-2 border-b border-slate-100 pb-3 mb-4",
+        "body_row": "flex flex-col lg:flex-row gap-6 items-start lg:items-center",
+        "input_group": "w-full lg:w-1/3 flex flex-col gap-2",
+        "amount_buttons": "w-full lg:w-2/3 grid grid-cols-3 sm:grid-cols-5 gap-3 (This fixes the vertical stacking)",
+        "payment_toggles": "flex gap-2 w-full mt-4 pt-4 border-t border-slate-100"
+      },
+      "amount_button_style": "h-14 md:h-16 rounded-lg font-bold text-lg bg-slate-50 border border-slate-200 hover:bg-blue-50 hover:border-blue-500 hover:text-blue-700 transition-colors flex items-center justify-center data-testid='amount-btn'"
     },
-    "product_placeholder": {
-      "url": "https://images.unsplash.com/photo-1634403665443-81dc4d75843a?crop=entropy&cs=srgb&fm=jpg&q=85",
-      "alt": "Generic Phone Screen",
-      "category": "Placeholder"
+    "TaskButtons_and_Shortcuts": {
+      "layout": "grid grid-cols-1 xl:grid-cols-2 gap-6 mt-2",
+      "tasks_grid": "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
+      "shortcuts_grid": "grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100",
+      "button_style": "h-16 flex flex-col items-center justify-center gap-1 text-sm bg-white border border-slate-200 rounded-lg hover:border-blue-500 transition-all shadow-sm active:scale-95"
     },
-    "empty_state": {
-      "url": "https://images.unsplash.com/photo-1636589150123-6d57c10527ce?crop=entropy&cs=srgb&fm=jpg&q=85",
-      "alt": "No Products Found",
-      "category": "State"
+    "CartArea": {
+      "layout": "flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden",
+      "selectors_header": "p-4 border-b border-slate-100 flex flex-col gap-3",
+      "table_wrapper": "flex-1 overflow-y-auto min-h-[300px]",
+      "payment_tabs": "grid grid-cols-3 gap-2 p-4 border-t border-slate-100 bg-slate-50",
+      "checkout_footer": "p-4 border-t border-slate-200 flex flex-col gap-3"
+    },
+    "SessionHeader": {
+      "layout": "flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 mb-4 shadow-sm",
+      "stats_group": "flex flex-wrap items-center gap-6 divide-x divide-x-reverse divide-slate-200"
     }
   },
-  "rtl_guidelines": {
-    "direction": "The app must support dynamic switching of 'dir' attribute on <html> tag.",
-    "font_switching": "When dir='rtl', font-family must switch to 'Cairo'. When 'ltr', use 'Manrope'.",
-    "mirroring": "Margins, Paddings, Text Alignment, and Flex direction must mirror. Use 'start' and 'end' instead of 'left' and 'right'."
+  "interactive_elements": {
+    "touch_targets": "Minimum 44px height for all buttons and inputs (mobile-friendly). Use 56px (h-14) or 64px (h-16) for primary POS grid actions.",
+    "active_states": "Use transform active:scale-95 for tactile feedback on touch devices.",
+    "testing": "Ensure every button has a data-testid attribute (e.g., data-testid='flexy-amount-500')."
   },
   "instructions_to_main_agent": [
-    "1. INSTALL FONTS: Add '@fontsource/manrope', '@fontsource/outfit', and '@fontsource/cairo' via yarn.",
-    "2. SETUP TAILWIND: Ensure 'tailwindcss-animate' is configured. Add the custom colors to tailwind.config.js.",
-    "3. CREATE LAYOUT: Build a 'DashboardLayout' component that handles the Sidebar and Topbar. It must be responsive.",
-    "4. RTL TOGGLE: Implement a global language context that toggles the 'dir' attribute and font class on the body.",
-    "5. MOCK DATA: Create a robust set of mock products (at least 10) with Arabic and English names/descriptions to demonstrate the bilingual capability.",
-    "6. USE SHADCN: Use the provided shadcn components for complex interactions (Dialog, Dropdown, Select, Table).",
-    "7. SEARCH: The search bar should be prominent in the Topbar. It should filter the product list in real-time.",
-    "8. COMPATIBILITY: The product card must clearly show 'Compatible Models' as a list of badges."
-  ],
-  "universal_guidelines": [
-    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients",
-    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
-    "Create depth through layered design elements with z-index hierarchy",
-    "Use glass-morphism effects with backdrop filters (12-24px blur)",
-    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
-    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text",
-    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
-    "NEVER: use AI assistant Emoji characters like 🤖 etc for icons.",
-    "Every interaction needs micro-animations - hover states, transitions.",
-    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
-    "Main agent relies on these image URLs. Missing categories = main agent will use placeholder text which is FORBIDDEN",
-    "Prioritize using pre-existing components from src/components/ui when applicable",
-    "Components MUST use named exports (export const ComponentName = ...)",
-    "Pages MUST use default exports (export default function PageName() {...})",
-    "Use 'sonner' for toasts"
+    "1. Replace the existing 3-column flex layout with a 12-column CSS grid (`grid grid-cols-1 lg:grid-cols-12 gap-6`).",
+    "2. Move the Cart/Checkout section to the right-most side (or left depending on exact RTL mirroring preference, usually `col-span-4`).",
+    "3. Combine the previous 'left task column' and 'middle flexy column' into a single 'Actions Area' (`col-span-8`).",
+    "4. Inside the Actions Area, render the QuickFlexyPanel as a full-width block (`w-full flex-col`).",
+    "5. Change the QuickFlexyPanel amount buttons container to `grid grid-cols-3 sm:grid-cols-5 gap-3` to fix the vertical squeezing issue.",
+    "6. Ensure all UI components use Tailwind classes mapped to the 'colors' and 'typography' definitions above.",
+    "7. Implement a Bottom Sheet or toggle for the Cart on mobile screens (`max-w-md` breakpoints) so the Actions Area takes full width on phones.",
+    "8. Add `dir=\"rtl\"` to the root POS container if not already present globally.",
+    "9. Do NOT modify backend logic or component state—only adjust the Tailwind classes and JSX structure to achieve this grid redesign."
   ]
 }
