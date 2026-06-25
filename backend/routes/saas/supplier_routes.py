@@ -355,6 +355,92 @@ def build_supplier_router() -> APIRouter:
         items = await tenant_db.platform_cards.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
         return {"items": items}
 
+    @router.get("/platform-cards/stock-summary")
+    async def my_platform_cards_summary(current_user: dict = Depends(get_current_user)):
+        """Aggregate counts grouped by (operator, denomination) of *available*
+        cards. Used by the POS quick-sell dialog."""
+        tenant_id = current_user.get("tenant_id") or current_user.get("id")
+        if not tenant_id:
+            return []
+        tenant_db = get_tenant_db(tenant_id)
+        pipeline = [
+            {"$match": {"status": "available"}},
+            {"$group": {
+                "_id": {"operator": "$operator", "denomination": "$denomination"},
+                "count": {"$sum": 1},
+            }},
+            {"$sort": {"_id.operator": 1, "_id.denomination": 1}},
+        ]
+        rows = await tenant_db.platform_cards.aggregate(pipeline).to_list(200)
+        # Also aggregate idoom from tenant's own idoom_codes (excluding sold)
+        idoom_rows = []
+        try:
+            idoom_pipeline = [
+                {"$match": {"status": "available"}},
+                {"$group": {"_id": {"denomination": "$denomination"}, "count": {"$sum": 1}}},
+                {"$sort": {"_id.denomination": 1}},
+            ]
+            idoom_rows = await tenant_db.idoom_codes.aggregate(idoom_pipeline).to_list(200)
+        except Exception:
+            pass
+        return {"cards": rows, "idoom": idoom_rows}
+
+    class SellPlatformCard(BaseModel):
+        operator: str
+        denomination: float
+        sell_price: Optional[float] = None  # what the customer paid; defaults to denomination
+        customer_phone: Optional[str] = None
+        payment_method: str = "cash"
+
+    @router.post("/platform-cards/sell")
+    async def sell_platform_card(body: SellPlatformCard, current_user: dict = Depends(get_current_user)):
+        """Pop the next available card of the chosen (operator, denomination),
+        mark it sold, register a tenant-side sale + cash movement.
+        Returns the actual code so the POS can show & print it."""
+        tenant_id = current_user.get("tenant_id") or current_user.get("id")
+        if not tenant_id:
+            raise HTTPException(status_code=403, detail="tenant required")
+        tenant_db = get_tenant_db(tenant_id)
+        # Atomically reserve & mark sold
+        card = await tenant_db.platform_cards.find_one_and_update(
+            {"operator": body.operator, "denomination": body.denomination, "status": "available"},
+            {"$set": {"status": "sold", "sold_at": _now(), "sold_to": body.customer_phone}},
+            return_document=True,
+        )
+        if not card:
+            raise HTTPException(status_code=404, detail=f"لا توجد كروت متاحة من {body.operator} {body.denomination}")
+        sell_price = float(body.sell_price) if body.sell_price else float(body.denomination)
+        # Insert a sale record (light-weight, just enough for reports)
+        sale_id = str(uuid.uuid4())
+        sale_doc = {
+            "id": sale_id,
+            "type": "platform_card",
+            "operator": body.operator,
+            "denomination": body.denomination,
+            "code": card.get("code"),
+            "sell_price": sell_price,
+            "payment_method": body.payment_method,
+            "customer_phone": body.customer_phone,
+            "card_id": card.get("id"),
+            "created_at": _now(),
+            "user_id": current_user.get("id"),
+        }
+        await tenant_db.platform_card_sales.insert_one(sale_doc)
+        sale_doc.pop("_id", None)
+        return {"sale": sale_doc, "card": {"code": card.get("code"), "operator": card.get("operator"), "denomination": card.get("denomination")}}
+
+    @router.get("/platform-cards/sales")
+    async def platform_card_sales(
+        limit: int = Query(50, ge=1, le=500),
+        current_user: dict = Depends(get_current_user),
+    ):
+        tenant_id = current_user.get("tenant_id") or current_user.get("id")
+        if not tenant_id:
+            return []
+        tenant_db = get_tenant_db(tenant_id)
+        rows = await tenant_db.platform_card_sales.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+        return rows
+
     @router.post("/supplier/order")
     async def place_order(payload: SupplierOrderIn, current_user: dict = Depends(get_current_user)):
         tenant_id = current_user.get("tenant_id") or current_user.get("id")

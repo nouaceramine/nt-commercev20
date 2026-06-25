@@ -10,7 +10,7 @@ import {
   Plus, Undo2, Users, Barcode,
   List, FolderTree, FileText, ArrowDownToLine,
   ArrowUpFromLine, BarChart3, ScrollText, CalendarDays,
-  Tag, Printer, PackagePlus, History,
+  Tag, Printer, PackagePlus, History, CreditCard,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -27,6 +27,7 @@ import POSSidebar from './pos/POSSidebar';
 import POSShortcuts from './pos/POSShortcuts';
 import POSCart from './pos/POSCart';
 import PrintDocumentDialog from '../components/print/PrintDocumentDialog';
+import SellPlatformCardDialog from '../components/SellPlatformCardDialog';
 
 // Color palette for product shortcuts
 const SHORTCUT_COLORS = [
@@ -120,6 +121,7 @@ export default function POSPage() {
 
   // Calculator
   const [showCalculator, setShowCalculator] = useState(false);
+  const [showSellCardDialog, setShowSellCardDialog] = useState(false);
 
   // Search Results
   const [showSearchResults, setShowSearchResults] = useState(false);
@@ -1160,6 +1162,19 @@ ${sale.paid_amount?`<div class="row" style="margin-top:4px"><span>${language==='
             </Button>
           </div>
 
+          {/* Sell Recharge Card button (visible on all viewports) */}
+          <div className="mb-2">
+            <Button
+              variant="outline"
+              className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50"
+              onClick={() => setShowSellCardDialog(true)}
+              data-testid="open-sell-card-btn"
+            >
+              <CreditCard className="h-4 w-4" />
+              {language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte de recharge'}
+            </Button>
+          </div>
+
           {/* Cart */}
           <POSCart
             cart={cart}
@@ -1399,6 +1414,12 @@ ${sale.paid_amount?`<div class="row" style="margin-top:4px"><span>${language==='
           onOpenChange={setShowPrintDocDialog}
           docType="sale"
           documentId={lastSaleId}
+        />
+
+        {/* Sell Platform Card Dialog */}
+        <SellPlatformCardDialog
+          open={showSellCardDialog}
+          onClose={() => setShowSellCardDialog(false)}
         />
 
         {/* Product Entry Dialog (force_qty / force_price / serial) */}

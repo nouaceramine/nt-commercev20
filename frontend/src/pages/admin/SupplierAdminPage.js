@@ -128,10 +128,12 @@ export default function SupplierAdminPage() {
                           <TableCell>{c.default_price} دج</TableCell>
                           <TableCell><span className="text-green-700">{s.available}</span> / <span className="text-amber-600">{s.reserved}</span> / <span className="text-gray-500">{s.sold}</span></TableCell>
                           <TableCell>{Object.keys(c.tenant_prices || {}).length}</TableCell>
-                          <TableCell className="space-x-2 space-x-reverse">
-                            <Button size="sm" variant="outline" onClick={() => setShowUpload({ type: "cards", catalogId: c.id, label: `${c.operator} ${c.denomination}` })} data-testid={`upload-${c.id}`}><Upload className="h-4 w-4" /></Button>
-                            <Button size="sm" variant="outline" onClick={() => setShowPriceDialog({ type: "cards", item: c })}><Pencil className="h-4 w-4" /></Button>
-                            <Button size="sm" variant="destructive" onClick={() => deleteCatalog("cards", c.id)} data-testid={`del-${c.id}`}><Trash2 className="h-4 w-4" /></Button>
+                          <TableCell className="space-x-2 space-x-reverse whitespace-nowrap">
+                            <Button size="sm" variant="default" className="bg-purple-600 hover:bg-purple-700" onClick={() => setShowUpload({ type: "cards", catalogId: c.id, label: `${c.operator} ${c.denomination}` })} data-testid={`upload-${c.id}`}>
+                              <Upload className="h-4 w-4 ml-1" /> رفع أكواد
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setShowPriceDialog({ type: "cards", item: c })} title="أسعار مخصصة"><Pencil className="h-4 w-4" /></Button>
+                            <Button size="sm" variant="destructive" onClick={() => deleteCatalog("cards", c.id)} data-testid={`del-${c.id}`} title="حذف"><Trash2 className="h-4 w-4" /></Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -172,10 +174,12 @@ export default function SupplierAdminPage() {
                           <TableCell>{i.default_price} دج</TableCell>
                           <TableCell><span className="text-green-700">{s.available}</span> / <span className="text-amber-600">{s.reserved}</span> / <span className="text-gray-500">{s.sold}</span></TableCell>
                           <TableCell>{Object.keys(i.tenant_prices || {}).length}</TableCell>
-                          <TableCell className="space-x-2 space-x-reverse">
-                            <Button size="sm" variant="outline" onClick={() => setShowUpload({ type: "idoom", catalogId: i.id, label: `Idoom ${i.denomination}` })}><Upload className="h-4 w-4" /></Button>
-                            <Button size="sm" variant="outline" onClick={() => setShowPriceDialog({ type: "idoom", item: i })}><Pencil className="h-4 w-4" /></Button>
-                            <Button size="sm" variant="destructive" onClick={() => deleteCatalog("idoom", i.id)}><Trash2 className="h-4 w-4" /></Button>
+                          <TableCell className="space-x-2 space-x-reverse whitespace-nowrap">
+                            <Button size="sm" variant="default" className="bg-purple-600 hover:bg-purple-700" onClick={() => setShowUpload({ type: "idoom", catalogId: i.id, label: `Idoom ${i.denomination}` })}>
+                              <Upload className="h-4 w-4 ml-1" /> رفع أكواد
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setShowPriceDialog({ type: "idoom", item: i })} title="أسعار مخصصة"><Pencil className="h-4 w-4" /></Button>
+                            <Button size="sm" variant="destructive" onClick={() => deleteCatalog("idoom", i.id)} title="حذف"><Trash2 className="h-4 w-4" /></Button>
                           </TableCell>
                         </TableRow>
                       );
