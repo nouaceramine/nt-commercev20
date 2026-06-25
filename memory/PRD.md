@@ -114,3 +114,19 @@ See `/app/memory/test_credentials.md`
 - **P3:** طباعة فواتير `platform_cards` المباعة من POS.
 - **Enhancement queued:** صفحة `/customer-debts` — تصدير PDF/Excel سريع + تذكير SMS/WhatsApp جماعي.
 - **Polish:** Investigate 2 console 404s on tenant routes (unknown asset; non-blocking).
+
+## S14 — P2 Default POS Shortcuts (2026-02 / iter 9)
+- **Backend:**
+  - `main_db.platform_default_pos_shortcuts` collection (single doc id='default').
+  - GET/PUT `/api/saas/default-pos-shortcuts` (super-admin only).
+  - GET `/api/pos/shortcuts` now returns `{shortcuts, source: 'user'|'default'|'empty'}` — falls back to platform defaults when no per-user document exists.
+- **Frontend:** New tab in `/saas-admin` → "اختصارات POS الافتراضية" with slot-based editor (label + color picker + per-slot remove + Add slot + Save). Auto-pads to 8 slots on client; backend persists only non-empty entries.
+- **Tests:** `backend/tests/test_default_pos_shortcuts.py` — 8/8 ✅ • iter 9 backend 100% • frontend 100% • 0 React warnings • 0 console 404s.
+- **Polish (verified):** Iter 7's "2 console 404" observation could NOT be reproduced — likely transient asset noise; iter 9 reported 0.
+
+## Next Action Items
+- **P1:** تفعيل Redis للـ caching.
+- **P3:** طباعة فواتير `platform_cards` المباعة من POS.
+- **Enhancement queued:** `/customer-debts` — تصدير PDF/Excel + تذكير SMS/WhatsApp جماعي.
+- **Enhancement queued:** تنبيه فوري WhatsApp/Email للمستأجر عند بدء جلسة انتحال (GDPR-grade).
+- **Cleanup:** `backend/tests/test_wallet_chain.py` migrate hardcoded `localhost:8000` to `REACT_APP_BACKEND_URL`/`BASE_URL` env var.
