@@ -137,7 +137,7 @@ import DailyReportPage from "./pages/DailyReportPage";
 
 // Protected Route Component
 const ProtectedRoute = ({ children, adminOnly = false, tenantOnly = false, superAdminOnly = false, cashierBlocked = false, featureKey = null }) => {
-  const { isAuthenticated, loading, isAdmin, isSuperAdmin, isTenant, isCashier, user, isFeatureEnabled } = useAuth();
+  const { isAuthenticated, loading, isAdmin, isSuperAdmin, isEffectiveSuperAdmin, isTenant, isCashier, user, isFeatureEnabled } = useAuth();
 
   if (loading) {
     return (
@@ -183,7 +183,7 @@ const ProtectedRoute = ({ children, adminOnly = false, tenantOnly = false, super
     return <Navigate to="/" replace />;
   }
 
-  if (superAdminOnly && !isSuperAdmin) {
+  if (superAdminOnly && !isEffectiveSuperAdmin) {
     return <Navigate to="/" replace />;
   }
 

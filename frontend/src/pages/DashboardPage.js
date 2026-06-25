@@ -76,7 +76,8 @@ export default function DashboardPage() {
 
         if (walletRes.data) {
           setWalletBalance(walletRes.data.balance || 0);
-          setWalletDebt(walletRes.data.subscription_due || 0);
+          // total_platform_debt includes subscription_due + platform purchase debts
+          setWalletDebt(walletRes.data.total_platform_debt ?? walletRes.data.subscription_due ?? 0);
           setWalletOverdue(!!walletRes.data.subscription_overdue);
         }
         
@@ -109,12 +110,22 @@ export default function DashboardPage() {
 
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
 
+  const customerBalance = stats.customer_balance_total || 0;
+  const customerBalanceCount = stats.customer_balance_count || 0;
+  const customerDebt = stats.customer_debt_total || 0;
+  const customerDebtCount = stats.customers_with_debt || 0;
+  const totalPlatformDebt = (walletDebt || 0); // Already includes subscription_due; backend may extend
+
   const statsCards = [
+    // ── Top row: Customer wallet snapshot (per user request) ──
+    { title: language === 'ar' ? 'رصيد محفظة الزبون' : 'Solde portefeuille client', value: `${customerBalance.toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `${customerBalanceCount} زبون لديه رصيد` : `${customerBalanceCount} clients avec crédit`, icon: Wallet, color: 'text-emerald-600', bgColor: 'bg-emerald-100', link: '/customers' },
+    { title: language === 'ar' ? 'ديون محفظة الزبون' : 'Dettes portefeuille client', value: `${customerDebt.toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `${customerDebtCount} زبون مدين` : `${customerDebtCount} clients endettés`, icon: CreditCard, color: customerDebt > 0 ? 'text-red-600' : 'text-slate-600', bgColor: customerDebt > 0 ? 'bg-red-100' : 'bg-slate-100', link: '/customer-debts' },
+    // ── Standard stats ──
     { title: t.todaySales, value: `${stats.today_sales_total?.toFixed(2) || 0} ${t.currency}`, subValue: `${stats.today_sales_count || 0} ${t.sales}`, icon: TrendingUp, color: 'text-emerald-600', bgColor: 'bg-emerald-100', link: '/sales' },
     { title: t.totalCash, value: `${stats.total_cash?.toFixed(2) || 0} ${t.currency}`, icon: Banknote, color: 'text-blue-600', bgColor: 'bg-blue-100', link: '/cash' },
     { title: language === 'ar' ? 'رصيد المحفظة' : 'Solde portefeuille', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'متوفر لشحن الجوال' : 'Disponible recharge', icon: Wallet, color: 'text-teal-600', bgColor: 'bg-teal-100', link: '/recharge' },
     { title: language === 'ar' ? 'رصيد محفظة المستخدم' : 'Solde portefeuille utilisateur', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'محفظة المنصة' : 'Portefeuille plateforme', icon: Wallet, color: 'text-indigo-600', bgColor: 'bg-indigo-100', link: '/wallet-management' },
-    { title: language === 'ar' ? 'ديون محفظة المستخدم' : 'Dettes portefeuille utilisateur', value: `${walletDebt?.toFixed(2) || 0} ${t.currency}`, subValue: walletOverdue ? (language === 'ar' ? 'اشتراك متأخر' : 'Abonnement échu') : (language === 'ar' ? 'لا توجد ديون' : 'Aucune dette'), icon: CreditCard, color: walletOverdue ? 'text-red-600' : 'text-slate-600', bgColor: walletOverdue ? 'bg-red-100' : 'bg-slate-100', link: '/wallet-management' },
+    { title: language === 'ar' ? 'ديون محفظة المستخدم' : 'Dettes portefeuille utilisateur', value: `${totalPlatformDebt.toFixed(2)} ${t.currency}`, subValue: walletOverdue ? (language === 'ar' ? 'اشتراك متأخر + مشتريات' : 'Abonnement échu + achats') : (totalPlatformDebt > 0 ? (language === 'ar' ? 'مشتريات غير مدفوعة' : 'Achats impayés') : (language === 'ar' ? 'لا توجد ديون' : 'Aucune dette')), icon: CreditCard, color: (walletOverdue || totalPlatformDebt > 0) ? 'text-red-600' : 'text-slate-600', bgColor: (walletOverdue || totalPlatformDebt > 0) ? 'bg-red-100' : 'bg-slate-100', link: '/wallet-management' },
     { title: t.totalProducts, value: stats.total_products, icon: Package, color: 'text-primary', bgColor: 'bg-primary/10', link: '/products' },
     { title: t.lowStock, value: stats.low_stock_count, icon: AlertTriangle, color: 'text-amber-600', bgColor: 'bg-amber-100', link: '/products?filter=low-stock' },
     { title: t.totalCustomers, value: stats.total_customers, icon: Users, color: 'text-purple-600', bgColor: 'bg-purple-100', link: '/customers' },

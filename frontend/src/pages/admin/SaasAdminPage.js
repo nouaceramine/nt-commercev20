@@ -434,13 +434,18 @@ export default function SaasAdminPage() {
     if (!impersonateTenant) return;
     setImpersonateLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const originalToken = localStorage.getItem('token');
+      const originalUser = localStorage.getItem('user');
       const res = await apiClient.post(`/saas/impersonate/${impersonateTenant.id}`, {});
       const data = res.data;
+      // Preserve original super-admin session so user can return + still access platform pages
+      if (originalToken) localStorage.setItem('super_admin_token', originalToken);
+      if (originalUser) localStorage.setItem('super_admin_user', originalUser);
       // Store new token and user data
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('user', JSON.stringify(data.user));
       localStorage.setItem('user_type', 'tenant');
+      localStorage.setItem('is_impersonating', '1');
       // Redirect to dashboard
       window.location.href = '/';
     } catch (error) {

@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 5 — Full backend + frontend verification of: (a) two NEW top dashboard cards 'رصيد محفظة الزبون' and 'ديون محفظة الزبون' backed by /api/stats new fields customer_balance_total/count + customer_debt_total/customers_with_debt, (b) Motherboard fix while impersonating (isEffectiveSuperAdmin + apiClient super-admin-token routing), (c) impersonation banner + stop-impersonation flow, (d) /api/wallet platform_purchase_debt/count + total_platform_debt enrichment. Backend: 9/9 pytest tests PASS (/api/stats new fields present + numeric + anonymous 401, /api/wallet platform purchase fields present + invariant total_platform_debt == subscription_due + platform_purchase_debt verified, super_admin wallet returns 0 for platform purchase fields, /api/diagnostics still 200 for super_admin). Frontend: impersonation via /api/saas/impersonate works, dashboard renders all 8 cards in EXACT requested order with NEW cards FIRST [0]='رصيد محفظة الزبون'→/customers, [1]='ديون محفظة الزبون'→/customer-debts, then [2..7]= مبيعات اليوم, إجمالي النقد, رصيد المحفظة, رصيد محفظة المستخدم, ديون محفظة المستخدم, إجمالي المنتجات. Banner '🔁 أنت تتصفح كحساب: TEST TEST' shown with stop-impersonation-btn. /motherboard renders while impersonating (NO redirect): 24 components, DB متصلة, all 5 tabs (المكوّنات/المقاييس/الروبوتات/المستأجرون/الميزات) clickable with NO 403. stop-impersonation-btn correctly restores super_admin_token→token, removes is_impersonating/user_type/super_admin_token/super_admin_user, redirects to /saas-admin, banner gone.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (impersonated tenant)", "issues": ["React warning: 'Encountered two children with the same key' fires when navigating between routes (/wallet-management, /customers). Console-only, no visual impact — but should be traced (likely duplicate key in sidebar menu items or a stats list). Repro: load /, click /wallet-management."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter5_dashboard_cards.py",
+    "/app/test_reports/pytest/iteration_5_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Locate and fix the duplicate React key warning (likely in Layout.js sidebar items or a list inside DashboardPage). Grep .map((... ) => without a unique key prop."
+  ],
+  "critical_code_review_comments": [
+    "stats_routes.py:68-74 — customer_debt_agg uses `$group:_id:$customer_id` then `$group:_id:null,count:$sum:1` which counts UNIQUE customers with debt (correct for 'X زبون مدين'). Good. customer_balance_agg counts customers with balance>0 (correct).",
+    "wallet_routes.py:202-214 — platform_purchase_debt aggregates supplier_orders status∈{pending,unpaid,credit}. Currently DB has no such rows so the field is always 0 — this is by design (graceful fallback) but means UI subtitle 'لا توجد ديون' will keep showing until a real unpaid platform purchase exists. Recommend documenting how a supplier_order becomes 'unpaid' (which endpoint creates it).",
+    "stats_routes.py:21-23 — Cache TTL is 60s with cache_key=f'stats:dashboard:{tenant_id}'. Good per-tenant isolation. POST /api/cache/clear was reachable (tested) and returned without breaking the next /api/stats call.",
+    "Dashboard duplicate React key warning — investigation needed; not a blocker but pollutes console."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter5_dashboard_cards.py (new — 9 tests, all pass)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Super admin: admin@ntcommerce.com / Admin@2024 (via /api/auth/login). Impersonation via POST /api/saas/impersonate/{tenant_id} with super-admin Bearer; returns access_token + user(tenant_admin). Sample tenant: b4fde9b7-d1f2-46ec-b62a-f0971ca3deba ('TEST TEST').",
+  "seed_data_creation": "None permanent. No DB mutations in iteration 5 — tenant subscription_ends_at left at 2026-07-07 from iteration 4.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 PASSED end-to-end. New backend regression at /app/backend/tests/test_iter5_dashboard_cards.py covers /api/stats customer fields + /api/wallet platform_purchase_debt + impersonation context + /api/diagnostics super_admin/anonymous. Dashboard card DOM order verified: [0] رصيد محفظة الزبون → /customers, [1] ديون محفظة الزبون → /customer-debts, [2] مبيعات اليوم → /sales, [3] إجمالي النقد, [4] رصيد المحفظة → /recharge, [5] رصيد محفظة المستخدم → /wallet-management, [6] ديون محفظة المستخدم → /wallet-management, [7] إجمالي المنتجات. Banner data-testid='impersonation-banner' + button data-testid='stop-impersonation-btn' present. Motherboard works while impersonating (24 healthy components, all 5 tabs no-403). Stop-impersonation correctly clears: super_admin_token/super_admin_user/is_impersonating/user_type — restores token from super_admin_token, redirects to /saas-admin. Run regression: `pytest /app/backend/tests/test_iter5_dashboard_cards.py /app/backend/tests/test_wallet_enrichment.py /app/backend/tests/test_motherboard.py -v`. Minor: React duplicate-key console warning on navigation — non-blocking.",
+  "rca of the issue": "N/A — feature + bug-fix verification iteration. All three changes verified working. Customer-wallet stats: /api/stats returns new keys with correct types and the dashboard renders the new cards FIRST in the grid. Motherboard impersonation fix: dashboard mounts /motherboard without redirecting; underlying apiClient correctly swaps Authorization to super_admin_token for /diagnostics & /platform/features (verified by 200 + 24-component count + DB-connected banner). Wallet platform-purchase enrichment: invariant total_platform_debt = subscription_due + platform_purchase_debt holds; super_admin wallet returns 0 for both new fields (no tenant_id branch)."
+}

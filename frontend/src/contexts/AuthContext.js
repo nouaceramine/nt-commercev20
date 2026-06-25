@@ -122,7 +122,23 @@ export const AuthProvider = ({ children }) => {
   const isTenant = user?.user_type === 'tenant' || user?.role === 'tenant_admin';
   const isAgent = user?.user_type === 'agent' || user?.role === 'agent';
   const isCashier = user?.role === 'cashier';
-  
+  // Super-admin impersonating a tenant: original super-admin session was preserved in localStorage
+  const isImpersonating = typeof window !== 'undefined' && !!localStorage.getItem('super_admin_token');
+  // Treat the impersonating user as super-admin for platform-page access (motherboard, etc.)
+  const isEffectiveSuperAdmin = isSuperAdmin || isImpersonating;
+
+  const stopImpersonation = () => {
+    const origToken = localStorage.getItem('super_admin_token');
+    const origUser = localStorage.getItem('super_admin_user');
+    if (origToken) localStorage.setItem('token', origToken);
+    if (origUser) localStorage.setItem('user', origUser);
+    localStorage.removeItem('super_admin_token');
+    localStorage.removeItem('super_admin_user');
+    localStorage.removeItem('is_impersonating');
+    localStorage.removeItem('user_type');
+    window.location.href = '/saas-admin';
+  };
+
   const value = {
     user,
     token,
@@ -132,6 +148,9 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAdmin,
     isSuperAdmin,
+    isEffectiveSuperAdmin,
+    isImpersonating,
+    stopImpersonation,
     isTenant,
     isAgent,
     isCashier,

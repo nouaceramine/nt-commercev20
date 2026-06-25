@@ -195,6 +195,23 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         wallet["subscription_due"] = subscription_due
         wallet["subscription_overdue"] = subscription_overdue
         wallet["subscription_ends_at"] = subscription_ends_at
+
+        # Platform purchases debt — sum of any unpaid/pending supplier_orders for this tenant.
+        # Currently orders are paid upfront (status=completed), but this aggregation
+        # gracefully accounts for any future credit-based platform purchases.
+        platform_purchase_debt = 0.0
+        platform_purchase_count = 0
+        if entity_type == "tenant":
+            agg = await main_db.supplier_orders.aggregate([
+                {"$match": {"tenant_id": entity_id, "status": {"$in": ["pending", "unpaid", "credit"]}}},
+                {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
+            ]).to_list(1)
+            if agg:
+                platform_purchase_debt = float(agg[0].get("total") or 0)
+                platform_purchase_count = int(agg[0].get("count") or 0)
+        wallet["platform_purchase_debt"] = platform_purchase_debt
+        wallet["platform_purchase_count"] = platform_purchase_count
+        wallet["total_platform_debt"] = subscription_due + platform_purchase_debt
         return wallet
 
     # ── Add Funds (Admin) ──

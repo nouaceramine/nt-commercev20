@@ -96,7 +96,7 @@ const iconMap = {
 export const Layout = ({ children }) => {
   const { t, language, toggleLanguage, isRTL } = useLanguage();
   // Get user type and features
-  const { user, logout, isAdmin, isSuperAdmin, isTenant, isCashier, isFeatureEnabled } = useAuth();
+  const { user, logout, isAdmin, isSuperAdmin, isEffectiveSuperAdmin, isImpersonating, stopImpersonation, isTenant, isCashier, isFeatureEnabled } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -561,7 +561,8 @@ export const Layout = ({ children }) => {
       .map(section => {
         const filteredItems = section.items.filter(item => {
           // minRole guard: hide super-admin-only items from tenants/agents/cashiers
-          if (item.minRole === 'super_admin' && !isSuperAdmin) return false;
+          // (allow when super-admin is impersonating a tenant)
+          if (item.minRole === 'super_admin' && !isEffectiveSuperAdmin) return false;
           // Section-scoped sub-feature check (plan-level nested format)
           if (section.featureKey && item.subFeature) {
             if (!isFeatureEnabled(section.featureKey, item.subFeature)) return false;
@@ -992,6 +993,21 @@ export const Layout = ({ children }) => {
 
         {/* Page Content */}
         <main className="p-6 md:p-8 pt-20 md:pt-8">
+          {isImpersonating && (
+            <div data-testid="impersonation-banner" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm dark:border-amber-700/50 dark:bg-amber-900/20">
+              <div className="text-amber-800 dark:text-amber-200">
+                {language === 'ar' ? `🔁 أنت تتصفح كحساب: ${user?.name || user?.email || ''}` : `🔁 Vous naviguez en tant que: ${user?.name || user?.email || ''}`}
+              </div>
+              <button
+                type="button"
+                data-testid="stop-impersonation-btn"
+                onClick={stopImpersonation}
+                className="rounded-md bg-amber-600 px-3 py-1 text-white hover:bg-amber-700"
+              >
+                {language === 'ar' ? 'العودة لحساب السوبر-أدمن' : 'Retour au super-admin'}
+              </button>
+            </div>
+          )}
           {children}
         </main>
       </div>

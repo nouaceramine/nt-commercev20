@@ -14,7 +14,16 @@ const apiClient = axios.create({
 });
 
 // Request interceptor - auto-attach auth token
+// When impersonating, super-admin-scoped endpoints (motherboard / platform mgmt)
+// must use the original super-admin token, not the tenant token.
+const SUPER_ADMIN_PATHS = ['/diagnostics', '/platform/features', '/saas/', '/robots', '/cache'];
 apiClient.interceptors.request.use((config) => {
+  const superToken = localStorage.getItem('super_admin_token');
+  const url = config.url || '';
+  if (superToken && SUPER_ADMIN_PATHS.some((p) => url.startsWith(p))) {
+    config.headers.Authorization = `Bearer ${superToken}`;
+    return config;
+  }
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

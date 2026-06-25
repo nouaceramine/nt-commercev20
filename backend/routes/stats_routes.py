@@ -55,6 +55,24 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             {"$group": {"_id": None, "total": {"$sum": "$remaining_amount"}}}
         ]).to_list(1)
 
+        # Customer wallet aggregates ─ used by dashboard cards
+        # "رصيد محفظة الزبون" — total positive prepaid credit held by customers
+        customer_balance_agg = await db.customers.aggregate([
+            {"$match": {"balance": {"$gt": 0}}},
+            {"$group": {"_id": None, "total": {"$sum": "$balance"}, "count": {"$sum": 1}}}
+        ]).to_list(1)
+        customer_balance_total = customer_balance_agg[0]["total"] if customer_balance_agg else 0
+        customer_balance_count = customer_balance_agg[0]["count"] if customer_balance_agg else 0
+
+        # "ديون محفظة الزبون" — total outstanding from unpaid sales (debt_amount > 0)
+        customer_debt_agg = await db.sales.aggregate([
+            {"$match": {"debt_amount": {"$gt": 0}, "status": {"$ne": "returned"}}},
+            {"$group": {"_id": "$customer_id", "total_debt": {"$sum": "$debt_amount"}}},
+            {"$group": {"_id": None, "total": {"$sum": "$total_debt"}, "count": {"$sum": 1}}}
+        ]).to_list(1)
+        customer_debt_total = customer_debt_agg[0]["total"] if customer_debt_agg else 0
+        customers_with_debt = customer_debt_agg[0]["count"] if customer_debt_agg else 0
+
         response = {
             "total_products": total_products, "total_customers": total_customers,
             "total_suppliers": total_suppliers, "total_employees": total_employees,
@@ -65,6 +83,10 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "unread_notifications": unread_notifications,
             "total_receivables": total_receivables[0]["total"] if total_receivables else 0,
             "total_payables": total_payables[0]["total"] if total_payables else 0,
+            "customer_balance_total": customer_balance_total,
+            "customer_balance_count": customer_balance_count,
+            "customer_debt_total": customer_debt_total,
+            "customers_with_debt": customers_with_debt,
             "currency": CURRENCY
         }
         cache.set(cache_key, response, ttl=60)  # Cache for 1 minute
