@@ -90,6 +90,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('super_admin_token');
     localStorage.removeItem('super_admin_user');
     localStorage.removeItem('is_impersonating');
+    localStorage.removeItem('impersonation_session_id');
     setToken(null);
     setUser(null);
     setFeatures(null);
@@ -149,12 +150,19 @@ export const AuthProvider = ({ children }) => {
   const stopImpersonation = () => {
     const origToken = localStorage.getItem('super_admin_token');
     const origUser = localStorage.getItem('super_admin_user');
+    const sessionId = localStorage.getItem('impersonation_session_id');
+    // Fire-and-forget: close the audit log entry (uses super-admin token via apiClient interceptor)
+    if (sessionId) {
+      // We must call BEFORE we wipe localStorage because apiClient needs super_admin_token
+      apiClient.post(`/saas/impersonate/${sessionId}/stop`).catch(() => {});
+    }
     if (origToken) localStorage.setItem('token', origToken);
     if (origUser) localStorage.setItem('user', origUser);
     localStorage.removeItem('super_admin_token');
     localStorage.removeItem('super_admin_user');
     localStorage.removeItem('is_impersonating');
     localStorage.removeItem('user_type');
+    localStorage.removeItem('impersonation_session_id');
     window.location.href = '/saas-admin';
   };
 

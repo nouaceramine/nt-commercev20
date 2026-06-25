@@ -1,5 +1,5 @@
 """SaaS Tenants Routes - Tenant management CRUD"""
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -83,7 +83,7 @@ async def get_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
 
 
 @router.post("/saas/impersonate/{tenant_id}")
-async def impersonate_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
+async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Depends(get_super_admin)):
     tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
     if not tenant:
         raise HTTPException(status_code=404, detail="المشترك غير موجود")
@@ -139,6 +139,32 @@ async def impersonate_tenant(tenant_id: str, admin: dict = Depends(get_super_adm
     features = {**(plan.get("features") or {}), **(tenant.get("features_override") or {})} if plan else {}
     limits = {**(plan.get("limits") or {}), **(tenant.get("limits_override") or {})} if plan else {}
 
+    # ── Impersonation Audit Log ──
+    # Record who, when, where (IP), and on which tenant. The "stopped_at" + "duration_seconds"
+    # are filled later by POST /saas/impersonate/{session_id}/stop or fall back to "open".
+    client_host = (request.client.host if request.client else None) or "unknown"
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    if forwarded:
+        client_host = forwarded.split(",")[0].strip()
+    session_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    log_doc = {
+        "id": session_id,
+        "tenant_id": tenant_id,
+        "tenant_name": tenant.get("name", ""),
+        "tenant_email": tenant.get("email", ""),
+        "admin_id": admin.get("id"),
+        "admin_email": admin.get("email", ""),
+        "admin_name": admin.get("name", ""),
+        "ip": client_host,
+        "user_agent": request.headers.get("user-agent", "")[:300],
+        "started_at": started_at,
+        "stopped_at": None,
+        "duration_seconds": None,
+        "status": "active",
+    }
+    await main_db.impersonation_logs.insert_one(log_doc)
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -146,6 +172,7 @@ async def impersonate_tenant(tenant_id: str, admin: dict = Depends(get_super_adm
         "name": tenant.get("name", ""),
         "company_name": tenant.get("company_name", ""),
         "tenant_id": tenant_id,
+        "impersonation_session_id": session_id,
         "user_type": "tenant",
         "user": {
             "id": actual_user_id,
@@ -160,6 +187,54 @@ async def impersonate_tenant(tenant_id: str, admin: dict = Depends(get_super_adm
             "limits": limits,
         },
     }
+
+
+@router.post("/saas/impersonate/{session_id}/stop")
+async def stop_impersonation(session_id: str, admin: dict = Depends(get_super_admin)):
+    """Close an impersonation audit-log entry. Idempotent."""
+    log = await main_db.impersonation_logs.find_one({"id": session_id}, {"_id": 0})
+    if not log:
+        raise HTTPException(status_code=404, detail="جلسة الانتحال غير موجودة")
+    if log.get("status") == "closed":
+        return {"ok": True, "already_closed": True}
+    stopped_at = datetime.now(timezone.utc)
+    try:
+        started_dt = datetime.fromisoformat(log["started_at"].replace("Z", "+00:00"))
+        duration = max(0, int((stopped_at - started_dt).total_seconds()))
+    except Exception:
+        duration = None
+    await main_db.impersonation_logs.update_one(
+        {"id": session_id},
+        {"$set": {
+            "stopped_at": stopped_at.isoformat(),
+            "duration_seconds": duration,
+            "status": "closed",
+        }},
+    )
+    return {"ok": True, "duration_seconds": duration}
+
+
+@router.get("/saas/impersonation-logs")
+async def list_impersonation_logs(
+    limit: int = 100,
+    tenant_id: Optional[str] = None,
+    admin_id: Optional[str] = None,
+    admin: dict = Depends(get_super_admin),
+):
+    """List impersonation audit-log entries (most recent first). Super-admin only."""
+    query: dict = {}
+    if tenant_id:
+        query["tenant_id"] = tenant_id
+    if admin_id:
+        query["admin_id"] = admin_id
+    cursor = (
+        main_db.impersonation_logs.find(query, {"_id": 0})
+        .sort("started_at", -1)
+        .limit(max(1, min(limit, 500)))
+    )
+    rows = await cursor.to_list(length=max(1, min(limit, 500)))
+    active = await main_db.impersonation_logs.count_documents({"status": "active"})
+    return {"total_active": active, "items": rows}
 
 
 @router.post("/saas/tenants", response_model=TenantResponse)

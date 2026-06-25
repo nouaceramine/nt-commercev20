@@ -43,7 +43,7 @@ import {
   Banknote, Wallet, PiggyBank, Receipt, Calculator, FileText, ArrowUpRight, ArrowDownRight,
   Database, Activity, BarChart3, ShoppingCart, UserCheck, LogIn, Bell, UserCog, Copy,
   AlertCircle, Bug, Shield, Zap, Server, Wrench, CheckCircle, XCircle, Download, Play, Pause,
-  Wifi, WifiOff, Sliders, Boxes, Tv, ShoppingBag as ShoppingBagIcon, Smartphone
+  Wifi, WifiOff, Sliders, Boxes, Tv, ShoppingBag as ShoppingBagIcon, Smartphone, ShieldCheck
 } from 'lucide-react';
 import { DatabaseManager } from '../../components/DatabaseManager';
 import { AgentsDashboard } from './components/AgentsDashboard';
@@ -112,6 +112,9 @@ export default function SaasAdminPage() {
   const [impersonateDialogOpen, setImpersonateDialogOpen] = useState(false);
   const [impersonateTenant, setImpersonateTenant] = useState(null);
   const [impersonateLoading, setImpersonateLoading] = useState(false);
+  const [impersonationLogs, setImpersonationLogs] = useState([]);
+  const [impersonationLogsLoading, setImpersonationLogsLoading] = useState(false);
+  const [impersonationActiveCount, setImpersonationActiveCount] = useState(0);
 
   // Bridge Mode State
   const [bridgeDialogOpen, setBridgeDialogOpen] = useState(false);
@@ -446,11 +449,27 @@ export default function SaasAdminPage() {
       localStorage.setItem('user', JSON.stringify(data.user));
       localStorage.setItem('user_type', 'tenant');
       localStorage.setItem('is_impersonating', '1');
+      if (data.impersonation_session_id) {
+        localStorage.setItem('impersonation_session_id', data.impersonation_session_id);
+      }
       // Redirect to dashboard
       window.location.href = '/';
     } catch (error) {
       toast.error(error.response?.data?.detail || 'فشل الدخول لحساب المشترك');
       setImpersonateLoading(false);
+    }
+  };
+
+  const loadImpersonationLogs = async () => {
+    setImpersonationLogsLoading(true);
+    try {
+      const res = await apiClient.get('/saas/impersonation-logs?limit=200');
+      setImpersonationLogs(res.data?.items || []);
+      setImpersonationActiveCount(res.data?.total_active || 0);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل تحميل سجل الانتحال');
+    } finally {
+      setImpersonationLogsLoading(false);
     }
   };
 
@@ -961,6 +980,10 @@ export default function SaasAdminPage() {
             <TabsTrigger value="ai-assistant" className="gap-2" data-testid="ai-assistant-tab">
               <Bot className="h-4 w-4" />
               المساعد الذكي
+            </TabsTrigger>
+            <TabsTrigger value="impersonation-logs" className="gap-2" data-testid="impersonation-logs-tab" onClick={() => loadImpersonationLogs()}>
+              <ShieldCheck className="h-4 w-4" />
+              سجل الانتحال
             </TabsTrigger>
           </TabsList>
 
@@ -1564,6 +1587,80 @@ export default function SaasAdminPage() {
           {/* AI Assistant Tab */}
           <TabsContent value="ai-assistant" className="space-y-6" data-testid="ai-assistant-content">
             <AIAssistant />
+          </TabsContent>
+
+          {/* Impersonation Audit Log Tab */}
+          <TabsContent value="impersonation-logs" className="space-y-4" data-testid="impersonation-logs-content">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">سجل عمليات الانتحال</h3>
+                <p className="text-sm text-muted-foreground">سجل كامل لكل مرّة دخل فيها السوبر-أدمن إلى حساب مشترك — للتدقيق والمساءلة (Compliance).</p>
+              </div>
+              <div className="flex items-center gap-3">
+                {impersonationActiveCount > 0 && (
+                  <span className="rounded-md bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-3 py-1 text-sm" data-testid="impersonation-active-count">
+                    🟡 {impersonationActiveCount} جلسة نشطة
+                  </span>
+                )}
+                <Button variant="outline" size="sm" onClick={loadImpersonationLogs} data-testid="refresh-impersonation-logs-btn">
+                  <RefreshCw className={`h-4 w-4 me-2 ${impersonationLogsLoading ? 'animate-spin' : ''}`} />
+                  تحديث
+                </Button>
+              </div>
+            </div>
+
+            <Card>
+              <CardContent className="p-0">
+                {impersonationLogsLoading ? (
+                  <div className="p-8 text-center text-muted-foreground">جارٍ التحميل…</div>
+                ) : impersonationLogs.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground" data-testid="impersonation-logs-empty">لا توجد عمليات انتحال مسجّلة بعد.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-3 py-2 text-start">السوبر-أدمن</th>
+                          <th className="px-3 py-2 text-start">المشترك المُنتحَل</th>
+                          <th className="px-3 py-2 text-start">IP</th>
+                          <th className="px-3 py-2 text-start">بدأ</th>
+                          <th className="px-3 py-2 text-start">انتهى</th>
+                          <th className="px-3 py-2 text-start">المدّة</th>
+                          <th className="px-3 py-2 text-start">الحالة</th>
+                        </tr>
+                      </thead>
+                      <tbody data-testid="impersonation-logs-table">
+                        {impersonationLogs.map((log) => (
+                          <tr key={log.id} className="border-t border-border hover:bg-muted/30">
+                            <td className="px-3 py-2 font-mono text-xs">{log.admin_email || log.admin_name || log.admin_id}</td>
+                            <td className="px-3 py-2">{log.tenant_name} <span className="text-xs text-muted-foreground">({log.tenant_email})</span></td>
+                            <td className="px-3 py-2 font-mono text-xs">{log.ip}</td>
+                            <td className="px-3 py-2 text-xs">{formatShortDate(log.started_at)}</td>
+                            <td className="px-3 py-2 text-xs">{log.stopped_at ? formatShortDate(log.stopped_at) : '—'}</td>
+                            <td className="px-3 py-2 text-xs">
+                              {log.duration_seconds != null
+                                ? (log.duration_seconds < 60
+                                    ? `${log.duration_seconds} ث`
+                                    : log.duration_seconds < 3600
+                                      ? `${Math.round(log.duration_seconds / 60)} د`
+                                      : `${(log.duration_seconds / 3600).toFixed(1)} س`)
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2">
+                              {log.status === 'active' ? (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-0.5 text-xs">🟡 جاري</span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 text-xs">✓ مُنتهى</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 

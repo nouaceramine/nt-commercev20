@@ -112,17 +112,24 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
             return plan.get("six_month_price", 0)
         return plan.get("yearly_price", 0)
 
+    async def _lookup_plan_and_price(tenant):
+        """Resolve a tenant's plan + current-period price.
+        Returns (plan_doc_or_None, sub_type, price_float).
+        """
+        sub_type = tenant.get("subscription_type", "monthly")
+        plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
+        price = float(_plan_price(plan or {}, sub_type) or 0)
+        return plan, sub_type, price
+
     def _period_days(sub_type):
         return {"monthly": 30, "6months": 180}.get(sub_type, 365)
 
     async def _charge_subscription(tenant, by_label):
         """Charge a tenant's subscription fee from their wallet and extend the subscription."""
         entity_id = tenant["id"]
-        plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
+        plan, sub_type, amount = await _lookup_plan_and_price(tenant)
         if not plan:
             raise HTTPException(status_code=404, detail="الخطة غير موجودة")
-        sub_type = tenant.get("subscription_type", "monthly")
-        amount = float(_plan_price(plan, sub_type) or 0)
         if amount <= 0:
             raise HTTPException(status_code=400, detail="سعر الخطة غير محدد")
         wallet = await _get_or_create_wallet(entity_id, "tenant")
@@ -179,10 +186,8 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         if entity_type == "tenant":
             tenant = await main_db.saas_tenants.find_one({"id": entity_id}, {"_id": 0})
             if tenant:
-                sub_type = tenant.get("subscription_type", "monthly")
+                _plan, _sub_type, period_price = await _lookup_plan_and_price(tenant)
                 subscription_ends_at = tenant.get("subscription_ends_at")
-                plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
-                period_price = float(_plan_price(plan or {}, sub_type) or 0)
                 now = datetime.now(timezone.utc)
                 if subscription_ends_at:
                     try:

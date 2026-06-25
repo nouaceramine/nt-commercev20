@@ -885,9 +885,9 @@ export const Layout = ({ children }) => {
                 {/* Section Items */}
                 {(sidebarCollapsed || expandedSections.includes(section.title)) && (
                   <div className={`space-y-1 ${!sidebarCollapsed ? 'mt-1 ms-2' : ''}`}>
-                    {section.items.map((item) => (
+                    {Array.from(new Map(section.items.map(i => [i.path, i])).values()).map((item) => (
                       <Link
-                        key={item.path}
+                        key={`${section.id || section.title}-${item.path}`}
                         to={item.path}
                         onClick={() => setSidebarOpen(false)}
                         className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 ${
