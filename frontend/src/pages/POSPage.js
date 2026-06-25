@@ -179,16 +179,39 @@ export default function POSPage() {
   const [editingShortcutIndex, setEditingShortcutIndex] = useState(null);
   const [shortcutColor, setShortcutColor] = useState('#e5e7eb');
   const [shortcutProductId, setShortcutProductId] = useState('');
+  const [editingShortcutsMode, setEditingShortcutsMode] = useState(false);
 
   // Current cashier info
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const currentCashier = currentUser?.full_name || currentUser?.username || 'Cashier';
 
-  // Save shortcuts to localStorage
+  // Save shortcuts to localStorage AND backend (debounced)
   const saveShortcuts = (shortcuts) => {
     setProductShortcuts(shortcuts);
     localStorage.setItem('posProductShortcuts', JSON.stringify(shortcuts));
+    // Fire-and-forget backend sync
+    apiClient.put('/pos/shortcuts', {
+      shortcuts: shortcuts.map((s) => ({
+        productId: s.productId || null,
+        color: s.color || null,
+        label: s.label || null,
+      })),
+    }).catch(() => { /* localStorage is the source of truth on failure */ });
   };
+
+  // Load shortcuts from backend on mount (falls back to localStorage)
+  useEffect(() => {
+    apiClient.get('/pos/shortcuts').then((res) => {
+      const remote = res.data?.shortcuts || [];
+      if (remote.length > 0) {
+        const padded = remote.length < 18
+          ? [...remote, ...Array(18 - remote.length).fill({ productId: null, color: '#e5e7eb' })]
+          : remote.slice(0, 18);
+        setProductShortcuts(padded);
+        localStorage.setItem('posProductShortcuts', JSON.stringify(padded));
+      }
+    }).catch(() => { /* silently keep localStorage version */ });
+  }, []);
 
   // ==================== DATA FETCHING ====================
 
@@ -1245,6 +1268,9 @@ ${sale.paid_amount?`<div class="row" style="margin-top:4px"><span>${language==='
             language={language}
             formatCurrency={formatCurrency}
             isRTL={isRTL}
+            editing={editingShortcutsMode}
+            onToggleEdit={() => setEditingShortcutsMode(!editingShortcutsMode)}
+            onReorder={saveShortcuts}
           />
         </div>
 
