@@ -1092,7 +1092,7 @@ export default function DailySessionsPage() {
                 </h3>
                 <div className="space-y-2">
                   {closingReport.topCustomers.map((customer, index) => (
-                    <div key={`session-sale-${sale.id || sale.invoice_number || index}`} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                    <div key={`session-top-customer-${customer.id || customer.name || index}`} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
                       <div className="flex items-center gap-2">
                         <span className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
                           {index + 1}

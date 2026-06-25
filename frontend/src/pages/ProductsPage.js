@@ -186,11 +186,12 @@ export default function ProductsPage() {
   const sortedProducts = [...products].sort((a, b) => {
     let comparison = 0;
     switch (sortBy) {
-      case 'name':
+      case 'name': {
         const nameA = language === 'ar' ? (a.name_ar || a.name_en) : (a.name_en || a.name_ar);
         const nameB = language === 'ar' ? (b.name_ar || b.name_en) : (b.name_en || b.name_ar);
         comparison = nameA.localeCompare(nameB);
         break;
+      }
       case 'price':
         comparison = (a.retail_price || 0) - (b.retail_price || 0);
         break;

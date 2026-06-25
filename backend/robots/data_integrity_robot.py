@@ -167,7 +167,7 @@ class DataIntegrityRobot:
         """Detect products sharing the same barcode (data entry error)."""
         try:
             pipeline = [
-                {"$match": {"barcode": {"$ne": None, "$ne": ""}}},
+                {"$match": {"barcode": {"$nin": [None, ""]}}},
                 {"$group": {"_id": "$barcode", "count": {"$sum": 1}, "names": {"$push": "$name_ar"}}},
                 {"$match": {"count": {"$gt": 1}}},
                 {"$limit": 20},
@@ -230,7 +230,7 @@ class DataIntegrityRobot:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
             recent_sales = await tdb.sales.find(
                 {
-                    "customer_id": {"$ne": None, "$ne": ""},
+                    "customer_id": {"$nin": [None, ""]},
                     "created_at": {"$gte": cutoff},
                 },
                 {"_id": 0, "id": 1, "customer_id": 1},

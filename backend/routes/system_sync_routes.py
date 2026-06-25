@@ -792,7 +792,6 @@ async def request_tenant_backup(current_user: dict = Depends(require_tenant)):
 @router.get("/tenant/export-data")
 async def export_tenant_data(current_user: dict = Depends(require_tenant)):
     """Export tenant's own data"""
-    import json
 
     tenant_id = current_user.get("tenant_id") or current_user.get("id")
 

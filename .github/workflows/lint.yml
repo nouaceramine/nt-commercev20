@@ -1,0 +1,65 @@
+name: Lint & Static Checks
+
+# Runs ESLint on the React frontend and ruff on the Python backend for
+# every push and pull request. Blocks the merge if any lint *error* is found
+# (warnings are allowed during the cleanup transition).
+#
+# This was added after a real production bug where `<History />` was used in
+# POSPage.js without being imported, falling back to the browser's
+# non-constructable window.History and crashing /pos with "Illegal constructor".
+# Catches that class of bug before it reaches production.
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  frontend-lint:
+    name: Frontend ESLint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Run ESLint
+        run: yarn lint
+
+  backend-lint:
+    name: Backend Ruff
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff (errors only)
+        # Only enforce the catastrophic rules: undefined names, redefinitions,
+        # duplicate dict keys (e.g. {"$ne": None, "$ne": ""} Mongo bug).
+        # Stylistic issues are not blocking.
+        run: |
+          ruff check . \
+            --select=F821,F811,F601,F602 \
+            --exclude=__pycache__,logs,static

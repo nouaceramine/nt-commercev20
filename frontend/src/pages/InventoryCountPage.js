@@ -535,11 +535,12 @@ export default function InventoryCountPage() {
         case 'barcode':
           comparison = (a.barcode || '').localeCompare(b.barcode || '');
           break;
-        case 'difference':
+        case 'difference': {
           const diffA = countedItems[a.id] !== undefined ? countedItems[a.id] - a.quantity : -Infinity;
           const diffB = countedItems[b.id] !== undefined ? countedItems[b.id] - b.quantity : -Infinity;
           comparison = diffA - diffB;
           break;
+        }
         default:
           comparison = 0;
       }

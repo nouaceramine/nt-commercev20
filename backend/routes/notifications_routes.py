@@ -205,7 +205,6 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
 
     @router.get("/products/export/excel")
     async def export_products_excel(admin: dict = Depends(get_tenant_admin)):
-        import pandas as pd
 
         products = await db.products.find({}, {"_id": 0}).to_list(10000)
 
@@ -240,11 +239,9 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             headers={"Content-Disposition": "attachment; filename=products.xlsx"}
         )
 
-    from fastapi import UploadFile, File
 
     @router.post("/products/import/excel")
     async def import_products_excel(file: UploadFile = File(...), admin: dict = Depends(get_tenant_admin)):
-        import pandas as pd
 
         if not file.filename.endswith(('.xlsx', '.xls')):
             raise HTTPException(status_code=400, detail="File must be Excel format (.xlsx or .xls)")

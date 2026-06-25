@@ -331,7 +331,7 @@ def create_agent_hierarchy_routes(db, get_super_admin) -> dict:
         """Get overall hierarchy statistics"""
         total_agents = await db.saas_agents.count_documents({})
         active_agents = await db.saas_agents.count_documents({"is_active": True})
-        agents_with_parent = await db.saas_agents.count_documents({"parent_agent_id": {"$exists": True, "$ne": None, "$ne": ""}})
+        agents_with_parent = await db.saas_agents.count_documents({"parent_agent_id": {"$exists": True, "$nin": [None, ""]}})
         levels = await db.agent_levels.find({}, {"_id": 0}).sort("level", 1).to_list(20)
 
         # Agents per level

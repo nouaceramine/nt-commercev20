@@ -311,10 +311,6 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         return UserResponse(**current_user)
 
     # ============ TWO-FACTOR AUTHENTICATION (2FA) ============
-    import pyotp
-    import qrcode
-    import io
-    import base64
 
     @router.post("/auth/2fa/setup")
     async def setup_2fa(current_user: dict = Depends(get_current_user)):

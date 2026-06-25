@@ -1,34 +1,40 @@
 # NT Commerce v16 - PRD
 
 ## Original Problem Statement
-استنساخ مشروع `nouaceramine/nt-commercev16` من GitHub وتثبيته/تشغيله، إصلاح الأخطاء، بناء نظام لوغات لتتبع الأخطاء، إصلاح مشكلة الدخول للحسابات، وحل أخطاء واجهة المستخدم المتعددة.
+استنساخ مشروع `nouaceramine/nt-commercev16` وتشغيله، إصلاح الأخطاء، بناء نظام لوغات، إصلاح المصادقة، وحماية الكود من تكرار نفس نوع الأخطاء.
 
 ## Architecture
 - **Backend**: FastAPI (entry: `backend/main.py`, supervisor wrapper: `backend/server.py`), MongoDB (motor), JWT auth, multi-tenant SaaS
 - **Frontend**: React 19 + craco, Tailwind, Shadcn/Radix UI, RTL Arabic + French
-- **Integrations**: Emergent LLM key (gpt-4o-mini for AI Chat + log analysis). Stripe/SendGrid/Resend empty.
+- **Integrations**: Emergent LLM key (gpt-4o-mini for AI Chat + log analysis)
+- **CI**: GitHub Actions workflow `.github/workflows/lint.yml` (ESLint + ruff)
 
 ## Sessions Summary
-- **S1 Setup**: Cloned & ran, deps installed, server.py shim, env configured, prod data seeded
-- **S2 Code cleanup**: LandingPage/PricingPage/RegisterPage field-name fixes, suppressed 403 toast on public pages, missing `io` imports, undefined symbols, removed legacy RegisterPage
-- **S3 System Logs**: backend route + global exception handler, frontend errorLogger.js, SystemLogsPage `/saas-admin/system-logs`, AI analysis via Emergent LLM
-- **S4 Auth bug**: impersonate now creates real user in tenant_db, agent branch added to get_current_user, tenant fallback to saas_tenants
-- **S5 Page-level errors (current)**:
-  - `SmartDashboardPage.js`: undefined `stat` → `indicator.name` (ReferenceError fixed)
-  - `utils/beep.js`: lazy AudioContext creation to avoid "Illegal constructor" on /pos
-  - `services/ai/llm_service.py`: fallback to Emergent LLM via emergentintegrations when Replit env not set → AI Chat now works
-  - `sidebarMenu.js` + `Layout.js`: `motherboard` item now requires `minRole: 'super_admin'` (hidden from tenants)
-  - Tax-report endpoints verified working (200 OK for all)
+- **S1 Setup**: Cloned, deps installed, server.py shim, env configured, prod data seeded
+- **S2 Code cleanup**: LandingPage/PricingPage/RegisterPage fixes, suppressed 403 toast, missing `io` imports
+- **S3 System Logs**: backend route + global exception handler, frontend errorLogger.js, /saas-admin/system-logs page with AI analysis
+- **S4 Auth bug**: impersonate now creates real user in tenant_db, agent branch in get_current_user, tenant fallback
+- **S5 Page-level errors**: SmartDashboard `stat`→`indicator.name`, beep.js lazy AudioContext, llm_service Emergent LLM fallback, motherboard sidebar guard
+- **S6 POS Illegal constructor + CI**:
+  - **Root cause**: `<History />` in POSPage.js wasn't imported from lucide-react → fell back to `window.History` (DOM API) which throws Illegal constructor when React rendered it
+  - **Fix**: added `History` to lucide-react imports + `/motherboard` route now `superAdminOnly`
+  - **CI**: created `.github/workflows/lint.yml` with ESLint (no-undef + react/jsx-no-undef) + ruff (F821/F811/F601/F602)
+  - **eslint.config.mjs**: flat config tuned to catch the bug class without flooding on existing warnings
+  - **Backend cleanup**: removed duplicate import redefinitions, fixed 3 real Mongo bugs `{"$ne": None, "$ne": ""}` → `{"$nin": [None, ""]}` in data_integrity_robot and agent_hierarchy_routes
+  - **Frontend cleanup**: fixed `sale is not defined` in DailySessionsPage, missing `toast` import in DashboardPage, 3 case-declarations bugs
 
 ## Test Credentials
 See `/app/memory/test_credentials.md`
 
+## Final Lint Status
+- **Backend ruff**: 0 errors (catastrophic class)
+- **Frontend ESLint**: 0 errors, 867 non-blocking warnings (cleanup backlog)
+
 ## Known Limitations / Backlog
-- **P2**: Stripe / SendGrid / Resend require user-provided API keys
-- **P2**: Redis caching disabled
-- **P2**: Some tenant pages still flood logs (notifications/families) when accessed by impersonator
-- **P3**: ~200 react-hooks/exhaustive-deps non-blocking warnings remain
+- P2: Stripe / SendGrid / Resend require user keys
+- P2: Redis caching disabled
+- P3: 867 unused-vars warnings + ~200 react-hooks/exhaustive-deps warnings (non-blocking)
 
 ## Next Action Items
-- Verify the 5 previously-broken pages now load cleanly: /motherboard (hidden), /pos, /smart-dashboard, /tax-reports, /ai-chat
-- If new errors appear, capture them in `/saas-admin/system-logs` and we iterate
+- Push to GitHub via "Save to GitHub" — the workflow will run on the next push
+- If CI fails, fix only the *errors* (not warnings) and re-push

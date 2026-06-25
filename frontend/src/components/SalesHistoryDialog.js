@@ -68,18 +68,20 @@ export default function SalesHistoryDialog({ open, onClose }) {
           startDate = new Date(now.setHours(0, 0, 0, 0)).toISOString();
           endDate = new Date().toISOString();
           break;
-        case 'week':
+        case 'week': {
           const weekAgo = new Date(now);
           weekAgo.setDate(weekAgo.getDate() - 7);
           startDate = weekAgo.toISOString();
           endDate = new Date().toISOString();
           break;
-        case 'month':
+        }
+        case 'month': {
           const monthAgo = new Date(now);
           monthAgo.setMonth(monthAgo.getMonth() - 1);
           startDate = monthAgo.toISOString();
           endDate = new Date().toISOString();
           break;
+        }
         case 'custom':
           if (customStartDate && customEndDate) {
             startDate = new Date(customStartDate).toISOString();
