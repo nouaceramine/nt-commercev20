@@ -1148,37 +1148,36 @@ ${sale.paid_amount?`<div class="row" style="margin-top:4px"><span>${language==='
             isRTL={isRTL}
           />
 
-          {/* Mobile Quick Actions Bar */}
-          <div className="md:hidden flex items-center gap-2 mb-2 overflow-x-auto pb-2" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
-            <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowProductsDialog(true)}>
-              <Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}
-            </Button>
-            <Button size="sm" variant={returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}>
-              <Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}
-            </Button>
-            <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowCustomersDialog(true)}>
-              <Users className="h-4 w-4" />{language === 'ar' ? 'زبون' : 'Client'}
-            </Button>
-            <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowHistoryDialog(true)}>
-              <History className="h-4 w-4" />
-            </Button>
-          </div>
+          {/* Middle column: quick actions (mobile bar + Sell Card + Flexy panel) */}
+          <div className="col-span-1 md:col-span-3 flex flex-col gap-2 min-h-0 overflow-y-auto" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+            {/* Mobile Quick Actions Bar */}
+            <div className="md:hidden flex items-center gap-2 mb-1 overflow-x-auto pb-1">
+              <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowProductsDialog(true)}>
+                <Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}
+              </Button>
+              <Button size="sm" variant={returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}>
+                <Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowCustomersDialog(true)}>
+                <Users className="h-4 w-4" />{language === 'ar' ? 'زبون' : 'Client'}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowHistoryDialog(true)}>
+                <History className="h-4 w-4" />
+              </Button>
+            </div>
 
-          {/* Sell Recharge Card button (visible on all viewports) */}
-          <div className="mb-2">
+            {/* Sell Recharge Card button */}
             <Button
               variant="outline"
-              className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50"
+              className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 w-full justify-start"
               onClick={() => setShowSellCardDialog(true)}
               data-testid="open-sell-card-btn"
             >
               <CreditCard className="h-4 w-4" />
-              {language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte de recharge'}
+              {language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte'}
             </Button>
-          </div>
 
-          {/* Quick Flexy / mobile recharge */}
-          <div className="mb-2">
+            {/* Quick Flexy / mobile recharge */}
             <QuickFlexyPanel ref={flexyPanelRef} language={language} />
           </div>
 

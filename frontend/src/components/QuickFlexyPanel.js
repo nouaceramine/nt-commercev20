@@ -185,12 +185,12 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
                 </Button>
               </div>
             </div>
-            <div className="flex items-center gap-1 flex-wrap">
+            <div className="grid grid-cols-5 gap-1">
               {QUICK_AMOUNTS.map((a) => (
                 <Button
                   key={a} size="sm"
                   variant={parseFloat(amount) === a ? "default" : "outline"}
-                  className="h-7 text-xs"
+                  className="h-9 text-sm font-bold px-1"
                   onClick={() => setAmount(String(a))}
                   data-testid={`flexy-quick-${a}`}
                 >{a}</Button>
@@ -246,13 +246,13 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
         )}
 
         {/* Payment method + credit customer picker */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-600">{ar ? "الدفع:" : "Paiement:"}</span>
-          <Button size="sm" variant={pay === "cash" ? "default" : "outline"} className="h-7 text-xs" onClick={() => setPay("cash")} data-testid="pay-cash">{ar ? "نقدي" : "Cash"}</Button>
-          <Button size="sm" variant={pay === "credit" ? "default" : "outline"} className="h-7 text-xs" onClick={() => setPay("credit")} data-testid="pay-credit">{ar ? "آجل" : "Crédit"}</Button>
+        <div className="flex items-center gap-1 flex-wrap pt-1 border-t">
+          <span className="text-xs text-gray-600 mr-1">{ar ? "الدفع:" : "Paiement:"}</span>
+          <Button size="sm" variant={pay === "cash" ? "default" : "outline"} className="h-7 text-xs flex-1 min-w-[60px]" onClick={() => setPay("cash")} data-testid="pay-cash">{ar ? "نقدي" : "Cash"}</Button>
+          <Button size="sm" variant={pay === "credit" ? "default" : "outline"} className="h-7 text-xs flex-1 min-w-[60px]" onClick={() => setPay("credit")} data-testid="pay-credit">{ar ? "آجل" : "Crédit"}</Button>
           {pay === "credit" && (
             <select
-              className="border rounded px-2 py-1 text-xs flex-1 min-w-[140px]"
+              className="border rounded px-2 py-1 text-xs w-full"
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
               data-testid="credit-customer-select"
