@@ -60,3 +60,20 @@ See `/app/memory/test_credentials.md`
 - P3: Invoice printing for `platform_cards` sold from POS.
 - P3: Visual QA tenant-side on /smart-notifications and /ai-agents.
 - Cleanup: extract `_plan_price + lookup` helper in wallet_routes.py (currently duplicated with `_charge_subscription`).
+
+## S11 — Customer Wallet Cards + Impersonation Fix (2026-02 / iter 5)
+- **Dashboard:** Two NEW cards added at TOP of `/` stats grid:
+  - `رصيد محفظة الزبون` (Customer Wallet Balance) → link `/customers` — sums positive `customers.balance`.
+  - `ديون محفظة الزبون` (Customer Wallet Debts) → link `/customer-debts` — sums `sales.debt_amount > 0`.
+- **Backend `/api/stats`** enriched with `customer_balance_total`, `customer_balance_count`, `customer_debt_total`, `customers_with_debt`.
+- **Backend `/api/wallet`** enriched with `platform_purchase_debt`, `platform_purchase_count`, `total_platform_debt` (graceful 0 when no unpaid supplier_orders).
+- **Motherboard fix (impersonation):** `AuthContext` adds `isImpersonating` + `isEffectiveSuperAdmin` + `stopImpersonation()`. `apiClient` interceptor routes `/diagnostics`, `/platform/features`, `/saas/`, `/robots`, `/cache` calls via preserved `super_admin_token` while impersonating. Super-admin items now appear in sidebar and pages render normally during impersonation.
+- **Impersonation banner** added to `Layout.js` with "العودة لحساب السوبر-أدمن" button restoring original super-admin session.
+- **Tests:** `backend/tests/test_iter5_dashboard_cards.py` — 9/9 pass. Iteration 5 report: backend 100% — frontend 100%.
+
+## Next Action Items
+- P1: Setup Redis caching.
+- P2: "Default POS Shortcuts" — super-admin defines default grid.
+- P3: Invoice printing for `platform_cards` sold from POS.
+- Minor: Investigate React duplicate-key console warning on dashboard navigation (non-blocking).
+- Cleanup: extract `_plan_price + lookup` helper in `wallet_routes.py`.
