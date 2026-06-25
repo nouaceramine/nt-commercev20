@@ -170,6 +170,31 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         wallet["low_balance_threshold"] = threshold
         wallet["auto_pay_subscription"] = wallet.get("auto_pay_subscription", False)
         wallet["low_balance"] = wallet.get("balance", 0) < threshold
+
+        # Subscription debt — how much the tenant owes the platform right now.
+        # Computed for tenant wallets only (super_admin/agent have no subscription).
+        subscription_due = 0.0
+        subscription_overdue = False
+        subscription_ends_at = None
+        if entity_type == "tenant":
+            tenant = await main_db.saas_tenants.find_one({"id": entity_id}, {"_id": 0})
+            if tenant:
+                sub_type = tenant.get("subscription_type", "monthly")
+                subscription_ends_at = tenant.get("subscription_ends_at")
+                plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
+                period_price = float(_plan_price(plan or {}, sub_type) or 0)
+                now = datetime.now(timezone.utc)
+                if subscription_ends_at:
+                    try:
+                        end_dt = datetime.fromisoformat(subscription_ends_at.replace('Z', '+00:00'))
+                        if end_dt < now:
+                            subscription_overdue = True
+                            subscription_due = period_price
+                    except Exception:
+                        pass
+        wallet["subscription_due"] = subscription_due
+        wallet["subscription_overdue"] = subscription_overdue
+        wallet["subscription_ends_at"] = subscription_ends_at
         return wallet
 
     # ── Add Funds (Admin) ──

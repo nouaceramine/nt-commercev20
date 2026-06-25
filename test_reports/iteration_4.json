@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 4 — Feature verification: two new dashboard cards (User Wallet Balance / User Wallet Debts) backed by /api/wallet subscription_due+subscription_overdue+subscription_ends_at enrichment. Backend: 9/9 pytest tests PASS (tenant impersonation + /api/wallet enrichment + super_admin path + overdue toggle E2E + regression on /wallet/transactions, /wallet/requests, /wallet/add-funds RBAC, /auth/me). Frontend: dashboard renders for impersonated tenant with the two new cards in the EXACT requested order (#3 'رصيد محفظة المستخدم' with subtitle 'محفظة المنصة', #4 'ديون محفظة المستخدم' with subtitle 'لا توجد ديون') between 'رصيد المحفظة' and 'إجمالي المنتجات'. Card click navigates to /wallet-management. Overdue UI verified by forcing subscription_ends_at to a past date: API returned overdue=true, due=5900, and the UI swapped subtitle to 'اشتراك متأخر' with bg-red-100 + text-red-600 icon styling. No JS page errors. Original tenant subscription_ends_at restored after test.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_wallet_enrichment.py",
+    "/app/test_reports/pytest/iteration_4_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "wallet_routes.py:165-198 — get_wallet now computes subscription_due/overdue/ends_at inline. Looks correct, but plan lookup is repeated in two places (get_wallet and _charge_subscription) — consider extracting `_plan_price + lookup` into a small helper to avoid divergence.",
+    "schemas.py:104 TenantUpdate does not include subscription_ends_at. That is OK for prod (super_admin shouldn't backdate easily) but means tests had to bypass via DB. Not a bug, just a note.",
+    "DashboardPage.js:115-117 — both 'رصيد المحفظة' (link /recharge) and 'رصيد محفظة المستخدم' (link /wallet-management) display the SAME walletBalance value with different subtitles. If product intent is that these represent the SAME wallet, fine; otherwise a separate API/field is required."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_wallet_enrichment.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Super admin: admin@ntcommerce.com / Admin@2024. Tenant impersonation via POST /api/saas/impersonate/{tenant_id} works and returns a usable bearer token (tested against /api/wallet, /api/auth/me, /api/wallet/transactions, /api/wallet/requests).",
+  "seed_data_creation": "None permanent. Test temporarily set subscription_ends_at to a past ISO on tenant b4fde9b7-d1f2-46ec-b62a-f0971ca3deba and restored it to 2026-07-07T15:35:52.522399+00:00 in /app/nt_commerce.saas_tenants.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 PASSED. New regression suite at /app/backend/tests/test_wallet_enrichment.py covers: super login, /api/saas/impersonate, /api/wallet new fields (subscription_due, subscription_overdue, subscription_ends_at) for both tenant + super_admin, RBAC on /wallet/add-funds, and an E2E that mutates subscription_ends_at directly in Mongo to assert overdue flips correctly (then restores). Run with: `set -a && source /app/backend/.env && set +a && pytest /app/backend/tests/test_wallet_enrichment.py -v`. Note: /api/saas/login does NOT exist (404) — super_admin uses /api/auth/login. Dashboard order verified: 0 todaySales, 1 totalCash, 2 رصيد المحفظة, 3 رصيد محفظة المستخدم (NEW), 4 ديون محفظة المستخدم (NEW), 5 totalProducts, 6 lowStock, 7 totalCustomers, 8 totalSuppliers.",
+  "rca of the issue": "N/A — feature addition iteration. All acceptance criteria met."
+}

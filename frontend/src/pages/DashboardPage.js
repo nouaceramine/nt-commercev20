@@ -29,7 +29,8 @@ import {
   Minus,
   Equal,
   Settings,
-  Wallet
+  Wallet,
+  CreditCard
 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -56,6 +57,8 @@ export default function DashboardPage() {
   });
   const [recentProducts, setRecentProducts] = useState([]);
   const [walletBalance, setWalletBalance] = useState(0);
+  const [walletDebt, setWalletDebt] = useState(0);
+  const [walletOverdue, setWalletOverdue] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -73,6 +76,8 @@ export default function DashboardPage() {
 
         if (walletRes.data) {
           setWalletBalance(walletRes.data.balance || 0);
+          setWalletDebt(walletRes.data.subscription_due || 0);
+          setWalletOverdue(!!walletRes.data.subscription_overdue);
         }
         
         if (statsRes.data) {
@@ -108,6 +113,8 @@ export default function DashboardPage() {
     { title: t.todaySales, value: `${stats.today_sales_total?.toFixed(2) || 0} ${t.currency}`, subValue: `${stats.today_sales_count || 0} ${t.sales}`, icon: TrendingUp, color: 'text-emerald-600', bgColor: 'bg-emerald-100', link: '/sales' },
     { title: t.totalCash, value: `${stats.total_cash?.toFixed(2) || 0} ${t.currency}`, icon: Banknote, color: 'text-blue-600', bgColor: 'bg-blue-100', link: '/cash' },
     { title: language === 'ar' ? 'رصيد المحفظة' : 'Solde portefeuille', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'متوفر لشحن الجوال' : 'Disponible recharge', icon: Wallet, color: 'text-teal-600', bgColor: 'bg-teal-100', link: '/recharge' },
+    { title: language === 'ar' ? 'رصيد محفظة المستخدم' : 'Solde portefeuille utilisateur', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'محفظة المنصة' : 'Portefeuille plateforme', icon: Wallet, color: 'text-indigo-600', bgColor: 'bg-indigo-100', link: '/wallet-management' },
+    { title: language === 'ar' ? 'ديون محفظة المستخدم' : 'Dettes portefeuille utilisateur', value: `${walletDebt?.toFixed(2) || 0} ${t.currency}`, subValue: walletOverdue ? (language === 'ar' ? 'اشتراك متأخر' : 'Abonnement échu') : (language === 'ar' ? 'لا توجد ديون' : 'Aucune dette'), icon: CreditCard, color: walletOverdue ? 'text-red-600' : 'text-slate-600', bgColor: walletOverdue ? 'bg-red-100' : 'bg-slate-100', link: '/wallet-management' },
     { title: t.totalProducts, value: stats.total_products, icon: Package, color: 'text-primary', bgColor: 'bg-primary/10', link: '/products' },
     { title: t.lowStock, value: stats.low_stock_count, icon: AlertTriangle, color: 'text-amber-600', bgColor: 'bg-amber-100', link: '/products?filter=low-stock' },
     { title: t.totalCustomers, value: stats.total_customers, icon: Users, color: 'text-purple-600', bgColor: 'bg-purple-100', link: '/customers' },
