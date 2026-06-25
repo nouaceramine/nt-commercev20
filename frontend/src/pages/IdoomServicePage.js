@@ -21,13 +21,15 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatCurrency } from '../utils/globalDateFormatter';
+import BuyFromPlatform from '../components/BuyFromPlatform';
 
 const DENOMINATIONS = [500, 1000, 1500, 2000, 2500, 5000];
 
-const TABS = ['sell', 'inventory', 'upload'];
+const TABS = ['sell', 'inventory', 'buy', 'upload'];
 const TAB_LABELS = {
   sell:      { ar: 'بيع كود', fr: 'Vendre un code' },
   inventory: { ar: 'المخزون', fr: 'Inventaire' },
+  buy:       { ar: 'شراء من المنصة', fr: 'Acheter depuis la plateforme' },
   upload:    { ar: 'رفع أكواد', fr: 'Importer des codes' },
 };
 
@@ -362,6 +364,13 @@ export default function IdoomServicePage() {
                 </Table>
               </CardContent>
             </Card>
+          </div>
+        )}
+
+        {/* ===================== TAB: BUY FROM PLATFORM ===================== */}
+        {tab === 'buy' && (
+          <div className="max-w-4xl">
+            <BuyFromPlatform type="idoom" onOrdered={() => loadStats()} />
           </div>
         )}
 

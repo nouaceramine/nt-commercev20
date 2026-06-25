@@ -1,333 +1,157 @@
-import { useState, useEffect } from 'react';
-import apiClient from '../lib/apiClient';
-import { useLanguage } from '../contexts/LanguageContext';
-import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Badge } from '../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '../components/ui/table';
-import { toast } from 'sonner';
-import {
-  CreditCard,
-  Plus,
-  ShoppingCart,
-  History,
-  ArrowRight,
-  Package,
-  Search,
-  Eye,
-  Copy,
-  CheckCircle2,
-  Clock,
-  XCircle
-} from 'lucide-react';
-import { Link } from 'react-router-dom';
+/**
+ * Cards Service Page — sells phone recharge cards (Mobilis/Djezzy/Ooredoo)
+ * from the tenant's own inventory.
+ *
+ * Two tabs:
+ *   1. Buy from Platform — order new codes from the super-admin
+ *   2. My inventory — list available/sold codes the tenant already owns
+ */
+import { useEffect, useState, useCallback } from "react";
+import apiClient from "../lib/apiClient";
+import { useLanguage } from "../contexts/LanguageContext";
+import { Layout } from "../components/Layout";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { Input } from "../components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
+import { CreditCard, Loader2, Copy, Search, ShoppingCart, Package } from "lucide-react";
+import { toast } from "sonner";
+import BuyFromPlatform from "../components/BuyFromPlatform";
 
-// Sample card types
-const CARD_TYPES = [
-  { id: 'mobilis_100', name: 'موبيليس 100 دج', operator: 'Mobilis', price: 95, sellPrice: 100, color: 'bg-green-500' },
-  { id: 'mobilis_200', name: 'موبيليس 200 دج', operator: 'Mobilis', price: 190, sellPrice: 200, color: 'bg-green-500' },
-  { id: 'mobilis_500', name: 'موبيليس 500 دج', operator: 'Mobilis', price: 475, sellPrice: 500, color: 'bg-green-500' },
-  { id: 'mobilis_1000', name: 'موبيليس 1000 دج', operator: 'Mobilis', price: 950, sellPrice: 1000, color: 'bg-green-500' },
-  { id: 'djezzy_100', name: 'جيزي 100 دج', operator: 'Djezzy', price: 95, sellPrice: 100, color: 'bg-red-500' },
-  { id: 'djezzy_200', name: 'جيزي 200 دج', operator: 'Djezzy', price: 190, sellPrice: 200, color: 'bg-red-500' },
-  { id: 'djezzy_500', name: 'جيزي 500 دج', operator: 'Djezzy', price: 475, sellPrice: 500, color: 'bg-red-500' },
-  { id: 'djezzy_1000', name: 'جيزي 1000 دج', operator: 'Djezzy', price: 950, sellPrice: 1000, color: 'bg-red-500' },
-  { id: 'ooredoo_100', name: 'أوريدو 100 دج', operator: 'Ooredoo', price: 95, sellPrice: 100, color: 'bg-orange-500' },
-  { id: 'ooredoo_200', name: 'أوريدو 200 دج', operator: 'Ooredoo', price: 190, sellPrice: 200, color: 'bg-orange-500' },
-  { id: 'ooredoo_500', name: 'أوريدو 500 دج', operator: 'Ooredoo', price: 475, sellPrice: 500, color: 'bg-orange-500' },
-  { id: 'ooredoo_1000', name: 'أوريدو 1000 دج', operator: 'Ooredoo', price: 950, sellPrice: 1000, color: 'bg-orange-500' },
+const OPERATORS = [
+  { id: "Mobilis", color: "bg-green-500" },
+  { id: "Djezzy", color: "bg-red-500" },
+  { id: "Ooredoo", color: "bg-orange-500" },
 ];
 
 export default function CardsServicePage() {
   const { language } = useLanguage();
-  const [activeTab, setActiveTab] = useState('buy');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCards, setSelectedCards] = useState({});
-  const [orders, setOrders] = useState([]);
-  const [myCards, setMyCards] = useState([]);
+  const ar = language === "ar";
+  const [tab, setTab] = useState("buy");
+  const [operator, setOperator] = useState("Mobilis");
+  const [codes, setCodes] = useState([]);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const filteredCards = CARD_TYPES.filter(card => 
-    card.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    card.operator.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleQuantityChange = (cardId, quantity) => {
-    if (quantity < 0) return;
-    setSelectedCards(prev => ({
-      ...prev,
-      [cardId]: quantity
-    }));
-  };
-
-  const getTotalPrice = () => {
-    return Object.entries(selectedCards).reduce((total, [cardId, qty]) => {
-      const card = CARD_TYPES.find(c => c.id === cardId);
-      return total + (card ? card.price * qty : 0);
-    }, 0);
-  };
-
-  const getTotalCards = () => {
-    return Object.values(selectedCards).reduce((a, b) => a + b, 0);
-  };
-
-  const handleOrder = async () => {
-    if (getTotalCards() === 0) {
-      toast.error(language === 'ar' ? 'يرجى اختيار بطاقات' : 'Veuillez sélectionner des cartes');
-      return;
-    }
-
+  const loadInventory = useCallback(async () => {
     setLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const newOrder = {
-        id: Date.now(),
-        items: Object.entries(selectedCards)
-          .filter(([_, qty]) => qty > 0)
-          .map(([cardId, qty]) => {
-            const card = CARD_TYPES.find(c => c.id === cardId);
-            return { ...card, quantity: qty };
-          }),
-        total: getTotalPrice(),
-        status: 'pending',
-        date: new Date().toISOString()
-      };
-
-      setOrders(prev => [newOrder, ...prev]);
-      setSelectedCards({});
-      toast.success(language === 'ar' ? 'تم إرسال الطلب بنجاح' : 'Commande envoyée avec succès');
-    } catch (error) {
-      toast.error(language === 'ar' ? 'فشل في إرسال الطلب' : 'Échec de la commande');
+      const params = {};
+      if (operator) params.operator = operator;
+      if (statusFilter) params.status = statusFilter;
+      const res = await apiClient.get("/platform-cards", { params });
+      setCodes(res.data?.items || res.data || []);
+    } catch (_e) {
+      setCodes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [operator, statusFilter]);
 
-  const copyCardCode = (code) => {
+  useEffect(() => { if (tab === "inventory") loadInventory(); }, [tab, loadInventory]);
+
+  const filtered = codes.filter((c) =>
+    !search || (c.code || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const copyCode = (code) => {
     navigator.clipboard.writeText(code);
-    toast.success(language === 'ar' ? 'تم نسخ الكود' : 'Code copié');
+    toast.success(ar ? "تم النسخ" : "Copié");
   };
 
   return (
     <Layout>
-      <div className="space-y-6 animate-fade-in" data-testid="cards-service-page">
-        {/* Header */}
-        <div className="flex items-center gap-4">
-          <Link to="/services">
-            <Button variant="ghost" size="icon">
-              <ArrowRight className="h-5 w-5" />
-            </Button>
-          </Link>
+      <div className="p-4 md:p-6 space-y-6" data-testid="cards-page">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-bold flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                <CreditCard className="h-8 w-8 text-blue-500" />
-              </div>
-              {language === 'ar' ? 'بطاقات التعبئة' : 'Cartes de recharge'}
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <CreditCard className="h-6 w-6 text-blue-600" />
+              {ar ? "بطاقات تعبئة" : "Cartes de recharge"}
             </h1>
-            <p className="text-muted-foreground mt-1">
-              {language === 'ar' ? 'شراء وإدارة بطاقات التعبئة' : 'Acheter et gérer les cartes de recharge'}
-            </p>
+            <p className="text-sm text-gray-500">{ar ? "إدارة كروت Mobilis / Djezzy / Ooredoo" : "Gérer les cartes Mobilis / Djezzy / Ooredoo"}</p>
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid grid-cols-3 w-full max-w-md">
-            <TabsTrigger value="buy" className="gap-2">
-              <ShoppingCart className="h-4 w-4" />
-              {language === 'ar' ? 'شراء' : 'Acheter'}
-            </TabsTrigger>
-            <TabsTrigger value="orders" className="gap-2">
-              <Package className="h-4 w-4" />
-              {language === 'ar' ? 'طلباتي' : 'Mes commandes'}
-            </TabsTrigger>
-            <TabsTrigger value="cards" className="gap-2">
-              <CreditCard className="h-4 w-4" />
-              {language === 'ar' ? 'بطاقاتي' : 'Mes cartes'}
-            </TabsTrigger>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList>
+            <TabsTrigger value="buy" data-testid="tab-buy"><ShoppingCart className="h-4 w-4 ml-2" />{ar ? "شراء من المنصة" : "Acheter"}</TabsTrigger>
+            <TabsTrigger value="inventory" data-testid="tab-inventory"><Package className="h-4 w-4 ml-2" />{ar ? "مخزوني" : "Mon inventaire"}</TabsTrigger>
           </TabsList>
 
-          {/* Buy Cards Tab */}
-          <TabsContent value="buy" className="space-y-6 mt-6">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder={language === 'ar' ? 'بحث عن بطاقة...' : 'Rechercher une carte...'}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pe-10"
-                  />
-                </div>
+          <TabsContent value="buy" className="mt-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-gray-600">{ar ? "فلتر بالمشغّل:" : "Filtrer par opérateur:"}</span>
+                {OPERATORS.map((op) => (
+                  <Button
+                    key={op.id}
+                    variant={operator === op.id ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setOperator(op.id)}
+                    data-testid={`op-${op.id}`}
+                  >
+                    {op.id}
+                  </Button>
+                ))}
               </div>
-              <Card className="p-4 flex items-center gap-4 bg-primary/5">
-                <div>
-                  <p className="text-sm text-muted-foreground">{language === 'ar' ? 'الإجمالي' : 'Total'}</p>
-                  <p className="text-2xl font-bold text-primary">{getTotalPrice().toFixed(2)} دج</p>
+              <BuyFromPlatform type="card" operator={operator} onOrdered={() => setTab("inventory")} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="inventory" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>{ar ? "أكوادي" : "Mes codes"}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input className="pr-8" placeholder={ar ? "بحث برقم الكود" : "Rechercher"} value={search} onChange={(e) => setSearch(e.target.value)} data-testid="search-input" />
+                  </div>
+                  <select className="border rounded px-2 py-1 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} data-testid="status-filter">
+                    <option value="">{ar ? "كل الحالات" : "Tous"}</option>
+                    <option value="available">{ar ? "متاح" : "Disponible"}</option>
+                    <option value="sold">{ar ? "مُباع" : "Vendu"}</option>
+                  </select>
+                  {OPERATORS.map((op) => (
+                    <Button key={op.id} variant={operator === op.id ? "default" : "outline"} size="sm" onClick={() => setOperator(op.id)}>{op.id}</Button>
+                  ))}
+                  <Button variant="outline" size="sm" onClick={loadInventory}>{ar ? "تحديث" : "Actualiser"}</Button>
                 </div>
-                <Button 
-                  onClick={handleOrder} 
-                  disabled={loading || getTotalCards() === 0}
-                  className="h-12"
-                >
-                  {loading ? (
-                    <span className="animate-spin">⏳</span>
-                  ) : (
-                    <>
-                      <ShoppingCart className="h-4 w-4 me-2" />
-                      {language === 'ar' ? `طلب (${getTotalCards()})` : `Commander (${getTotalCards()})`}
-                    </>
-                  )}
-                </Button>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {['Mobilis', 'Djezzy', 'Ooredoo'].map(operator => (
-                <Card key={operator}>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2">
-                      <Badge className={
-                        operator === 'Mobilis' ? 'bg-green-500' :
-                        operator === 'Djezzy' ? 'bg-red-500' : 'bg-orange-500'
-                      }>
-                        {operator}
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {filteredCards.filter(c => c.operator === operator).map(card => (
-                      <div key={card.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
-                        <div>
-                          <p className="font-medium text-sm">{card.sellPrice} دج</p>
-                          <p className="text-xs text-muted-foreground">{language === 'ar' ? 'سعر الشراء' : 'Prix'}: {card.price} دج</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => handleQuantityChange(card.id, (selectedCards[card.id] || 0) - 1)}
-                          >
-                            -
-                          </Button>
-                          <span className="w-8 text-center font-bold">{selectedCards[card.id] || 0}</span>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => handleQuantityChange(card.id, (selectedCards[card.id] || 0) + 1)}
-                          >
-                            +
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-
-          {/* Orders Tab */}
-          <TabsContent value="orders" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>{language === 'ar' ? 'طلباتي' : 'Mes commandes'}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {orders.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <Package className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p>{language === 'ar' ? 'لا توجد طلبات' : 'Aucune commande'}</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {orders.map(order => (
-                      <Card key={order.id} className="p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={order.status === 'completed' ? 'default' : 'secondary'}>
-                              {order.status === 'completed' ? (
-                                <><CheckCircle2 className="h-3 w-3 me-1" />{language === 'ar' ? 'مكتمل' : 'Terminé'}</>
-                              ) : (
-                                <><Clock className="h-3 w-3 me-1" />{language === 'ar' ? 'قيد المعالجة' : 'En cours'}</>
-                              )}
-                            </Badge>
-                            <span className="text-sm text-muted-foreground">
-                              {new Date(order.date).toLocaleString()}
-                            </span>
-                          </div>
-                          <span className="font-bold text-primary">{order.total} دج</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {order.items.map((item, idx) => (
-                            <Badge key={idx} variant="outline">
-                              {item.name} × {item.quantity}
-                            </Badge>
-                          ))}
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* My Cards Tab */}
-          <TabsContent value="cards" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>{language === 'ar' ? 'بطاقاتي المتاحة' : 'Mes cartes disponibles'}</CardTitle>
-                <CardDescription>
-                  {language === 'ar' ? 'البطاقات الجاهزة للاستخدام' : 'Cartes prêtes à utiliser'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {myCards.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <CreditCard className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p>{language === 'ar' ? 'لا توجد بطاقات متاحة' : 'Aucune carte disponible'}</p>
-                    <p className="text-sm">{language === 'ar' ? 'قم بشراء بطاقات من تبويب "شراء"' : 'Achetez des cartes depuis l\'onglet "Acheter"'}</p>
-                  </div>
+                {loading ? (
+                  <div className="text-center py-8"><Loader2 className="animate-spin h-6 w-6 mx-auto text-gray-400" /></div>
+                ) : !filtered.length ? (
+                  <div className="text-center py-10 text-gray-500" data-testid="empty-inventory">{ar ? "لا توجد أكواد في المخزون. اطلب من تبويب الشراء." : "Pas de codes en stock."}</div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>{language === 'ar' ? 'البطاقة' : 'Carte'}</TableHead>
-                        <TableHead>{language === 'ar' ? 'الكود' : 'Code'}</TableHead>
-                        <TableHead>{language === 'ar' ? 'الحالة' : 'Statut'}</TableHead>
+                        <TableHead>{ar ? "الكود" : "Code"}</TableHead>
+                        <TableHead>{ar ? "الفئة" : "Montant"}</TableHead>
+                        <TableHead>{ar ? "الحالة" : "Statut"}</TableHead>
+                        <TableHead>{ar ? "المصدر" : "Source"}</TableHead>
+                        <TableHead>{ar ? "التاريخ" : "Date"}</TableHead>
                         <TableHead></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {myCards.map(card => (
-                        <TableRow key={card.id}>
-                          <TableCell>{card.name}</TableCell>
-                          <TableCell className="font-mono">{card.code}</TableCell>
+                      {filtered.map((c) => (
+                        <TableRow key={c.id} data-testid={`code-row-${c.id}`}>
+                          <TableCell className="font-mono">{c.code}</TableCell>
+                          <TableCell>{c.denomination} دج</TableCell>
                           <TableCell>
-                            <Badge variant={card.used ? 'secondary' : 'default'}>
-                              {card.used ? (language === 'ar' ? 'مستخدم' : 'Utilisé') : (language === 'ar' ? 'متاح' : 'Disponible')}
+                            <Badge className={c.status === "available" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-700"}>
+                              {c.status === "available" ? (ar ? "متاح" : "Disponible") : (ar ? "مُباع" : "Vendu")}
                             </Badge>
                           </TableCell>
+                          <TableCell className="text-xs">{c.source === "platform" ? (ar ? "من المنصة" : "Plateforme") : (ar ? "خاص" : "Privé")}</TableCell>
+                          <TableCell className="text-xs">{new Date(c.created_at).toLocaleDateString("ar")}</TableCell>
                           <TableCell>
-                            <Button variant="ghost" size="sm" onClick={() => copyCardCode(card.code)}>
-                              <Copy className="h-4 w-4" />
-                            </Button>
+                            <Button size="icon" variant="ghost" onClick={() => copyCode(c.code)}><Copy className="h-4 w-4" /></Button>
                           </TableCell>
                         </TableRow>
                       ))}

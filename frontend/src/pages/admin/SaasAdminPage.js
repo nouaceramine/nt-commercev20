@@ -821,6 +821,15 @@ export default function SaasAdminPage() {
             <AlertTriangle className="h-4 w-4" />
             سجل الأخطاء
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/saas-admin/supplier')}
+            className="gap-2"
+            data-testid="go-to-supplier-btn"
+          >
+            <Package className="h-4 w-4" />
+            المنصة كمورد
+          </Button>
         </div>
 
         {/* Stats */}

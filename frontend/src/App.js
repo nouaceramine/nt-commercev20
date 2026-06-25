@@ -126,6 +126,7 @@ import PricingPage from "./pages/landing/PricingPage";
 import SaasAdminPage from "./pages/admin/SaasAdminPage";
 import FeatureFlagsPage from "./pages/admin/FeatureFlagsPage";
 import SystemLogsPage from "./pages/SystemLogsPage";
+import SupplierAdminPage from "./pages/admin/SupplierAdminPage";
 import StoreManagementPage from "./pages/store/StoreManagementPage";
 import PublicStorePage from "./pages/store/PublicStorePage";
 import DataImportExportPage from "./pages/DataImportExportPage";
@@ -378,6 +379,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SystemLogsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/saas-admin/supplier"
+        element={
+          <ProtectedRoute superAdminOnly>
+            <SupplierAdminPage />
           </ProtectedRoute>
         }
       />

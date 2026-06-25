@@ -1,40 +1,46 @@
 # NT Commerce v16 - PRD
 
 ## Original Problem Statement
-استنساخ مشروع `nouaceramine/nt-commercev16` وتشغيله، إصلاح الأخطاء، بناء نظام لوغات، إصلاح المصادقة، وحماية الكود من تكرار نفس نوع الأخطاء.
+استنساخ مشروع `nouaceramine/nt-commercev16` وتشغيله، إصلاح الأخطاء، بناء نظام لوغات، إصلاح المصادقة، حماية الكود من التراجع، وبناء نظام السوبر-أدمن كمورد للأكواد.
 
 ## Architecture
-- **Backend**: FastAPI (entry: `backend/main.py`, supervisor wrapper: `backend/server.py`), MongoDB (motor), JWT auth, multi-tenant SaaS
-- **Frontend**: React 19 + craco, Tailwind, Shadcn/Radix UI, RTL Arabic + French
-- **Integrations**: Emergent LLM key (gpt-4o-mini for AI Chat + log analysis)
-- **CI**: GitHub Actions workflow `.github/workflows/lint.yml` (ESLint + ruff)
+- **Backend**: FastAPI + MongoDB (motor) + JWT auth + multi-tenant SaaS
+- **Frontend**: React 19 + Tailwind + Shadcn UI + RTL Arabic/French
+- **Integrations**: Emergent LLM key (gpt-4o-mini)
+- **CI**: GitHub Actions (.github/workflows/lint.yml) — ESLint + ruff
 
 ## Sessions Summary
-- **S1 Setup**: Cloned, deps installed, server.py shim, env configured, prod data seeded
-- **S2 Code cleanup**: LandingPage/PricingPage/RegisterPage fixes, suppressed 403 toast, missing `io` imports
-- **S3 System Logs**: backend route + global exception handler, frontend errorLogger.js, /saas-admin/system-logs page with AI analysis
-- **S4 Auth bug**: impersonate now creates real user in tenant_db, agent branch in get_current_user, tenant fallback
-- **S5 Page-level errors**: SmartDashboard `stat`→`indicator.name`, beep.js lazy AudioContext, llm_service Emergent LLM fallback, motherboard sidebar guard
-- **S6 POS Illegal constructor + CI**:
-  - **Root cause**: `<History />` in POSPage.js wasn't imported from lucide-react → fell back to `window.History` (DOM API) which throws Illegal constructor when React rendered it
-  - **Fix**: added `History` to lucide-react imports + `/motherboard` route now `superAdminOnly`
-  - **CI**: created `.github/workflows/lint.yml` with ESLint (no-undef + react/jsx-no-undef) + ruff (F821/F811/F601/F602)
-  - **eslint.config.mjs**: flat config tuned to catch the bug class without flooding on existing warnings
-  - **Backend cleanup**: removed duplicate import redefinitions, fixed 3 real Mongo bugs `{"$ne": None, "$ne": ""}` → `{"$nin": [None, ""]}` in data_integrity_robot and agent_hierarchy_routes
-  - **Frontend cleanup**: fixed `sale is not defined` in DailySessionsPage, missing `toast` import in DashboardPage, 3 case-declarations bugs
+- **S1-S5**: استنساخ، تشغيل، تنظيف، نظام لوغات، إصلاح المصادقة، إصلاح صفحات /pos, /smart-dashboard, /tax-reports, /ai-chat, /motherboard
+- **S6 CI**: GitHub Action + ESLint flat config + ruff (3 ثغرات Mongo حقيقية اكتُشفت وأُصلحت: `{"$ne":None,"$ne":""}` → `{"$nin":[None,""]}`)
+- **S7 Wallet transfers**: تغيير `/wallet/transfers` من super_admin-only → multi-role (tenant يرى تحويلاته فقط)
+- **S8 Platform Supplier (الحالي)**:
+  - Backend جديد `routes/saas/supplier_routes.py` بـ 15+ endpoint
+  - مجموعات MongoDB جديدة: `platform_card_catalog`, `platform_idoom_catalog`, `platform_card_stock`, `platform_idoom_stock`, `supplier_orders`
+  - معالجة طلب ذرية (atomic) مع rollback: حجز ⇒ خصم محفظة ⇒ نقل الأكواد ⇒ إشعار
+  - أسعار مخصصة لكل مستأجر (override per tenant_id)
+  - رفض الطلب بالكامل عند نقص المخزون (422 + تفاصيل الكمية المتاحة)
+  - واجهة سوبر-أدمن `/saas-admin/supplier` بـ3 تبويبات (بطاقات/Idoom/طلبات) + رفع أكواد Excel + تعديل أسعار مخصصة
+  - مكوّن مشترك `BuyFromPlatform.js` يُستخدم في صفحتي المستأجر
+  - `CardsServicePage` أُعيد بناؤها (كانت Mock بالكامل) باستخدام `/supplier/order` + `/platform-cards`
+  - `IdoomServicePage` أُضيف تبويب جديد "شراء من المنصة" (الرفع الذاتي يبقى موجوداً — مورد اختياري)
+  - **مخزون أولي مزروع**: 21 فئة بطاقات (Mobilis/Djezzy/Ooredoo × 100/200/500/1000/2000/3000/6500) + 5 فئات Idoom
+  - تم اختبار End-to-End بنجاح: رفع 5 أكواد → شحن محفظة 10,000 → طلب 3 → استلام تلقائي + خصم 291 + إشعار
+
+## Personas
+- Super Admin: + إدارة المورد المركزي
+- Agent
+- Tenant Admin: + شراء من المنصة + رفع أكواد ذاتية
+- Cashier
 
 ## Test Credentials
 See `/app/memory/test_credentials.md`
 
-## Final Lint Status
-- **Backend ruff**: 0 errors (catastrophic class)
-- **Frontend ESLint**: 0 errors, 867 non-blocking warnings (cleanup backlog)
-
 ## Known Limitations / Backlog
 - P2: Stripe / SendGrid / Resend require user keys
 - P2: Redis caching disabled
-- P3: 867 unused-vars warnings + ~200 react-hooks/exhaustive-deps warnings (non-blocking)
+- P3: لا يوجد POS مدمج بعد لبيع بطاقات `tenant_db.platform_cards` (المستأجر يراها لكن البيع للزبون يحتاج تكامل إضافي)
+- P3: ~200 react-hooks/exhaustive-deps warnings
 
 ## Next Action Items
-- Push to GitHub via "Save to GitHub" — the workflow will run on the next push
-- If CI fails, fix only the *errors* (not warnings) and re-push
+- اختبار من واجهة المتصفح (الـ SaaS Admin يرفع كود ثم المستأجر يشتري)
+- (لاحقاً) دمج "بيع كود من tenant_db.platform_cards" في POSPage مع طباعة فاتورة

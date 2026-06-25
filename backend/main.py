@@ -657,6 +657,10 @@ async def delete_cache_pattern(pattern: str, admin: dict = Depends(get_super_adm
 
 app.include_router(cache_router, prefix="/api")  # Cache management routes
 
+# ============ PLATFORM SUPPLIER (Super-admin sells cards/idoom to tenants) ============
+from routes.saas.supplier_routes import build_supplier_router
+app.include_router(build_supplier_router(), prefix="/api")
+
 # ============ SYSTEM LOGS ============
 from routes.system_logs_routes import router as system_logs_router, log_backend_exception
 app.include_router(system_logs_router, prefix="/api")
