@@ -151,3 +151,28 @@ See `/app/memory/test_credentials.md`
 - **Enhancement queued:** تنبيه فوري Email للمستأجر عند بدء جلسة انتحال (GDPR).
 - **Tech debt:** N+1 query in `/saas/monitoring` (per-tenant sales.aggregate × N) — fold into one aggregation when tenant count > 50.
 - **Cleanup:** `backend/tests/test_wallet_chain.py` — migrate from `localhost:8000` to env-var URL.
+
+## S16 — Tenant Debts Dashboard + Platform Capacity (2026-02 / iter 11)
+- **NEW FEATURE A — Tenant Debts Dashboard (`/saas-admin → ديون التجار`):**
+  - Backend `routes/saas/tenant_debts_routes.py`:
+    - GET `/saas/tenant-debts` (super-admin) — returns `{summary, items[]}` with per-tenant `credit_debt`, last reminder, total reminders sent, subscription-overdue flag.
+    - POST `/saas/tenant-debts/{tid}/remind` — records reminder in `main_db.tenant_debt_reminders`, attempts email send (best-effort).
+    - GET `/saas/tenant-debts/{tid}/statement.pdf` — PDF account statement via reportlab.
+  - Frontend tab in SaaSAdminPage with summary cards + table + per-row reminder/PDF buttons.
+  - Email service: `services.email_service.send_email` module-level helper (uses SendGrid when configured, else returns True silently — dev fallback).
+- **NEW FEATURE B — Platform Capacity:**
+  - `MAX_TENANTS` env var (0=unlimited, default 500 in `backend/.env`). Enforced in `/saas/register` AND `/saas/tenants` create endpoints with Arabic 400 message.
+  - GET `/api/saas/platform-stats` (super-admin) — returns `{tenants{total,active,max,capacity_percent,severity}, databases{count}, resources{memory,cpu_percent,disk}}`. Severity: 'ok' / 'warning' (≥80%) / 'critical' (≥95%).
+  - `PlatformCapacityCard` component above the Tabs in `/saas-admin` with auto-refresh (30s) and 4 sub-cards (tenants, DBs, memory, CPU+disk).
+  - Memory progress-bar color thresholds aligned with backend severity (80% amber, 95% red).
+- **Dependencies:** `psutil==7.2.2` added to `backend/requirements.txt`.
+- **Tests:** `backend/tests/test_iter11_features.py` — 12/12 ✅ • iter 11 frontend Playwright: 100%.
+
+## Next Action Items
+- **P3:** طباعة فواتير `platform_cards` المباعة من POS.
+- **Enhancement:** `/customer-debts` — تصدير PDF/Excel + تذكير SMS/WhatsApp جماعي (تطبيق نفس النمط على tenant-side).
+- **Enhancement:** Email للمستأجر عند بدء جلسة انتحال (GDPR).
+- **P1:** Redis caching (deferred per user).
+- **Tech debt:** N+1 queries in `/saas/tenant-debts` (3N round-trips at 100+ tenants) and `/saas/monitoring`.
+- **Tech debt:** PDF statement uses Helvetica — no Arabic glyph support. Register NotoSansArabic when needed.
+- **Cleanup:** extract `_max_tenants()` helper (currently duplicated in 3 files).

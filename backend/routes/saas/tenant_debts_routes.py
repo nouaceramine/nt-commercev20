@@ -150,8 +150,8 @@ async def remind_tenant(
             f"يرجى تسديده في أقرب وقت ممكن لتجنّب أي تعليق في الخدمة.\n\n"
             f"شكراً لتعاونكم،\nفريق NT Commerce."
         )
-        await send_email(to=tenant.get("email", ""), subject=subject, body=body)
-        delivered = True
+        result = await send_email(to=tenant.get("email", ""), subject=subject, body=body)
+        delivered = bool(result)
     except ImportError:
         delivery_error = "email_service not configured"
     except Exception as e:

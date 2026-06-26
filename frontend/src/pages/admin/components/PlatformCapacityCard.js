@@ -100,7 +100,7 @@ const PlatformCapacityCard = () => {
             <p className="text-2xl font-bold mt-1">{mem.percent ?? '—'}%</p>
             <div className="h-2 w-full rounded-full bg-muted overflow-hidden mt-2">
               <div
-                className={`h-full transition-all ${mem.percent >= 90 ? 'bg-red-500' : mem.percent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                className={`h-full transition-all ${mem.percent >= 95 ? 'bg-red-500' : mem.percent >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`}
                 style={{ width: `${mem.percent ?? 0}%` }}
               />
             </div>
