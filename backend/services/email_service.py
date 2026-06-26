@@ -31,7 +31,18 @@ class EmailService:
     def __init__(self):
         self.resend_key = os.environ.get("RESEND_API_KEY", "").strip()
         self.sendgrid_key = os.environ.get("SENDGRID_API_KEY", "").strip()
-        self.sender = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+        self.sender = os.environ.get("SENDER_EMAIL", "").strip()
+        # Resend will reject sends from unverified domains — warn loudly at
+        # startup when the key is set but the sender is missing or pointing
+        # at the Resend sandbox so this isn't a silent production failure.
+        if self.resend_key and (not self.sender or self.sender == "onboarding@resend.dev"):
+            logger.warning(
+                "RESEND_API_KEY is set but SENDER_EMAIL is %s — real sends will "
+                "be rejected unless you configure a verified sender domain.",
+                "missing" if not self.sender else "the Resend sandbox default",
+            )
+        if not self.sender:
+            self.sender = "onboarding@resend.dev"
 
     @property
     def provider(self) -> str:

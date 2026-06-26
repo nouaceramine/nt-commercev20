@@ -53,6 +53,7 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
             if raw:
                 payload = _json.loads(raw)
                 payload["cached"] = True
+                payload["served_at"] = datetime.now(timezone.utc).isoformat()
                 return payload
         except Exception:
             pass
@@ -109,11 +110,10 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
         services["redis"] = {"status": "disabled", "label": "Redis (cache)"}
     else:
         try:
-            import redis.asyncio as redis_async  # type: ignore
-            r = redis_async.from_url(redis_url, socket_timeout=1.0, socket_connect_timeout=1.0)
-            await r.ping()
-            await r.aclose()
-            services["redis"] = {"status": "ok", "label": "Redis (cache)"}
+            # Reuse the singleton cache client (circuit-breaker aware) instead
+            # of opening a fresh connection per stats poll.
+            ok = await cache.ping()
+            services["redis"] = {"status": "ok" if ok else "down", "label": "Redis (cache)"}
         except Exception as e:
             services["redis"] = {"status": "down", "label": "Redis (cache)", "error": str(e)[:80]}
 

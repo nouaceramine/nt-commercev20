@@ -212,11 +212,28 @@ See `/app/memory/test_credentials.md`
   - `components/SellPlatformCardDialog.js` — replaced single "طباعة وصل" with THREE format buttons: `print-58mm-btn`, `print-80mm-btn` (default), `print-a5-btn`. Now fetches `tenant-branding` to inject store name, and captures `resultSale` alongside `card` for invoice metadata. Toasts on popup-blocked.
 - **Tests:** `backend/tests/test_iter14_saas_split.py` 12/12 ✅. Frontend Playwright + invoice-builder smoke 100% ✅. iter-12 tz-naive audit-timeline regression CONFIRMED FIXED.
 
+## S19 — SubscribersPage + Redis + Resend + Reprint + Format Memory (2026-02 / iter 15)
+- **P2 COMPLETE — SubscribersPage extracted** (last of the 5):
+  - `pages/admin/saas/SubscribersPage.js` — 760 lines, self-contained, fetches its own data, contains 6 inline dialogs (tenant CRUD / extend / impersonate / wallet-charge / feature-flags / bridge), `المعرّف` column with EntityCode badges, search input.
+  - `App.js` `/saas-admin/subscribers` now points at the new page (was legacy SaasAdminPage).
+  - All 5 biggest tabs from S17 are now extracted (Subscribers + TenantDebts + Plans + Payments + AuditTimeline).
+- **P1 — Redis caching infrastructure:**
+  - `utils/cache.py` — NEW: `RedisCache` + `_NoopCache` fallback with `cached_json` decorator + `invalidate_prefix` (SCAN-based, non-blocking).
+  - `/etc/supervisor/conf.d/redis.conf` — Redis bound to 127.0.0.1:6379, maxmemory 64MB, `allkeys-lru` eviction, persistence disabled. `REDIS_URL=redis://127.0.0.1:6379/0` added to `.env`.
+  - `/api/saas/platform-stats` now serves from cache with 10s TTL (returns `cached: true` + `served_at` timestamp on warm hits). `services.redis.status` flipped from `disabled` → `ok`. Service-health check now uses `cache.ping()` (reuses singleton + circuit-breaker) instead of opening fresh connections per poll.
+- **P1 — Resend email integration:**
+  - `services/email_service.py` — refactored to multi-provider (Resend > SendGrid > mock). Resend SDK lazy-imported. `get_email_provider()` public helper. Hard warning at init when `RESEND_API_KEY` is set but `SENDER_EMAIL` is empty/sandbox (preventing silent production failures). `resend==2.21.0` added to requirements.txt.
+  - Provider currently = `mock` because user hasn't supplied `RESEND_API_KEY` — setting it in `.env` and `supervisorctl restart backend` is the only step to switch to real delivery.
+- **P3 — Reprint receipts from /services/cards:**
+  - `pages/CardsServicePage.js` — NEW `tab-sales` lists `/platform-cards/sales` rows with three reprint buttons per row (58mm / 80mm / A5). Fetches `tenant-branding` once for the store name.
+- **P3 — Persistent last-used invoice format (per-cashier):**
+  - `lib/platformCardInvoice.js` + `components/SellPlatformCardDialog.js` + `pages/CardsServicePage.js` — `printPlatformCardInvoice` saves the format choice to `localStorage.pos.last_invoice_format`. The 3 print buttons read it on render and highlight the matching one with a star ★ as the recommended default.
+- **Tests:** `backend/tests/test_iter15_redis_resend.py` 14/14 PASS. Frontend Playwright 100% across all 7 saas-admin sub-routes + SubscribersPage dialogs + Sales tab. Code-review nits (testid on extend button, served_at timestamp, cache.ping reuse, SENDER_EMAIL warning) all APPLIED.
+
 ## Next Action Items
-- **P2 leftover:** Extract Subscribers tab (~1000 lines, 7 dialogs) into `pages/admin/saas/subscribers/` with sub-dialog components.
-- **P1:** Resend integration for tenant-debt email reminders (still pending `RESEND_API_KEY`).
-- **P2:** `printPlatformCardInvoice` — add "Click to Print" fallback inside popup body for browsers blocking `window.onload`.
-- **P3:** Persist last-used invoice format per cashier in localStorage.
-- **P3:** Re-print receipt for any previously-sold card from `/services/cards` inventory list.
-- **Tech debt:** Single source of truth for SaaS sidebar (Layout.js ↔ MonitoringDashboard ↔ SaasAdminPage SLUG_TO_TAB).
-- **Enhancement:** Consider tenant-monotonic counter for invoice numbers (current 8-hex has minor birthday risk at very high volume).
+- **🔥 P1:** Provide `RESEND_API_KEY` + `SENDER_EMAIL` (verified domain) in `backend/.env` to flip email provider from `mock` → `resend`. Then `sudo supervisorctl restart backend`.
+- **🗑️ P2:** Now that all 5 big tabs are extracted, the legacy inline-dialog code in `SaasAdminPage.js` (~2000 lines) is dead/duplicate. Schedule a cleanup pass — keep only the monitoring branch (`showMonitoringOnly`) and delete the inline `TabsContent` blocks for subscribers/plans/payments/tenant-debts/audit-timeline.
+- **🚀 P2:** Apply `cached_json` decorator to more hot endpoints — `/saas/stats` (polled every 30s by 5+ dashboard cards), `/saas/tenant-debts`, `/saas/plans`. Each warm hit saves ~50-200ms of DB round-trips.
+- **📊 P3:** Pagination + date-range filter on `/platform-cards/sales` — current implementation loads the full list (would break at 10k+ sales per tenant).
+- **🧰 P3:** Add `served_at` field to all cached endpoint responses for consistency.
+- **🛡️ P3:** `pages/admin/saas/AgentsPage.js` wrapper around `AgentsDashboard` so `/saas-admin/agents` no longer routes through legacy SaasAdminPage (matching the cleanup target above).
