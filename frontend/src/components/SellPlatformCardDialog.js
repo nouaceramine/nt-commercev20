@@ -109,6 +109,8 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
 
   const printReceipt = (format = "thermal80") => {
     if (!result) return;
+    // Persist last-used format per cashier so next sale defaults to it
+    try { localStorage.setItem("pos.last_invoice_format", format); } catch { /* storage may be disabled */ }
     const ok = printPlatformCardInvoice({
       format,
       storeName: branding.name || "متجري",
@@ -119,6 +121,12 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
     });
     if (!ok) toast.error("فضلاً اسمح بالنوافذ المنبثقة للطباعة");
   };
+
+  // Read the cashier's last-used format once on mount so we can highlight
+  // the matching button as the recommended/default one.
+  const lastFormat = (() => {
+    try { return localStorage.getItem("pos.last_invoice_format") || "thermal80"; } catch { return "thermal80"; }
+  })();
 
   const copyCode = () => {
     navigator.clipboard.writeText(result?.code || "");
@@ -142,14 +150,26 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
             </div>
             <div className="flex gap-2 justify-center flex-wrap">
               <Button variant="outline" onClick={copyCode} data-testid="copy-code-btn"><Copy className="h-4 w-4 ml-2" /> نسخ</Button>
-              <Button variant="outline" onClick={() => printReceipt("thermal58")} data-testid="print-58mm-btn">
-                <Printer className="h-4 w-4 ml-2" /> حراري 58mm
+              <Button
+                variant={lastFormat === "thermal58" ? "default" : "outline"}
+                onClick={() => printReceipt("thermal58")}
+                data-testid="print-58mm-btn"
+              >
+                <Printer className="h-4 w-4 ml-2" /> حراري 58mm{lastFormat === "thermal58" ? " ★" : ""}
               </Button>
-              <Button onClick={() => printReceipt("thermal80")} data-testid="print-80mm-btn">
-                <Printer className="h-4 w-4 ml-2" /> حراري 80mm
+              <Button
+                variant={lastFormat === "thermal80" ? "default" : "outline"}
+                onClick={() => printReceipt("thermal80")}
+                data-testid="print-80mm-btn"
+              >
+                <Printer className="h-4 w-4 ml-2" /> حراري 80mm{lastFormat === "thermal80" ? " ★" : ""}
               </Button>
-              <Button variant="outline" onClick={() => printReceipt("a5")} data-testid="print-a5-btn">
-                <FileText className="h-4 w-4 ml-2" /> فاتورة A5
+              <Button
+                variant={lastFormat === "a5" ? "default" : "outline"}
+                onClick={() => printReceipt("a5")}
+                data-testid="print-a5-btn"
+              >
+                <FileText className="h-4 w-4 ml-2" /> فاتورة A5{lastFormat === "a5" ? " ★" : ""}
               </Button>
             </div>
             <DialogFooter>

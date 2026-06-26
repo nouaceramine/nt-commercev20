@@ -12,9 +12,15 @@ import psutil
 from fastapi import APIRouter, Depends
 
 from config.database import db, client
+from utils.cache import cache
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Platform Stats"])
+
+# Polled every 30s by the monitoring dashboard. Caching for 10s collapses
+# concurrent polls from multiple super-admins into a single DB/psutil pass.
+_PLATFORM_STATS_TTL = 10
+_PLATFORM_STATS_KEY = "saas:platform-stats:global"
 
 
 def _max_tenants() -> int:
@@ -39,6 +45,18 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
     Capacity is computed against MAX_TENANTS env var when > 0. When unset,
     `capacity_percent` is null and `unlimited` flag is true.
     """
+    # ── Redis-backed fast path (10s TTL) ──
+    if cache.enabled:
+        try:
+            import json as _json
+            raw = await cache.get(_PLATFORM_STATS_KEY)
+            if raw:
+                payload = _json.loads(raw)
+                payload["cached"] = True
+                return payload
+        except Exception:
+            pass
+
     # Tenant count + active count
     total_tenants = await db.saas_tenants.count_documents({})
     active_tenants = await db.saas_tenants.count_documents({"is_active": True})
@@ -99,7 +117,7 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
         except Exception as e:
             services["redis"] = {"status": "down", "label": "Redis (cache)", "error": str(e)[:80]}
 
-    return {
+    payload = {
         "tenants": {
             "total": total_tenants,
             "active": active_tenants,
@@ -118,6 +136,16 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
         "services": services,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # ── Store in cache (10s TTL) — best-effort, never blocks the response ──
+    if cache.enabled:
+        try:
+            import json as _json
+            await cache.set(_PLATFORM_STATS_KEY, _json.dumps(payload, default=str), ttl=_PLATFORM_STATS_TTL)
+        except Exception:
+            pass
+
+    return payload
 
 
 __all__ = ["router"]
