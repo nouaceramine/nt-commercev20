@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 14 — 100% GREEN on both backend & frontend. Backend (pytest 12/12 PASS, test_iter14_saas_split.py): all four newly-extracted SaaS sub-route endpoints respond 200 (payments / plans?include_inactive=true / tenant-debts / audit-timeline), the iter-12 tz-naive date regression (audit-timeline?since=2026-01-01 / ?until=2027-01-01) is CONFIRMED FIXED — both return 200 not 500, monitoring dashboard endpoints still healthy (/api/saas/stats + /api/saas/platform-stats with services block intact), and auth-gating still 401/403 on the three new public-route surfaces. Frontend Playwright end-to-end PASS — login as admin@ntcommerce.com landed at /saas-admin where monitoring-dashboard renders. All 4 extracted pages render their data-testids: saas-payments-page (with back-to-monitoring-btn + payments-table), saas-plans-page (add-plan-btn opens plan-dialog), saas-tenant-debts-page (2 tenant-code-* badges + 2 settle-debt-*-btn rows; clicking opens settle-debt-dialog — note iter-13's MEDIUM regression about missing badges is now RESOLVED), saas-audit-timeline-page (audit-filters-card with type/since/until inputs; setting since=2026-01-01 + audit-apply-btn does NOT crash and audit-events-list visible). NO horizontal tablists on any sub-route (0 [role=tablist] elements). Legacy /saas-admin/subscribers and /saas-admin/agents regressions PASS. Platform-card invoice builder validated via Node-shimmed dynamic execution of /app/frontend/src/lib/platformCardInvoice.js — for each of thermal58 / thermal80 / a5 the returned HTML contains: store name, invoice number CARD-ABCDEF, PIN code PIN-1234-5678, operator+denomination (Djezzy 500), formatted Arabic date, 'كود التعبئة (PIN)' label, 'توقيع الكاشير' signature, 'فاتورة بطاقة شحن' title; width-CSS assertions PASS (200px / 280px / @page A5). XSS safety VERIFIED — passing storeName='<script>alert(1)</script>' + customer='\"><img onerror=alert(1)>' produces exactly 1 raw <script> in output (the legit window.onload/window.print bundled tag) and the user-controlled payload is properly escaped to '&lt;script&gt;' and '&lt;img'. SellPlatformCardDialog.js confirmed via grep to expose print-58mm-btn (line 145), print-80mm-btn (line 148, default variant), print-a5-btn (line 151) — each wired to printPlatformCardInvoice with the corresponding format. Zero console pageerrors during the entire smoke run.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter14_saas_split.py",
+    "/app/test_reports/pytest/iteration_14.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "platformCardInvoice.js:114 — invoiceNo fallback `CARD-${sale.id.slice(0,6).toUpperCase()}` uses the FIRST 6 hex chars of the sale UUID. With high sale volume per tenant this 6-hex space (16M) has a measurable birthday collision risk for customer-facing invoice numbers; recommend using a tenant-monotonic counter or the full sale id (or a 8-char base32) for the invoice_number when not provided by the backend.",
+    "platformCardInvoice.js:86 — the inline `<script>window.onload=function(){window.print();setTimeout(function(){window.close()},500)}</script>` runs unconditionally inside the popup. Modern browsers (esp. with popup blockers + cross-origin restrictions) can silently swallow the popup; consider adding a fallback in-page 'Click to Print' button rendered server-less inside the body so users on a blocked popup still see something printable.",
+    "platformCardInvoice.js:64 — denomination uses `_fmtAmount(denomination)` which is ar-DZ locale (Arabic-Indic digits or DZD spacing). For thermal 58mm where horizontal real-estate is precious, the long ar-DZ format may wrap to a second line. Consider passing a {style:'decimal', useGrouping:false} option or a tighter formatter for thermal58 only.",
+    "SellPlatformCardDialog.js:145-151 — three print buttons rendered with distinct testids but the file imports printPlatformCardInvoice which calls window.open(...,_blank,...). In some embedded POS browsers (e.g. Android Chrome WebView) window.open without a user-gesture context returns null. The handler at line ~112 returns the boolean ok but the UI does not surface a toast on `ok===false` (popup blocked). Recommend a toast.error('فضلاً اسمح بالنوافذ المنبثقة للطباعة') when printPlatformCardInvoice returns false.",
+    "audit_timeline_routes.py:26-37 (carried review) — the iter-13 _parse_iso coercion to UTC is solid for the regression, but the function silently drops timezone-aware inputs that supply a different offset (e.g. +02:00). Confirm tests cover both naive and offset-bearing inputs — current iter-14 pytest only exercises the naive path.",
+    "Sub-route pages under /app/frontend/src/pages/admin/saas/ duplicate the back-to-monitoring header + page-shell pattern. The shared SaasPageHeader.js is good — verify all 4 new pages actually import it (rather than each re-implementing the header) to avoid drift on future styling changes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter14_saas_split.py (NEW — 12 tests, all pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 pytest)",
+    "frontend": "100% — every spec-required data-testid present, zero console pageerrors, XSS escaping verified, 3-format invoice HTML validated"
+  },
+  "test_credentials": "admin@ntcommerce.com / Admin@2024 (super_admin). Tenant TEST_tenant_0e54f6b5 credentials were NOT exercised this iter — invoice builder was validated as a pure module via Node-shimmed dynamic execution which is more deterministic than POS popup-window verification under Playwright headless (popup-blocker may interfere).",
+  "seed_data_creation": "None — relied on existing 8 tenants, 2 agents, 2 tenant-debt rows from iter 13.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 14 = SaaS Admin split (4 of 5 BIG tabs extracted to /app/frontend/src/pages/admin/saas/*Page.js, Subscribers deferred) + 3-format platform-card invoice (thermal58/thermal80/a5) with XSS-safe HTML. Backend regression file /app/backend/tests/test_iter14_saas_split.py covers the four extracted sub-route endpoints + naive-date audit-timeline regression. Pure-function invoice builder lives at /app/frontend/src/lib/platformCardInvoice.js — validation strategy was: shim escape.js extension + dynamic-import via node (CRA bundle does not expose /src/ at runtime). All extracted pages render their spec-required data-testids; iter-13's missing tenant-code-* badge on tenant-debts is now FIXED. Subscribers tab is INTENTIONALLY still legacy SaasAdminPage — do not flag as regression.",
+  "rca of the issue": "No issues found this iter — all spec items pass. The iter-13 minor (missing tenant-code badges on /saas-admin/tenant-debts) and the iter-12 carry-over (naive ISO date in audit-timeline filter) are BOTH confirmed RESOLVED in this iter."
+}

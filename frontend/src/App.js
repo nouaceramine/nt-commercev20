@@ -127,6 +127,10 @@ import SaasAdminPage from "./pages/admin/SaasAdminPage";
 import FeatureFlagsPage from "./pages/admin/FeatureFlagsPage";
 import SystemLogsPage from "./pages/SystemLogsPage";
 import SupplierAdminPage from "./pages/admin/SupplierAdminPage";
+import SaasPaymentsPage from "./pages/admin/saas/PaymentsPage";
+import SaasPlansPage from "./pages/admin/saas/PlansPage";
+import SaasTenantDebtsPage from "./pages/admin/saas/TenantDebtsPage";
+import SaasAuditTimelinePage from "./pages/admin/saas/AuditTimelinePage";
 import StoreManagementPage from "./pages/store/StoreManagementPage";
 import PublicStorePage from "./pages/store/PublicStorePage";
 import DataImportExportPage from "./pages/DataImportExportPage";
@@ -377,11 +381,11 @@ function AppRoutes() {
       />
       <Route
         path="/saas-admin/plans"
-        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+        element={<ProtectedRoute superAdminOnly><SaasPlansPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/payments"
-        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+        element={<ProtectedRoute superAdminOnly><SaasPaymentsPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/platform-catalog"
@@ -421,11 +425,11 @@ function AppRoutes() {
       />
       <Route
         path="/saas-admin/tenant-debts"
-        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+        element={<ProtectedRoute superAdminOnly><SaasTenantDebtsPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/audit-timeline"
-        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+        element={<ProtectedRoute superAdminOnly><SaasAuditTimelinePage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/feature-flags"

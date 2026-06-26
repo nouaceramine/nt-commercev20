@@ -14,10 +14,11 @@ import apiClient from "../lib/apiClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Loader2, ShoppingCart, Copy, Printer, CreditCard, CheckCircle2 } from "lucide-react";
+import { Loader2, ShoppingCart, Copy, Printer, CreditCard, CheckCircle2, FileText } from "lucide-react";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
+import { printPlatformCardInvoice } from "../lib/platformCardInvoice";
 
 const OPERATOR_COLORS = { Mobilis: "bg-green-500", Djezzy: "bg-red-500", Ooredoo: "bg-orange-500" };
 
@@ -31,14 +32,17 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
   const [sellPrice, setSellPrice] = useState("");
   const [pay, setPay] = useState("cash");
   const [result, setResult] = useState(null);  // {code, operator, denomination}
+  const [resultSale, setResultSale] = useState(null);  // sale payload from /platform-cards/sell
+  const [branding, setBranding] = useState({ name: "" });
   const [submitting, setSubmitting] = useState(false);
 
   const reload = async () => {
     setLoading(true);
     try {
-      const [s, c] = await Promise.all([
+      const [s, c, b] = await Promise.all([
         apiClient.get("/platform-cards/stock-summary"),
         apiClient.get("/customers").catch(() => ({ data: [] })),
+        apiClient.get("/settings/tenant-branding").catch(() => ({ data: {} })),
       ]);
       const data = s.data || {};
       setStock({
@@ -46,6 +50,7 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
         idoom: (data.idoom || []).map((r) => ({ denomination: r._id.denomination, count: r.count })),
       });
       setCustomers(Array.isArray(c.data) ? c.data : (c.data?.items || []));
+      setBranding({ name: b.data?.name || "" });
     } catch (_e) {
       toast.error("فشل تحميل المخزون");
     } finally { setLoading(false); }
@@ -53,7 +58,8 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
 
   useEffect(() => {
     if (open) {
-      setPicked(null); setCustomer(""); setSelectedCustomerId(""); setSellPrice(""); setPay("cash"); setResult(null);
+      setPicked(null); setCustomer(""); setSelectedCustomerId(""); setSellPrice(""); setPay("cash");
+      setResult(null); setResultSale(null);
       reload();
     }
   }, [open]);
@@ -92,6 +98,7 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
       }
       const res = await apiClient.post("/platform-cards/sell", payload);
       setResult(res.data?.card);
+      setResultSale(res.data?.sale);
       toast.success("تم البيع. الكود معروض أدناه");
       if (onSold) onSold(res.data?.sale, res.data?.card);
     } catch (e) {
@@ -100,22 +107,17 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
     } finally { setSubmitting(false); }
   };
 
-  const printReceipt = () => {
+  const printReceipt = (format = "thermal80") => {
     if (!result) return;
-    const html = `
-      <!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
-      <style>body{font-family:sans-serif;text-align:center;padding:20px;width:280px}
-      h2{margin:8px 0} .code{font-family:monospace;font-size:24px;letter-spacing:2px;background:#f3f4f6;padding:12px;margin:12px 0;border-radius:8px;direction:ltr}
-      .meta{font-size:12px;color:#666}</style></head><body>
-      <h2>${result.operator} ${result.denomination} دج</h2>
-      <div class="code">${result.code}</div>
-      <div class="meta">${new Date().toLocaleString("ar")}</div>
-      ${customer ? `<div class="meta">رقم الزبون: ${customer}</div>` : ""}
-      <div style="margin-top:10px;font-size:11px">شكراً لتعاملكم معنا 💚</div>
-      <script>window.print();</script></body></html>`;
-    const w = window.open("", "_blank", "width=320,height=480");
-    w.document.write(html);
-    w.document.close();
+    const ok = printPlatformCardInvoice({
+      format,
+      storeName: branding.name || "متجري",
+      sale: resultSale || {},
+      card: result,
+      customer: resultSale?.customer_name || "",
+      customerPhone: customer,
+    });
+    if (!ok) toast.error("منع المتصفح فتح نافذة الطباعة — يرجى السماح بها");
   };
 
   const copyCode = () => {
@@ -138,12 +140,20 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
             <div className="bg-gray-100 rounded p-4 text-center font-mono text-2xl tracking-widest" dir="ltr" data-testid="sold-code">
               {result.code}
             </div>
-            <div className="flex gap-2 justify-center">
+            <div className="flex gap-2 justify-center flex-wrap">
               <Button variant="outline" onClick={copyCode} data-testid="copy-code-btn"><Copy className="h-4 w-4 ml-2" /> نسخ</Button>
-              <Button onClick={printReceipt} data-testid="print-receipt-btn"><Printer className="h-4 w-4 ml-2" /> طباعة وصل</Button>
+              <Button variant="outline" onClick={() => printReceipt("thermal58")} data-testid="print-58mm-btn">
+                <Printer className="h-4 w-4 ml-2" /> حراري 58mm
+              </Button>
+              <Button onClick={() => printReceipt("thermal80")} data-testid="print-80mm-btn">
+                <Printer className="h-4 w-4 ml-2" /> حراري 80mm
+              </Button>
+              <Button variant="outline" onClick={() => printReceipt("a5")} data-testid="print-a5-btn">
+                <FileText className="h-4 w-4 ml-2" /> فاتورة A5
+              </Button>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setResult(null); setPicked(null); reload(); }}>بيع كرت آخر</Button>
+              <Button variant="outline" onClick={() => { setResult(null); setResultSale(null); setPicked(null); reload(); }}>بيع كرت آخر</Button>
               <Button onClick={onClose}>إغلاق</Button>
             </DialogFooter>
           </div>
