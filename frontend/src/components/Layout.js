@@ -299,14 +299,60 @@ export const Layout = ({ children }) => {
       title: 'NT Commerce',
       icon: Building,
       items: [
-        { path: '/saas-admin', icon: Building, label: language === 'ar' ? 'لوحة تحكم SaaS' : 'SaaS Dashboard' },
-        { path: '/saas-admin/feature-flags', icon: Shield, label: language === 'ar' ? 'إدارة الميزات' : 'Feature Flags' },
-        { path: '/system-updates', icon: Bell, label: language === 'ar' ? 'تحديثات النظام' : 'Mises à jour système' },
-        { path: '/security-dashboard', icon: Shield, label: language === 'ar' ? 'لوحة الأمان' : 'Sécurité' },
-        { path: '/backup-system', icon: Database, label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes' },
-        { path: '/data-import-export', icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
-        { path: '/wallet-management', icon: Wallet, label: language === 'ar' ? 'المحافظ' : 'Portefeuilles' },
-        { path: '/payments', icon: CreditCard, label: language === 'ar' ? 'المدفوعات' : 'Paiements' },
+        { path: '/saas-admin', icon: LayoutDashboard, label: language === 'ar' ? 'لوحة المراقبة' : 'Tableau de monitoring' },
+      ]
+    },
+    {
+      id: 'saas-management',
+      title: language === 'ar' ? 'إدارة SaaS' : 'Gestion SaaS',
+      icon: Building,
+      items: [
+        { path: '/saas-admin/subscribers',         icon: Users,         label: language === 'ar' ? 'المشتركين' : 'Abonnés' },
+        { path: '/saas-admin/agents',              icon: Truck,         label: language === 'ar' ? 'الوكلاء' : 'Agents' },
+        { path: '/saas-admin/plans',               icon: Package,       label: language === 'ar' ? 'الخطط' : 'Plans' },
+        { path: '/saas-admin/payments',            icon: CreditCard,    label: language === 'ar' ? 'المدفوعات' : 'Paiements' },
+        { path: '/saas-admin/tenant-debts',        icon: Receipt,       label: language === 'ar' ? 'ديون التجار' : 'Dettes locataires' },
+        { path: '/saas-admin/withdrawals',         icon: DollarSign,    label: language === 'ar' ? 'طلبات السحب' : 'Demandes retrait' },
+      ]
+    },
+    {
+      id: 'saas-catalog',
+      title: language === 'ar' ? 'كتالوج المنصّة' : 'Catalogue plateforme',
+      icon: Boxes,
+      items: [
+        { path: '/saas-admin/platform-catalog',    icon: Tv,            label: language === 'ar' ? 'كتالوج IPTV' : 'Catalogue IPTV' },
+        { path: '/saas-admin/recharge-mgmt',       icon: Smartphone,    label: language === 'ar' ? 'شحن الجوال' : 'Recharge mobile' },
+        { path: '/saas-admin/supplier',            icon: Package,       label: language === 'ar' ? 'المنصة كمورد' : 'Plateforme fournisseur' },
+        { path: '/saas-admin/default-pos-shortcuts', icon: LayoutDashboard, label: language === 'ar' ? 'اختصارات POS' : 'Raccourcis POS' },
+      ]
+    },
+    {
+      id: 'saas-reports',
+      title: language === 'ar' ? 'التقارير والتدقيق' : 'Rapports & Audit',
+      icon: BarChart3,
+      items: [
+        { path: '/saas-admin/finance',             icon: DollarSign,    label: language === 'ar' ? 'التقارير المالية' : 'Rapports financiers' },
+        { path: '/saas-admin/audit-timeline',      icon: Clock,         label: language === 'ar' ? 'سجل التدقيق' : 'Journal audit' },
+        { path: '/saas-admin/impersonation-logs',  icon: Shield,        label: language === 'ar' ? 'سجل الانتحال' : 'Journal impersonation' },
+        { path: '/saas-admin/alerts',              icon: Bell,          label: language === 'ar' ? 'سجل الأخطاء' : 'Alertes' },
+        { path: '/system-updates',                 icon: Bell,          label: language === 'ar' ? 'تحديثات النظام' : 'Mises à jour' },
+        { path: '/saas-admin/system-logs',         icon: FileText,      label: language === 'ar' ? 'سجل النظام' : 'Journal système' },
+      ]
+    },
+    {
+      id: 'saas-system',
+      title: language === 'ar' ? 'النظام' : 'Système',
+      icon: Settings,
+      items: [
+        { path: '/saas-admin/ai-assistant',        icon: Bot,           label: language === 'ar' ? 'المساعد الذكي' : 'Assistant IA' },
+        { path: '/saas-admin/databases',           icon: Database,      label: language === 'ar' ? 'قواعد البيانات' : 'Bases données' },
+        { path: '/saas-admin/feature-flags',       icon: Shield,        label: language === 'ar' ? 'إدارة الميزات' : 'Feature Flags' },
+        { path: '/security-dashboard',             icon: Shield,        label: language === 'ar' ? 'لوحة الأمان' : 'Sécurité' },
+        { path: '/backup-system',                  icon: Database,      label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes' },
+        { path: '/data-import-export',             icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
+        { path: '/wallet-management',              icon: Wallet,        label: language === 'ar' ? 'المحافظ' : 'Portefeuilles' },
+        { path: '/payments',                       icon: CreditCard,    label: language === 'ar' ? 'المدفوعات (محفظة)' : 'Paiements wallet' },
+        { path: '/motherboard',                    icon: CircuitBoard,  label: language === 'ar' ? 'اللوحة الأم' : 'Carte mère' },
       ]
     }
   ];

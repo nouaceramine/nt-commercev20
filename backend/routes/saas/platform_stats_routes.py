@@ -75,6 +75,30 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
     except Exception:
         cpu_percent = None
 
+    # ── Service health snapshot ──
+    services: dict = {}
+    # Backend itself: if we reached here, backend is up
+    services["backend"] = {"status": "ok", "label": "Backend API"}
+    # MongoDB ping
+    try:
+        await client.admin.command("ping")
+        services["mongodb"] = {"status": "ok", "label": "MongoDB"}
+    except Exception as e:
+        services["mongodb"] = {"status": "down", "label": "MongoDB", "error": str(e)[:80]}
+    # Redis: optional — disabled when no REDIS_URL configured
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if not redis_url:
+        services["redis"] = {"status": "disabled", "label": "Redis (cache)"}
+    else:
+        try:
+            import redis.asyncio as redis_async  # type: ignore
+            r = redis_async.from_url(redis_url, socket_timeout=1.0, socket_connect_timeout=1.0)
+            await r.ping()
+            await r.aclose()
+            services["redis"] = {"status": "ok", "label": "Redis (cache)"}
+        except Exception as e:
+            services["redis"] = {"status": "down", "label": "Redis (cache)", "error": str(e)[:80]}
+
     return {
         "tenants": {
             "total": total_tenants,
@@ -91,6 +115,7 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
             "cpu_percent": cpu_percent,
             "disk": _safe_disk_usage("/"),
         },
+        "services": services,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

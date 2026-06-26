@@ -358,7 +358,7 @@ function AppRoutes() {
       <Route path="/supplier-tracking" element={<ProtectedRoute><SupplierTrackingPage /></ProtectedRoute>} />
       <Route path="/two-factor" element={<ProtectedRoute><TwoFactorPage /></ProtectedRoute>} />
 
-      {/* SaaS Admin Dashboard */}
+      {/* SaaS Admin Dashboard + sub-routes (per-tab pages) */}
       <Route
         path="/saas-admin"
         element={
@@ -366,6 +366,66 @@ function AppRoutes() {
             <SaasAdminPage />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/saas-admin/subscribers"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/agents"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/plans"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/payments"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/platform-catalog"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/recharge-mgmt"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/finance"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/databases"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/alerts"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/withdrawals"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/ai-assistant"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/impersonation-logs"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/default-pos-shortcuts"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/tenant-debts"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/audit-timeline"
+        element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/feature-flags"

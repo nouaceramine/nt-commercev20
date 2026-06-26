@@ -1,0 +1,60 @@
+{
+  "summary": "Iter 13 — Massive SaaS Admin refactor (sidebar-driven sub-routes + Monitoring-only dashboard + Settle Debt + EntityCode badges). Backend: 11/11 pytest PASS (test_iter13_saas_admin.py) — services block (backend=ok, mongodb=ok, redis=disabled), MAX_TENANTS=500 capacity, /api/wallet/settle-credit happy path + 400 over-amount + 400 zero + 404 unknown entity + 401 unauthorized. Frontend Playwright: end-to-end PASS — login → /saas-admin renders monitoring-dashboard with 6 stat cards + platform-capacity-card + service-status-card (backend/mongodb/redis rows visible) + quick-links-card with exactly 15 quick links. ZERO visible horizontal tablists across /saas-admin and all 12 smoke sub-routes (plans, payments, platform-catalog, recharge-mgmt, finance, databases*, alerts, withdrawals, ai-assistant, impersonation-logs, default-pos-shortcuts, audit-timeline). /saas-admin/subscribers shows heading 'المشتركين' + back button + 8 T-XXXXXX tenant-code badges. /saas-admin/agents shows 2 AG-XXXXXX agent-code badges. /saas-admin/tenant-debts has 2 settle-debt-{id}-btn rows; clicking opens settle-debt-dialog with amount input + full button + note textarea. ZERO console errors during full smoke run.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/saas/audit-timeline?since=YYYY-MM-DD (carried over from iter 12)",
+        "issue": "Naive ISO date in ?since/?until still crashes with 500 (tz-naive vs tz-aware datetime compare in audit_timeline_routes._ts_dt). Not retested this iter — iter 12 reported this as HIGH and it does not appear in the iter 13 changeset."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Tenant Debts table (/saas-admin/tenant-debts)",
+        "issue": "EntityCode T-XXXXXX badges are NOT rendered in this table even though the spec lists tenant-debts alongside Subscribers & Agents as a place that should show the human-readable identifier. Playwright found 0 elements matching [data-testid^='tenant-code-'] inside /saas-admin/tenant-debts (Subscribers shows 8, Agents shows 2 correctly).",
+        "selector": "[data-testid^='tenant-code-'] inside /saas-admin/tenant-debts",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Right sidebar on /saas-admin",
+        "issues": ["Sidebar is collapsed to icon-only by default; group section titles (NT Commerce, إدارة SaaS, كتالوج المنصّة, التقارير والتدقيق, النظام) were not extractable via innerText in the collapsed state. Visually icons render and routing works — confirm Layout.js intentionally hides section headers when sidebar is collapsed or expose them as tooltips for discoverability."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter13_saas_admin.py",
+    "/app/test_reports/pytest/iteration_13.xml"
+  ],
+  "action_items": [
+    "MEDIUM: Add the EntityCode T-XXXXXX badge column to the Tenant Debts table (/saas-admin/tenant-debts) — currently 0 badges render there while Subscribers (8) and Agents (2) work. Use <EntityCode uuid={row.tenant_id} type='tenant' testId={`tenant-code-${row.tenant_id}`} /> mirroring the Subscribers table implementation at SaasAdminPage.js line ~1075.",
+    "LOW: Carry-over from iter 12 — fix tz-naive date filter crash in audit_timeline_routes._ts_dt (still open, not in this iter's changeset).",
+    "LOW: Consider showing the 5 sidebar group section titles even when sidebar is collapsed (tooltip or hover) so super-admin can discover groupings."
+  ],
+  "critical_code_review_comments": [
+    "MonitoringDashboard.js:178-188 — `data-testid={`quick-link-${to.replace('/saas-admin/', '')}`}` good. But QUICK_LINKS at lines 15-31 hard-codes 15 routes whose ordering & set is duplicated with Layout.js superAdminNavSections — risk of drift. Recommend extracting a single source-of-truth array (e.g. /lib/saasNav.js) consumed by both Layout.js and MonitoringDashboard.js so renaming/reordering happens in one place.",
+    "ServiceStatusMap.js:65-70 — Uses dynamic Tailwind classes `bg-${meta.color}-100 dark:bg-${meta.color}-900/30 text-${meta.color}-600 dark:text-${meta.color}-400`. Tailwind JIT may purge these in production builds. Either add to tailwind.config.js safelist (emerald-100/600, red-100/600, slate-100/600 + dark variants) or replace with a static map per status. Same pattern flagged in iter 12 for SaasAdminPage:2078.",
+    "ServiceStatusMap.js:31 — Polls /api/saas/platform-stats every 30s in parallel with MonitoringDashboard polling /api/saas/stats every 30s → 2 separate intervals, separate cache. Acceptable today but consider a single shared platformStats context + React-Query for backoff / dedupe.",
+    "platform_stats_routes.py:78-100 — redis import is inside the if-branch (good lazy-import). Redis ping uses 1.0s socket_timeout — at higher load this 1-second blocking call on every dashboard load could surprise. Consider caching the redis status for 10-30 seconds.",
+    "SaasAdminPage.js still hovering ~3011 lines from iter 12 + this iter added more handlers — splitting is overdue (>700 LoC rule). Specifically each tab body (TenantDebtsTab, SubscribersTab, AgentsTab, etc.) should be its own file with co-located state.",
+    "EntityCode.js:13-17 — shortCode slices the first 6 hex chars after stripping dashes. With 8 tenants today collisions are unlikely, but at scale (MAX_TENANTS=500) the birthday-paradox collision probability over 6 hex chars (16M space) is small but nonzero — if collisions matter for human reference, consider 8 chars or a checksum suffix.",
+    "MonitoringDashboard.js:39-47 — Polling interval has no jitter and uses raw setInterval. If many super-admin tabs are open, all hit /api/saas/stats on the same 30s tick. Acceptable for a single-admin internal tool but worth noting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter13_saas_admin.py (NEW)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11)",
+    "frontend": "~95% — all critical flows PASS; only deviation from spec is missing tenant-code badges in the Tenant Debts table"
+  },
+  "test_credentials": "admin@ntcommerce.com / Admin@2024 (super_admin). Tenant with credit_debt > 0 used: B4FDE9... (TEST TEST) and F2E36D... (FOAD). Settle-credit happy path debited 1.0 DZD from the first debtor wallet.",
+  "seed_data_creation": "None — relied on existing 8 tenants, 2 agents, 2 tenant-debt rows.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 13 = SaaS Admin refactor to sidebar-driven routes + monitoring-only dashboard + Settle Debt + EntityCode badges. All endpoint behaviors are stable; backend test file at /app/backend/tests/test_iter13_saas_admin.py. Single open frontend miss: Tenant Debts table missing T-XXXXXX EntityCode column even though spec lists it. Iter 12 audit-timeline tz-naive date crash is still open (not touched this iter). Sub-route /saas-admin/databases legitimately renders its own inner tablist (it's a tab-based DB management page, not the old SaaS Admin horizontal tabs) — that's expected, not a regression.",
+  "rca of the issue": "Tenant Debts table missing EntityCode badges — most likely a simple omission in /app/frontend/src/pages/admin/SaasAdminPage.js around line 1850+ (the tenant-debts table row render). The reusable EntityCode component already exists and works in Subscribers (line ~1075) and Agents (AgentsDashboard.js line 530+); spec explicitly mentions tenant-debts as the third location. Reproduction: login as admin → /saas-admin/tenant-debts → no column 'المعرّف' present in row cells. Mitigation: add `<EntityCode uuid={row.tenant_id} type='tenant' testId={`tenant-code-${row.tenant_id}`} />` to the first or near-first <td> of each tenant-debts row mirroring SubscribersTab."
+}

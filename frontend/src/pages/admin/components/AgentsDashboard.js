@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { AgentPermissionsDialog } from './AgentPermissionsDialog';
 import { AgentTenantsDialog } from './AgentTenantsDialog';
+import { EntityCode } from './EntityCode';
 
 // Mini chart component for sparklines
 const MiniChart = ({ data, color = 'blue', height = 40 }) => {
@@ -516,6 +517,7 @@ export const AgentsDashboard = () => {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
+                <TableHead>المعرّف</TableHead>
                 <TableHead>الوكيل</TableHead>
                 <TableHead>النوع</TableHead>
                 <TableHead>التواصل</TableHead>
@@ -529,6 +531,9 @@ export const AgentsDashboard = () => {
             <TableBody>
               {filteredAgents.map(agent => (
                 <TableRow key={agent.id} className="hover:bg-muted/30" data-testid={`agent-row-${agent.id}`}>
+                  <TableCell>
+                    <EntityCode uuid={agent.id} type="agent" testId={`agent-code-${agent.id}`} />
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-foreground ${

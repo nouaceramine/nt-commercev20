@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Layout } from '../../components/Layout';
@@ -51,14 +51,62 @@ import { SystemAlertsSection } from './components/SystemAlertsSection';
 import { MonitoringSection } from './components/MonitoringSection';
 import { FinanceReportsSection } from './components/FinanceReportsSection';
 import PlatformCapacityCard from './components/PlatformCapacityCard';
+import { MonitoringDashboard } from './components/MonitoringDashboard';
+import { EntityCode } from './components/EntityCode';
 import { AIAssistant } from '../../components/AIAssistant';
 import { Bot } from 'lucide-react';
 import { formatShortDate, convertToWesternNumerals } from '../../utils/globalDateFormatter';
 
+// Map sidebar/url slugs ↔ internal Tabs `value` keys
+const SLUG_TO_TAB = {
+  'subscribers': 'tenants',
+  'agents': 'agents',
+  'plans': 'plans',
+  'payments': 'payments',
+  'platform-catalog': 'platform-catalog',
+  'recharge-mgmt': 'recharge-mgmt',
+  'finance': 'finance',
+  'databases': 'databases',
+  'alerts': 'alerts',
+  'withdrawals': 'withdrawals',
+  'ai-assistant': 'ai-assistant',
+  'impersonation-logs': 'impersonation-logs',
+  'default-pos-shortcuts': 'default-pos-shortcuts',
+  'tenant-debts': 'tenant-debts',
+  'audit-timeline': 'audit-timeline',
+};
+
+const TAB_HEADERS = {
+  'tenants': { titleAr: 'المشتركين', subtitleAr: 'إدارة جميع المستأجرين، اشتراكاتهم، ومحافظهم' },
+  'agents': { titleAr: 'الوكلاء', subtitleAr: 'إدارة الوكلاء الموزّعين وعمولاتهم' },
+  'plans': { titleAr: 'الخطط', subtitleAr: 'إنشاء وتعديل خطط الاشتراك' },
+  'payments': { titleAr: 'المدفوعات', subtitleAr: 'سجل جميع المدفوعات والتجديدات' },
+  'platform-catalog': { titleAr: 'كتالوج IPTV', subtitleAr: 'إدارة كتالوج خدمات IPTV على المنصّة' },
+  'recharge-mgmt': { titleAr: 'إدارة شحن الجوال', subtitleAr: 'إعدادات الشحن والمعاملات' },
+  'finance': { titleAr: 'التقارير المالية', subtitleAr: 'تقارير الإيرادات والمصاريف المالية' },
+  'databases': { titleAr: 'قواعد البيانات', subtitleAr: 'إدارة قواعد بيانات المستأجرين' },
+  'alerts': { titleAr: 'سجل الأخطاء والتنبيهات', subtitleAr: 'تنبيهات النظام والأخطاء النشطة' },
+  'withdrawals': { titleAr: 'طلبات السحب', subtitleAr: 'مراجعة طلبات السحب من الوكلاء' },
+  'ai-assistant': { titleAr: 'المساعد الذكي', subtitleAr: 'مساعد إداري بالذكاء الاصطناعي' },
+  'impersonation-logs': { titleAr: 'سجل الانتحال', subtitleAr: 'سجل جميع جلسات انتحال شخصية المستأجرين' },
+  'default-pos-shortcuts': { titleAr: 'اختصارات POS الافتراضية', subtitleAr: 'تخصيص اختصارات الكاشير الافتراضية لكافة المستأجرين' },
+  'tenant-debts': { titleAr: 'ديون التجار للمنصّة', subtitleAr: 'إدارة الديون المستحقّة من التجار والتذكيرات' },
+  'audit-timeline': { titleAr: 'سجل التدقيق الموحّد', subtitleAr: 'خط زمني واحد يجمع كل عمليات التدقيق' },
+};
+
 export default function SaasAdminPage() {
   const { t, language } = useLanguage();
   const navigate = useNavigate();
-  
+  const location = useLocation();
+
+  // Derive activeTab from URL path. Base `/saas-admin` → monitoring (no inner tab)
+  const slug = useMemo(() => {
+    const m = location.pathname.match(/^\/saas-admin\/([^/]+)/);
+    return m ? m[1] : '';
+  }, [location.pathname]);
+  const activeTab = SLUG_TO_TAB[slug] || '';
+  const showMonitoringOnly = !activeTab; // base /saas-admin
+
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
   const [tenants, setTenants] = useState([]);
@@ -126,6 +174,12 @@ export default function SaasAdminPage() {
   const [tenantDebtsSummary, setTenantDebtsSummary] = useState({ total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
   const [tenantDebtsLoading, setTenantDebtsLoading] = useState(false);
   const [remindingTenantId, setRemindingTenantId] = useState(null);
+  // Settle Debt dialog state
+  const [settleDebtDialogOpen, setSettleDebtDialogOpen] = useState(false);
+  const [settleDebtTenant, setSettleDebtTenant] = useState(null);
+  const [settleDebtAmount, setSettleDebtAmount] = useState(0);
+  const [settleDebtNote, setSettleDebtNote] = useState('');
+  const [settleDebtBusy, setSettleDebtBusy] = useState(false);
   // Audit Timeline
   const [auditEvents, setAuditEvents] = useState([]);
   const [auditSummary, setAuditSummary] = useState({ total: 0, by_type: {} });
@@ -184,6 +238,18 @@ export default function SaasAdminPage() {
   useEffect(() => {
     fetchData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load tab-specific data when URL-driven activeTab changes (was previously
+  // wired to TabsTrigger onClick — now the trigger is hidden so we use effect).
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab === 'platform-catalog') loadPlatformCatalog();
+    else if (activeTab === 'recharge-mgmt') { loadRechargeConfig(); loadRechargeTxns(); }
+    else if (activeTab === 'impersonation-logs') loadImpersonationLogs();
+    else if (activeTab === 'default-pos-shortcuts') loadDefaultShortcuts();
+    else if (activeTab === 'tenant-debts') loadTenantDebts();
+    else if (activeTab === 'audit-timeline') loadAuditTimeline();
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = async () => {
     try {
@@ -551,6 +617,43 @@ export default function SaasAdminPage() {
       window.URL.revokeObjectURL(url);
     } catch (e) {
       toast.error('فشل تنزيل كشف الحساب');
+    }
+  };
+
+  // ── Settle Debt ──
+  const openSettleDebtDialog = (tenant) => {
+    setSettleDebtTenant(tenant);
+    setSettleDebtAmount(tenant.credit_debt || 0);
+    setSettleDebtNote('');
+    setSettleDebtDialogOpen(true);
+  };
+
+  const confirmSettleDebt = async () => {
+    if (!settleDebtTenant) return;
+    const amount = parseFloat(settleDebtAmount);
+    if (!amount || amount <= 0) {
+      toast.error('المبلغ يجب أن يكون أكبر من صفر');
+      return;
+    }
+    if (amount > (settleDebtTenant.credit_debt || 0)) {
+      toast.error(`المبلغ يفوق الدين المسجَّل (${(settleDebtTenant.credit_debt || 0).toLocaleString('ar-DZ')} دج)`);
+      return;
+    }
+    setSettleDebtBusy(true);
+    try {
+      const res = await apiClient.post('/wallet/settle-credit', {
+        entity_id: settleDebtTenant.tenant_id,
+        amount,
+        description: settleDebtNote || `تسديد دين — ${settleDebtTenant.tenant_name || settleDebtTenant.tenant_id}`,
+      });
+      toast.success(`تم التسديد. الدين المتبقّي: ${Number(res.data?.credit_debt_remaining || 0).toLocaleString('ar-DZ')} دج`);
+      setSettleDebtDialogOpen(false);
+      setSettleDebtTenant(null);
+      await loadTenantDebts();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل تسديد الدين');
+    } finally {
+      setSettleDebtBusy(false);
     }
   };
 
@@ -943,198 +1046,54 @@ export default function SaasAdminPage() {
   return (
     <Layout>
       <div className="space-y-6 animate-fade-in" data-testid="saas-admin-page">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-              <Building className="h-8 w-8 text-primary" />
-              لوحة تحكم NT Commerce
-            </h1>
-            <p className="text-muted-foreground mt-1">إدارة المشتركين والخطط والاشتراكات</p>
-          </div>
-          <Button
-            variant="outline"
-            onClick={() => navigate('/robots')}
-            className="gap-2"
-            data-testid="go-to-robots-btn"
-          >
-            <Bot className="h-4 w-4" />
-            الروبوتات الذكية
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => navigate('/auto-reports')}
-            className="gap-2"
-            data-testid="go-to-reports-btn"
-          >
-            <BarChart3 className="h-4 w-4" />
-            التقارير التلقائية
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => navigate('/saas-admin/system-logs')}
-            className="gap-2"
-            data-testid="go-to-system-logs-btn"
-          >
-            <AlertTriangle className="h-4 w-4" />
-            سجل الأخطاء
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => navigate('/saas-admin/supplier')}
-            className="gap-2"
-            data-testid="go-to-supplier-btn"
-          >
-            <Package className="h-4 w-4" />
-            المنصة كمورد
-          </Button>
-        </div>
+        {showMonitoringOnly ? (
+          <MonitoringDashboard />
+        ) : (
+          <>
+            {/* Per-tab header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+                  <Building className="h-7 w-7 text-primary" />
+                  {TAB_HEADERS[activeTab]?.titleAr || 'لوحة SaaS'}
+                </h1>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {TAB_HEADERS[activeTab]?.subtitleAr || ''}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => navigate('/saas-admin')}
+                className="gap-2"
+                data-testid="back-to-monitoring-btn"
+              >
+                <Activity className="h-4 w-4" />
+                العودة للمراقبة
+              </Button>
+            </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">إجمالي المشتركين</p>
-                  <p className="text-2xl font-bold">{stats.total_tenants}</p>
-                </div>
-                <Users className="h-8 w-8 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">نشط</p>
-                  <p className="text-2xl font-bold text-green-600">{stats.active_tenants}</p>
-                </div>
-                <Check className="h-8 w-8 text-green-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">تجريبي</p>
-                  <p className="text-2xl font-bold text-blue-600">{stats.trial_tenants}</p>
-                </div>
-                <Clock className="h-8 w-8 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">ينتهي قريباً</p>
-                  <p className="text-2xl font-bold text-amber-600">{stats.expiring_soon}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-amber-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">إيراد الشهر</p>
-                  <p className="text-2xl font-bold">{stats.monthly_revenue?.toLocaleString()}</p>
-                </div>
-                <TrendingUp className="h-8 w-8 text-green-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">إجمالي الإيراد</p>
-                  <p className="text-2xl font-bold">{stats.total_revenue?.toLocaleString()}</p>
-                </div>
-                <DollarSign className="h-8 w-8 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            <Tabs value={activeTab} className="space-y-6">
+              {/* Horizontal TabsList hidden — navigation now via right sidebar. */}
+              <TabsList className="hidden">
+                <TabsTrigger value="tenants" />
+                <TabsTrigger value="agents" />
+                <TabsTrigger value="plans" />
+                <TabsTrigger value="payments" />
+                <TabsTrigger value="platform-catalog" />
+                <TabsTrigger value="recharge-mgmt" />
+                <TabsTrigger value="finance" />
+                <TabsTrigger value="databases" />
+                <TabsTrigger value="monitoring" />
+                <TabsTrigger value="alerts" />
+                <TabsTrigger value="withdrawals" />
+                <TabsTrigger value="ai-assistant" />
+                <TabsTrigger value="impersonation-logs" />
+                <TabsTrigger value="default-pos-shortcuts" />
+                <TabsTrigger value="tenant-debts" />
+                <TabsTrigger value="audit-timeline" />
+              </TabsList>
 
-        {/* Platform Capacity Banner */}
-        <PlatformCapacityCard />
-
-        <Tabs defaultValue="tenants" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="tenants" className="gap-2">
-              <Users className="h-4 w-4" />
-              المشتركين
-            </TabsTrigger>
-            <TabsTrigger value="agents" className="gap-2">
-              <Truck className="h-4 w-4" />
-              الوكلاء
-            </TabsTrigger>
-            <TabsTrigger value="plans" className="gap-2">
-              <Package className="h-4 w-4" />
-              الخطط
-            </TabsTrigger>
-            <TabsTrigger value="payments" className="gap-2">
-              <CreditCard className="h-4 w-4" />
-              المدفوعات
-            </TabsTrigger>
-            <TabsTrigger value="platform-catalog" className="gap-2" onClick={loadPlatformCatalog}>
-              <Boxes className="h-4 w-4" />
-              كتالوج IPTV
-            </TabsTrigger>
-            <TabsTrigger value="recharge-mgmt" className="gap-2" onClick={() => { loadRechargeConfig(); loadRechargeTxns(); }}>
-              <Smartphone className="h-4 w-4" />
-              شحن الجوال
-            </TabsTrigger>
-            <TabsTrigger value="finance" className="gap-2">
-              <TrendingUp className="h-4 w-4" />
-              التقارير المالية
-            </TabsTrigger>
-            <TabsTrigger value="databases" className="gap-2">
-              <Database className="h-4 w-4" />
-              قواعد البيانات
-            </TabsTrigger>
-            <TabsTrigger value="monitoring" className="gap-2" data-testid="monitoring-tab">
-              <Activity className="h-4 w-4" />
-              المراقبة
-            </TabsTrigger>
-            <TabsTrigger value="alerts" className="gap-2" data-testid="alerts-tab">
-              <Bug className="h-4 w-4" />
-              الأخطاء
-            </TabsTrigger>
-            <TabsTrigger value="withdrawals" className="gap-2" data-testid="withdrawals-tab">
-              <Banknote className="h-4 w-4" />
-              طلبات السحب
-              {withdrawals.filter(w => w.status === 'pending_approval').length > 0 && (
-                <span className="ml-1 bg-amber-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                  {withdrawals.filter(w => w.status === 'pending_approval').length}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="ai-assistant" className="gap-2" data-testid="ai-assistant-tab">
-              <Bot className="h-4 w-4" />
-              المساعد الذكي
-            </TabsTrigger>
-            <TabsTrigger value="impersonation-logs" className="gap-2" data-testid="impersonation-logs-tab" onClick={() => loadImpersonationLogs()}>
-              <ShieldCheck className="h-4 w-4" />
-              سجل الانتحال
-            </TabsTrigger>
-            <TabsTrigger value="default-pos-shortcuts" className="gap-2" data-testid="default-pos-shortcuts-tab" onClick={() => loadDefaultShortcuts()}>
-              <LayoutDashboard className="h-4 w-4" />
-              اختصارات POS الافتراضية
-            </TabsTrigger>
-            <TabsTrigger value="tenant-debts" className="gap-2" data-testid="tenant-debts-tab" onClick={() => loadTenantDebts()}>
-              <Receipt className="h-4 w-4" />
-              ديون التجار
-            </TabsTrigger>
-            <TabsTrigger value="audit-timeline" className="gap-2" data-testid="audit-timeline-tab" onClick={() => loadAuditTimeline()}>
-              <Activity className="h-4 w-4" />
-              سجل التدقيق
-            </TabsTrigger>
-          </TabsList>
+              {/* ── Tab content sections ── */}
 
           {/* Tenants Tab */}
           <TabsContent value="tenants" className="space-y-4">
@@ -1159,6 +1118,7 @@ export default function SaasAdminPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>المعرّف</TableHead>
                       <TableHead>المشترك</TableHead>
                       <TableHead>الوكيل</TableHead>
                       <TableHead>التصنيف</TableHead>
@@ -1172,6 +1132,9 @@ export default function SaasAdminPage() {
                   <TableBody>
                     {filteredTenants.map(tenant => (
                       <TableRow key={tenant.id}>
+                        <TableCell>
+                          <EntityCode uuid={tenant.id} type="tenant" testId={`tenant-code-${tenant.id}`} />
+                        </TableCell>
                         <TableCell>
                           <div 
                             className="cursor-pointer hover:text-primary transition-colors"
@@ -1932,6 +1895,7 @@ export default function SaasAdminPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-muted/50">
                         <tr>
+                          <th className="px-3 py-2 text-start">المعرّف</th>
                           <th className="px-3 py-2 text-start">التاجر</th>
                           <th className="px-3 py-2 text-start">البريد الإلكتروني</th>
                           <th className="px-3 py-2 text-start">الرصيد</th>
@@ -1944,6 +1908,9 @@ export default function SaasAdminPage() {
                       <tbody data-testid="tenant-debts-table">
                         {tenantDebts.map((t) => (
                           <tr key={t.tenant_id} className="border-t border-border hover:bg-muted/30" data-testid={`tenant-debt-row-${t.tenant_id}`}>
+                            <td className="px-3 py-2">
+                              <EntityCode uuid={t.tenant_id} type="tenant" testId={`debt-tenant-code-${t.tenant_id}`} />
+                            </td>
                             <td className="px-3 py-2">
                               <div className="font-medium">{t.tenant_name}</div>
                               {t.subscription_overdue && (
@@ -1958,7 +1925,17 @@ export default function SaasAdminPage() {
                             <td className="px-3 py-2 text-xs">{t.last_reminder_at ? formatShortDate(t.last_reminder_at) : '—'}</td>
                             <td className="px-3 py-2 text-center">{t.reminders_sent || 0}</td>
                             <td className="px-3 py-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  onClick={() => openSettleDebtDialog(t)}
+                                  data-testid={`settle-debt-${t.tenant_id}-btn`}
+                                >
+                                  <Banknote className="h-3 w-3 me-1" />
+                                  تسديد الدين
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -2103,6 +2080,85 @@ export default function SaasAdminPage() {
             </Card>
           </TabsContent>
         </Tabs>
+          </>
+        )}
+
+        {/* Settle Debt Dialog */}
+        <Dialog open={settleDebtDialogOpen} onOpenChange={(open) => { setSettleDebtDialogOpen(open); if (!open) setSettleDebtTenant(null); }}>
+          <DialogContent className="max-w-md" data-testid="settle-debt-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Banknote className="h-5 w-5 text-emerald-600" />
+                تسديد دين التاجر
+              </DialogTitle>
+              <DialogDescription>
+                {settleDebtTenant ? (
+                  <>
+                    التاجر: <span className="font-semibold">{settleDebtTenant.tenant_name}</span>
+                    {' · '}
+                    الدين الحالي:{' '}
+                    <span className="font-semibold text-red-600">
+                      {(settleDebtTenant.credit_debt || 0).toLocaleString('ar-DZ')} دج
+                    </span>
+                  </>
+                ) : 'حدّد المبلغ المُسدَّد نقداً من التاجر.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label className="text-xs">المبلغ المُسدَّد (دج)</Label>
+                <Input
+                  type="number"
+                  value={settleDebtAmount}
+                  onChange={(e) => setSettleDebtAmount(parseFloat(e.target.value) || 0)}
+                  data-testid="settle-debt-amount-input"
+                />
+                <div className="flex gap-2 mt-1">
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:underline"
+                    onClick={() => setSettleDebtAmount(settleDebtTenant?.credit_debt || 0)}
+                    data-testid="settle-debt-full-btn"
+                  >
+                    تسديد كامل الدين
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:underline"
+                    onClick={() => setSettleDebtAmount(Math.round((settleDebtTenant?.credit_debt || 0) / 2))}
+                  >
+                    النصف
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">ملاحظة (اختياري)</Label>
+                <Textarea
+                  rows={2}
+                  placeholder="مرجع إيصال، طريقة التسليم، إلخ"
+                  value={settleDebtNote}
+                  onChange={(e) => setSettleDebtNote(e.target.value)}
+                  data-testid="settle-debt-note-input"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                سيُسجَّل هذا كمعاملة <strong>credit_settlement</strong> ويُخصم من رصيد دين التاجر تلقائياً.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSettleDebtDialogOpen(false)} data-testid="settle-debt-cancel-btn">إلغاء</Button>
+              <Button
+                onClick={confirmSettleDebt}
+                disabled={settleDebtBusy || !settleDebtAmount || settleDebtAmount <= 0}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                data-testid="settle-debt-confirm-btn"
+              >
+                {settleDebtBusy && <RefreshCw className="h-4 w-4 animate-spin" />}
+                تأكيد التسديد
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Reject Withdrawal Dialog */}
         <Dialog open={rejectWithdrawalDialogOpen} onOpenChange={setRejectWithdrawalDialogOpen}>
