@@ -105,6 +105,16 @@ export function UnifiedSearch({
     }
     
     setLoading(true);
+    // Super-admin has no tenant DB — skip silently to avoid 403 noise.
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (user.role === 'super_admin') {
+        setResults([]);
+        setTotalResults(0);
+        setLoading(false);
+        return;
+      }
+    } catch { /* noop */ }
     try {
       const params = { limit: 15 };
       if (searchQuery) params.q = searchQuery;

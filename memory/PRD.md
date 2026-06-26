@@ -130,3 +130,24 @@ See `/app/memory/test_credentials.md`
 - **Enhancement queued:** `/customer-debts` — تصدير PDF/Excel + تذكير SMS/WhatsApp جماعي.
 - **Enhancement queued:** تنبيه فوري WhatsApp/Email للمستأجر عند بدء جلسة انتحال (GDPR-grade).
 - **Cleanup:** `backend/tests/test_wallet_chain.py` migrate hardcoded `localhost:8000` to `REACT_APP_BACKEND_URL`/`BASE_URL` env var.
+
+## S15 — 6 Super-Admin Bug Fixes + Wallet Credit Top-up (2026-02 / iter 10)
+- **Bug #1 — System logs:** auto-cleaned (was capturing only #2/#3 errors).
+- **Bug #2 — `/saas/monitoring`:** rewritten to return `{summary, alerts[], tenants[]}` with per-tenant `tenant_name, total_revenue, users_count, last_activity`. Frontend MonitoringSection now uses null-safe destructuring. Cards render: 8 المشتركين / 8 نشط / 1 المنتجات / 3 العملاء / 3 المبيعات / 2,010 الإيراد.
+- **Bug #3 — AI Assistant 403:** switched auth dep from `require_tenant` to `get_current_user`; context-data lookups wrapped in try/except so super_admin (no tenant_db) doesn't 500. Chat history save wrapped too.
+- **Bug #4 — Plan features incomplete:** `FeatureFlagsPage.js` `FEATURE_CATEGORIES` extended with 8 new categories: recharge (Flexy), cards, internet (Idoom), iptv, ai_assistant, backup, wallet, security — each with subFeatures.
+- **Bug #5 — Import/Export redirect:** added `/data-import-export`, `/system-logs`, `/settings`, `/feature-flags` to `superAdminAllowedPaths` in App.js.
+- **Bug #6 — Wallet top-up Cash/Credit (NEW FEATURE):**
+  - Backend `/wallet/add-funds` now accepts `payment_method='cash'|'credit'`. Credit also `$inc credit_debt` on tenant wallet.
+  - Backend `/wallet/settle-credit` new endpoint: super-admin records tenant's repayment, decrements credit_debt.
+  - Frontend dialog redesigned with 2-button method selector + amber warning when credit chosen.
+- **Polish:** wallet-charge open button got data-testid; global header search now skipped silently for super_admin (was producing 403 console noise).
+- **Tests:** `backend/tests/test_iter10_bugs.py` — 7/7 ✅ • iter 10: backend 100% • frontend 100%.
+
+## Next Action Items
+- **P1:** تفعيل Redis للـ caching (مؤجَّل بطلب المستخدم).
+- **P3:** طباعة فواتير `platform_cards` المباعة من POS.
+- **Enhancement queued:** `/customer-debts` — تصدير PDF/Excel + تذكير SMS/WhatsApp جماعي.
+- **Enhancement queued:** تنبيه فوري Email للمستأجر عند بدء جلسة انتحال (GDPR).
+- **Tech debt:** N+1 query in `/saas/monitoring` (per-tenant sales.aggregate × N) — fold into one aggregation when tenant count > 50.
+- **Cleanup:** `backend/tests/test_wallet_chain.py` — migrate from `localhost:8000` to env-var URL.

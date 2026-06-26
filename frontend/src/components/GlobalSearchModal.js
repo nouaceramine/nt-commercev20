@@ -45,6 +45,14 @@ export function GlobalSearchModal({ open, onClose, language }) {
       setResults({ products: [], customers: [], sales: [] });
       return;
     }
+    // Super-admin has no tenant DB — these tenant endpoints would 403. Skip silently.
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (user.role === 'super_admin') {
+        setResults({ products: [], customers: [], sales: [] });
+        return;
+      }
+    } catch { /* noop */ }
     setLoading(true);
     try {
       const [pRes, cRes, sRes] = await Promise.allSettled([

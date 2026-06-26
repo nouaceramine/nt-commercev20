@@ -37,3 +37,15 @@ class EmailService:
         except Exception as e:
             logger.error(f"Email send failed: {e}")
             return False
+
+
+# Module-level convenience wrapper used by other routers.
+# Accepts either `html=` or `body=` (plain-text body is auto-wrapped in <pre>).
+_default_service = EmailService()
+
+
+async def send_email(to: str, subject: str, html: str = "", body: str = "") -> bool:
+    if not to:
+        raise ValueError("recipient email is required")
+    content = html or f"<pre style='font-family: Arial, sans-serif; white-space: pre-wrap;'>{body}</pre>"
+    return await _default_service.send_email(to=to, subject=subject, html=content)

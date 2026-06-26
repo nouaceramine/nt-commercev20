@@ -120,6 +120,11 @@ export default function SaasAdminPage() {
   const [defaultShortcutsMeta, setDefaultShortcutsMeta] = useState({ updated_at: null, updated_by: null });
   const [defaultShortcutsLoading, setDefaultShortcutsLoading] = useState(false);
   const [defaultShortcutsSaving, setDefaultShortcutsSaving] = useState(false);
+  // Tenant Debts dashboard
+  const [tenantDebts, setTenantDebts] = useState([]);
+  const [tenantDebtsSummary, setTenantDebtsSummary] = useState({ total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
+  const [tenantDebtsLoading, setTenantDebtsLoading] = useState(false);
+  const [remindingTenantId, setRemindingTenantId] = useState(null);
 
   // Bridge Mode State
   const [bridgeDialogOpen, setBridgeDialogOpen] = useState(false);
@@ -475,6 +480,52 @@ export default function SaasAdminPage() {
       toast.error(e.response?.data?.detail || 'فشل تحميل سجل الانتحال');
     } finally {
       setImpersonationLogsLoading(false);
+    }
+  };
+
+  const loadTenantDebts = async () => {
+    setTenantDebtsLoading(true);
+    try {
+      const res = await apiClient.get('/saas/tenant-debts');
+      setTenantDebts(res.data?.items || []);
+      setTenantDebtsSummary(res.data?.summary || { total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل تحميل ديون التجار');
+    } finally {
+      setTenantDebtsLoading(false);
+    }
+  };
+
+  const remindTenant = async (tenantId) => {
+    setRemindingTenantId(tenantId);
+    try {
+      const res = await apiClient.post(`/saas/tenant-debts/${tenantId}/remind`, { channel: 'email' });
+      if (res.data?.delivered) {
+        toast.success('تم إرسال التذكير بنجاح');
+      } else {
+        toast.success(`تم تسجيل التذكير${res.data?.delivery_error ? ` (لم يُرسَل: ${res.data.delivery_error})` : ''}`);
+      }
+      await loadTenantDebts();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل إرسال التذكير');
+    } finally {
+      setRemindingTenantId(null);
+    }
+  };
+
+  const downloadStatementPdf = async (tenant) => {
+    try {
+      const res = await apiClient.get(`/saas/tenant-debts/${tenant.tenant_id}/statement.pdf`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `statement_${(tenant.tenant_name || tenant.tenant_id).replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error('فشل تنزيل كشف الحساب');
     }
   };
 
@@ -1047,6 +1098,10 @@ export default function SaasAdminPage() {
               <LayoutDashboard className="h-4 w-4" />
               اختصارات POS الافتراضية
             </TabsTrigger>
+            <TabsTrigger value="tenant-debts" className="gap-2" data-testid="tenant-debts-tab" onClick={() => loadTenantDebts()}>
+              <Receipt className="h-4 w-4" />
+              ديون التجار
+            </TabsTrigger>
           </TabsList>
 
           {/* Tenants Tab */}
@@ -1159,7 +1214,7 @@ export default function SaasAdminPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-center gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => openWalletChargeDialog(tenant)} title="شحن المحفظة">
+                            <Button variant="ghost" size="sm" onClick={() => openWalletChargeDialog(tenant)} title="شحن المحفظة" data-testid={`wallet-charge-open-${tenant.id}`}>
                               <Wallet className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => openExtendDialog(tenant)} title="تمديد">
@@ -1796,6 +1851,111 @@ export default function SaasAdminPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Tenant Debts Dashboard Tab */}
+          <TabsContent value="tenant-debts" className="space-y-4" data-testid="tenant-debts-content">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">ديون التجار للمنصّة</h3>
+                <p className="text-sm text-muted-foreground">
+                  جميع التجار الذين لديهم رصيد دين (Credit) متبقّ. أرسل تذكير بضغطة واحدة أو نزّل كشف حساب PDF.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={loadTenantDebts} disabled={tenantDebtsLoading} data-testid="refresh-tenant-debts-btn">
+                <RefreshCw className={`h-4 w-4 me-1 ${tenantDebtsLoading ? 'animate-spin' : ''}`} />
+                تحديث
+              </Button>
+            </div>
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card data-testid="tenant-debts-summary-count"><CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">عدد التجار المدينين</p>
+                <p className="text-3xl font-bold mt-1">{tenantDebtsSummary.total_tenants_with_debt ?? 0}</p>
+              </CardContent></Card>
+              <Card data-testid="tenant-debts-summary-total"><CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">إجمالي الديون (دج)</p>
+                <p className="text-3xl font-bold mt-1 text-red-600">{(tenantDebtsSummary.total_debt || 0).toLocaleString('ar-DZ')}</p>
+              </CardContent></Card>
+              <Card data-testid="tenant-debts-summary-overdue"><CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">اشتراكات متأخرة</p>
+                <p className="text-3xl font-bold mt-1 text-amber-600">{tenantDebtsSummary.overdue_subscriptions ?? 0}</p>
+              </CardContent></Card>
+            </div>
+
+            <Card>
+              <CardContent className="p-0">
+                {tenantDebtsLoading ? (
+                  <div className="p-8 text-center text-muted-foreground">جارٍ التحميل…</div>
+                ) : tenantDebts.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground" data-testid="tenant-debts-empty">
+                    🎉 لا يوجد أي تاجر مدين للمنصّة حالياً.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-3 py-2 text-start">التاجر</th>
+                          <th className="px-3 py-2 text-start">البريد الإلكتروني</th>
+                          <th className="px-3 py-2 text-start">الرصيد</th>
+                          <th className="px-3 py-2 text-start">الدين (دج)</th>
+                          <th className="px-3 py-2 text-start">آخر تذكير</th>
+                          <th className="px-3 py-2 text-start">عدد التذكيرات</th>
+                          <th className="px-3 py-2 text-start">الإجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody data-testid="tenant-debts-table">
+                        {tenantDebts.map((t) => (
+                          <tr key={t.tenant_id} className="border-t border-border hover:bg-muted/30" data-testid={`tenant-debt-row-${t.tenant_id}`}>
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{t.tenant_name}</div>
+                              {t.subscription_overdue && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 px-2 py-0.5 text-xs mt-1">
+                                  ⚠️ اشتراك منتهي
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-muted-foreground">{t.tenant_email}</td>
+                            <td className="px-3 py-2 text-xs">{(t.wallet_balance || 0).toLocaleString('ar-DZ')}</td>
+                            <td className="px-3 py-2 font-semibold text-red-600">{(t.credit_debt || 0).toLocaleString('ar-DZ')}</td>
+                            <td className="px-3 py-2 text-xs">{t.last_reminder_at ? formatShortDate(t.last_reminder_at) : '—'}</td>
+                            <td className="px-3 py-2 text-center">{t.reminders_sent || 0}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => remindTenant(t.tenant_id)}
+                                  disabled={remindingTenantId === t.tenant_id}
+                                  data-testid={`remind-tenant-${t.tenant_id}-btn`}
+                                >
+                                  {remindingTenantId === t.tenant_id ? (
+                                    <RefreshCw className="h-3 w-3 me-1 animate-spin" />
+                                  ) : (
+                                    <Bell className="h-3 w-3 me-1" />
+                                  )}
+                                  تذكير
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => downloadStatementPdf(t)}
+                                  data-testid={`download-statement-${t.tenant_id}-btn`}
+                                >
+                                  <FileText className="h-3 w-3 me-1" />
+                                  PDF
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </CardContent>
@@ -2669,7 +2829,7 @@ export default function SaasAdminPage() {
                   </div>
                   {walletChargeForm.payment_method === 'credit' && (
                     <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 p-2 rounded">
-                      ⚠️ سيُسجّل هذا المبلغ كدين على التاجر — يجب تحصيله لاحقاً عبر "تسديد الدين".
+                      ⚠️ سيُسجّل هذا المبلغ كدين على التاجر — يجب تحصيله لاحقاً عبر &quot;تسديد الدين&quot;.
                     </p>
                   )}
                 </div>
