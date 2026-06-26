@@ -15,6 +15,7 @@ from .saas.platform_catalog_routes import router as platform_catalog_router
 from .saas.recharge_config_routes import router as recharge_config_router
 from .saas.tenant_debts_routes import router as tenant_debts_router
 from .saas.platform_stats_routes import router as platform_stats_router
+from .saas.audit_timeline_routes import router as audit_timeline_router
 from .saas.helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Admin"])
@@ -30,3 +31,4 @@ router.include_router(platform_catalog_router)
 router.include_router(recharge_config_router)
 router.include_router(tenant_debts_router)
 router.include_router(platform_stats_router)
+router.include_router(audit_timeline_router)

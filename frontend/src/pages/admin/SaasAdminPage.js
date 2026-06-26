@@ -126,6 +126,11 @@ export default function SaasAdminPage() {
   const [tenantDebtsSummary, setTenantDebtsSummary] = useState({ total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
   const [tenantDebtsLoading, setTenantDebtsLoading] = useState(false);
   const [remindingTenantId, setRemindingTenantId] = useState(null);
+  // Audit Timeline
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [auditSummary, setAuditSummary] = useState({ total: 0, by_type: {} });
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditFilters, setAuditFilters] = useState({ type: '', tenant_id: '', since: '', until: '' });
 
   // Bridge Mode State
   const [bridgeDialogOpen, setBridgeDialogOpen] = useState(false);
@@ -481,6 +486,25 @@ export default function SaasAdminPage() {
       toast.error(e.response?.data?.detail || 'فشل تحميل سجل الانتحال');
     } finally {
       setImpersonationLogsLoading(false);
+    }
+  };
+
+  const loadAuditTimeline = async (filters = auditFilters) => {
+    setAuditLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.append('limit', '300');
+      if (filters.type) params.append('event_type', filters.type);
+      if (filters.tenant_id) params.append('tenant_id', filters.tenant_id);
+      if (filters.since) params.append('since', filters.since);
+      if (filters.until) params.append('until', filters.until);
+      const res = await apiClient.get(`/saas/audit-timeline?${params.toString()}`);
+      setAuditEvents(res.data?.events || []);
+      setAuditSummary(res.data?.summary || { total: 0, by_type: {} });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'فشل تحميل سجل التدقيق');
+    } finally {
+      setAuditLoading(false);
     }
   };
 
@@ -1105,6 +1129,10 @@ export default function SaasAdminPage() {
             <TabsTrigger value="tenant-debts" className="gap-2" data-testid="tenant-debts-tab" onClick={() => loadTenantDebts()}>
               <Receipt className="h-4 w-4" />
               ديون التجار
+            </TabsTrigger>
+            <TabsTrigger value="audit-timeline" className="gap-2" data-testid="audit-timeline-tab" onClick={() => loadAuditTimeline()}>
+              <Activity className="h-4 w-4" />
+              سجل التدقيق
             </TabsTrigger>
           </TabsList>
 
@@ -1960,6 +1988,115 @@ export default function SaasAdminPage() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Audit Timeline Tab */}
+          <TabsContent value="audit-timeline" className="space-y-4" data-testid="audit-timeline-content">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">سجل التدقيق الموحّد</h3>
+                <p className="text-sm text-muted-foreground">
+                  خط زمني واحد يجمع: عمليات الانتحال + تذكيرات الديون + شحن المحافظ. مفيد للتدقيق والامتثال (SOC2/GDPR).
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => loadAuditTimeline()} disabled={auditLoading} data-testid="refresh-audit-btn">
+                <RefreshCw className={`h-4 w-4 me-1 ${auditLoading ? 'animate-spin' : ''}`} />
+                تحديث
+              </Button>
+            </div>
+
+            {/* Filters */}
+            <Card data-testid="audit-filters-card">
+              <CardContent className="p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <Label className="text-xs">نوع الحدث</Label>
+                    <select
+                      value={auditFilters.type}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, type: e.target.value })}
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      data-testid="audit-filter-type"
+                    >
+                      <option value="">الكل ({auditSummary.total})</option>
+                      <option value="impersonation">الانتحال ({auditSummary.by_type?.impersonation || 0})</option>
+                      <option value="reminder">التذكيرات ({auditSummary.by_type?.reminder || 0})</option>
+                      <option value="wallet_topup">شحن المحفظة ({auditSummary.by_type?.wallet_topup || 0})</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">معرّف المستأجر (اختياري)</Label>
+                    <Input
+                      placeholder="tenant_id..."
+                      value={auditFilters.tenant_id}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, tenant_id: e.target.value })}
+                      data-testid="audit-filter-tenant"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">من تاريخ</Label>
+                    <Input
+                      type="date"
+                      value={auditFilters.since}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, since: e.target.value })}
+                      data-testid="audit-filter-since"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">إلى تاريخ</Label>
+                    <Input
+                      type="date"
+                      value={auditFilters.until}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, until: e.target.value })}
+                      data-testid="audit-filter-until"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <Button size="sm" onClick={() => loadAuditTimeline()} data-testid="audit-apply-btn">تطبيق الفلاتر</Button>
+                  <Button size="sm" variant="outline" onClick={() => { const cleared = { type:'', tenant_id:'', since:'', until:'' }; setAuditFilters(cleared); loadAuditTimeline(cleared); }} data-testid="audit-clear-btn">مسح</Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Timeline */}
+            <Card>
+              <CardContent className="p-0">
+                {auditLoading ? (
+                  <div className="p-8 text-center text-muted-foreground">جارٍ التحميل…</div>
+                ) : auditEvents.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground" data-testid="audit-empty">لا توجد أحداث.</div>
+                ) : (
+                  <div className="divide-y divide-border" data-testid="audit-events-list">
+                    {auditEvents.map((ev) => {
+                      const sevColor = ev.severity === 'critical' ? 'red' : ev.severity === 'warning' ? 'amber' : 'emerald';
+                      const typeLabel = ev.type === 'impersonation' ? '🔁 انتحال' : ev.type === 'reminder' ? '🔔 تذكير' : ev.type === 'wallet_topup' ? '💳 شحن محفظة' : ev.type;
+                      return (
+                        <div key={ev.id} className="p-3 hover:bg-muted/30 flex items-start gap-3" data-testid={`audit-event-${ev.id}`}>
+                          <div className={`mt-1 w-2 h-2 rounded-full bg-${sevColor}-500 shrink-0`}></div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-sm">
+                              <span className="font-medium">{typeLabel}</span>
+                              {ev.tenant_name && <span className="text-muted-foreground">·</span>}
+                              {ev.tenant_name && <span className="text-foreground">{ev.tenant_name}</span>}
+                              {ev.admin_email && <span className="text-muted-foreground">·</span>}
+                              {ev.admin_email && <span className="text-xs text-muted-foreground font-mono">{ev.admin_email}</span>}
+                            </div>
+                            <p className="text-sm text-foreground mt-1">{ev.summary}</p>
+                            <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
+                              <span>🕐 {ev.timestamp ? formatShortDate(ev.timestamp) : '—'}</span>
+                              {ev.ip && <span>🌐 {ev.ip}</span>}
+                              {ev.details?.amount && <span>💰 {Number(ev.details.amount).toLocaleString('ar-DZ')} دج</span>}
+                              {ev.details?.duration_seconds != null && (
+                                <span>⏱️ {ev.details.duration_seconds < 60 ? `${ev.details.duration_seconds} ث` : `${Math.round(ev.details.duration_seconds/60)} د`}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
