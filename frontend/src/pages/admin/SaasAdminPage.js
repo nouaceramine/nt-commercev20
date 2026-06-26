@@ -1909,7 +1909,7 @@ export default function SaasAdminPage() {
                         {tenantDebts.map((t) => (
                           <tr key={t.tenant_id} className="border-t border-border hover:bg-muted/30" data-testid={`tenant-debt-row-${t.tenant_id}`}>
                             <td className="px-3 py-2">
-                              <EntityCode uuid={t.tenant_id} type="tenant" testId={`debt-tenant-code-${t.tenant_id}`} />
+                              <EntityCode uuid={t.tenant_id} type="tenant" testId={`tenant-code-${t.tenant_id}`} />
                             </td>
                             <td className="px-3 py-2">
                               <div className="font-medium">{t.tenant_name}</div>

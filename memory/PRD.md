@@ -176,3 +176,31 @@ See `/app/memory/test_credentials.md`
 - **Tech debt:** N+1 queries in `/saas/tenant-debts` (3N round-trips at 100+ tenants) and `/saas/monitoring`.
 - **Tech debt:** PDF statement uses Helvetica — no Arabic glyph support. Register NotoSansArabic when needed.
 - **Cleanup:** extract `_max_tenants()` helper (currently duplicated in 3 files).
+
+## S17 — SaaS Admin Refactor: Sidebar-driven + Monitoring-only + Settle Debt + EntityCode (2026-02 / iter 13)
+- **MAJOR UX REFACTOR — SaaS Admin from horizontal tabs → sidebar-driven sub-routes:**
+  - `App.js` now registers 15 new sub-routes `/saas-admin/<slug>` (subscribers, agents, plans, payments, platform-catalog, recharge-mgmt, finance, databases, alerts, withdrawals, ai-assistant, impersonation-logs, default-pos-shortcuts, tenant-debts, audit-timeline) — all `superAdminOnly`.
+  - `SaasAdminPage.js` derives `activeTab` from `useLocation().pathname` via `SLUG_TO_TAB` map; horizontal `TabsList` is hidden (`className="hidden"`) — the URL is the single source of truth.
+  - Per-tab data loaders (loadTenantDebts, loadAuditTimeline, loadPlatformCatalog, loadRechargeConfig, loadImpersonationLogs, loadDefaultShortcuts) moved from `onClick` handlers to a `useEffect([activeTab])`.
+  - `Layout.js` `superAdminNavSections` restructured into 5 grouped sections: NT Commerce / إدارة SaaS / كتالوج المنصّة / التقارير والتدقيق / النظام.
+- **NEW MONITORING DASHBOARD (`/saas-admin` root only):**
+  - `pages/admin/components/MonitoringDashboard.js` — 6 stat cards + PlatformCapacityCard + ServiceStatusMap + Quick Links (15 buttons mirroring sidebar).
+  - `pages/admin/components/ServiceStatusMap.js` — Backend API / MongoDB / Redis (cache) status rows polling `/api/saas/platform-stats` every 30s.
+  - Backend `/api/saas/platform-stats` extended with a `services` block: backend (always ok if reachable), mongodb (ping check), redis (REDIS_URL ping, falls back to `disabled` when env var unset). Lazy-imports `redis.asyncio` only when REDIS_URL is set.
+- **NEW — Settle Debt (تسديد الدين) button + dialog in Tenant Debts table:**
+  - Emerald `<Button data-testid="settle-debt-{id}-btn">` in each row; opens `<Dialog data-testid="settle-debt-dialog">` with amount input + "تسديد كامل الدين" quick-fill + optional note + Cancel/Confirm. Posts to existing `POST /api/wallet/settle-credit` and refreshes table on success.
+- **NEW — Human-readable EntityCode badges:**
+  - `pages/admin/components/EntityCode.js` — reusable `<EntityCode uuid={...} type="tenant"|"agent" />` rendering `T-XXXXXX` / `AG-XXXXXX` (first 6 hex chars of UUID, uppercase) with a one-click copy-to-clipboard button.
+  - Subscribers table (`/saas-admin/subscribers`) and Agents table (`/saas-admin/agents`) and Tenant Debts table (`/saas-admin/tenant-debts`) all show a new `المعرّف` column as the first cell.
+- **BUG FIX — Audit timeline tz-naive date filter crash (carry-over from iter 12):**
+  - `routes/saas/audit_timeline_routes.py` `_parse_iso` now coerces naive datetimes to UTC so `?since=2026-01-01` no longer raises `TypeError: can't compare offset-naive and offset-aware datetimes`.
+- **Tests:** `backend/tests/test_iter13_saas_admin.py` — 11/11 ✅. Iter 13 frontend Playwright 100% PASS — 0 console errors across full smoke run.
+
+## Next Action Items
+- **P1:** Resend integration for tenant-debt email reminders (user has not yet provided `RESEND_API_KEY`). Playbook fetched, code untouched.
+- **P1:** Redis caching (still deferred).
+- **P2:** Extract MASSIVE `SaasAdminPage.js` (~3060 lines) into per-tab files (`pages/admin/saas/SubscribersTab.js`, `AgentsTab.js`, `TenantDebtsTab.js`, etc.) — overdue, see iter-13 code review.
+- **P2:** Tailwind dynamic class safelist (`bg-{color}-100/600` in ServiceStatusMap) — JIT could purge.
+- **P3:** Printing invoices for `platform_cards` sold from POS.
+- **Tech debt:** Single source of truth for SaaS sidebar (Layout.js `superAdminNavSections` ↔ MonitoringDashboard.js `QUICK_LINKS` ↔ SaasAdminPage.js `SLUG_TO_TAB`).
+- **Enhancement:** GDPR Email to tenant when impersonation session starts.
