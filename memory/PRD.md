@@ -230,10 +230,29 @@ See `/app/memory/test_credentials.md`
   - `lib/platformCardInvoice.js` + `components/SellPlatformCardDialog.js` + `pages/CardsServicePage.js` — `printPlatformCardInvoice` saves the format choice to `localStorage.pos.last_invoice_format`. The 3 print buttons read it on render and highlight the matching one with a star ★ as the recommended default.
 - **Tests:** `backend/tests/test_iter15_redis_resend.py` 14/14 PASS. Frontend Playwright 100% across all 7 saas-admin sub-routes + SubscribersPage dialogs + Sales tab. Code-review nits (testid on extend button, served_at timestamp, cache.ping reuse, SENDER_EMAIL warning) all APPLIED.
 
+## S20 — Cleanup + Cache propagation + Pagination + Agents extraction (2026-02 / iter 16)
+- **P2 CLEANUP — SaasAdminPage.js: 3066 → 1875 lines (-39%, ~1175 lines of dead code removed):**
+  - Deleted 6 dead `<TabsContent>` blocks (tenants/agents/plans/payments/tenant-debts/audit-timeline — those routes now use extracted page files).
+  - Deleted 8 duplicate dialogs: Settle Debt, Plan Form, Tenant Form, Extend Subscription, Bridge Mode, Impersonate, Feature Flags, Wallet Charge.
+  - Pruned hidden `TabsList` to only the 10 still-served tabs.
+  - Removed `loadTenantDebts` / `loadAuditTimeline` branches from the activeTab effect.
+- **P2 CACHE PROPAGATION:**
+  - `/api/saas/stats` — 15s Redis TTL (key `saas:stats:global`). Warm hit returns `cached:true` + `served_at`.
+  - `/api/saas/tenant-debts` — 15s Redis TTL (key prefix `saas:tenant-debts:`, variants for `only_with_debt=true|false`). Exposes `invalidate_tenant_debts_cache()`.
+  - Cache busting wired into `POST /api/wallet/settle-credit`, `POST /api/wallet/add-funds`, and `POST /api/saas/tenant-debts/{id}/remind` so the dashboard reflects writes immediately.
+- **P3 PAGINATION + SERVER-SIDE FILTERS on /api/platform-cards/sales:**
+  - Backend: `limit` (1-500, default 50) + `skip` + `operator` + `payment_method` + `since` + `until` + `search` (uses `re.escape` for safety). Response shape changed from bare array → `{items, total, limit, skip, has_more}`.
+  - Frontend `/services/cards` Sales tab: `sales-prev-btn` / `sales-next-btn` pagination footer (appears when `total > 50`), debounced search (300ms) wired to `?search=` server filter, "default format" indicator (★) on the matching reprint button.
+- **P3 AGENTS EXTRACTION:**
+  - `pages/admin/saas/AgentsPage.js` — NEW (~16 lines): thin wrapper around AgentsDashboard inside `<Layout>` + `<SaasPageHeader>`.
+  - `/saas-admin/agents` now routes to SaasAgentsPage instead of legacy SaasAdminPage. Page data-testid: `saas-agents-page`.
+- **Tests:** `backend/tests/test_iter16_cleanup_perf.py` 16/16 PASS. Frontend Playwright 100% across all 10 kept + 6 extracted routes.
+- **Polish applied post-test:** `re.escape` in sales search (replaces hand-rolled metachar escape), removed 5 redundant eslint-disable directives, re-added the debounced-search useEffect that was reverted in the test diff.
+
 ## Next Action Items
-- **🔥 P1:** Provide `RESEND_API_KEY` + `SENDER_EMAIL` (verified domain) in `backend/.env` to flip email provider from `mock` → `resend`. Then `sudo supervisorctl restart backend`.
-- **🗑️ P2:** Now that all 5 big tabs are extracted, the legacy inline-dialog code in `SaasAdminPage.js` (~2000 lines) is dead/duplicate. Schedule a cleanup pass — keep only the monitoring branch (`showMonitoringOnly`) and delete the inline `TabsContent` blocks for subscribers/plans/payments/tenant-debts/audit-timeline.
-- **🚀 P2:** Apply `cached_json` decorator to more hot endpoints — `/saas/stats` (polled every 30s by 5+ dashboard cards), `/saas/tenant-debts`, `/saas/plans`. Each warm hit saves ~50-200ms of DB round-trips.
-- **📊 P3:** Pagination + date-range filter on `/platform-cards/sales` — current implementation loads the full list (would break at 10k+ sales per tenant).
-- **🧰 P3:** Add `served_at` field to all cached endpoint responses for consistency.
-- **🛡️ P3:** `pages/admin/saas/AgentsPage.js` wrapper around `AgentsDashboard` so `/saas-admin/agents` no longer routes through legacy SaasAdminPage (matching the cleanup target above).
+- **🔑 P1:** Provide `RESEND_API_KEY` + `SENDER_EMAIL` (verified domain) to flip email provider mock → resend.
+- **🚀 P2:** Promote the cache boilerplate (key gen + `cached:true`/`served_at` stamping) into the `@cached_json` decorator in `utils/cache.py` so the next hot endpoint is one-line to cache.
+- **🧰 P2:** Sweep `SaasAdminPage.js` to remove the now-orphan state setters (`openTenantDialog`, `settleDebtDialogOpen`, plan/wallet/feature-flags state, etc.) — currently dead code kept intentionally for one iteration of safety.
+- **🪙 P3:** Seed ~60 sales for a TEST tenant in CI so the Sales-tab `sales-pagination` footer is exercised by automation.
+- **📊 P3:** Add date-range pickers to the Sales tab (backend already supports `since`/`until`).
+- **🛡️ P3:** Consider an explicit cache invalidation hook in `/saas/saas-payments/add` (currently relies on TTL).

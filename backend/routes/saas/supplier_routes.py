@@ -33,6 +33,7 @@ Order processing is **atomic & all-or-nothing**:
 import uuid
 import io
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional, List, Literal
 
@@ -549,9 +550,9 @@ def build_supplier_router() -> APIRouter:
                 rng["$lte"] = until
             flt["created_at"] = rng
         if search:
-            # case-insensitive partial match on three fields
-            esc = "".join("\\" + c if c in r".^$*+?()[]{}|" else c for c in search)
-            rx = {"$regex": esc, "$options": "i"}
+            # case-insensitive partial match on three fields; re.escape
+            # handles all regex metacharacters incl. backslash.
+            rx = {"$regex": re.escape(search), "$options": "i"}
             flt["$or"] = [
                 {"code": rx},
                 {"customer_name": rx},

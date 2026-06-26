@@ -237,19 +237,19 @@ export default function SaasAdminPage() {
 
   useEffect(() => {
     fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load tab-specific data when URL-driven activeTab changes (was previously
   // wired to TabsTrigger onClick — now the trigger is hidden so we use effect).
+  // Only the still-served tabs need loaders here; tenant-debts/audit-timeline
+  // were extracted to their own pages so their branches are removed.
   useEffect(() => {
     if (!activeTab) return;
     if (activeTab === 'platform-catalog') loadPlatformCatalog();
     else if (activeTab === 'recharge-mgmt') { loadRechargeConfig(); loadRechargeTxns(); }
     else if (activeTab === 'impersonation-logs') loadImpersonationLogs();
     else if (activeTab === 'default-pos-shortcuts') loadDefaultShortcuts();
-    else if (activeTab === 'tenant-debts') loadTenantDebts();
-    else if (activeTab === 'audit-timeline') loadAuditTimeline();
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const fetchData = async () => {
     try {

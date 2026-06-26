@@ -93,14 +93,23 @@ export default function CardsServicePage() {
     } finally {
       setSalesLoading(false);
     }
-  // salesPage/salesSearch read via default args — reload triggered by setters
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (tab === "inventory") loadInventory();
-    if (tab === "sales") loadSales();
-  }, [tab, loadInventory, loadSales]);
+    if (tab === "sales") loadSales(salesPage, salesSearch);
+  }, [tab, loadInventory, salesPage, salesSearch, loadSales]);
+
+  // Debounced search — reset to page 0 and re-fetch 300ms after the user
+  // stops typing so we hit the server-side ?search= filter efficiently.
+  useEffect(() => {
+    if (tab !== "sales") return;
+    const id = setTimeout(() => {
+      setSalesPage(0);
+      loadSales(0, salesSearch);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [salesSearch, tab, loadSales]);
 
   const filtered = codes.filter((c) =>
     !search || (c.code || "").toLowerCase().includes(search.toLowerCase())
