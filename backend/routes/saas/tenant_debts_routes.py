@@ -25,10 +25,31 @@ from reportlab.platypus import (
 )
 
 from config.database import main_db
+from utils.cache import cache
 from .helpers import get_super_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["SaaS Tenant Debts"])
+
+# /saas/tenant-debts is N+1 (one query per tenant for last-reminder +
+# reminders count). Caching for 15s collapses the dashboard's polling.
+_DEBTS_TTL = 15
+_DEBTS_KEY_PREFIX = "saas:tenant-debts"
+
+
+def _debts_cache_key(only_with_debt: bool) -> str:
+    return f"{_DEBTS_KEY_PREFIX}:{'debt-only' if only_with_debt else 'all'}"
+
+
+async def invalidate_tenant_debts_cache() -> None:
+    """Clear all tenant-debts cache entries (both filter variants).
+    Called after any mutation: remind, settle, wallet top-up etc.
+    """
+    if cache.enabled:
+        try:
+            await cache.invalidate_prefix(f"{_DEBTS_KEY_PREFIX}:")
+        except Exception:
+            pass
 
 
 def _now_iso() -> str:
@@ -42,6 +63,19 @@ async def list_tenant_debts(
 ):
     """Return one row per tenant wallet with `credit_debt > 0` (or all if
     only_with_debt=false). Plus a summary."""
+    cache_key = _debts_cache_key(only_with_debt)
+    if cache.enabled:
+        try:
+            import json as _json
+            raw = await cache.get(cache_key)
+            if raw:
+                payload = _json.loads(raw)
+                payload["cached"] = True
+                payload["served_at"] = datetime.now(timezone.utc).isoformat()
+                return payload
+        except Exception:
+            pass
+
     query = {"entity_type": "tenant"}
     if only_with_debt:
         query["credit_debt"] = {"$gt": 0}
@@ -89,7 +123,7 @@ async def list_tenant_debts(
         })
     # Sort by debt descending
     items.sort(key=lambda x: x["credit_debt"], reverse=True)
-    return {
+    payload = {
         "summary": {
             "total_tenants_with_debt": sum(1 for i in items if i["credit_debt"] > 0),
             "total_debt": total_debt,
@@ -97,6 +131,15 @@ async def list_tenant_debts(
         },
         "items": items,
     }
+
+    if cache.enabled:
+        try:
+            import json as _json
+            await cache.set(cache_key, _json.dumps(payload, default=str), ttl=_DEBTS_TTL)
+        except Exception:
+            pass
+
+    return payload
 
 
 @router.get("/saas/tenant-debts/{tenant_id}/transactions")
@@ -172,6 +215,7 @@ async def remind_tenant(
         "created_at": _now_iso(),
     }
     await main_db.tenant_debt_reminders.insert_one(reminder)
+    await invalidate_tenant_debts_cache()
     return {
         "ok": True,
         "delivered": delivered,

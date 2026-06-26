@@ -263,6 +263,13 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         }
         await main_db.wallet_transactions.insert_one(txn)
         txn.pop("_id", None)
+        # Credit top-ups increase credit_debt; invalidate the dashboard
+        # cache so super-admin sees the new debt total immediately.
+        try:
+            from routes.saas.tenant_debts_routes import invalidate_tenant_debts_cache
+            await invalidate_tenant_debts_cache()
+        except Exception:
+            pass
         return {"message": "تم الإيداع", "new_balance": new_balance, "payment_method": payment_method, "transaction": txn}
 
     # ── Settle credit-debt: tenant pays back what super-admin fronted on credit ──
@@ -299,6 +306,13 @@ def create_wallet_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         }
         await main_db.wallet_transactions.insert_one(txn)
         txn.pop("_id", None)
+        # Invalidate the tenant-debts dashboard cache so the next poll
+        # immediately reflects the settled amount.
+        try:
+            from routes.saas.tenant_debts_routes import invalidate_tenant_debts_cache
+            await invalidate_tenant_debts_cache()
+        except Exception:
+            pass
         return {"message": "تم التسديد", "credit_debt_remaining": new_debt, "transaction": txn}
 
     # ── Deduct Funds ──

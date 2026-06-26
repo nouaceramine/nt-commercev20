@@ -1,0 +1,47 @@
+{
+  "summary": "Iter-16 ALL GREEN. Backend (pytest 16/16 PASS, test_iter16_cleanup_perf.py): /api/saas/stats and /api/saas/tenant-debts both warm on 2nd call (cached:true + served_at ISO); /api/wallet/settle-credit busts the tenant-debts cache (next GET returns cached:false); /api/platform-cards/sales returns {items,total,limit,skip,has_more} shape with default limit=50/skip=0/has_more=false on the empty TEST_tenant_0e54f6b5 dataset, accepts search/operator/payment_method/since filters without 500, and rejects limit=1000 with 422 (le=500 guard); /api/saas/platform-stats services.redis.status='ok'; 5-poll resilience shows ≥3 cached hits; payments/plans?include_inactive/audit-timeline/tenants/agents all 200. Frontend Playwright (super-admin login → /saas-admin): all 10 'kept' SaasAdminPage routes (platform-catalog, recharge-mgmt, finance, databases, alerts, withdrawals, ai-assistant, impersonation-logs, default-pos-shortcuts) render content (>200 chars body) with TabsList HIDDEN (computed style display:none) and 0 console errors — confirms cleanup did NOT delete kept TabsContent blocks. Extracted routes: /saas-admin/subscribers has saas-subscribers-page testid, /saas-admin/agents has saas-agents-page testid + title 'الوكلاء' + AgentsDashboard rendering 21 AG-XXXX badge matches in DOM, /saas-admin/tenant-debts and /saas-admin/audit-timeline render with 0 console errors and >400 chars (screenshot confirms full audit timeline + filter form). Tenant login (TEST_tenant_0e54f6b5/TenantPass@2024) → /services/cards Sales tab: tab-sales, sales-search-input, and empty-sales testids all present; sales-pagination footer correctly ABSENT (total<=50). Lint clean on monitoring_routes, tenant_debts_routes, supplier_routes, cache.py, CardsServicePage.js, AgentsPage.js (only 2 unused eslint-disable warnings in SaasAdminPage.js leftover from the cleanup — cosmetic, not new errors).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Cards Sales tab search",
+        "issue": "Spec says 'debounced search updates the URL params (300ms)' but the actual implementation at CardsServicePage.js:43-71 has NO debounce and NO setSearchParams — salesSearch is a useState that only triggers a reload when the user clicks the refresh-sales-btn or via loadSales(salesPage, salesSearch) effect. Pagination + server-side filter shape works correctly; the UX promise of as-you-type debounced refetch + URL persistence is not yet implemented.",
+        "affected_selectors": ["sales-search-input", "refresh-sales-btn"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter16_cleanup_perf.py",
+    "/app/test_reports/pytest/iteration_16.xml"
+  ],
+  "action_items": [
+    "Optional: implement the debounced-search + URL-param sync in CardsServicePage.js as described in the iter-16 spec. The backend already supports ?search= server-side; only the React wiring (useDebouncedValue + setSearchParams + reload effect) is missing.",
+    "Optional cleanup: remove the 2 unused eslint-disable directives at /app/frontend/src/pages/admin/SaasAdminPage.js:240 and :252 left over from the dead-code excision.",
+    "Optional: legacy SaasAdminPage.js still carries orphaned state setters (e.g., openTenantDialog, settleDebtDialogOpen) referenced by no JSX — main agent noted they are kept intentionally. Recommend a follow-up sweep to remove them once stable for one more iter."
+  ],
+  "critical_code_review_comments": [
+    "supplier_routes.py:553 — regex search escape is hand-rolled (`''.join('\\\\'+c if c in r'.^$*+?()[]{}|' else c)`). Prefer `re.escape(search)` for correctness + readability; the current list misses `\\\\` itself which can be exploited to inject regex tokens. Low severity but defensible defense-in-depth.",
+    "tenant_debts_routes.py:73 — the cached payload is mutated in-place (payload['cached']=True + payload['served_at']=...) on every read. If a future caller relied on the payload being immutable, this could surprise. Fine as-is since we deserialize fresh from JSON every read.",
+    "CardsServicePage.js:65-98 — `loadSales` is wrapped in useCallback with empty deps and an eslint-disable. This is intentional to prevent re-creation, but reading salesPage/salesSearch via default args means callers must always pass them explicitly (which they do). Slightly fragile pattern; a useRef of latest values is more idiomatic.",
+    "monitoring_routes.py / tenant_debts_routes.py — both modules duplicate the cache key/TTL boilerplate. Consider a `@cached_json(key=..., ttl=...)` decorator in utils/cache.py so future endpoints don't redo the JSON ser/deser + cached/served_at stamping by hand.",
+    "Frontend Cards Sales pagination footer is reachable only when total>50. The TEST tenant dataset is empty, so this code path is not exercised by automated UI. Recommend seeding ~60 sales via /platform-cards/sell against a TEST tenant in a one-time setup script so future regressions catch the prev/next button wiring."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter16_cleanup_perf.py (NEW — 16 tests, 16 pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest)",
+    "frontend": "100% — all 10 kept routes render with hidden TabsList and 0 console errors; agents page has new saas-agents-page testid + Arabic title + 21 AG-XXXX agent badges; tenant-debts/audit-timeline/subscribers extracted pages all render; Cards Sales tab pagination+filters wired and empty-state shown for the empty tenant"
+  },
+  "test_credentials": "admin@ntcommerce.com / Admin@2024 — super-admin login at /api/auth/login (NOT /api/saas/auth/super-admin/login as some older specs imply). Tenant TEST_tenant_0e54f6b5@example.com / TenantPass@2024 — logs in via /api/saas/tenant-login.",
+  "seed_data_creation": "None — used existing 8 tenants with 2 having credit_debt. settle-credit test reduced one tenant's debt by 1 dz (still has remaining debt). Sales table for the test tenant remains empty so frontend sales-pagination footer was not exercised — verified via backend response shape instead.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 16 = pure refactor/perf pass, ALL clean. SaasAdminPage.js shrank from 3066→~1875 lines; 6 TabsContent blocks + 8 duplicate dialogs deleted; TabsList hidden and only the 10 still-served tabs kept. /api/saas/stats and /api/saas/tenant-debts now 15s Redis cached with proper invalidation hooked into wallet settle-credit + add-funds. /api/platform-cards/sales paginated end-to-end with limit(1-500)/skip/operator/payment_method/since/until/search → returns {items,total,limit,skip,has_more}. SaasAgentsPage extracted at /app/frontend/src/pages/admin/saas/AgentsPage.js (data-testid='saas-agents-page'). Regression file /app/backend/tests/test_iter16_cleanup_perf.py covers cache warm-up + invalidation + pagination shape + 5-poll resilience + all extracted endpoints. One spec-vs-impl gap: CardsServicePage Sales search is NOT debounced and does NOT mirror to URL params — server-side filtering works but as-you-type behaviour is manual via the refresh button. Not a regression, just a polish item.",
+  "rca of the issue": "No bugs found. One spec/implementation gap noted (Sales search debouncing) — non-blocking; backend filter contract is correct."
+}

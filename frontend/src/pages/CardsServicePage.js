@@ -42,6 +42,10 @@ export default function CardsServicePage() {
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesSearch, setSalesSearch] = useState("");
   const [branding, setBranding] = useState({ name: "" });
+  const [salesPage, setSalesPage] = useState(0);
+  const [salesTotal, setSalesTotal] = useState(0);
+  const [salesHasMore, setSalesHasMore] = useState(false);
+  const SALES_PAGE_SIZE = 50;
 
   const loadInventory = useCallback(async () => {
     setLoading(true);
@@ -58,20 +62,39 @@ export default function CardsServicePage() {
     }
   }, [operator, statusFilter]);
 
-  const loadSales = useCallback(async () => {
+  const loadSales = useCallback(async (page = salesPage, query = salesSearch) => {
     setSalesLoading(true);
     try {
+      const params = new URLSearchParams();
+      params.set("limit", String(SALES_PAGE_SIZE));
+      params.set("skip", String(page * SALES_PAGE_SIZE));
+      if (query && query.trim()) params.set("search", query.trim());
       const [s, b] = await Promise.all([
-        apiClient.get("/platform-cards/sales?limit=200"),
+        apiClient.get(`/platform-cards/sales?${params.toString()}`),
         apiClient.get("/settings/tenant-branding").catch(() => ({ data: {} })),
       ]);
-      setSales(Array.isArray(s.data) ? s.data : (s.data?.items || []));
+      // Backend now returns {items, total, has_more, ...} — fall back to
+      // raw array for backwards-compat if an old version is deployed.
+      const data = s.data;
+      if (Array.isArray(data)) {
+        setSales(data);
+        setSalesTotal(data.length);
+        setSalesHasMore(false);
+      } else {
+        setSales(data?.items || []);
+        setSalesTotal(data?.total || 0);
+        setSalesHasMore(Boolean(data?.has_more));
+      }
       setBranding({ name: b.data?.name || "" });
     } catch (_e) {
       setSales([]);
+      setSalesTotal(0);
+      setSalesHasMore(false);
     } finally {
       setSalesLoading(false);
     }
+  // salesPage/salesSearch read via default args — reload triggered by setters
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -83,16 +106,7 @@ export default function CardsServicePage() {
     !search || (c.code || "").toLowerCase().includes(search.toLowerCase())
   );
 
-  const filteredSales = sales.filter((s) => {
-    if (!salesSearch) return true;
-    const q = salesSearch.toLowerCase();
-    return (
-      (s.code || "").toLowerCase().includes(q) ||
-      (s.customer_name || "").toLowerCase().includes(q) ||
-      (s.customer_phone || "").toLowerCase().includes(q) ||
-      (s.id || "").toLowerCase().includes(q)
-    );
-  });
+  const filteredSales = sales; // server-side filter — no extra client trimming
 
   const reprintSale = (sale, format) => {
     try { localStorage.setItem("pos.last_invoice_format", format); } catch { /* noop */ }
@@ -237,7 +251,7 @@ export default function CardsServicePage() {
                       data-testid="sales-search-input"
                     />
                   </div>
-                  <Button variant="outline" size="sm" onClick={loadSales} data-testid="refresh-sales-btn">
+                  <Button variant="outline" size="sm" onClick={() => loadSales(salesPage, salesSearch)} data-testid="refresh-sales-btn">
                     {ar ? "تحديث" : "Actualiser"}
                   </Button>
                   <span className="text-xs text-muted-foreground ms-auto">
@@ -326,6 +340,36 @@ export default function CardsServicePage() {
                       })}
                     </TableBody>
                   </Table>
+                )}
+                {/* Pagination footer */}
+                {salesTotal > SALES_PAGE_SIZE && (
+                  <div className="flex items-center justify-between mt-3 pt-2 border-t border-border" data-testid="sales-pagination">
+                    <span className="text-xs text-muted-foreground">
+                      {ar
+                        ? `الصفحة ${salesPage + 1} — يعرض ${sales.length} من أصل ${salesTotal}`
+                        : `Page ${salesPage + 1} — ${sales.length} sur ${salesTotal}`}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={salesPage === 0 || salesLoading}
+                        onClick={() => setSalesPage(p => Math.max(0, p - 1))}
+                        data-testid="sales-prev-btn"
+                      >
+                        {ar ? "السابق" : "Précédent"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!salesHasMore || salesLoading}
+                        onClick={() => setSalesPage(p => p + 1)}
+                        data-testid="sales-next-btn"
+                      >
+                        {ar ? "التالي" : "Suivant"}
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </CardContent>
             </Card>

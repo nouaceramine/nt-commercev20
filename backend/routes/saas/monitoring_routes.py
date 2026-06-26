@@ -4,10 +4,17 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from config.database import db, client
+from utils.cache import cache
 from .schemas import SubscriptionPaymentResponse
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Monitoring"])
+
+# Cache TTLs (seconds) — these endpoints are polled aggressively from the
+# monitoring dashboard cards; even a short cache collapses concurrent polls
+# into a single set of aggregations.
+_STATS_TTL = 15
+_STATS_KEY = "saas:stats:global"
 
 
 @router.get("/saas/monitoring")
@@ -134,6 +141,19 @@ async def get_finance_reports(admin: dict = Depends(get_super_admin)):
 
 @router.get("/saas/stats")
 async def get_saas_stats(admin: dict = Depends(get_super_admin)):
+    # Fast path — serve from Redis when available (15s TTL).
+    if cache.enabled:
+        try:
+            import json as _json
+            raw = await cache.get(_STATS_KEY)
+            if raw:
+                payload = _json.loads(raw)
+                payload["cached"] = True
+                payload["served_at"] = datetime.now(timezone.utc).isoformat()
+                return payload
+        except Exception:
+            pass
+
     now = datetime.now(timezone.utc)
 
     total_tenants = await db.saas_tenants.count_documents({})
@@ -167,7 +187,7 @@ async def get_saas_stats(admin: dict = Depends(get_super_admin)):
         count = await db.saas_tenants.count_documents({"plan_id": plan["id"]})
         plans_distribution[plan.get("name_ar", plan["id"])] = count
 
-    return {
+    payload = {
         "total_tenants": total_tenants,
         "active_tenants": active_tenants,
         "trial_tenants": trial_tenants,
@@ -176,6 +196,16 @@ async def get_saas_stats(admin: dict = Depends(get_super_admin)):
         "total_revenue": total_revenue,
         "plans_distribution": plans_distribution
     }
+
+    # Best-effort cache write — never blocks the response.
+    if cache.enabled:
+        try:
+            import json as _json
+            await cache.set(_STATS_KEY, _json.dumps(payload, default=str), ttl=_STATS_TTL)
+        except Exception:
+            pass
+
+    return payload
 
 
 @router.get("/saas/stats-extended")

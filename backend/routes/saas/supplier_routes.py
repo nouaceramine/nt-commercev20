@@ -522,14 +522,58 @@ def build_supplier_router() -> APIRouter:
     @router.get("/platform-cards/sales")
     async def platform_card_sales(
         limit: int = Query(50, ge=1, le=500),
+        skip: int = Query(0, ge=0),
+        operator: Optional[str] = Query(None),
+        payment_method: Optional[str] = Query(None),
+        since: Optional[str] = Query(None, description="ISO date — created_at >= since"),
+        until: Optional[str] = Query(None, description="ISO date — created_at <= until"),
+        search: Optional[str] = Query(None, description="match code or customer name/phone"),
         current_user: dict = Depends(get_current_user),
     ):
         tenant_id = current_user.get("tenant_id") or current_user.get("id")
         if not tenant_id:
-            return []
+            return {"items": [], "total": 0, "limit": limit, "skip": skip, "has_more": False}
         tenant_db = get_tenant_db(tenant_id)
-        rows = await tenant_db.platform_card_sales.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
-        return rows
+
+        # Build filter
+        flt: dict = {}
+        if operator:
+            flt["operator"] = operator
+        if payment_method:
+            flt["payment_method"] = payment_method
+        if since or until:
+            rng: dict = {}
+            if since:
+                rng["$gte"] = since
+            if until:
+                rng["$lte"] = until
+            flt["created_at"] = rng
+        if search:
+            # case-insensitive partial match on three fields
+            esc = "".join("\\" + c if c in r".^$*+?()[]{}|" else c for c in search)
+            rx = {"$regex": esc, "$options": "i"}
+            flt["$or"] = [
+                {"code": rx},
+                {"customer_name": rx},
+                {"customer_phone": rx},
+            ]
+
+        total = await tenant_db.platform_card_sales.count_documents(flt)
+        cursor = (
+            tenant_db.platform_card_sales
+            .find(flt, {"_id": 0})
+            .sort("created_at", -1)
+            .skip(skip)
+            .limit(limit)
+        )
+        items = await cursor.to_list(limit)
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "skip": skip,
+            "has_more": (skip + len(items)) < total,
+        }
 
     @router.post("/supplier/order")
     async def place_order(payload: SupplierOrderIn, current_user: dict = Depends(get_current_user)):
