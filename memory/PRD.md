@@ -196,11 +196,27 @@ See `/app/memory/test_credentials.md`
   - `routes/saas/audit_timeline_routes.py` `_parse_iso` now coerces naive datetimes to UTC so `?since=2026-01-01` no longer raises `TypeError: can't compare offset-naive and offset-aware datetimes`.
 - **Tests:** `backend/tests/test_iter13_saas_admin.py` — 11/11 ✅. Iter 13 frontend Playwright 100% PASS — 0 console errors across full smoke run.
 
+## S18 — SaaS Admin per-tab split + 3-format Platform Card Invoice (2026-02 / iter 14)
+- **P2 — Extracted 4 of the 5 biggest SaaS tabs into dedicated page files:**
+  - `pages/admin/saas/SaasPageHeader.js` — shared per-tab header with "back-to-monitoring" button.
+  - `pages/admin/saas/PaymentsPage.js` — replaces inline Payments tab.
+  - `pages/admin/saas/PlansPage.js` — full Plans page + plan-form dialog.
+  - `pages/admin/saas/TenantDebtsPage.js` — TenantDebts WITH Settle Debt dialog + EntityCode column.
+  - `pages/admin/saas/AuditTimelinePage.js` — Audit timeline + filters.
+  - `App.js` routes for `/saas-admin/{plans,payments,tenant-debts,audit-timeline}` now point at these new pages.
+  - **DEFERRED:** SubscribersPage extraction — has 7 interconnected dialogs (tenant CRUD, extend, impersonate, wallet charge, feature flags, add payment, bridge); needs a focused iteration.
+- **P3 — Multi-format invoice printing for platform_cards sold from POS:**
+  - `lib/platformCardInvoice.js` — pure builder: `buildPlatformCardInvoice({format, storeName, sale, card, customer, customerPhone})` returning print-ready HTML for `thermal58` (200px / 8pt), `thermal80` (280px / 10pt, default), or `a5` (148×210 mm @page rule).
+  - `lib/escape.js` — `escapeHtml` helper (XSS-safe — testing agent verified `<script>` injection is escaped to `&lt;script&gt;`).
+  - Invoice content (per user spec): store name, invoice# (`CARD-XXXXXXXX` — 8 hex chars), date/time (Arabic month name), card (operator + denomination), sale price, PIN code (mono box), payment method, customer/phone (if present), cashier signature line, thank-you message.
+  - `components/SellPlatformCardDialog.js` — replaced single "طباعة وصل" with THREE format buttons: `print-58mm-btn`, `print-80mm-btn` (default), `print-a5-btn`. Now fetches `tenant-branding` to inject store name, and captures `resultSale` alongside `card` for invoice metadata. Toasts on popup-blocked.
+- **Tests:** `backend/tests/test_iter14_saas_split.py` 12/12 ✅. Frontend Playwright + invoice-builder smoke 100% ✅. iter-12 tz-naive audit-timeline regression CONFIRMED FIXED.
+
 ## Next Action Items
-- **P1:** Resend integration for tenant-debt email reminders (user has not yet provided `RESEND_API_KEY`). Playbook fetched, code untouched.
-- **P1:** Redis caching (still deferred).
-- **P2:** Extract MASSIVE `SaasAdminPage.js` (~3060 lines) into per-tab files (`pages/admin/saas/SubscribersTab.js`, `AgentsTab.js`, `TenantDebtsTab.js`, etc.) — overdue, see iter-13 code review.
-- **P2:** Tailwind dynamic class safelist (`bg-{color}-100/600` in ServiceStatusMap) — JIT could purge.
-- **P3:** Printing invoices for `platform_cards` sold from POS.
-- **Tech debt:** Single source of truth for SaaS sidebar (Layout.js `superAdminNavSections` ↔ MonitoringDashboard.js `QUICK_LINKS` ↔ SaasAdminPage.js `SLUG_TO_TAB`).
-- **Enhancement:** GDPR Email to tenant when impersonation session starts.
+- **P2 leftover:** Extract Subscribers tab (~1000 lines, 7 dialogs) into `pages/admin/saas/subscribers/` with sub-dialog components.
+- **P1:** Resend integration for tenant-debt email reminders (still pending `RESEND_API_KEY`).
+- **P2:** `printPlatformCardInvoice` — add "Click to Print" fallback inside popup body for browsers blocking `window.onload`.
+- **P3:** Persist last-used invoice format per cashier in localStorage.
+- **P3:** Re-print receipt for any previously-sold card from `/services/cards` inventory list.
+- **Tech debt:** Single source of truth for SaaS sidebar (Layout.js ↔ MonitoringDashboard ↔ SaasAdminPage SLUG_TO_TAB).
+- **Enhancement:** Consider tenant-monotonic counter for invoice numbers (current 8-hex has minor birthday risk at very high volume).

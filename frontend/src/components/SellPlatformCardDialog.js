@@ -117,7 +117,7 @@ export default function SellPlatformCardDialog({ open, onClose, onSold }) {
       customer: resultSale?.customer_name || "",
       customerPhone: customer,
     });
-    if (!ok) toast.error("منع المتصفح فتح نافذة الطباعة — يرجى السماح بها");
+    if (!ok) toast.error("فضلاً اسمح بالنوافذ المنبثقة للطباعة");
   };
 
   const copyCode = () => {

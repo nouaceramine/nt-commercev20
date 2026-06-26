@@ -111,7 +111,7 @@ export const buildPlatformCardInvoice = ({
   customer = '',
   customerPhone = '',
 }) => {
-  const invoiceNo = sale.invoice_number || (sale.id ? `CARD-${String(sale.id).slice(0, 6).toUpperCase()}` : '—');
+  const invoiceNo = sale.invoice_number || (sale.id ? `CARD-${String(sale.id).replace(/-/g, '').slice(0, 8).toUpperCase()}` : '—');
   const dateTime = _fmtDateTime(sale.created_at);
   const payload = {
     storeName,
