@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 11 — verified Tenant Debts Dashboard (A1-A4) + MAX_TENANTS cap + Platform Capacity Card (B1-B3). Backend: 12/12 pytest cases PASS (test_iter11_features.py). Frontend Playwright: all 4 capacity sub-cards render with correct content (8/500 = 1.6% tenants, 9 databases, ~70% memory, ~35% CPU+disk). Tenant-debts tab renders with all required data-testids, 2 debt rows (TEST TEST 300 dz + FOAD 100 dz, total=400), remind button shows success toast and increments count, PDF button triggers actual file download (statement_TEST_TEST.pdf, 2986 bytes, valid %PDF-1.x header). Auto-refresh of platform-stats observed within the 30s window.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter11_features.py",
+    "/app/test_reports/pytest/iteration_11.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: PDF statement uses Helvetica which doesn't render Arabic glyphs — the tenant name appearing as ASCII (e.g. 'TEST TEST') works fine, but Arabic tenant names will render as boxes. Consider registering an Arabic-capable font (e.g. NotoSansArabic) via reportlab.pdfbase.pdfmetrics if Arabic statements become a requirement.",
+    "OPTIONAL: tenant-debts list endpoint runs 1+N queries (one per wallet to fetch tenant + last reminder + count). For 100+ tenants this becomes O(3N) round-trips. Consider a single aggregation pipeline ($lookup saas_tenants + $lookup tenant_debt_reminders with $group). Acceptable for current scale (8 tenants).",
+    "OPTIONAL: MAX_TENANTS cap is read from env on every request (registration_routes.py:18, tenants_routes.py:246, platform_stats_routes.py:22). Three independent _max_tenants helpers — could be extracted into a shared util."
+  ],
+  "critical_code_review_comments": [
+    "platform_stats_routes.py — _max_tenants() defaults to 0 (unlimited) when MAX_TENANTS is unset or invalid. ValueError-only catch in the try/except may miss other parse issues, but since the int() falls back via the `or 0` short-circuit, it's safe. OK.",
+    "tenant_debts_routes.py:88 — reminders_sent is computed by a count_documents call inside the loop. With N wallets that's N round-trips. Fold into the same $lookup as last_reminder_at for performance.",
+    "tenant_debts_routes.py:91 — items are sorted in Python after the DB query; if `only_with_debt=false` and many tenants exist, the resulting list could be large. Move sort to MongoDB ({'credit_debt': -1}) for consistency.",
+    "tenant_debts_routes.py:138 — payload may be None; the `payload or {}` guard handles it. Note: when FastAPI receives no body for a POST with an Optional[dict] param, it sets payload=None — current code is correct.",
+    "email_service.py:47 — module-level send_email returns False on failure but tenant_debts_routes wraps it in try/except and ignores the boolean return. That means `delivered=True` is set even if send_email returned False. Minor: consider `delivered = await send_email(...) is True` so the response field accurately reflects delivery.",
+    "PlatformCapacityCard — visual progress bar color thresholds (emerald<75%, amber<90%, red≥90%) appear consistent with the severity calculation in platform_stats_routes (warning≥80%, critical≥95%). The UI thresholds and backend severity thresholds are NOT identical — UI uses 75/90, backend uses 80/95. Minor inconsistency; align if you want UI color and backend severity to convey the same warning level."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (capacity card 4/4 sub-cards + debts tab full flow incl. remind toast + PDF download)"},
+  "test_credentials": "admin@ntcommerce.com / Admin@2024 (super_admin)",
+  "seed_data_creation": "test_iter11_features.py adds 250 DZD credit debt to tenant b4fde9b7-d1f2-46ec-b62a-f0971ca3deba (via /api/saas/tenants/{id}/wallet/add-funds payment_method=credit) and sends 2 reminders (recorded in main_db.tenant_debt_reminders). Total credit_debt on TEST TEST tenant is now ~300 DZD (from cumulative test runs). FOAD tenant has 100 DZD debt from prior iter 10 test. Main agent can settle-credit on these tenants to clear the test data if desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 11 PASSED end-to-end. data-testids that exist and work: platform-capacity-card, capacity-tenants, capacity-databases, capacity-memory, capacity-cpu-disk, tenant-debts-tab, tenant-debts-content, refresh-tenant-debts-btn, tenant-debts-summary-{count,total,overdue}, tenant-debts-table, tenant-debt-row-{id}, remind-tenant-{id}-btn, download-statement-{id}-btn. MAX_TENANTS=500 in backend/.env. Test tenant b4fde9b7-d1f2-46ec-b62a-f0971ca3deba ('TEST TEST') is the canonical debt-fixture target. Email send_email is best-effort and returns True when SENDGRID_API_KEY is unset (intentional dev fallback).",
+  "rca of the issue": "N/A — feature verification, all checks passed."
+}

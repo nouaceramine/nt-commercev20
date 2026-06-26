@@ -50,6 +50,7 @@ import { AgentsDashboard } from './components/AgentsDashboard';
 import { SystemAlertsSection } from './components/SystemAlertsSection';
 import { MonitoringSection } from './components/MonitoringSection';
 import { FinanceReportsSection } from './components/FinanceReportsSection';
+import PlatformCapacityCard from './components/PlatformCapacityCard';
 import { AIAssistant } from '../../components/AIAssistant';
 import { Bot } from 'lucide-react';
 import { formatShortDate, convertToWesternNumerals } from '../../utils/globalDateFormatter';
@@ -1034,6 +1035,9 @@ export default function SaasAdminPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Platform Capacity Banner */}
+        <PlatformCapacityCard />
 
         <Tabs defaultValue="tenants" className="space-y-6">
           <TabsList>

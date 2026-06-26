@@ -1,6 +1,7 @@
 """SaaS Registration Routes - Public registration + tenant login"""
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone, timedelta
+import os
 import uuid
 import bcrypt
 
@@ -11,8 +12,26 @@ from .helpers import create_access_token
 router = APIRouter(tags=["SaaS Registration"])
 
 
+def _max_tenants() -> int:
+    """Return the configured ceiling for active tenants. 0 = unlimited."""
+    try:
+        return int(os.environ.get("MAX_TENANTS", "0") or 0)
+    except ValueError:
+        return 0
+
+
 @router.post("/saas/register")
 async def register_tenant(tenant: TenantCreate):
+    # Enforce the platform-wide tenant cap when MAX_TENANTS > 0
+    cap = _max_tenants()
+    if cap > 0:
+        current = await db.saas_tenants.count_documents({})
+        if current >= cap:
+            raise HTTPException(
+                status_code=400,
+                detail=f"تم بلوغ الحدّ الأقصى للمستأجرين على المنصّة ({cap}). الرجاء التواصل مع الإدارة.",
+            )
+
     existing = await db.saas_tenants.find_one({"email": tenant.email})
     if existing:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")

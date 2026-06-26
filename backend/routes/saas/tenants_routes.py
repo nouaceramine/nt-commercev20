@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import bcrypt
 import ipaddress
+import os
 import socket
 import httpx
 import logging
@@ -239,6 +240,20 @@ async def list_impersonation_logs(
 
 @router.post("/saas/tenants", response_model=TenantResponse)
 async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_admin)):
+    # Platform-wide cap (MAX_TENANTS env, 0 = unlimited). Applies even when
+    # super-admin creates the tenant — easier policy enforcement.
+    try:
+        cap = int(os.environ.get("MAX_TENANTS", "0") or 0)
+    except ValueError:
+        cap = 0
+    if cap > 0:
+        current = await db.saas_tenants.count_documents({})
+        if current >= cap:
+            raise HTTPException(
+                status_code=400,
+                detail=f"تم بلوغ الحدّ الأقصى للمستأجرين على المنصّة ({cap}).",
+            )
+
     existing = await db.saas_tenants.find_one({"email": tenant.email})
     if existing:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
