@@ -1,0 +1,38 @@
+{
+  "summary": "Iter-17 ALL GREEN. Backend pytest 20/20 (test_iter17_cache_decorator.py): @cached_json decorator confirmed on /api/saas/platform-stats, /api/saas/stats, /api/saas/tenant-debts — warm hits return `cached:true` + ISO `served_at`, cold reads after invalidation return cached:false. Cache invalidation via POST /api/saas/tenant-debts/{id}/remind correctly busts the prefix. /api/platform-cards/sales with seeded data returns total=60, has_more=true, items.length=50 on first page; skip=50 returns the remaining 10 items with has_more=false; date filters (since=, until=, both) all accepted; limit=1000 properly rejected (422). All 9 extracted-route GETs (platform-stats, stats, tenant-debts, tenants, payments, plans?include_inactive, agents, audit-timeline, agent-withdrawals) all 200. services.redis=ok, services.mongodb=ok. Frontend Playwright: super-admin login → all 17 saas-admin routes (11 legacy-served + 6 extracted) render content with 0 console errors. The 6 extracted-page testids (saas-subscribers-page, saas-agents-page, saas-plans-page, saas-payments-page, saas-tenant-debts-page, saas-audit-timeline-page) all confirmed in DOM. Tenant login (TEST_tenant_0e54f6b5) → /services/cards Sales tab: sales-since-input, sales-until-input, sales-clear-filters-btn, sales-pagination, sales-prev-btn, sales-next-btn all present; sales table populated with 50 of 60 seeded rows; clear-filters btn appears only after a filter is set (verified by setting since=2026-01-01). Lint clean on cache.py, monitoring_routes.py, tenant_debts_routes.py, platform_stats_routes.py, seed_platform_card_sales.py, and SaasAdminPage.js (eslint: 0 issues, 0 warnings). SaasAdminPage.js is now 1113 lines (-63% from 3066 baseline; spec said 1122 — within noise).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_cache_decorator.py",
+    "/app/test_reports/pytest/iteration_17.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ENV/Infra: Redis was FATAL in supervisor at the start of this iter — /usr/bin/redis-server binary was missing (likely lost when container was forked). Installed via `apt-get install -y redis-server` and `sudo supervisorctl start redis`; after restart cache works as expected. Recommend adding redis-server to the base image / Dockerfile so this doesn't recur on next clean spawn.",
+    "cache.py:192 — `value['cached']=True; value['served_at']=...` mutates the deserialized dict before returning. Since the JSON is freshly parsed each warm hit there is no aliasing risk, but a future optimization that returns a shared object would surface this. Not blocking.",
+    "tenant_debts_routes.py key_fn — uses `lambda only_with_debt=True,...: f'v={int(bool(only_with_debt))}'`. The default-arg trick relies on FastAPI passing query params as kwargs (it does). Slightly opaque; a named helper would read better.",
+    "seed_platform_card_sales.py — sells with `is_credit=method=='credit'` but `debt_amount=sell` only when credit; consistent. No tenant-side recompute hook triggered for the seeded credit rows, so credit-debt cache won't reflect them until a real settle event — acceptable for a pagination QA seed.",
+    "Frontend pagination footer renders even when total<=50 in the conditional? Verified: yes, only renders when has_more or page>0 (line 389 wraps in {(salesHasMore || salesPage>0) && ...}); footer correctly hidden for tenants without seed data, visible for seeded tenant."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17_cache_decorator.py (NEW — 20 tests, 20 pass)",
+    "/etc/supervisor/conf.d (no edit; just started redis after installing the missing binary via apt-get)"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 pytest)",
+    "frontend": "100% — 17/17 saas-admin routes render with 0 console errors; 6/6 extracted-page testids present; tenant Sales tab pagination + date filters + clear-filters btn all wired and working with 60 seeded sales rows"
+  },
+  "test_credentials": "admin@ntcommerce.com / Admin@2024 (super-admin, /api/auth/login). TEST_tenant_0e54f6b5@example.com / TenantPass@2024 (tenant, /api/saas/tenant-login).",
+  "seed_data_creation": "Ran `python -m scripts.seed_platform_card_sales bd5068ef-5158-4c6c-8210-86dc6a63b260 60` against the TEST_tenant_0e54f6b5 tenant (NOT the script's default first-active-tenant, because that turned out to be AMINE@AMINE for which no test password is on file). The script is idempotent — re-runs delete prior seed_tag='iter17-pagination' rows before inserting 60 fresh sales spread over ~13 hours, mixed operators (Mobilis/Djezzy/Ooredoo), mixed payment methods (cash/credit), some named customers and some anonymous. Verified via /api/platform-cards/sales: total=60, has_more=true.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 17 = FINAL cleanup pass, ALL clean. @cached_json decorator (utils/cache.py:154) replaces hand-rolled get/set/stamp boilerplate in monitoring_routes, tenant_debts_routes, platform_stats_routes — warm hits stamped with cached:true + ISO served_at, persisted payload is clean (stamps stripped before SET). SaasAdminPage.js is now 1113 lines (was 3066 in iter15) — only 11 still-served tabs remain; all extracted pages route to dedicated components. Sales pagination + date filters complete: backend accepts since/until, frontend has 2 date pickers + debounced reload (300ms) + clear-filters btn. seed_platform_card_sales.py is the canonical way to populate the Sales tab for pagination QA — idempotent via seed_tag. IMPORTANT INFRA NOTE: if the container is freshly spawned and redis-server binary is missing, run `apt-get install -y redis-server && sudo supervisorctl start redis` before testing — otherwise cached_json silently falls back to NoopCache and the cached:true/served_at assertions will fail. Resend is intentionally deferred (provider='mock', RESEND_API_KEY empty) — DO NOT flag it as missing.",
+  "rca of the issue": "No application bugs. One environmental gotcha: redis-server binary was missing from the container so the Redis supervisor program was in FATAL state, which made @cached_json fall back to NoopCache. Resolution: installed redis-server via apt-get and started it via supervisorctl — all cache-related tests passed afterward. Suggest baking redis-server into the base image."
+}

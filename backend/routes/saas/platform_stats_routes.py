@@ -12,15 +12,10 @@ import psutil
 from fastapi import APIRouter, Depends
 
 from config.database import db, client
-from utils.cache import cache
+from utils.cache import cache, cached_json
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Platform Stats"])
-
-# Polled every 30s by the monitoring dashboard. Caching for 10s collapses
-# concurrent polls from multiple super-admins into a single DB/psutil pass.
-_PLATFORM_STATS_TTL = 10
-_PLATFORM_STATS_KEY = "saas:platform-stats:global"
 
 
 def _max_tenants() -> int:
@@ -39,25 +34,13 @@ def _safe_disk_usage(path: str = "/") -> Optional[dict]:
 
 
 @router.get("/saas/platform-stats")
+@cached_json(prefix="saas:platform-stats", ttl=10)
 async def platform_stats(admin: dict = Depends(get_super_admin)):
     """Return platform capacity + resource snapshot.
 
     Capacity is computed against MAX_TENANTS env var when > 0. When unset,
     `capacity_percent` is null and `unlimited` flag is true.
     """
-    # ── Redis-backed fast path (10s TTL) ──
-    if cache.enabled:
-        try:
-            import json as _json
-            raw = await cache.get(_PLATFORM_STATS_KEY)
-            if raw:
-                payload = _json.loads(raw)
-                payload["cached"] = True
-                payload["served_at"] = datetime.now(timezone.utc).isoformat()
-                return payload
-        except Exception:
-            pass
-
     # Tenant count + active count
     total_tenants = await db.saas_tenants.count_documents({})
     active_tenants = await db.saas_tenants.count_documents({"is_active": True})
@@ -136,15 +119,6 @@ async def platform_stats(admin: dict = Depends(get_super_admin)):
         "services": services,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
-
-    # ── Store in cache (10s TTL) — best-effort, never blocks the response ──
-    if cache.enabled:
-        try:
-            import json as _json
-            await cache.set(_PLATFORM_STATS_KEY, _json.dumps(payload, default=str), ttl=_PLATFORM_STATS_TTL)
-        except Exception:
-            pass
-
     return payload
 
 

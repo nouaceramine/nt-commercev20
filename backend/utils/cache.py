@@ -156,18 +156,27 @@ def cached_json(
     prefix: str,
     ttl: int = 60,
     key_fn: Optional[Callable[..., str]] = None,
+    stamp: bool = True,
 ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
     """Decorator that JSON-caches the return value of an async function.
 
     The decorated function still runs (and the cache stays bypassed) if the
     cache is the NoopCache (REDIS_URL unset) or if Redis is unreachable.
 
+    When ``stamp=True`` (default) and the cached value is a dict, the
+    returned payload is augmented on the *warm* hit with two fields:
+      * ``cached: true`` — flag for clients / tests
+      * ``served_at`` — ISO timestamp of when the cached copy was served
+
     Args:
         prefix:   Key namespace prefix (e.g. ``"saas:platform-stats"``).
         ttl:      Seconds to live for the cached payload.
         key_fn:   Function returning the per-call sub-key. Receives the same
                   args the wrapped function does. Defaults to a constant key.
+        stamp:    Set to False to disable cached/served_at stamping when the
+                  wrapped function returns non-dict payloads (e.g. a list).
     """
+    from datetime import datetime, timezone
 
     def decorator(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         @wraps(fn)
@@ -179,12 +188,20 @@ def cached_json(
             try:
                 raw = await cache.get(full_key)
                 if raw:
-                    return json.loads(raw)
+                    value = json.loads(raw)
+                    if stamp and isinstance(value, dict):
+                        value["cached"] = True
+                        value["served_at"] = datetime.now(timezone.utc).isoformat()
+                    return value
             except Exception:
                 pass
             value = await fn(*args, **kwargs)
             try:
-                await cache.set(full_key, json.dumps(value, default=str), ttl=ttl)
+                # Don't persist the stamp fields — recompute on each warm hit.
+                payload_to_store = value
+                if stamp and isinstance(value, dict):
+                    payload_to_store = {k: v for k, v in value.items() if k not in ("cached", "served_at")}
+                await cache.set(full_key, json.dumps(payload_to_store, default=str), ttl=ttl)
             except Exception:
                 pass
             return value

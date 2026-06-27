@@ -45,6 +45,8 @@ export default function CardsServicePage() {
   const [salesPage, setSalesPage] = useState(0);
   const [salesTotal, setSalesTotal] = useState(0);
   const [salesHasMore, setSalesHasMore] = useState(false);
+  const [salesSince, setSalesSince] = useState("");
+  const [salesUntil, setSalesUntil] = useState("");
   const SALES_PAGE_SIZE = 50;
 
   const loadInventory = useCallback(async () => {
@@ -62,13 +64,15 @@ export default function CardsServicePage() {
     }
   }, [operator, statusFilter]);
 
-  const loadSales = useCallback(async (page = salesPage, query = salesSearch) => {
+  const loadSales = useCallback(async (page = salesPage, query = salesSearch, since = salesSince, until = salesUntil) => {
     setSalesLoading(true);
     try {
       const params = new URLSearchParams();
       params.set("limit", String(SALES_PAGE_SIZE));
       params.set("skip", String(page * SALES_PAGE_SIZE));
       if (query && query.trim()) params.set("search", query.trim());
+      if (since) params.set("since", since);
+      if (until) params.set("until", until);
       const [s, b] = await Promise.all([
         apiClient.get(`/platform-cards/sales?${params.toString()}`),
         apiClient.get("/settings/tenant-branding").catch(() => ({ data: {} })),
@@ -97,8 +101,8 @@ export default function CardsServicePage() {
 
   useEffect(() => {
     if (tab === "inventory") loadInventory();
-    if (tab === "sales") loadSales(salesPage, salesSearch);
-  }, [tab, loadInventory, salesPage, salesSearch, loadSales]);
+    if (tab === "sales") loadSales(salesPage, salesSearch, salesSince, salesUntil);
+  }, [tab, loadInventory, salesPage, salesSearch, salesSince, salesUntil, loadSales]);
 
   // Debounced search — reset to page 0 and re-fetch 300ms after the user
   // stops typing so we hit the server-side ?search= filter efficiently.
@@ -106,10 +110,10 @@ export default function CardsServicePage() {
     if (tab !== "sales") return;
     const id = setTimeout(() => {
       setSalesPage(0);
-      loadSales(0, salesSearch);
+      loadSales(0, salesSearch, salesSince, salesUntil);
     }, 300);
     return () => clearTimeout(id);
-  }, [salesSearch, tab, loadSales]);
+  }, [salesSearch, salesSince, salesUntil, tab, loadSales]);
 
   const filtered = codes.filter((c) =>
     !search || (c.code || "").toLowerCase().includes(search.toLowerCase())
@@ -260,7 +264,37 @@ export default function CardsServicePage() {
                       data-testid="sales-search-input"
                     />
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => loadSales(salesPage, salesSearch)} data-testid="refresh-sales-btn">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-muted-foreground whitespace-nowrap">{ar ? "من" : "Du"}</label>
+                    <Input
+                      type="date"
+                      className="w-36"
+                      value={salesSince}
+                      onChange={(e) => setSalesSince(e.target.value)}
+                      data-testid="sales-since-input"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-muted-foreground whitespace-nowrap">{ar ? "إلى" : "Au"}</label>
+                    <Input
+                      type="date"
+                      className="w-36"
+                      value={salesUntil}
+                      onChange={(e) => setSalesUntil(e.target.value)}
+                      data-testid="sales-until-input"
+                    />
+                  </div>
+                  {(salesSince || salesUntil || salesSearch) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setSalesSearch(""); setSalesSince(""); setSalesUntil(""); }}
+                      data-testid="sales-clear-filters-btn"
+                    >
+                      {ar ? "مسح" : "Effacer"}
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => loadSales(salesPage, salesSearch, salesSince, salesUntil)} data-testid="refresh-sales-btn">
                     {ar ? "تحديث" : "Actualiser"}
                   </Button>
                   <span className="text-xs text-muted-foreground ms-auto">

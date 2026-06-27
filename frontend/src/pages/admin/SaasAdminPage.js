@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Layout } from '../../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -35,24 +35,15 @@ import {
 } from '../../components/ui/select';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
-import { 
-  Users, Building, CreditCard, TrendingUp, Package, 
-  Settings, Plus, Edit, Trash2, Check, X, Clock,
-  AlertTriangle, DollarSign, Search, MoreHorizontal,
-  Star, Eye, EyeOff, Ban, RefreshCw, Calendar, Store, Truck, ShoppingBag,
-  Banknote, Wallet, PiggyBank, Receipt, Calculator, FileText, ArrowUpRight, ArrowDownRight,
-  Database, Activity, BarChart3, ShoppingCart, UserCheck, LogIn, Bell, UserCog, Copy,
-  AlertCircle, Bug, Shield, Zap, Server, Wrench, CheckCircle, XCircle, Download, Play, Pause,
-  Wifi, WifiOff, Sliders, Boxes, Tv, ShoppingBag as ShoppingBagIcon, Smartphone, ShieldCheck, LayoutDashboard
+import {
+  Plus, Edit, Trash2, Check, X, Clock, RefreshCw, Banknote,
+  Receipt, Activity, Smartphone, Tv, Building,
 } from 'lucide-react';
 import { DatabaseManager } from '../../components/DatabaseManager';
-import { AgentsDashboard } from './components/AgentsDashboard';
 import { SystemAlertsSection } from './components/SystemAlertsSection';
 import { MonitoringSection } from './components/MonitoringSection';
 import { FinanceReportsSection } from './components/FinanceReportsSection';
-import PlatformCapacityCard from './components/PlatformCapacityCard';
 import { MonitoringDashboard } from './components/MonitoringDashboard';
-import { EntityCode } from './components/EntityCode';
 import { AIAssistant } from '../../components/AIAssistant';
 import { Bot } from 'lucide-react';
 import { formatShortDate, convertToWesternNumerals } from '../../utils/globalDateFormatter';
@@ -108,94 +99,33 @@ export default function SaasAdminPage() {
   const showMonitoringOnly = !activeTab; // base /saas-admin
 
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
+
+  // Lightweight collections still needed by the Finance + Databases tabs
+  // (those tabs are still served by this legacy page — extracting them is a
+  // future cleanup task).
   const [tenants, setTenants] = useState([]);
-  const [plans, setPlans] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Dialogs
-  const [planDialogOpen, setPlanDialogOpen] = useState(false);
-  const [tenantDialogOpen, setTenantDialogOpen] = useState(false);
-  const [extendDialogOpen, setExtendDialogOpen] = useState(false);
-  const [editingPlan, setEditingPlan] = useState(null);
-  const [editingTenant, setEditingTenant] = useState(null);
-  const [selectedTenantForExtend, setSelectedTenantForExtend] = useState(null);
-  
-  // Forms
-  const [planForm, setPlanForm] = useState({
-    name: '', name_ar: '', description: '', description_ar: '',
-    price_monthly: 0, price_6months: 0, price_yearly: 0,
-    features: {}, limits: {}, is_active: true, is_popular: false, sort_order: 0,
-    commission_rate: 10
-  });
-  
-  const [tenantForm, setTenantForm] = useState({
-    name: '', email: '', phone: '', company_name: '', password: '',
-    plan_id: '', subscription_type: 'monthly', business_type: 'retailer', role: 'admin'
-  });
-
-  const [showPassword, setShowPassword] = useState(false);
-
-  const [extendForm, setExtendForm] = useState({
-    amount: 0, payment_method: 'manual', subscription_type: 'monthly', notes: '', transaction_id: ''
-  });
-
-  // Agents State
   const [agents, setAgents] = useState([]);
-  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
-  const [agentTransactionsDialogOpen, setAgentTransactionsDialogOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState(null);
-  const [selectedAgent, setSelectedAgent] = useState(null);
-  const [agentTransactions, setAgentTransactions] = useState([]);
-  const [addPaymentDialogOpen, setAddPaymentDialogOpen] = useState(false);
 
-  // Withdrawal requests state
+  // ── Withdrawal requests (legacy /saas-admin/withdrawals tab)
   const [withdrawals, setWithdrawals] = useState([]);
   const [withdrawalsBusy, setWithdrawalsBusy] = useState(false);
   const [rejectWithdrawalDialogOpen, setRejectWithdrawalDialogOpen] = useState(false);
   const [selectedWithdrawal, setSelectedWithdrawal] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
-  
-  // Impersonation State
-  const [impersonateDialogOpen, setImpersonateDialogOpen] = useState(false);
-  const [impersonateTenant, setImpersonateTenant] = useState(null);
-  const [impersonateLoading, setImpersonateLoading] = useState(false);
+
+  // ── Impersonation logs (/saas-admin/impersonation-logs)
   const [impersonationLogs, setImpersonationLogs] = useState([]);
   const [impersonationLogsLoading, setImpersonationLogsLoading] = useState(false);
   const [impersonationActiveCount, setImpersonationActiveCount] = useState(0);
-  // Default POS shortcuts
+
+  // ── Default POS shortcuts (/saas-admin/default-pos-shortcuts)
   const [defaultShortcuts, setDefaultShortcuts] = useState([]);
   const [defaultShortcutsMeta, setDefaultShortcutsMeta] = useState({ updated_at: null, updated_by: null });
   const [defaultShortcutsLoading, setDefaultShortcutsLoading] = useState(false);
   const [defaultShortcutsSaving, setDefaultShortcutsSaving] = useState(false);
-  // Tenant Debts dashboard
-  const [tenantDebts, setTenantDebts] = useState([]);
-  const [tenantDebtsSummary, setTenantDebtsSummary] = useState({ total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
-  const [tenantDebtsLoading, setTenantDebtsLoading] = useState(false);
-  const [remindingTenantId, setRemindingTenantId] = useState(null);
-  // Settle Debt dialog state
-  const [settleDebtDialogOpen, setSettleDebtDialogOpen] = useState(false);
-  const [settleDebtTenant, setSettleDebtTenant] = useState(null);
-  const [settleDebtAmount, setSettleDebtAmount] = useState(0);
-  const [settleDebtNote, setSettleDebtNote] = useState('');
-  const [settleDebtBusy, setSettleDebtBusy] = useState(false);
-  // Audit Timeline
-  const [auditEvents, setAuditEvents] = useState([]);
-  const [auditSummary, setAuditSummary] = useState({ total: 0, by_type: {} });
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [auditFilters, setAuditFilters] = useState({ type: '', tenant_id: '', since: '', until: '' });
 
-  // Bridge Mode State
-  const [bridgeDialogOpen, setBridgeDialogOpen] = useState(false);
-  const [walletChargeDialogOpen, setWalletChargeDialogOpen] = useState(false);
-  const [walletChargeTenant, setWalletChargeTenant] = useState(null);
-  const [walletChargeForm, setWalletChargeForm] = useState({ amount: '', notes: '', payment_method: 'cash' });
-  const [walletChargeLoading, setWalletChargeLoading] = useState(false);
-  const [walletInfo, setWalletInfo] = useState(null);
-  const [walletInfoLoading, setWalletInfoLoading] = useState(false);
-
-  // Recharge Config State
+  // ── Recharge config (/saas-admin/recharge-mgmt)
   const [rechargeOperators, setRechargeOperators] = useState([]);
   const [rechargeOperatorsLoading, setRechargeOperatorsLoading] = useState(false);
   const [rechargeEditDialogOpen, setRechargeEditDialogOpen] = useState(false);
@@ -206,7 +136,7 @@ export default function SaasAdminPage() {
   const [rechargeTxnsLoading, setRechargeTxnsLoading] = useState(false);
   const [rechargeTxnsMeta, setRechargeTxnsMeta] = useState({ total_count: 0, total_amount: 0 });
 
-  // Platform Catalog State
+  // ── Platform catalog (/saas-admin/platform-catalog)
   const CATALOG_EMPTY = { name: '', category: 'iptv', server_name: '', supplier_name: '', duration_months: '', cost_price: '', sell_price: '', description: '', active: true };
   const [platformCatalog, setPlatformCatalog] = useState([]);
   const [platformCatalogLoading, setPlatformCatalogLoading] = useState(false);
@@ -214,27 +144,6 @@ export default function SaasAdminPage() {
   const [platformCatalogEditing, setPlatformCatalogEditing] = useState(null);
   const [platformCatalogForm, setPlatformCatalogForm] = useState(CATALOG_EMPTY);
   const [platformCatalogSaving, setPlatformCatalogSaving] = useState(false);
-  const [bridgeTenant, setBridgeTenant] = useState(null);
-  const [bridgeForm, setBridgeForm] = useState({ recharge_mode: 'owner_bridge', self_bridge_url: '', self_bridge_api_key: '' });
-  const [bridgeSaving, setBridgeSaving] = useState(false);
-  const [bridgeTesting, setBridgeTesting] = useState(false);
-  const [bridgeTestResult, setBridgeTestResult] = useState(null);
-
-  // Feature Flags State
-  const [featureFlagsDialogOpen, setFeatureFlagsDialogOpen] = useState(false);
-  const [selectedTenantForFlags, setSelectedTenantForFlags] = useState(null);
-  const [tenantFeatureFlags, setTenantFeatureFlags] = useState({});
-  const [savingFlags, setSavingFlags] = useState(false);
-  
-  const [agentForm, setAgentForm] = useState({
-    name: '', email: '', password: '', phone: '', company_name: '', address: '',
-    commission_percent: 10, commission_fixed: 0, credit_limit: 100000, notes: ''
-  });
-  
-  const [paymentForm, setPaymentForm] = useState({
-    amount: 0, transaction_type: 'payment', description: '', notes: ''
-  });
-
   useEffect(() => {
     fetchData();
   }, []);
@@ -253,33 +162,11 @@ export default function SaasAdminPage() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-      
-      const [statsRes, tenantsRes, plansRes, paymentsRes, agentsRes, withdrawalsRes] = await Promise.allSettled([
-        apiClient.get(`/saas/stats`, { headers }),
-        apiClient.get(`/saas/tenants`, { headers }),
-        apiClient.get(`/saas/plans?include_inactive=true`, { headers }),
-        apiClient.get(`/saas/payments`, { headers }),
-        apiClient.get(`/saas/agents`, { headers }),
-        apiClient.get(`/saas/agent-withdrawals`, { headers }),
-      ]);
-      
-      if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
-      if (tenantsRes.status === 'fulfilled') setTenants(tenantsRes.value.data);
-      if (plansRes.status === 'fulfilled') setPlans(plansRes.value.data);
-      if (paymentsRes.status === 'fulfilled') setPayments(paymentsRes.value.data);
-      if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value.data);
-      if (withdrawalsRes.status === 'fulfilled') setWithdrawals(withdrawalsRes.value.data || []);
-      
-      const failed = [statsRes, tenantsRes, plansRes, paymentsRes, agentsRes].filter(r => r.status === 'rejected');
-      if (failed.length > 0) {
-        console.error('Some requests failed:', failed.map(f => f.reason?.message));
-        toast.error('بعض البيانات لم تحمل بشكل كامل');
-      }
+      const res = await apiClient.get('/saas/agent-withdrawals');
+      setWithdrawals(res.data || []);
     } catch (error) {
-      console.error('Error fetching data:', error);
-      toast.error('خطأ في تحميل البيانات');
+      console.error('Error fetching withdrawals:', error);
+      toast.error('خطأ في تحميل طلبات السحب');
     } finally {
       setLoading(false);
     }
@@ -325,222 +212,9 @@ export default function SaasAdminPage() {
   };
 
   // Plan Functions
-  const openPlanDialog = (plan = null) => {
-    if (plan) {
-      setEditingPlan(plan);
-      setPlanForm({
-        name: plan.name, name_ar: plan.name_ar,
-        description: plan.description, description_ar: plan.description_ar,
-        price_monthly: plan.price_monthly, price_6months: plan.price_6months, price_yearly: plan.price_yearly,
-        features: plan.features || {}, limits: plan.limits || {},
-        is_active: plan.is_active, is_popular: plan.is_popular, sort_order: plan.sort_order,
-        commission_rate: plan.commission_rate ?? 10
-      });
-    } else {
-      setEditingPlan(null);
-      setPlanForm({
-        name: '', name_ar: '', description: '', description_ar: '',
-        price_monthly: 0, price_6months: 0, price_yearly: 0,
-        features: { pos: true, reports: true, ai_tips: false, multi_warehouse: false },
-        limits: { max_products: 100, max_users: 3, max_sales_per_month: 500 },
-        is_active: true, is_popular: false, sort_order: plans.length,
-        commission_rate: 10
-      });
-    }
-    setPlanDialogOpen(true);
-  };
-
-  const savePlan = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (editingPlan) {
-        await apiClient.put(`/saas/plans/${editingPlan.id}`, planForm);
-        toast.success('تم تحديث الخطة بنجاح');
-      } else {
-        await apiClient.post(`/saas/plans`, planForm);
-        toast.success('تم إنشاء الخطة بنجاح');
-      }
-      setPlanDialogOpen(false);
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
-    }
-  };
-
-  const deletePlan = async (planId) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذه الخطة؟')) return;
-    try {
-      const token = localStorage.getItem('token');
-      await apiClient.delete(`/saas/plans/${planId}`);
-      toast.success('تم حذف الخطة');
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
-    }
-  };
-
   // Agent Functions
-  const openAgentDialog = (agent = null) => {
-    if (agent) {
-      setEditingAgent(agent);
-      setAgentForm({
-        name: agent.name, email: agent.email, password: '', phone: agent.phone,
-        company_name: agent.company_name || '', address: agent.address || '',
-        commission_percent: agent.commission_percent || 10,
-        commission_fixed: agent.commission_fixed || 0,
-        credit_limit: agent.credit_limit || 100000,
-        notes: agent.notes || ''
-      });
-    } else {
-      setEditingAgent(null);
-      setAgentForm({
-        name: '', email: '', password: '', phone: '', company_name: '', address: '',
-        commission_percent: 10, commission_fixed: 0, credit_limit: 100000, notes: ''
-      });
-    }
-    setAgentDialogOpen(true);
-  };
-
-  const saveAgent = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-      
-      if (editingAgent) {
-        const updateData = { ...agentForm };
-        if (!updateData.password) delete updateData.password;
-        await apiClient.put(`/saas/agents/${editingAgent.id}`, updateData, { headers });
-        toast.success('تم تحديث الوكيل بنجاح');
-      } else {
-        await apiClient.post(`/saas/agents`, agentForm, { headers });
-        toast.success('تم إنشاء الوكيل بنجاح');
-      }
-      setAgentDialogOpen(false);
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
-    }
-  };
-
-  const deleteAgent = async (agentId) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الوكيل؟')) return;
-    try {
-      const token = localStorage.getItem('token');
-      await apiClient.delete(`/saas/agents/${agentId}`);
-      toast.success('تم حذف الوكيل');
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
-    }
-  };
-
-  const openAgentTransactions = async (agent) => {
-    setSelectedAgent(agent);
-    try {
-      const token = localStorage.getItem('token');
-      const response = await apiClient.get(`/saas/agents/${agent.id}/transactions`);
-      setAgentTransactions(response.data);
-      setAgentTransactionsDialogOpen(true);
-    } catch (error) {
-      toast.error('خطأ في تحميل المعاملات');
-    }
-  };
-
-  const openAddPayment = (agent) => {
-    setSelectedAgent(agent);
-    setPaymentForm({ amount: 0, transaction_type: 'payment', description: 'دفعة نقدية', notes: '' });
-    setAddPaymentDialogOpen(true);
-  };
-
-  const saveAgentPayment = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      await apiClient.post(`/saas/agents/${selectedAgent.id}/transactions`, paymentForm);
-      toast.success('تم تسجيل الدفعة بنجاح');
-      setAddPaymentDialogOpen(false);
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
-    }
-  };
-
   // Tenant Functions
-  const openBridgeDialog = (tenant) => {
-    setBridgeTenant(tenant);
-    setBridgeForm({
-      recharge_mode: tenant.recharge_mode || 'owner_bridge',
-      self_bridge_url: tenant.self_bridge_url || '',
-      self_bridge_api_key: tenant.self_bridge_api_key || '',
-    });
-    setBridgeTestResult(null);
-    setBridgeDialogOpen(true);
-  };
 
-  const saveBridgeMode = async () => {
-    if (!bridgeTenant) return;
-    setBridgeSaving(true);
-    try {
-      await apiClient.put(`/saas/tenants/${bridgeTenant.id}/recharge-mode`, bridgeForm);
-      toast.success('تم تحديث وضع الجسر');
-      setBridgeDialogOpen(false);
-      fetchData();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في الحفظ');
-    } finally {
-      setBridgeSaving(false);
-    }
-  };
-
-  const testBridgeFromAdmin = async () => {
-    if (!bridgeTenant) return;
-    setBridgeTesting(true);
-    setBridgeTestResult(null);
-    try {
-      const res = await apiClient.post(`/saas/tenants/${bridgeTenant.id}/test-bridge`, {
-        self_bridge_url: bridgeForm.self_bridge_url,
-        self_bridge_api_key: bridgeForm.self_bridge_api_key,
-      });
-      setBridgeTestResult(res.data);
-      if (res.data.ok) toast.success('الجسر متصل ويعمل');
-      else toast.error('الجسر غير متاح');
-    } catch (err) {
-      setBridgeTestResult({ ok: false, error: err.response?.data?.detail || err.message });
-    } finally {
-      setBridgeTesting(false);
-    }
-  };
-
-  const openImpersonateDialog = (tenant) => {
-    setImpersonateTenant(tenant);
-    setImpersonateDialogOpen(true);
-  };
-
-  const handleImpersonate = async () => {
-    if (!impersonateTenant) return;
-    setImpersonateLoading(true);
-    try {
-      const originalToken = localStorage.getItem('token');
-      const originalUser = localStorage.getItem('user');
-      const res = await apiClient.post(`/saas/impersonate/${impersonateTenant.id}`, {});
-      const data = res.data;
-      // Preserve original super-admin session so user can return + still access platform pages
-      if (originalToken) localStorage.setItem('super_admin_token', originalToken);
-      if (originalUser) localStorage.setItem('super_admin_user', originalUser);
-      // Store new token and user data
-      localStorage.setItem('token', data.access_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      localStorage.setItem('user_type', 'tenant');
-      localStorage.setItem('is_impersonating', '1');
-      if (data.impersonation_session_id) {
-        localStorage.setItem('impersonation_session_id', data.impersonation_session_id);
-      }
-      // Redirect to dashboard
-      window.location.href = '/';
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل الدخول لحساب المشترك');
-      setImpersonateLoading(false);
-    }
-  };
 
   const loadImpersonationLogs = async () => {
     setImpersonationLogsLoading(true);
@@ -555,107 +229,8 @@ export default function SaasAdminPage() {
     }
   };
 
-  const loadAuditTimeline = async (filters = auditFilters) => {
-    setAuditLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.append('limit', '300');
-      if (filters.type) params.append('event_type', filters.type);
-      if (filters.tenant_id) params.append('tenant_id', filters.tenant_id);
-      if (filters.since) params.append('since', filters.since);
-      if (filters.until) params.append('until', filters.until);
-      const res = await apiClient.get(`/saas/audit-timeline?${params.toString()}`);
-      setAuditEvents(res.data?.events || []);
-      setAuditSummary(res.data?.summary || { total: 0, by_type: {} });
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل سجل التدقيق');
-    } finally {
-      setAuditLoading(false);
-    }
-  };
-
-  const loadTenantDebts = async () => {
-    setTenantDebtsLoading(true);
-    try {
-      const res = await apiClient.get('/saas/tenant-debts');
-      setTenantDebts(res.data?.items || []);
-      setTenantDebtsSummary(res.data?.summary || { total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل ديون التجار');
-    } finally {
-      setTenantDebtsLoading(false);
-    }
-  };
-
-  const remindTenant = async (tenantId) => {
-    setRemindingTenantId(tenantId);
-    try {
-      const res = await apiClient.post(`/saas/tenant-debts/${tenantId}/remind`, { channel: 'email' });
-      if (res.data?.delivered) {
-        toast.success('تم إرسال التذكير بنجاح');
-      } else {
-        toast.success(`تم تسجيل التذكير${res.data?.delivery_error ? ` (لم يُرسَل: ${res.data.delivery_error})` : ''}`);
-      }
-      await loadTenantDebts();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل إرسال التذكير');
-    } finally {
-      setRemindingTenantId(null);
-    }
-  };
-
-  const downloadStatementPdf = async (tenant) => {
-    try {
-      const res = await apiClient.get(`/saas/tenant-debts/${tenant.tenant_id}/statement.pdf`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `statement_${(tenant.tenant_name || tenant.tenant_id).replace(/\s+/g, '_')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (e) {
-      toast.error('فشل تنزيل كشف الحساب');
-    }
-  };
 
   // ── Settle Debt ──
-  const openSettleDebtDialog = (tenant) => {
-    setSettleDebtTenant(tenant);
-    setSettleDebtAmount(tenant.credit_debt || 0);
-    setSettleDebtNote('');
-    setSettleDebtDialogOpen(true);
-  };
-
-  const confirmSettleDebt = async () => {
-    if (!settleDebtTenant) return;
-    const amount = parseFloat(settleDebtAmount);
-    if (!amount || amount <= 0) {
-      toast.error('المبلغ يجب أن يكون أكبر من صفر');
-      return;
-    }
-    if (amount > (settleDebtTenant.credit_debt || 0)) {
-      toast.error(`المبلغ يفوق الدين المسجَّل (${(settleDebtTenant.credit_debt || 0).toLocaleString('ar-DZ')} دج)`);
-      return;
-    }
-    setSettleDebtBusy(true);
-    try {
-      const res = await apiClient.post('/wallet/settle-credit', {
-        entity_id: settleDebtTenant.tenant_id,
-        amount,
-        description: settleDebtNote || `تسديد دين — ${settleDebtTenant.tenant_name || settleDebtTenant.tenant_id}`,
-      });
-      toast.success(`تم التسديد. الدين المتبقّي: ${Number(res.data?.credit_debt_remaining || 0).toLocaleString('ar-DZ')} دج`);
-      setSettleDebtDialogOpen(false);
-      setSettleDebtTenant(null);
-      await loadTenantDebts();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تسديد الدين');
-    } finally {
-      setSettleDebtBusy(false);
-    }
-  };
 
   const loadDefaultShortcuts = async () => {
     setDefaultShortcutsLoading(true);
@@ -829,209 +404,6 @@ export default function SaasAdminPage() {
       setRechargeEditSaving(false);
     }
   };
-
-  const openWalletChargeDialog = async (tenant) => {
-    setWalletChargeTenant(tenant);
-    setWalletChargeForm({ amount: '', notes: '' });
-    setWalletInfo(null);
-    setWalletChargeDialogOpen(true);
-    setWalletInfoLoading(true);
-    try {
-      const res = await apiClient.get(`/saas/tenants/${tenant.id}/wallet`);
-      setWalletInfo(res.data);
-    } catch (e) {
-      setWalletInfo(null);
-    } finally {
-      setWalletInfoLoading(false);
-    }
-  };
-
-  const handleWalletCharge = async () => {
-    if (!walletChargeTenant) return;
-    const amount = parseFloat(walletChargeForm.amount);
-    if (!amount || amount <= 0) {
-      toast.error('أدخل مبلغاً صحيحاً أكبر من صفر');
-      return;
-    }
-    setWalletChargeLoading(true);
-    try {
-      // Use the central /wallet/add-funds endpoint which supports payment_method
-      const res = await apiClient.post('/wallet/add-funds', {
-        entity_id: walletChargeTenant.id,
-        amount,
-        payment_method: walletChargeForm.payment_method,
-        description: walletChargeForm.notes || (walletChargeForm.payment_method === 'cash' ? 'شحن نقدي من المدير العام' : 'شحن بالدين من المدير العام'),
-      });
-      const methodLabel = walletChargeForm.payment_method === 'cash' ? 'نقداً' : 'بالدين';
-      toast.success(`تم شحن المحفظة ${methodLabel} — الرصيد الجديد: ${res.data.new_balance?.toLocaleString('ar-DZ')} دج`);
-      setWalletChargeDialogOpen(false);
-      setWalletChargeForm({ amount: '', notes: '', payment_method: 'cash' });
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ أثناء شحن المحفظة');
-    } finally {
-      setWalletChargeLoading(false);
-    }
-  };
-
-  const openTenantDialog = (tenant = null) => {
-    if (tenant) {
-      setEditingTenant(tenant);
-      setTenantForm({
-        name: tenant.name, email: tenant.email, phone: tenant.phone,
-        company_name: tenant.company_name, password: '',
-        plan_id: tenant.plan_id, subscription_type: tenant.subscription_type,
-        business_type: tenant.business_type || 'retailer', role: tenant.role || 'admin'
-      });
-    } else {
-      setEditingTenant(null);
-      setTenantForm({
-        name: '', email: '', phone: '', company_name: '', password: '',
-        plan_id: plans[0]?.id || '', subscription_type: 'monthly',
-        business_type: 'retailer', role: 'admin'
-      });
-    }
-    setTenantDialogOpen(true);
-  };
-
-  const saveTenant = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (editingTenant) {
-        const updateData = { ...tenantForm };
-        delete updateData.password;
-        await apiClient.put(`/saas/tenants/${editingTenant.id}`, updateData);
-        toast.success('تم تحديث المشترك');
-      } else {
-        await apiClient.post(`/saas/tenants`, tenantForm);
-        toast.success('تم إنشاء المشترك');
-      }
-      setTenantDialogOpen(false);
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
-    }
-  };
-
-  const toggleTenantStatus = async (tenantId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await apiClient.post(`/saas/tenants/${tenantId}/toggle-status`, {});
-      toast.success(res.data.is_active ? 'تم تفعيل المشترك' : 'تم تعطيل المشترك');
-      fetchData();
-    } catch (error) {
-      toast.error('حدث خطأ');
-    }
-  };
-
-  const deleteTenant = async (tenantId) => {
-    if (!window.confirm('هل أنت متأكد؟ سيتم حذف جميع بيانات هذا المشترك نهائياً!')) return;
-    try {
-      const token = localStorage.getItem('token');
-      await apiClient.delete(`/saas/tenants/${tenantId}`);
-      toast.success('تم حذف المشترك');
-      fetchData();
-    } catch (error) {
-      toast.error('حدث خطأ');
-    }
-  };
-
-  // Feature Flags Functions
-  const ALL_FEATURES = [
-    { key: 'pos', labelAr: 'نقطة البيع (POS)' },
-    { key: 'inventory', labelAr: 'المخزون والمنتجات' },
-    { key: 'customers', labelAr: 'الزبائن' },
-    { key: 'recharge', labelAr: 'شحن رصيد الجوال' },
-    { key: 'iptv', labelAr: 'الخدمات الرقمية (IPTV)' },
-    { key: 'maintenance', labelAr: 'الصيانة' },
-    { key: 'wallet', labelAr: 'المحفظة المالية' },
-    { key: 'commission', labelAr: 'العمولات' },
-    { key: 'reports', labelAr: 'التقارير' },
-    { key: 'backup', labelAr: 'النسخ الاحتياطي' },
-    { key: 'ai_bots', labelAr: 'الروبوتات الذكية (AI)' },
-    { key: 'barcode', labelAr: 'الباركود' },
-    { key: 'thermal_print', labelAr: 'الطباعة الحرارية' },
-    { key: 'credit_sales', labelAr: 'البيع بالدين' },
-    { key: 'loyalty_points', labelAr: 'نقاط الولاء' },
-  ];
-
-  const openFeatureFlagsDialog = async (tenant) => {
-    setSelectedTenantForFlags(tenant);
-    setFeatureFlagsDialogOpen(true);
-    try {
-      const res = await apiClient.get(`/saas/tenants/${tenant.id}/features`);
-      // Use server-resolved values (plan defaults merged with per-tenant overrides)
-      const resolved = res.data?.resolved || {};
-      const initial = {};
-      ALL_FEATURES.forEach(f => {
-        initial[f.key] = resolved[f.key] !== undefined ? Boolean(resolved[f.key]) : true;
-      });
-      setTenantFeatureFlags(initial);
-    } catch {
-      // Fallback: optimistic defaults until server responds
-      const initial = {};
-      ALL_FEATURES.forEach(f => { initial[f.key] = true; });
-      setTenantFeatureFlags(initial);
-    }
-  };
-
-  const saveFeatureFlags = async () => {
-    if (!selectedTenantForFlags) return;
-    setSavingFlags(true);
-    try {
-      await apiClient.put(`/saas/tenants/${selectedTenantForFlags.id}/features`, tenantFeatureFlags);
-      toast.success('تم حفظ إعدادات الميزات');
-      setFeatureFlagsDialogOpen(false);
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ في الحفظ');
-    } finally {
-      setSavingFlags(false);
-    }
-  };
-
-  const openExtendDialog = (tenant) => {
-    setSelectedTenantForExtend(tenant);
-    const plan = plans.find(p => p.id === tenant.plan_id);
-    setExtendForm({
-      amount: plan?.price_monthly || 0,
-      payment_method: 'manual',
-      subscription_type: 'monthly',
-      notes: '',
-      transaction_id: ''
-    });
-    setExtendDialogOpen(true);
-  };
-
-  const extendSubscription = async () => {
-    try {
-      await apiClient.post(`/saas/tenants/${selectedTenantForExtend.id}/extend-subscription`, {
-        tenant_id: selectedTenantForExtend.id,
-        ...extendForm
-      });
-      toast.success('تم تمديد الاشتراك بنجاح');
-      setExtendDialogOpen(false);
-      fetchData();
-    } catch (error) {
-      toast.error('حدث خطأ');
-    }
-  };
-
-  const isExpiringSoon = (endDate) => {
-    const end = new Date(endDate);
-    const now = new Date();
-    const diff = (end - now) / (1000 * 60 * 60 * 24);
-    return diff <= 7 && diff > 0;
-  };
-
-  const isExpired = (endDate) => {
-    return new Date(endDate) < new Date();
-  };
-
-  const filteredTenants = tenants.filter(t => 
-    t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.company_name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   if (loading) {
     return (
@@ -1616,148 +988,6 @@ export default function SaasAdminPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Agent Dialog */}
-        <Dialog open={agentDialogOpen} onOpenChange={setAgentDialogOpen}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{editingAgent ? 'تعديل الوكيل' : 'إضافة وكيل جديد'}</DialogTitle>
-            </DialogHeader>
-            <div className="grid grid-cols-2 gap-3 py-2">
-              <div className="space-y-1">
-                <Label className="text-xs">الاسم *</Label>
-                <Input className="h-8 text-sm" value={agentForm.name} onChange={e => setAgentForm({...agentForm, name: e.target.value})} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">البريد الإلكتروني *</Label>
-                <Input className="h-8 text-sm" type="email" value={agentForm.email} onChange={e => setAgentForm({...agentForm, email: e.target.value})} disabled={!!editingAgent} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">الهاتف</Label>
-                <Input className="h-8 text-sm" value={agentForm.phone} onChange={e => setAgentForm({...agentForm, phone: e.target.value})} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">اسم الشركة</Label>
-                <Input className="h-8 text-sm" value={agentForm.company_name} onChange={e => setAgentForm({...agentForm, company_name: e.target.value})} />
-              </div>
-              <div className="col-span-2 space-y-1">
-                <Label className="text-xs">العنوان</Label>
-                <Input className="h-8 text-sm" value={agentForm.address} onChange={e => setAgentForm({...agentForm, address: e.target.value})} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">كلمة المرور {editingAgent ? '(اتركها فارغة للإبقاء)' : '*'}</Label>
-                <Input className="h-8 text-sm" type="password" value={agentForm.password} onChange={e => setAgentForm({...agentForm, password: e.target.value})} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">نسبة العمولة (%)</Label>
-                <Input className="h-8 text-sm" type="number" value={agentForm.commission_percent} onChange={e => setAgentForm({...agentForm, commission_percent: parseFloat(e.target.value) || 0})} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">عمولة ثابتة (دج)</Label>
-                <Input className="h-8 text-sm" type="number" value={agentForm.commission_fixed} onChange={e => setAgentForm({...agentForm, commission_fixed: parseFloat(e.target.value) || 0})} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">حد الدين (دج)</Label>
-                <Input className="h-8 text-sm" type="number" value={agentForm.credit_limit} onChange={e => setAgentForm({...agentForm, credit_limit: parseFloat(e.target.value) || 0})} />
-              </div>
-              <div className="col-span-2 space-y-1">
-                <Label className="text-xs">ملاحظات</Label>
-                <Textarea className="text-sm" rows={2} value={agentForm.notes} onChange={e => setAgentForm({...agentForm, notes: e.target.value})} />
-              </div>
-            </div>
-            <DialogFooter className="pt-2">
-              <Button variant="outline" size="sm" onClick={() => setAgentDialogOpen(false)}>إلغاء</Button>
-              <Button size="sm" onClick={saveAgent}>حفظ</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Agent Transactions Dialog */}
-        <Dialog open={agentTransactionsDialogOpen} onOpenChange={setAgentTransactionsDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>معاملات الوكيل: {selectedAgent?.name}</DialogTitle>
-              <DialogDescription>
-                الرصيد الحالي: <span className={`font-bold ${selectedAgent?.current_balance < 0 ? 'text-red-500' : 'text-green-500'}`}>
-                  {selectedAgent?.current_balance?.toLocaleString()} دج
-                </span>
-              </DialogDescription>
-            </DialogHeader>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>التاريخ</TableHead>
-                  <TableHead>النوع</TableHead>
-                  <TableHead>الوصف</TableHead>
-                  <TableHead>المبلغ</TableHead>
-                  <TableHead>الرصيد بعد</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {agentTransactions.map(tx => (
-                  <TableRow key={tx.id}>
-                    <TableCell className="text-sm">{formatShortDate(tx.created_at)}</TableCell>
-                    <TableCell>
-                      <Badge variant={tx.transaction_type === 'payment' ? 'default' : tx.transaction_type === 'commission' ? 'secondary' : 'outline'}>
-                        {tx.transaction_type === 'payment' ? 'دفعة' : tx.transaction_type === 'commission' ? 'عمولة' : tx.transaction_type === 'subscription_sale' ? 'بيع' : tx.transaction_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{tx.description}</TableCell>
-                    <TableCell className={`font-medium ${tx.transaction_type === 'subscription_sale' ? 'text-red-500' : 'text-green-500'}`}>
-                      {tx.transaction_type === 'subscription_sale' ? '-' : '+'}{tx.amount?.toLocaleString()} دج
-                    </TableCell>
-                    <TableCell className="font-medium">{tx.balance_after?.toLocaleString()} دج</TableCell>
-                  </TableRow>
-                ))}
-                {agentTransactions.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">لا توجد معاملات</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </DialogContent>
-        </Dialog>
-
-        {/* Add Payment Dialog */}
-        <Dialog open={addPaymentDialogOpen} onOpenChange={setAddPaymentDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>إضافة دفعة للوكيل</DialogTitle>
-              <DialogDescription>{selectedAgent?.name} - الرصيد الحالي: {selectedAgent?.current_balance?.toLocaleString()} دج</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>نوع المعاملة</Label>
-                <Select value={paymentForm.transaction_type} onValueChange={v => setPaymentForm({...paymentForm, transaction_type: v})}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="payment">دفعة نقدية (إضافة للرصيد)</SelectItem>
-                    <SelectItem value="refund">استرداد (خصم من الرصيد)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>المبلغ (دج)</Label>
-                <Input type="number" value={paymentForm.amount} onChange={e => setPaymentForm({...paymentForm, amount: parseFloat(e.target.value) || 0})} />
-              </div>
-              <div className="space-y-2">
-                <Label>الوصف</Label>
-                <Input value={paymentForm.description} onChange={e => setPaymentForm({...paymentForm, description: e.target.value})} />
-              </div>
-              <div className="space-y-2">
-                <Label>ملاحظات</Label>
-                <Textarea value={paymentForm.notes} onChange={e => setPaymentForm({...paymentForm, notes: e.target.value})} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAddPaymentDialogOpen(false)}>إلغاء</Button>
-              <Button onClick={saveAgentPayment}>تسجيل الدفعة</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
         {/* Platform Catalog Dialog */}
         <Dialog open={platformCatalogDialogOpen} onOpenChange={setPlatformCatalogDialogOpen}>
           <DialogContent className="max-w-lg">
@@ -1822,7 +1052,6 @@ export default function SaasAdminPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Wallet Charge Dialog */}
         {/* Recharge Operator Edit Dialog */}
         <Dialog open={rechargeEditDialogOpen} onOpenChange={setRechargeEditDialogOpen}>
           <DialogContent className="max-w-md" dir="rtl">
