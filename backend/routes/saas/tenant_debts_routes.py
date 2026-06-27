@@ -167,14 +167,22 @@ async def remind_tenant(
     delivery_error = None
     try:
         from services.email_service import send_email
-        subject = f"تذكير: لديك دين متبقّ للمنصّة — {debt:.2f} دج"
-        body = custom_message or (
-            f"مرحباً {tenant.get('name', '')},\n\n"
-            f"نذكّركم بأن لديكم رصيداً متبقّياً للمنصّة بقيمة {debt:.2f} دج. "
-            f"يرجى تسديده في أقرب وقت ممكن لتجنّب أي تعليق في الخدمة.\n\n"
-            f"شكراً لتعاونكم،\nفريق NT Commerce."
-        )
-        result = await send_email(to=tenant.get("email", ""), subject=subject, body=body)
+        from services.email_templates import debt_reminder_email
+        if custom_message:
+            # Custom message — wrap with the generic alert template for clean rendering
+            from services.email_templates import generic_alert_email
+            subject, html = generic_alert_email(
+                title=f"تذكير بمبلغ مستحق: {debt:.2f} دج",
+                message=custom_message,
+                severity="warning",
+            )
+        else:
+            subject, html = debt_reminder_email(
+                tenant_name=tenant.get("name", ""),
+                amount_due=debt,
+                currency="دج",
+            )
+        result = await send_email(to=tenant.get("email", ""), subject=subject, html=html)
         delivered = bool(result)
     except ImportError:
         delivery_error = "email_service not configured"

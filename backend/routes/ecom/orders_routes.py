@@ -252,8 +252,10 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
 async def update_order_status(order_id: str, body: dict, user: dict = Depends(require_tenant)):
     """Transition an order to a new status. Enforces the state machine.
 
-    Side effect: if the tenant has an active WhatsApp integration AND the customer
-    has a phone, automatically sends them a status-update notification (fire-and-forget).
+    Side effects:
+      • Inventory sync — deducts POS stock on first move to 'confirmed' (per item with product_id);
+        restores it on move to 'cancelled'/'refunded' (idempotent via inventory_deducted flag).
+      • WhatsApp notification — if a configured integration exists and customer.phone is set.
     """
     await require_ecom_feature(user)
     new_status = (body.get("status") or "").strip().lower()
@@ -282,6 +284,9 @@ async def update_order_status(order_id: str, body: dict, user: dict = Depends(re
         },
     )
 
+    # ── Inventory sync with POS products ──
+    inventory_result = await _sync_inventory_on_status_change(order, new_status, now)
+
     # ── Auto-notify customer via WhatsApp when integration is configured ──
     try:
         await _maybe_notify_customer(order, new_status)
@@ -289,7 +294,83 @@ async def update_order_status(order_id: str, body: dict, user: dict = Depends(re
         import logging
         logging.getLogger(__name__).warning("WhatsApp notify failed for order %s: %s", order_id, exc)
 
-    return {"ok": True, "status": new_status, "previous": current}
+    return {
+        "ok": True,
+        "status": new_status,
+        "previous": current,
+        "inventory": inventory_result,
+    }
+
+
+async def _sync_inventory_on_status_change(order: dict, new_status: str, now_iso: str) -> dict:
+    """Atomically deduct/restore POS product stock based on the order status transition.
+
+    Idempotent via the `inventory_deducted` flag on the order document.
+
+    Returns {deducted:[...], restored:[...], warnings:[...]} for the API consumer.
+    """
+    result = {"deducted": [], "restored": [], "warnings": []}
+    items = order.get("items") or []
+    items_with_product = [it for it in items if it.get("product_id")]
+    if not items_with_product:
+        return result
+
+    order_id = order.get("id")
+    already_deducted = bool(order.get("inventory_deducted"))
+
+    # ── Deduct on first move to 'confirmed' ──
+    if new_status == "confirmed" and not already_deducted:
+        deductions = []
+        for it in items_with_product:
+            pid = it["product_id"]
+            qty = int(it.get("qty", 0) or 0)
+            if qty <= 0:
+                continue
+            product = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "quantity": 1})
+            if not product:
+                result["warnings"].append(f"⚠️ منتج غير موجود في المخزون: {it.get('name', pid)}")
+                continue
+            new_qty = (product.get("quantity") or 0) - qty
+            await db.products.update_one({"id": pid}, {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso}})
+            deductions.append({"product_id": pid, "qty": qty, "deducted_at": now_iso})
+            result["deducted"].append({
+                "product_id": pid,
+                "name": product.get("name_ar") or product.get("name_en") or it.get("name"),
+                "qty": qty,
+                "stock_after": new_qty,
+            })
+            if new_qty < 0:
+                result["warnings"].append(f"⚠️ المخزون أصبح سالباً للمنتج '{product.get('name_ar') or it.get('name')}' ({new_qty})")
+        if deductions:
+            await db.ecom_orders.update_one(
+                {"id": order_id},
+                {"$set": {"inventory_deducted": True, "inventory_deductions": deductions, "inventory_deducted_at": now_iso}},
+            )
+        return result
+
+    # ── Restore on transition to cancelled / refunded ──
+    if new_status in ("cancelled", "refunded") and already_deducted:
+        deductions = order.get("inventory_deductions") or []
+        # Fallback: if we don't have the recorded deductions, restore from items
+        if not deductions:
+            deductions = [{"product_id": it["product_id"], "qty": int(it.get("qty", 0) or 0)} for it in items_with_product]
+        for d in deductions:
+            pid = d.get("product_id")
+            qty = int(d.get("qty", 0) or 0)
+            if not pid or qty <= 0:
+                continue
+            res = await db.products.update_one({"id": pid}, {"$inc": {"quantity": qty}, "$set": {"updated_at": now_iso}})
+            if res.matched_count == 0:
+                result["warnings"].append(f"⚠️ تعذَّرت إعادة المخزون لمنتج محذوف: {pid}")
+                continue
+            result["restored"].append({"product_id": pid, "qty": qty})
+        await db.ecom_orders.update_one(
+            {"id": order_id},
+            {"$set": {"inventory_deducted": False, "inventory_restored_at": now_iso}},
+        )
+        return result
+
+    return result
 
 
 # Cached lookup: is there an active WhatsApp integration with real creds?

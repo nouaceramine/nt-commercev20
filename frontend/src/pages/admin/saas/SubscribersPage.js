@@ -509,6 +509,9 @@ export default function SubscribersPage() {
                         <Button variant="ghost" size="sm" onClick={() => openFeatureFlagsDialog(tenant)} title="إعدادات الميزات" data-testid={`feature-flags-btn-${tenant.id}`}>
                           <Sliders className="h-4 w-4 text-blue-500" />
                         </Button>
+                        <Button variant="ghost" size="sm" onClick={() => openImpersonateDialog(tenant)} title="انتحال (الدخول لحساب المشترك)" data-testid={`impersonate-btn-${tenant.id}`}>
+                          <LogIn className="h-4 w-4 text-purple-500" />
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => toggleTenantStatus(tenant.id)} title={tenant.is_active ? 'تعطيل' : 'تفعيل'}>
                           {tenant.is_active ? <Ban className="h-4 w-4 text-amber-500" /> : <Check className="h-4 w-4 text-green-500" />}
                         </Button>

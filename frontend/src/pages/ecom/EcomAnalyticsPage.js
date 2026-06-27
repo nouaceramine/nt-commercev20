@@ -16,10 +16,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { BarChart3, TrendingUp, Trophy, Activity, ArrowRight, RefreshCcw } from 'lucide-react';
+import { BarChart3, TrendingUp, Trophy, Activity, ArrowRight, RefreshCcw, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
 import { EcomCopilotChat } from './EcomCopilotChat';
+import { downloadCsv, todayStamp } from '../../lib/csvExport';
 
 const CHANNEL_HEX = {
   pos: '#10b981', shopify: '#96bf48', facebook: '#1877f2', instagram: '#e4405f',
@@ -65,6 +66,49 @@ export default function EcomAnalyticsPage() {
     : [];
   const activeChannels = Object.keys(revenue?.series || {});
 
+  // ── CSV exports ──
+  const exportRevenueCsv = () => {
+    if (!revenue) return;
+    const headers = ['اليوم', ...activeChannels.map(ch => CHANNELS[ch]?.labelAr || ch), 'المجموع اليومي'];
+    const rows = timeSeriesRows.map(r => {
+      const channelVals = activeChannels.map(ch => r[ch] || 0);
+      const dailyTotal = channelVals.reduce((s, v) => s + v, 0);
+      return [r.day, ...channelVals, dailyTotal];
+    });
+    downloadCsv(`ecom-revenue-${days}d-${todayStamp()}.csv`, headers, rows);
+    toast.success('تمَّ تصدير الإيرادات إلى CSV');
+  };
+
+  const exportFunnelCsv = () => {
+    if (!funnel) return;
+    const stages = funnel.stages || [];
+    const headers = ['المرحلة', 'العدد', 'نسبة التحويل %'];
+    const rows = stages.map(s => [s.label_ar || s.key, s.count || 0, (s.pct ?? 0).toFixed(1)]);
+    downloadCsv(`ecom-funnel-${days}d-${todayStamp()}.csv`, headers, rows);
+    toast.success('تمَّ تصدير القمع إلى CSV');
+  };
+
+  const exportTopProductsCsv = () => {
+    if (!topProducts.length) return;
+    const headers = ['الترتيب', 'المنتج', 'SKU', 'الكمية المباعة', 'عدد الطلبات', 'الإيراد (دج)'];
+    const rows = topProducts.map((p, i) => [
+      i + 1,
+      p.name || '—',
+      (p.skus || []).join(' / ') || '—',
+      p.qty || 0,
+      p.orders || 0,
+      p.revenue || 0,
+    ]);
+    downloadCsv(`ecom-top-products-${days}d-${todayStamp()}.csv`, headers, rows);
+    toast.success('تمَّ تصدير أفضل المنتجات إلى CSV');
+  };
+
+  const exportAllCsv = () => {
+    exportRevenueCsv();
+    setTimeout(exportFunnelCsv, 300);
+    setTimeout(exportTopProductsCsv, 600);
+  };
+
   return (
     <Layout>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-analytics-page">
@@ -93,6 +137,10 @@ export default function EcomAnalyticsPage() {
             </Select>
             <Button variant="outline" onClick={load} disabled={loading} data-testid="analytics-refresh-btn">
               <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button variant="outline" onClick={exportAllCsv} disabled={loading || !revenue} data-testid="analytics-export-csv-btn" title="تصدير الإيرادات + القمع + أفضل المنتجات إلى ملفات CSV">
+              <Download className="w-4 h-4 ml-1" />
+              تصدير CSV
             </Button>
           </div>
         </div>

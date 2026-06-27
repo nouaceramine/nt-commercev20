@@ -1,16 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { Truck, Package, X, RefreshCcw, CheckCircle2, MapPin, Phone, User, Hash, Calendar } from 'lucide-react';
+import { Truck, Package, X, CheckCircle2, MapPin, Phone, User, Hash, Calendar, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '../../lib/apiClient';
 import { CHANNELS, ORDER_STATUSES, NEXT_STATUSES, SHIPPING_PROVIDERS } from './ecomConstants';
+import { printEcomOrderInvoice } from '../../lib/ecomOrderInvoice';
 
 export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) {
   const [busy, setBusy] = useState(false);
   const [shippingProvider, setShippingProvider] = useState('yalidine');
+  const [storeName, setStoreName] = useState('متجر إلكتروني');
+
+  // Fetch tenant store name once when the dialog first opens
+  useEffect(() => {
+    if (!open) return;
+    apiClient.get('/settings/tenant-branding')
+      .then(res => {
+        const data = res?.data?.value || res?.data || {};
+        const name = data.store_name || data.name || data.company_name;
+        if (name) setStoreName(name);
+      })
+      .catch(() => {/* keep default */});
+  }, [open]);
 
   if (!order) return null;
 
@@ -21,8 +35,22 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const transition = async (toStatus) => {
     setBusy(true);
     try {
-      await apiClient.put(`/ecom/orders/${order.id}/status`, { status: toStatus });
+      const res = await apiClient.put(`/ecom/orders/${order.id}/status`, { status: toStatus });
       toast.success(`تم تحديث الحالة إلى: ${ORDER_STATUSES[toStatus].labelAr}`);
+
+      // ── Inventory feedback ──
+      const inv = res?.data?.inventory;
+      if (inv) {
+        if (inv.deducted?.length > 0) {
+          const lines = inv.deducted.map(d => `• ${d.name}: -${d.qty} → المتبقي ${d.stock_after}`).join('\n');
+          toast.success(`📦 خُصِم من المخزون:\n${lines}`, { duration: 6000 });
+        }
+        if (inv.restored?.length > 0) {
+          const total = inv.restored.reduce((s, r) => s + r.qty, 0);
+          toast.success(`📦 أُعيد للمخزون: ${total} وحدة عبر ${inv.restored.length} منتج`, { duration: 4000 });
+        }
+        (inv.warnings || []).forEach(w => toast.warning(w, { duration: 8000 }));
+      }
       onUpdated?.();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'فشل تحديث الحالة');
@@ -71,6 +99,11 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
             <span className="font-mono text-lg">{order.order_code}</span>
             <Badge className={statusMeta.color}>{statusMeta.labelAr}</Badge>
             <Badge className={channelMeta.color}>{channelMeta.labelAr}</Badge>
+            {order.inventory_deducted && (
+              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200" data-testid="inventory-deducted-badge">
+                📦 مخصوم من المخزون
+              </Badge>
+            )}
           </DialogTitle>
           <DialogDescription>
             <Calendar className="inline w-3 h-3 ml-1" />
@@ -206,11 +239,22 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
 
         <div className="flex justify-between pt-2 border-t">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>إغلاق</Button>
-          {['cancelled', 'refunded'].includes(order.status) && (
-            <Button variant="destructive" onClick={deleteOrder} disabled={busy} data-testid="order-delete-btn">
-              <X className="w-4 h-4 ml-1" /> حذف نهائي
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => {
+              const res = printEcomOrderInvoice({ storeName, order });
+              if (!res.ok && res.reason === 'popup_blocked') {
+                toast.error('يرجى السماح بالنوافذ المنبثقة لطباعة الفاتورة');
+              }
+            }} data-testid="order-print-invoice-btn">
+              <Printer className="w-4 h-4 ml-1" />
+              طباعة / PDF
             </Button>
-          )}
+            {['cancelled', 'refunded'].includes(order.status) && (
+              <Button variant="destructive" onClick={deleteOrder} disabled={busy} data-testid="order-delete-btn">
+                <X className="w-4 h-4 ml-1" /> حذف نهائي
+              </Button>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

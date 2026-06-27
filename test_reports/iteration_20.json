@@ -1,0 +1,31 @@
+{
+  "summary": "Iter-20 — ALL 5 features VERIFIED end-to-end. Backend pytest 13/13 PASS (5 email-templates + 2 inventory-sync + 3 iter-19 regression + 3 iter-18.4 regression) via /app/test_reports/pytest/iteration_20.xml. Frontend Playwright: (1) Impersonate button on /saas-admin/subscribers with data-testid='impersonate-btn-{tid}' present, clickable; opens impersonate dialog, confirm navigates to '/' with localStorage.is_impersonating=='1' and the orange tenant banner 'أنت تتصفح كحساب: FOAD' visible. (2) CSV export on /ecom-hub/analytics: clicking analytics-export-csv-btn triggered 3 simultaneous downloads — ecom-revenue-30d-2026-06-27.csv, ecom-funnel-30d-2026-06-27.csv, ecom-top-products-30d-2026-06-27.csv (correct naming pattern). (3) PDF/Print invoice button order-print-invoice-btn ('طباعة / PDF') present in order detail dialog footer; clicking opens a new window with 4322-char A4 invoice HTML containing 'فاتورة'/'FOAD' branding (popup not blocked under Playwright). (4) Inventory sync UI: opened order ECO-DFEA1E08 (product_id-linked TEST_iter19 منتج, qty=1) → clicked 'مؤكَّد' → green toast '📦 خُصِم من المخزون: • TEST_iter19 منتج: -1 → المتبقي 12' + status toast + inventory-deducted-badge ('📦 مخصوم من المخزون') appeared in dialog header; then 'ملغى' → toast '📦 أُعيد للمخزون: 1 وحدة عبر 1 منتج' + badge disappeared. (5) Email templates wired: tenant-debts/{tid}/remind on FOAD returned {ok:true,delivered:false,reminder_id:'rem_...'}; code path verified at routes/saas/tenant_debts_routes.py:180 which imports debt_reminder_email and passes html=html to send_email; the 5 render pytests confirm emerald header + amount formatting. Smoke /ecom-hub, /ecom-hub/channels, /ecom-hub/guide, /ecom-hub/analytics, /saas-admin, /saas-admin/subscribers — all loaded with ZERO console errors.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter20_inventory_sync.py",
+    "/app/backend/tests/test_iter20_email_templates.py",
+    "/app/backend/tests/test_iter19_bug_fixes.py",
+    "/app/backend/tests/test_iter18_4_copilot_health_rag.py",
+    "/app/test_reports/pytest/iteration_20.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "tenant-debts remind: For tenant FOAD@FOAD the Resend provider rejects the address with 'Invalid `to` field' because FOAD@FOAD lacks a TLD. Backend correctly returns delivered:false with no exception — but consider adding stricter email validation at tenant-creation time (Pydantic EmailStr) so SaaS-admin cannot create tenants with invalid emails that silently fail every future notification.",
+    "Email provider note: README says provider is 'mock' when RESEND_API_KEY not set, but logs show actual Resend calls being attempted (and failing for invalid emails). Confirm RESEND_API_KEY is intentionally set in this env; if not, the mock-fallback in services/email_service.py may not be kicking in.",
+    "EcomOrderDetailDialog: when inventory.deducted is empty (no-product-id rows) confirm still shows the green status-update toast but no inventory toast — good UX. Optionally surface a small info chip 'لا توجد منتجات مرتبطة بالمخزون' in the dialog so users understand why stock wasn't touched.",
+    "csvExport.js: filename pattern hard-codes range_days '30d'. If user changes date range filter on analytics page, filename still says 30d. Minor — pass the actual range string into downloadCsv to keep filenames truthful."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (13/13 pytest)", "frontend": "100% (all 5 features verified)" },
+  "test_credentials": "Super-admin admin@ntcommerce.com / Admin@2024. FOAD tenant id=f2e36d2d-2a58-47c1-bdf5-c87f4bd7ae54 used for impersonation; ecommerce_hub=true preserved.",
+  "seed_data_creation": "No new seed data. Re-used iter-19 ECO-DFEA1E08 order (TEST_iter19 منتج, product_id=fe33f0e9-cb53-4c52-b27a-1445813dd095). Inventory was deducted (qty 13→12) then restored (12→13) during the UI test, leaving final qty unchanged. Order status ended at 'ملغى' (cancelled).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter-20 ships clean. Backend pytests cover all 5 features (13/13). Use admin@ntcommerce.com login → /saas-admin/subscribers → click impersonate-btn-{tid} → confirm dialog button text 'دخول للحساب' (not 'انتحال'). The /ecom-hub orders table uses data-testid='view-order-{id}' to open EcomOrderDetailDialog. Transition buttons: order-transition-confirmed / order-transition-cancelled. Print: order-print-invoice-btn. CSV: analytics-export-csv-btn (3 files at once). Toasts use sonner — query '[data-sonner-toast]'. Tenant banner text is 'أنت تتصفح كحساب: {name}' not 'انتحال'.",
+  "rca of the issue": "No bugs found. Email delivery to FOAD@FOAD returns delivered:false because the address is not RFC-valid — this is upstream seed data, not an iter-20 regression; the email template still renders correctly (validated by 5 pytests)."
+}

@@ -90,21 +90,18 @@ async def evaluate_and_alert(insights: dict) -> dict:
     admins = await admins_cursor.to_list(50)
 
     if admins:
-        color = "#dc2626" if severity == "critical" else "#f59e0b"
         label = "حرج" if severity == "critical" else "تحذير"
-        risks_html = "".join(f"<li>{r}</li>" for r in (insights.get("risks") or []))
-        recs_html = "".join(f"<li>{r}</li>" for r in (insights.get("recommendations") or []))
-        body = (
-            f"<div style='font-family:Arial;direction:rtl;padding:20px'>"
-            f"<h2 style='color:{color}'>⚠️ تنبيه صحة المنصة — {label}</h2>"
-            f"<p>سجَّل الذكاء الصناعي درجة صحة <b style='color:{color};font-size:24px'>{score}/100</b>.</p>"
-            f"<p><b>الخلاصة:</b> {insights.get('headline', '—')}</p>"
-            f"<h4 style='color:#374151'>المخاطر</h4><ul>{risks_html}</ul>"
-            f"<h4 style='color:#374151'>التوصيات</h4><ul>{recs_html}</ul>"
-            f"<p style='margin-top:20px;color:#6b7280;font-size:12px'>"
-            f"وقت التنبيه: {now_iso}<br/>"
-            f"NT Commerce v16 — Health Watch"
-            f"</p></div>"
+        risks_text = " • ".join((insights.get("risks") or [])[:3]) or "—"
+        recs_text = " • ".join((insights.get("recommendations") or [])[:3]) or "—"
+        from services.email_templates import generic_alert_email
+        subject, body = generic_alert_email(
+            title=f"تنبيه صحة المنصة — {label} (درجة {score}/100)",
+            message=(
+                f"{insights.get('headline', '—')}\n\n"
+                f"المخاطر: {risks_text}\n\n"
+                f"التوصيات: {recs_text}"
+            ),
+            severity=severity,
         )
         es = EmailService()
         for a in admins:
@@ -113,7 +110,7 @@ async def evaluate_and_alert(insights: dict) -> dict:
                 try:
                     await es.send_email(
                         to=email,
-                        subject=f"⚠️ تنبيه صحة المنصة — درجة {score}/100",
+                        subject=subject,
                         html=body,
                     )
                 except Exception as exc:
