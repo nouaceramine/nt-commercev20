@@ -10,37 +10,45 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/dialog";
 import { toast } from "sonner";
 import apiClient from "../../lib/apiClient";
-import { Loader2, Plus, Upload, Trash2, Pencil, Package, Wifi, CreditCard, ShoppingCart } from "lucide-react";
+import { Loader2, Plus, Upload, Trash2, Pencil, Package, Wifi, CreditCard, ShoppingCart, Smartphone } from "lucide-react";
 
 const OPERATORS = ["Mobilis", "Djezzy", "Ooredoo"];
+const SIM_OPERATORS = ["Mobilis", "Djezzy", "Ooredoo", "Sama"];
+const SIM_TIER_LABELS = { retail: "تجزئة", wholesale: "جملة" };
 
 export default function SupplierAdminPage() {
   const [tab, setTab] = useState("cards");
   const [cards, setCards] = useState([]);
   const [idoom, setIdoom] = useState([]);
+  const [sims, setSims] = useState([]);
   const [tenants, setTenants] = useState([]);
-  const [stockCards, setStockCards] = useState({});  // catalog_id -> {available, reserved, sold}
+  const [stockCards, setStockCards] = useState({});
   const [stockIdoom, setStockIdoom] = useState({});
+  const [stockSims, setStockSims] = useState({});
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAddCard, setShowAddCard] = useState(false);
   const [showAddIdoom, setShowAddIdoom] = useState(false);
-  const [showUpload, setShowUpload] = useState(null);  // {type, catalogId, label}
-  const [showPriceDialog, setShowPriceDialog] = useState(null);  // {type, item}
+  const [showAddSim, setShowAddSim] = useState(false);
+  const [showUpload, setShowUpload] = useState(null);
+  const [showPriceDialog, setShowPriceDialog] = useState(null);
 
   const reload = async () => {
     setLoading(true);
     try {
-      const [c, i, t, sc, si, o] = await Promise.all([
+      const [c, i, s, t, sc, si, ss, o] = await Promise.all([
         apiClient.get("/admin/supplier/catalog/cards"),
         apiClient.get("/admin/supplier/catalog/idoom"),
+        apiClient.get("/admin/supplier/catalog/sims"),
         apiClient.get("/saas/tenants"),
         apiClient.get("/admin/supplier/stock/cards"),
         apiClient.get("/admin/supplier/stock/idoom"),
+        apiClient.get("/admin/supplier/stock/sims"),
         apiClient.get("/admin/supplier/orders"),
       ]);
       setCards(c.data || []);
       setIdoom(i.data || []);
+      setSims(s.data || []);
       setTenants(t.data || []);
       const aggCards = {};
       (sc.data?.rows || []).forEach((r) => {
@@ -56,6 +64,13 @@ export default function SupplierAdminPage() {
         aggIdoom[cid][r._id.status] = r.count;
       });
       setStockIdoom(aggIdoom);
+      const aggSims = {};
+      (ss.data?.rows || []).forEach((r) => {
+        const cid = r._id.catalog_id;
+        aggSims[cid] = aggSims[cid] || { available: 0, reserved: 0, sold: 0 };
+        aggSims[cid][r._id.status] = r.count;
+      });
+      setStockSims(aggSims);
       setOrders(o.data || []);
     } catch (e) {
       toast.error("فشل التحميل");
@@ -77,8 +92,10 @@ export default function SupplierAdminPage() {
     }
   };
 
-  const stockOf = (type, id) =>
-    (type === "cards" ? stockCards : stockIdoom)[id] || { available: 0, reserved: 0, sold: 0 };
+  const stockOf = (type, id) => {
+    const map = type === "cards" ? stockCards : type === "sims" ? stockSims : stockIdoom;
+    return map[id] || { available: 0, reserved: 0, sold: 0 };
+  };
 
   return (
     <div className="p-6 space-y-6" dir="rtl" data-testid="supplier-admin-page">
@@ -94,6 +111,7 @@ export default function SupplierAdminPage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="cards" data-testid="tab-cards"><CreditCard className="h-4 w-4 ml-2" /> البطاقات</TabsTrigger>
+          <TabsTrigger value="sims" data-testid="tab-sims"><Smartphone className="h-4 w-4 ml-2" /> شرائح SIM</TabsTrigger>
           <TabsTrigger value="idoom" data-testid="tab-idoom"><Wifi className="h-4 w-4 ml-2" /> Idoom</TabsTrigger>
           <TabsTrigger value="orders" data-testid="tab-orders"><ShoppingCart className="h-4 w-4 ml-2" /> الطلبات</TabsTrigger>
         </TabsList>
@@ -139,6 +157,66 @@ export default function SupplierAdminPage() {
                       );
                     })}
                     {!cards.length && <TableRow><TableCell colSpan={6} className="text-center text-gray-500">لا توجد فئات. أضف فئة جديدة</TableCell></TableRow>}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* SIMS TAB — physical SIM cards (شرائح) */}
+        <TabsContent value="sims" className="mt-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>كتالوج شرائح SIM</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  شرائح SIM فعلية يبيعها المستأجرون عبر البريدج لزبائنهم. ICCID = الكود الفريد لكل شريحة.
+                </p>
+              </div>
+              <Button onClick={() => setShowAddSim(true)} data-testid="add-sim-btn"><Plus className="h-4 w-4 ml-2" /> إضافة فئة</Button>
+            </CardHeader>
+            <CardContent>
+              {loading ? <Loader2 className="animate-spin mx-auto h-6 w-6" /> : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>المُشغِّل</TableHead>
+                      <TableHead>المستوى</TableHead>
+                      <TableHead>الاسم</TableHead>
+                      <TableHead>سعر الشراء (من المنصة)</TableHead>
+                      <TableHead>سعر البيع المُقترَح</TableHead>
+                      <TableHead>المخزون (متاح/محجوز/مُباع)</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sims.map((s) => {
+                      const stock = stockOf("sims", s.id);
+                      const tierColor = s.tier === "wholesale" ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800";
+                      return (
+                        <TableRow key={s.id} data-testid={`sim-row-${s.id}`}>
+                          <TableCell><Badge>{s.operator}</Badge></TableCell>
+                          <TableCell><Badge className={tierColor}>{SIM_TIER_LABELS[s.tier]}</Badge></TableCell>
+                          <TableCell className="text-sm">{s.name_ar || `${s.operator} ${SIM_TIER_LABELS[s.tier]}`}</TableCell>
+                          <TableCell className="font-semibold">{s.default_price} دج</TableCell>
+                          <TableCell className="text-green-700">{s.suggested_retail_price ? `${s.suggested_retail_price} دج` : "—"}</TableCell>
+                          <TableCell>
+                            <span className="text-green-700">{stock.available}</span> /{" "}
+                            <span className="text-amber-600">{stock.reserved}</span> /{" "}
+                            <span className="text-gray-500">{stock.sold}</span>
+                          </TableCell>
+                          <TableCell className="space-x-2 space-x-reverse whitespace-nowrap">
+                            <Button size="sm" variant="default" className="bg-purple-600 hover:bg-purple-700" onClick={() => setShowUpload({ type: "sims", catalogId: s.id, label: `${s.operator} ${SIM_TIER_LABELS[s.tier]}` })} data-testid={`sim-upload-${s.id}`}>
+                              <Upload className="h-4 w-4 ml-1" /> رفع ICCID
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setShowPriceDialog({ type: "sims", item: s })} title="أسعار مخصصة"><Pencil className="h-4 w-4" /></Button>
+                            <Button size="sm" variant="destructive" onClick={() => deleteCatalog("sims", s.id)} title="حذف" data-testid={`sim-del-${s.id}`}><Trash2 className="h-4 w-4" /></Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {!sims.length && <TableRow><TableCell colSpan={7} className="text-center text-gray-500 py-8">لا توجد شرائح بعد — أضف فئة جديدة</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               )}
@@ -260,6 +338,26 @@ export default function SupplierAdminPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showAddSim} onOpenChange={setShowAddSim}>
+        <DialogContent dir="rtl">
+          <DialogHeader><DialogTitle>إضافة فئة شريحة SIM</DialogTitle></DialogHeader>
+          <AddCatalogForm
+            fields={["operator", "tier", "name_ar", "default_price", "suggested_retail_price"]}
+            operators={SIM_OPERATORS}
+            onSubmit={async (vals) => {
+              try {
+                await apiClient.post("/admin/supplier/catalog/sims", vals);
+                toast.success("تمَّت إضافة الفئة");
+                setShowAddSim(false);
+                reload();
+              } catch (e) {
+                toast.error(e?.response?.data?.detail || "فشل");
+              }
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Upload codes */}
       {showUpload && (
         <UploadCodesDialog
@@ -283,26 +381,64 @@ export default function SupplierAdminPage() {
 }
 
 function AddCatalogForm({ fields, operators, onSubmit }) {
-  const [vals, setVals] = useState({ operator: operators?.[0], is_active: true });
+  const [vals, setVals] = useState({ operator: operators?.[0], tier: "retail", is_active: true });
   return (
     <div className="space-y-3">
       {fields.includes("operator") && (
         <div>
-          <Label>المشغّل</Label>
+          <Label>المُشغِّل</Label>
           <Select value={vals.operator} onValueChange={(v) => setVals({ ...vals, operator: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger data-testid="catalog-operator"><SelectValue /></SelectTrigger>
             <SelectContent>{operators.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       )}
-      <div>
-        <Label>الفئة (دج)</Label>
-        <Input type="number" data-testid="catalog-denom" onChange={(e) => setVals({ ...vals, denomination: parseFloat(e.target.value) })} />
-      </div>
-      <div>
-        <Label>السعر الافتراضي (دج)</Label>
-        <Input type="number" data-testid="catalog-price" onChange={(e) => setVals({ ...vals, default_price: parseFloat(e.target.value) })} />
-      </div>
+      {fields.includes("tier") && (
+        <div>
+          <Label>المستوى</Label>
+          <Select value={vals.tier} onValueChange={(v) => setVals({ ...vals, tier: v })}>
+            <SelectTrigger data-testid="catalog-tier"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="retail">تجزئة (سعر مفرد)</SelectItem>
+              <SelectItem value="wholesale">جملة (سعر مخفَّض للكمية)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {fields.includes("name_ar") && (
+        <div>
+          <Label>الاسم (اختياري)</Label>
+          <Input
+            type="text"
+            placeholder="مثلاً: موبيليس - شريحة تجزئة"
+            data-testid="catalog-name-ar"
+            onChange={(e) => setVals({ ...vals, name_ar: e.target.value })}
+          />
+        </div>
+      )}
+      {fields.includes("denomination") && (
+        <div>
+          <Label>الفئة (دج)</Label>
+          <Input type="number" data-testid="catalog-denom" onChange={(e) => setVals({ ...vals, denomination: parseFloat(e.target.value) })} />
+        </div>
+      )}
+      {fields.includes("default_price") && (
+        <div>
+          <Label>سعر الشراء من المنصة (دج)</Label>
+          <Input type="number" data-testid="catalog-price" onChange={(e) => setVals({ ...vals, default_price: parseFloat(e.target.value) })} />
+        </div>
+      )}
+      {fields.includes("suggested_retail_price") && (
+        <div>
+          <Label>سعر البيع المُقترَح للزبون (دج)</Label>
+          <Input
+            type="number"
+            placeholder="عرض فقط — للإرشاد"
+            data-testid="catalog-suggested-retail"
+            onChange={(e) => setVals({ ...vals, suggested_retail_price: parseFloat(e.target.value) })}
+          />
+        </div>
+      )}
       <DialogFooter>
         <Button onClick={() => onSubmit(vals)} data-testid="catalog-save"><Plus className="h-4 w-4 ml-2" /> حفظ</Button>
       </DialogFooter>

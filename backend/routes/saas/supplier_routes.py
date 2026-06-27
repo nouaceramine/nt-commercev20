@@ -63,13 +63,28 @@ class IdoomCatalogIn(BaseModel):
     is_active: bool = True
 
 
+class SimCatalogIn(BaseModel):
+    """Platform-supplied physical SIM cards (شرائح هاتف).
+
+    Distinct from recharge vouchers — these are physical SIMs with ICCIDs
+    that the tenant resells to end-customers. The `tier` separates retail
+    (تجزئة) from wholesale (جملة) pricing channels.
+    """
+    operator: Literal["Mobilis", "Djezzy", "Ooredoo", "Sama"]
+    tier: Literal["retail", "wholesale"] = "retail"
+    name_ar: str = ""
+    default_price: float                # what tenant pays the platform
+    suggested_retail_price: float = 0   # display-only — what tenant typically sells for
+    is_active: bool = True
+
+
 class TenantPriceIn(BaseModel):
     tenant_id: str
     price: float
 
 
 class SupplierOrderItem(BaseModel):
-    type: Literal["card", "idoom"]
+    type: Literal["card", "idoom", "sim"]
     catalog_id: str
     quantity: int = Field(ge=1, le=1000)
 
@@ -235,10 +250,82 @@ def build_supplier_router() -> APIRouter:
         )
         return {"ok": True}
 
+    # ===== SIM catalog — physical SIM cards (شرائح SIM) =====
+    # Mirrors the cards/idoom CRUD but uses (operator, tier) as the natural key.
+
+    @router.get("/admin/supplier/catalog/sims")
+    async def list_sim_catalog(admin: dict = Depends(get_super_admin)):
+        items = await main_db.platform_sim_catalog.find({}, {"_id": 0}).sort([("operator", 1), ("tier", 1)]).to_list(500)
+        return items
+
+    @router.post("/admin/supplier/catalog/sims")
+    async def add_sim_catalog(payload: SimCatalogIn, admin: dict = Depends(get_super_admin)):
+        existing = await main_db.platform_sim_catalog.find_one({
+            "operator": payload.operator, "tier": payload.tier,
+        })
+        if existing:
+            raise HTTPException(status_code=409, detail="هذه الشريحة موجودة بالفعل لنفس المُشغِّل ونفس المستوى")
+        doc = payload.model_dump()
+        doc["id"] = str(uuid.uuid4())
+        doc["tenant_prices"] = {}
+        doc["created_at"] = _now()
+        await main_db.platform_sim_catalog.insert_one(doc)
+        doc.pop("_id", None)
+        return doc
+
+    @router.put("/admin/supplier/catalog/sims/{catalog_id}")
+    async def update_sim_catalog(catalog_id: str, payload: SimCatalogIn, admin: dict = Depends(get_super_admin)):
+        res = await main_db.platform_sim_catalog.update_one(
+            {"id": catalog_id},
+            {"$set": payload.model_dump()},
+        )
+        if res.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Not found")
+        return {"ok": True}
+
+    @router.delete("/admin/supplier/catalog/sims/{catalog_id}")
+    async def delete_sim_catalog(catalog_id: str, admin: dict = Depends(get_super_admin)):
+        await main_db.platform_sim_catalog.delete_one({"id": catalog_id})
+        return {"ok": True}
+
+    @router.put("/admin/supplier/catalog/sims/{catalog_id}/tenant-price")
+    async def set_sim_tenant_price(catalog_id: str, body: TenantPriceIn, admin: dict = Depends(get_super_admin)):
+        res = await main_db.platform_sim_catalog.update_one(
+            {"id": catalog_id},
+            {"$set": {f"tenant_prices.{body.tenant_id}": float(body.price)}},
+        )
+        if res.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Not found")
+        return {"ok": True}
+
+    @router.delete("/admin/supplier/catalog/sims/{catalog_id}/tenant-price/{tenant_id}")
+    async def clear_sim_tenant_price(catalog_id: str, tenant_id: str, admin: dict = Depends(get_super_admin)):
+        await main_db.platform_sim_catalog.update_one(
+            {"id": catalog_id},
+            {"$unset": {f"tenant_prices.{tenant_id}": ""}},
+        )
+        return {"ok": True}
+
+    @router.get("/admin/supplier/stock/sims")
+    async def list_sim_stock(admin: dict = Depends(get_super_admin)):
+        """Stock aggregation per sim catalog item: {available, reserved, sold}."""
+        rows = await main_db.platform_sim_stock.aggregate([
+            {"$group": {"_id": {"catalog_id": "$catalog_id", "status": "$status"}, "count": {"$sum": 1}}},
+        ]).to_list(2000)
+        return {"rows": rows}
+
+
+
     # ----- Stock management (bulk upload by super-admin) -----
 
     async def _bulk_upload(collection: str, catalog_id: str, raw_text: str) -> dict:
-        cat_coll = main_db.platform_card_catalog if collection == "platform_card_stock" else main_db.platform_idoom_catalog
+        # Resolve catalog collection name from the stock collection name.
+        if collection == "platform_card_stock":
+            cat_coll = main_db.platform_card_catalog
+        elif collection == "platform_sim_stock":
+            cat_coll = main_db.platform_sim_catalog
+        else:
+            cat_coll = main_db.platform_idoom_catalog
         if not await cat_coll.find_one({"id": catalog_id}):
             raise HTTPException(status_code=404, detail="Catalog entry not found")
         # Accept one code per line, ignore empties/comments
@@ -276,6 +363,12 @@ def build_supplier_router() -> APIRouter:
     async def upload_idoom_codes(catalog_id: str, file: UploadFile = File(...), admin: dict = Depends(get_super_admin)):
         data = (await file.read()).decode("utf-8", errors="ignore")
         return await _bulk_upload("platform_idoom_stock", catalog_id, data)
+
+    @router.post("/admin/supplier/stock/sims/{catalog_id}/upload")
+    async def upload_sim_codes(catalog_id: str, file: UploadFile = File(...), admin: dict = Depends(get_super_admin)):
+        """Upload ICCID (serial numbers) for physical SIM cards — one per line."""
+        data = (await file.read()).decode("utf-8", errors="ignore")
+        return await _bulk_upload("platform_sim_stock", catalog_id, data)
 
     @router.get("/admin/supplier/stock/cards")
     async def cards_stock_stats(admin: dict = Depends(get_super_admin)):
@@ -740,7 +833,7 @@ def build_supplier_router() -> APIRouter:
             tenant_id,
             "اكتمل طلبك من المنصة",
             f"تم شحن {sum(it['quantity'] for it in order_items_doc)} كود مقابل {total} دج",
-            f"/services/operations",
+            "/services/operations",
         )
 
         order_doc.pop("_id", None)

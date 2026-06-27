@@ -762,6 +762,13 @@ async def startup():
     _ffm = FeatureFlagManager(main_db)
     set_feature_flag_manager(_ffm)
     logger.info("Feature flag manager initialized (%d flags)", len(PLATFORM_FEATURES))
+    # SIM-card catalog seed — idempotent, only inserts missing entries
+    try:
+        from services.sim_catalog_seed import seed_sim_catalog
+        seed_result = await seed_sim_catalog(main_db)
+        logger.info("SIM catalog seed result: %s", seed_result)
+    except Exception as exc:
+        logger.warning("SIM catalog seed skipped: %s", exc)
     # Create indexes for better performance
     try:
         # Existing indexes

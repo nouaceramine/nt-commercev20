@@ -425,7 +425,23 @@ See `/app/memory/test_credentials.md`
   - ✓ Easy DNS verification via Brevo's "Senders" panel
 - **Tests** — `tests/test_iter22_multi_provider_email.py` **10/10 PASS** covering: explicit preferences (brevo/resend/mock), auto-chain priority, fallback when preferred key missing, full Brevo POST endpoint verification, HTTP-error handling.
 
-## Next Action Items (post-iter-22)
+## S22.9 — Platform SIM-Card Catalog (2026-02 / iter 23)
+- **🆕 New collection** — `platform_sim_catalog` — alongside `platform_card_catalog` (recharge vouchers) and `platform_idoom_catalog` (internet codes). SIM cards are physical inventory with **ICCID** as the unique code; tenants buy them from the platform via the bridge and resell to end-customers.
+- **Schema** — `{operator (Mobilis|Djezzy|Ooredoo|Sama), tier (retail|wholesale), name_ar, default_price, suggested_retail_price, tenant_prices, is_active, created_at}`. Unique key: `(operator, tier)` — enforced by Mongo unique index + Pydantic Literal validators.
+- **Backend (`routes/saas/supplier_routes.py`)** — 7 new endpoints mirroring the card/idoom pattern:
+  - `GET/POST/PUT/DELETE /admin/supplier/catalog/sims`
+  - `PUT/DELETE /admin/supplier/catalog/sims/{id}/tenant-price`
+  - `GET /admin/supplier/stock/sims` (aggregation)
+  - `POST /admin/supplier/stock/sims/{id}/upload` (ICCID bulk upload, one per line)
+  - `SupplierOrderItem.type` extended with `"sim"` literal so the bridge ordering flow supports SIMs out of the box.
+- **Idempotent seed** — `services/sim_catalog_seed.py` runs on backend startup. Inserts the 7 SKUs the user requested:
+  - Retail (4): موبيليس / أوريدو / جازي / سما — 200-250 دج cost, 300-400 دج suggested retail
+  - Wholesale (3): موبيليس جملة / أوريدو جملة / جازي جملة — 150 دج cost, 250 دج suggested retail
+  - Re-runs are no-ops (compound unique index on operator+tier).
+- **Frontend (`SupplierAdminPage.js`)** — New "شرائح SIM" tab between البطاقات and Idoom. Same UX as the others (Add dialog, Upload ICCID, Tenant pricing, Delete). `AddCatalogForm` extended to support `tier`, `name_ar`, `suggested_retail_price` fields conditionally. Tier badges colored blue (retail) vs purple (wholesale) for fast visual scan.
+- **Verified** — 7/7 entries seeded in `nt_commerce.platform_sim_catalog`, GET endpoint returns them sorted by `(operator, tier)`. Lint clean on all 3 files.
+
+## Next Action Items (post-iter-23)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).
