@@ -441,7 +441,30 @@ See `/app/memory/test_credentials.md`
 - **Frontend (`SupplierAdminPage.js`)** — New "شرائح SIM" tab between البطاقات and Idoom. Same UX as the others (Add dialog, Upload ICCID, Tenant pricing, Delete). `AddCatalogForm` extended to support `tier`, `name_ar`, `suggested_retail_price` fields conditionally. Tier badges colored blue (retail) vs purple (wholesale) for fast visual scan.
 - **Verified** — 7/7 entries seeded in `nt_commerce.platform_sim_catalog`, GET endpoint returns them sorted by `(operator, tier)`. Lint clean on all 3 files.
 
-## Next Action Items (post-iter-23)
+## S22.10 — Platform Finance Dashboard + Deferred ICCID Upload (2026-02 / iter 24)
+
+User asked for "إدارة المال" on `/saas-admin/supplier` — a money-management cockpit covering:
+external suppliers (the people the platform buys cards from), purchase records (cost side),
+payments to suppliers, revenue from tenant orders, gross profit, top customers, top suppliers,
+and the platform wallet balance. **Plus** the ability to upload ICCID/code files **later**,
+not just at purchase time.
+
+- **🆕 Backend** (`routes/saas/platform_finance_routes.py`) — 10 endpoints, all super-admin gated:
+  - External suppliers: `GET/POST /admin/supplier/external-suppliers`, `PUT/DELETE /{sid}` (delete blocked when purchases exist).
+  - Purchases: `GET /admin/supplier/purchases?from=&to=&supplier_id=`, `POST` (auto-creates linked payment row when `paid_amount > 0`), `DELETE /{pid}` (cascade-cleans linked payments + recomputes supplier balance).
+  - Payments: `GET/POST /admin/supplier/external-suppliers/{sid}/payments` — auto-recomputes `balance_due` on every write.
+  - Financial summary: `GET /admin/supplier/financial/summary?days=N` returns revenue / cost / gross profit / margin % / wallet balance / total AP / top 5 tenants / top 5 suppliers — single aggregation call.
+  - Catalog reference: `GET /admin/supplier/catalog-reference` returns all 4 platform catalogs (cards/sims/idoom/iptv) in one shot for the purchase-form dropdowns.
+  - Deferred upload: `POST /admin/supplier/purchases/{pid}/upload-codes?item_index=N&codes_text=...` — routes the upload to the correct stock collection (`platform_card_stock` / `platform_sim_stock` / `platform_idoom_stock`) based on the item's type, dedupes, and tracks `source_purchase_id` per code so we can later audit which purchase a code came from. Rejects iptv/other types with a clear Arabic error.
+- **🎨 Frontend** — Brand-new `PlatformFinanceTab.js` (~660 lines) mounted as the 5th tab "💰 إدارة المال" inside `/saas-admin/supplier`:
+  - **📊 Dashboard sub-tab** — 4 KPI cards (Revenue, Cost, Gross Profit ±, Platform Wallet) with gradient backgrounds, alert banner when AP > 0, two tables (Top 5 tenants by revenue, Top 5 suppliers by cost). Range picker: 7 / 30 / 90 / 365 days.
+  - **🏭 Suppliers sub-tab** — CRUD with phone/contact/notes/status, a quick-payment button (Banknote icon) that records a partial payment in 1 click.
+  - **📦 Purchases sub-tab** — purchase log with itemized breakdown. The Purchase form dialog has a **catalog dropdown** populated from `catalog-reference`: pick "Mobilis 100 دج" instead of typing it. When a catalog row is picked, the system shows "✓ مرتبط بالكاتالوج — يمكنك رفع الأكواد/ICCID لاحقاً".
+  - **📤 Upload codes button** on each purchase row — opens `UploadCodesForPurchaseDialog` which lists only the eligible items (card/sim/idoom with a catalog_id), shows progress (`3/5 مرفوع، يتبقى 2`), supports paste OR file-picker (`.txt`/`.csv`), dedupes, and updates `items.{idx}.codes_uploaded` for accurate progress tracking across multiple uploads.
+- **🧪 Tests** — `tests/test_iter24_platform_finance.py` **5/5 PASS** covering: CRUD + delete-protection, balance recompute through purchase→payment cycle, KPI summary shape, all-4-catalogs reference, full ICCID upload happy path (3 codes + dedupe + reach quota), iptv-rejected path. Total suite: **37/37 PASS**.
+- **What "money management" now covers** — ✅ external suppliers, ✅ purchases (cost), ✅ payments to suppliers (AP), ✅ revenue from tenants (already tracked), ✅ gross profit, ✅ platform wallet, ✅ top customers, ✅ top suppliers, ✅ accounts-payable dashboard alert, ✅ deferred code/ICCID upload tied to specific purchases.
+
+## Next Action Items (post-iter-24)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).

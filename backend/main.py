@@ -667,6 +667,8 @@ app.include_router(cache_router, prefix="/api")  # Cache management routes
 # ============ PLATFORM SUPPLIER (Super-admin sells cards/idoom to tenants) ============
 from routes.saas.supplier_routes import build_supplier_router
 app.include_router(build_supplier_router(), prefix="/api")
+from routes.saas.platform_finance_routes import build_financial_router
+app.include_router(build_financial_router(), prefix="/api")
 
 # ============ SYSTEM LOGS ============
 from routes.system_logs_routes import router as system_logs_router, log_backend_exception

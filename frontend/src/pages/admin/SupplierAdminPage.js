@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/dialog";
 import { toast } from "sonner";
 import apiClient from "../../lib/apiClient";
-import { Loader2, Plus, Upload, Trash2, Pencil, Package, Wifi, CreditCard, ShoppingCart, Smartphone } from "lucide-react";
+import { Loader2, Plus, Upload, Trash2, Pencil, Package, Wifi, CreditCard, ShoppingCart, Smartphone, Wallet } from "lucide-react";
+import { PlatformFinanceTab } from "./PlatformFinanceTab";
 
 const OPERATORS = ["Mobilis", "Djezzy", "Ooredoo"];
 const SIM_OPERATORS = ["Mobilis", "Djezzy", "Ooredoo", "Sama"];
@@ -114,6 +115,7 @@ export default function SupplierAdminPage() {
           <TabsTrigger value="sims" data-testid="tab-sims"><Smartphone className="h-4 w-4 ml-2" /> شرائح SIM</TabsTrigger>
           <TabsTrigger value="idoom" data-testid="tab-idoom"><Wifi className="h-4 w-4 ml-2" /> Idoom</TabsTrigger>
           <TabsTrigger value="orders" data-testid="tab-orders"><ShoppingCart className="h-4 w-4 ml-2" /> الطلبات</TabsTrigger>
+          <TabsTrigger value="finance" data-testid="tab-finance"><Wallet className="h-4 w-4 ml-2" /> إدارة المال</TabsTrigger>
         </TabsList>
 
         {/* CARDS TAB */}
@@ -307,6 +309,11 @@ export default function SupplierAdminPage() {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* FINANCE TAB — money management for the platform-as-supplier */}
+        <TabsContent value="finance" className="mt-4">
+          <PlatformFinanceTab />
         </TabsContent>
       </Tabs>
 
