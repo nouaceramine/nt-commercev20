@@ -1,21 +1,28 @@
-"""E-Commerce Hub: Shipping Labels (Mock provider for P1)
+"""E-Commerce Hub: Shipping Labels (P2 — real Yalidine + mock fallback)
 
-Generates a shipping label for an order. Real Yalidine/ZR/Maystro integrations
-land in P2 — for P1 we return a mocked tracking number + label URL so the UI
-flow works end-to-end.
+Strategy: if the tenant has a Yalidine integration with valid credentials AND
+provider=yalidine, attempt a real call. On any failure (or for other providers)
+we fall back to the P1 mock so the UI flow never breaks.
 """
 from datetime import datetime, timezone
 from typing import Optional
 import uuid
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from config.database import db
 from utils.auth import require_tenant
+from services.ecom.yalidine_service import (
+    create_parcel as yalidine_create_parcel,
+    YalidineCredentialsMissing,
+    YalidineAPIError,
+)
 from .constants import (
     SHIPPING_PROVIDERS, SHIPPING_PROVIDER_KEYS, require_ecom_feature,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["E-Commerce Shipping"])
 
 
@@ -44,7 +51,13 @@ async def list_labels(user: dict = Depends(require_tenant)):
 
 @router.post("/ecom/shipping/labels")
 async def create_label(body: dict, user: dict = Depends(require_tenant)):
-    """Create a shipping label for a given order. Mocks the provider call for P1.
+    """Create a shipping label for an order.
+
+    Real Yalidine call when:
+      • provider == 'yalidine'
+      • A yalidine integration exists with api_id + api_token configured
+
+    Otherwise falls back to mock (returns a synthetic tracking number).
 
     Body: {order_id: str, provider: 'yalidine'|'zr'|'maystro'|'mock'}
     """
@@ -60,19 +73,48 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
     if not order:
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
 
-    # ── MOCK label ──────────────────────────────────────────────────────────
-    # In P2 we'd dispatch to provider HTTP APIs here. For now, persist a row.
     now = datetime.now(timezone.utc).isoformat()
     label_id = str(uuid.uuid4())
-    tracking = _mock_tracking_number(provider)
+    mode = "mock"
+    tracking = None
+    label_url = ""
+
+    # ── Real provider path (Yalidine only for P2) ──────────────────────────
+    if provider == "yalidine":
+        # Find the tenant's active Yalidine integration (first match).
+        integration = await db.ecom_integrations.find_one({
+            "channel": "yalidine",
+            "is_active": True,
+        }) or await db.ecom_integrations.find_one({
+            "credentials.api_id": {"$exists": True},
+            "credentials.api_token": {"$exists": True},
+        })
+        if integration:
+            try:
+                result = await yalidine_create_parcel(integration, order)
+                tracking = result["tracking_number"]
+                label_url = result["label_url"]
+                mode = "live"
+                logger.info("Yalidine real parcel created: order=%s tracking=%s", order_id, tracking)
+            except YalidineCredentialsMissing:
+                logger.info("Yalidine creds missing — falling back to mock for order=%s", order_id)
+            except YalidineAPIError as exc:
+                logger.warning("Yalidine real call failed (%s) — falling back to mock", exc)
+
+    # ── Mock fallback (always works) ──────────────────────────────────────
+    if not tracking:
+        tracking = _mock_tracking_number(provider)
+        label_url = f"mock://labels/{label_id}.pdf"
+        mode = "mock" if provider == "mock" else "mock_real_provider_pending"
+
     label_doc = {
         "id": label_id,
         "order_id": order_id,
         "order_code": order.get("order_code"),
         "provider": provider,
-        "mode": "mock" if provider == "mock" else "mock_real_provider_pending",
+        "mode": mode,
         "tracking_number": tracking,
-        "label_url": f"mock://labels/{label_id}.pdf",
+        "label_url": label_url,
         "customer_name": order.get("customer", {}).get("name", ""),
         "customer_phone": order.get("customer", {}).get("phone", ""),
         "city": order.get("customer", {}).get("city", ""),
@@ -91,7 +133,6 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
         "courier": provider,
         "updated_at": now,
     }
-    # Optional auto-status bump: confirmed/packed → shipped.
     if order.get("status") in ("confirmed", "packed"):
         update["status"] = "shipped"
         await db.ecom_orders.update_one(
@@ -103,7 +144,7 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
                         "status": "shipped",
                         "at": now,
                         "by": user.get("id"),
-                        "note": f"تم إنشاء بطاقة شحن {provider} (mock)",
+                        "note": f"تم إنشاء بطاقة شحن {provider} ({mode})",
                     }
                 },
             },

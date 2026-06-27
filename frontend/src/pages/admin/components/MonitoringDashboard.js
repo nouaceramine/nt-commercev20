@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import PlatformCapacityCard from './PlatformCapacityCard';
 import { ServiceStatusMap } from './ServiceStatusMap';
+import AIInsightsCard from './AIInsightsCard';
 
 const QUICK_LINKS = [
   { to: '/saas-admin/subscribers',       Icon: Users,         labelAr: 'المشتركين' },
@@ -157,6 +158,9 @@ export const MonitoringDashboard = () => {
           </div>
         </CardContent></Card>
       </div>
+
+      {/* AI-Powered Platform Insights (iter 18.2) */}
+      <AIInsightsCard />
 
       {/* Platform Capacity */}
       <PlatformCapacityCard />

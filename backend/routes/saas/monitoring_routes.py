@@ -210,3 +210,28 @@ async def get_stats_extended(admin: dict = Depends(get_super_admin)):
         "expiring_soon": expiring_soon,
         "monthly_revenue": monthly_revenue
     }
+
+
+# ── AI Insights snapshot (iter 18.2) ────────────────────────────────────────
+# Cached 1 hour — LLM cost remains negligible even with many super-admin reloads.
+@cached_json(prefix="saas:ai-insights", ttl=3600, key_fn=lambda admin: "global")
+async def _generate_cached_insights(admin: dict) -> dict:
+    from services.ai_insights_service import generate_ai_insights
+    return await generate_ai_insights()
+
+
+@router.get("/saas/ai-insights")
+async def get_ai_insights(admin: dict = Depends(get_super_admin)):
+    """LLM-powered platform health snapshot — refreshed hourly via Redis cache."""
+    return await _generate_cached_insights(admin)
+
+
+@router.post("/saas/ai-insights/refresh")
+async def refresh_ai_insights(admin: dict = Depends(get_super_admin)):
+    """Force a fresh snapshot (busts the 1h Redis cache for this admin)."""
+    from utils.cache import cache
+    try:
+        await cache.delete("saas:ai-insights:global")
+    except Exception:
+        pass
+    return await _generate_cached_insights(admin)

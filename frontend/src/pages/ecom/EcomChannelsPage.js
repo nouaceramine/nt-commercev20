@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
+import { useAuth } from '../../contexts/AuthContext';
 import { Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -10,24 +11,32 @@ import { Badge } from '../../components/ui/badge';
 import { Switch } from '../../components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckCircle2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
 
-const SUPPORTED_CHANNELS = ['shopify', 'facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram', 'viber'];
+const SUPPORTED_CHANNELS = ['shopify', 'facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram', 'viber', 'yalidine', 'zr', 'maystro'];
 
 // Per-channel credential field schemas — only used to render the right inputs in the dialog.
 const CREDENTIAL_SCHEMA = {
-  shopify:   [['shop_domain', 'متجر Shopify (مثال: store.myshopify.com)'], ['admin_api_key', 'Admin API Access Token']],
+  shopify:   [
+    ['shop_domain', 'متجر Shopify (مثال: store.myshopify.com)'],
+    ['admin_api_key', 'Admin API Access Token'],
+    ['webhook_secret', 'Webhook Secret (لتحقق HMAC)'],
+  ],
   facebook:  [['page_id', 'معرّف صفحة Facebook'], ['access_token', 'Page Access Token']],
   instagram: [['account_id', 'معرّف حساب Instagram Business'], ['access_token', 'Access Token']],
   tiktok:    [['shop_id', 'TikTok Shop ID'], ['access_token', 'Access Token']],
   whatsapp:  [['phone_number_id', 'Phone Number ID'], ['access_token', 'WhatsApp Cloud API Token']],
   telegram:  [['bot_token', 'Telegram Bot Token']],
   viber:     [['bot_token', 'Viber Bot Auth Token']],
+  yalidine:  [['api_id', 'Yalidine API ID'], ['api_token', 'Yalidine API Token']],
+  zr:        [['token', 'ZR Express API Token'], ['client_key', 'Client Key']],
+  maystro:   [['api_key', 'Maystro API Key']],
 };
 
 export default function EcomChannelsPage() {
+  const { user } = useAuth();
   const [integrations, setIntegrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -245,6 +254,29 @@ export default function EcomChannelsPage() {
           </DialogHeader>
 
           <div className="space-y-3 py-2">
+            {/* Shopify webhook URL — shown when editing an existing Shopify integration */}
+            {editing && form.channel === 'shopify' && user?.tenant_id && (
+              <div className="bg-emerald-50 border border-emerald-300 rounded-lg p-3 space-y-1">
+                <div className="text-xs font-semibold text-emerald-900">🪝 رابط الـ Webhook (انسخه إلى Shopify Admin → Notifications → Webhooks)</div>
+                {(() => {
+                  const url = `${process.env.REACT_APP_BACKEND_URL}/api/ecom/webhooks/shopify/${user.tenant_id}/${editing.id}/orders`;
+                  return (
+                    <div className="flex items-center gap-1">
+                      <code className="flex-1 text-[10px] bg-white border rounded px-2 py-1 break-all" data-testid="shopify-webhook-url">{url}</code>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { navigator.clipboard.writeText(url); toast.success('تم النسخ'); }}
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  );
+                })()}
+                <div className="text-[10px] text-emerald-800">الموضوع: <code>orders/create</code> • التنسيق: JSON • تأكد من إدخال نفس Webhook Secret في الحقل أدناه.</div>
+              </div>
+            )}
+
             {!editing && (
               <div>
                 <Label>القناة</Label>

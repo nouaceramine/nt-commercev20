@@ -7,12 +7,13 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen } from 'lucide-react';
+import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
 import { EcomManualOrderDialog } from './EcomManualOrderDialog';
 import { EcomOrderDetailDialog } from './EcomOrderDetailDialog';
+import { useEcomOrderNotifications, requestNotificationPermission } from '../../hooks/useEcomOrderNotifications';
 
 export default function EcomHubPage() {
   const [orders, setOrders] = useState([]);
@@ -25,6 +26,29 @@ export default function EcomHubPage() {
   const [search, setSearch] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [notifEnabled, setNotifEnabled] = useState(
+    typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted',
+  );
+
+  // Auto-poll for new orders + fire desktop notification when count increases.
+  useEcomOrderNotifications(notifEnabled);
+
+  const toggleNotifications = async () => {
+    if (notifEnabled) {
+      setNotifEnabled(false);
+      toast.info('تم إيقاف تنبيهات سطح المكتب');
+      return;
+    }
+    const { granted, reason } = await requestNotificationPermission();
+    if (granted) {
+      setNotifEnabled(true);
+      toast.success('✅ سيتم تنبيهك تلقائياً عند وصول طلب جديد');
+    } else if (reason === 'denied') {
+      toast.error('الإذن مرفوض من المتصفح — فعّله من إعدادات الموقع.');
+    } else if (reason === 'unsupported') {
+      toast.error('متصفحك لا يدعم تنبيهات سطح المكتب.');
+    }
+  };
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -86,6 +110,15 @@ export default function EcomHubPage() {
             <Button variant="outline" onClick={loadAll} disabled={loading} data-testid="ecom-refresh-btn">
               <RefreshCcw className={`w-4 h-4 ml-1 ${loading ? 'animate-spin' : ''}`} />
               تحديث
+            </Button>
+            <Button
+              variant={notifEnabled ? 'default' : 'outline'}
+              onClick={toggleNotifications}
+              data-testid="ecom-notifications-toggle"
+              title={notifEnabled ? 'تنبيهات سطح المكتب مُفعَّلة' : 'تفعيل تنبيهات سطح المكتب'}
+            >
+              {notifEnabled ? <Bell className="w-4 h-4 ml-1" /> : <BellOff className="w-4 h-4 ml-1" />}
+              {notifEnabled ? 'التنبيهات مُفعَّلة' : 'تفعيل التنبيهات'}
             </Button>
             <Link to="/ecom-hub/guide">
               <Button variant="outline" data-testid="ecom-guide-link">

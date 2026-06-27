@@ -138,6 +138,7 @@ import SaasTenantDebtsPage from "./pages/admin/saas/TenantDebtsPage";
 import SaasAuditTimelinePage from "./pages/admin/saas/AuditTimelinePage";
 import SaasSubscribersPage from "./pages/admin/saas/SubscribersPage";
 import SaasAgentsPage from "./pages/admin/saas/AgentsPage";
+import SaasEmailSettingsPage from "./pages/admin/saas/EmailSettingsPage";
 import StoreManagementPage from "./pages/store/StoreManagementPage";
 import PublicStorePage from "./pages/store/PublicStorePage";
 import DataImportExportPage from "./pages/DataImportExportPage";
@@ -410,6 +411,10 @@ function AppRoutes() {
       <Route
         path="/saas-admin/agents"
         element={<ProtectedRoute superAdminOnly><SaasAgentsPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/email-settings"
+        element={<ProtectedRoute superAdminOnly><SaasEmailSettingsPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/plans"

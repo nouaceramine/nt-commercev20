@@ -299,6 +299,30 @@ See `/app/memory/test_credentials.md`
 - **`/ecom-hub` header:** new "دليل الاستخدام" button (data-testid='ecom-guide-link') between Refresh and Channels.
 - **Tests:** Backend 6/6 still PASS. Lint clean across all ecom pages.
 
+
+## S22.2 — P1.5 indexes + Browser notifications + AI Insights + Email settings + P2 Shopify/Yalidine (2026-02 / iter 18.2)
+- **P1.5 indexes (5 new MongoDB indexes per tenant DB):**
+  - `ecom_orders`: id (unique), order_code (unique), created_at, (channel,status) compound, customer.phone, integration_id
+  - `ecom_integrations`: id (unique), channel
+  - `ecom_leads`: id (unique), created_at, (channel,status) compound
+  - `ecom_shipping_labels`: id (unique), order_id, tracking_number (unique sparse)
+- **🌐 Browser notifications** — `hooks/useEcomOrderNotifications.js` polls `/ecom/orders/summary` every 30s and fires desktop notifications when the `new` counter increases. Permission requested via toggle button on /ecom-hub header. localStorage stores last-seen count to avoid duplicate notifications after reload.
+- **🤖 AI Insights Card** — Backend: `services/ai_insights_service.py` builds a JSON metrics snapshot (tenants, churn risk, debt, ecom adoption) → fed to Emergent LLM (gpt-4o-mini) → parses JSON response with headline/health_score/highlights/risks/recommendations. Heuristic fallback when LLM unavailable. Cached 1h in Redis. UI: `pages/admin/components/AIInsightsCard.js` with animated SVG health-score ring + 3-column breakdown + manual refresh button. Auto-rendered on Monitoring dashboard.
+- **📧 Email settings admin page** — `routes/saas/email_settings_routes.py` (GET/PUT/test) + `pages/admin/saas/EmailSettingsPage.js`. Super-admin can paste RESEND_API_KEY / SENDGRID_API_KEY / SENDER_EMAIL at runtime — stored in `main_db.platform_settings`. `email_service.py` extended with `_load_db_settings()` (60s cache) so values take effect within a minute without restart. Keys masked (last 4 chars) in GET responses. Test-send endpoint validates the setup with a real email. Sidebar link added: `/saas-admin/email-settings`.
+- **🛍️ P2 Shopify webhook integration (REAL):**
+  - `services/ecom/shopify_service.py`: HMAC-SHA256 verification, Shopify order JSON → internal schema parser, idempotent upsert by `external_id`.
+  - `routes/ecom/webhooks_routes.py`: POST /api/ecom/webhooks/shopify/{tenant_id}/{integration_id}/orders (unauthenticated, HMAC-verified). Returns 200 even on duplicate so Shopify stops retrying. Bumps integration `mode` to 'live' on first successful delivery. Stub for products webhook (P2.1).
+  - Channels UI now displays the unique webhook URL (one-click copy) when editing a Shopify integration — operator pastes it into Shopify Admin → Notifications → Webhooks.
+- **🚚 P2 Yalidine real shipping client:**
+  - `services/ecom/yalidine_service.py`: real Yalidine REST call (POST /v1/parcels/) with X-API-ID + X-API-TOKEN headers, parsed response → tracking_number + label_url. Typed `YalidineCredentialsMissing` / `YalidineAPIError` exceptions.
+  - `routes/ecom/shipping_routes.py`: tries real Yalidine first when provider=yalidine AND credentials present → falls back to mock on any failure (network, 4xx, missing creds). Label doc records `mode='live'` or `'mock_real_provider_pending'` accordingly.
+- **Shipping carriers as integrations:** Extended CHANNELS map with `yalidine`/`zr`/`maystro` (kind='shipping'). Channels CRUD now accepts all 10 entries (7 sales + 3 shipping). Frontend dialog auto-renders per-channel credential schemas including shipping carriers.
+- **Tests:** Backend 10/10 PASS (6 existing + 4 new in `test_iter18_2_p2_real_integrations.py`):
+  - test_ai_insights_endpoint (validates LLM/heuristic shape)
+  - test_email_settings_round_trip (validates GET/PUT masking)
+  - test_shopify_webhook_hmac_verification (bad/good HMAC + idempotency + Shopify→internal mapping)
+  - test_yalidine_mock_fallback_when_no_creds (creds-missing path returns YAL- mock)
+
 ## Next Action Items (User's deferred backlog)
 - **🛍️ P2 (E-Commerce Hub — TOP PRIORITY going forward):** Real Shopify webhooks (orders + stock sync) + real Yalidine API for shipping labels and tracking polling. User keys required: SHOPIFY_API_KEY / SHOPIFY_WEBHOOK_SECRET / YALIDINE_API_ID / YALIDINE_API_TOKEN.
 - **💬 P3 (E-Commerce Hub):** WhatsApp Business Cloud API (status updates SMS-like) + Meta Webhooks for FB/IG Leads → auto-populate `ecom_leads`.

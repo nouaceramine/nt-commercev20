@@ -849,7 +849,28 @@ async def startup():
         await db.currencies.create_index("code", unique=True)
         await db.currency_settings.create_index("tenant_id")
         await db.currency_rate_history.create_index("code")
-        
+
+        # ── E-Commerce Hub indexes (iter 18.2) ────────────────────────────
+        # Critical: orders are queried by channel + status + date-range + customer.phone search.
+        # ecom_orders
+        await db.ecom_orders.create_index("id", unique=True)
+        await db.ecom_orders.create_index("order_code", unique=True)
+        await db.ecom_orders.create_index("created_at")
+        await db.ecom_orders.create_index([("channel", 1), ("status", 1)])  # most common filter combo
+        await db.ecom_orders.create_index("customer.phone")
+        await db.ecom_orders.create_index("integration_id")
+        # ecom_integrations
+        await db.ecom_integrations.create_index("id", unique=True)
+        await db.ecom_integrations.create_index("channel")
+        # ecom_leads
+        await db.ecom_leads.create_index("id", unique=True)
+        await db.ecom_leads.create_index("created_at")
+        await db.ecom_leads.create_index([("channel", 1), ("status", 1)])
+        # ecom_shipping_labels
+        await db.ecom_shipping_labels.create_index("id", unique=True)
+        await db.ecom_shipping_labels.create_index("order_id")
+        await db.ecom_shipping_labels.create_index("tracking_number", unique=True, sparse=True)
+
         print("✅ Database indexes created successfully (including accounting & AI)")
     except Exception as e:
         print(f"⚠️ Index creation warning: {e}")

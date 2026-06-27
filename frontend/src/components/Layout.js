@@ -350,6 +350,7 @@ export const Layout = ({ children }) => {
         { path: '/saas-admin/ai-assistant',        icon: Bot,           label: language === 'ar' ? 'المساعد الذكي' : 'Assistant IA' },
         { path: '/saas-admin/databases',           icon: Database,      label: language === 'ar' ? 'قواعد البيانات' : 'Bases données' },
         { path: '/saas-admin/feature-flags',       icon: Shield,        label: language === 'ar' ? 'إدارة الميزات' : 'Feature Flags' },
+        { path: '/saas-admin/email-settings',      icon: Mail,          label: language === 'ar' ? 'إعدادات البريد' : 'Email & Resend' },
         { path: '/security-dashboard',             icon: Shield,        label: language === 'ar' ? 'لوحة الأمان' : 'Sécurité' },
         { path: '/backup-system',                  icon: Database,      label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes' },
         { path: '/data-import-export',             icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },

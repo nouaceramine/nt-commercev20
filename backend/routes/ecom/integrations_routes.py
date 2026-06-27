@@ -33,7 +33,11 @@ def _redact(integration: dict) -> dict:
 
 @router.get("/ecom/channels")
 async def list_supported_channels(user: dict = Depends(require_tenant)):
-    """Return the catalogue of supported channels (static reference)."""
+    """Return the catalogue of supported channels (static reference).
+
+    Filters out POS / manual (not connectable). Includes shipping carriers
+    (kind='shipping') so the UI can show one unified Connect list.
+    """
     await require_ecom_feature(user)
     return {
         "channels": [
@@ -54,7 +58,7 @@ async def list_integrations(user: dict = Depends(require_tenant)):
 async def create_integration(body: dict, user: dict = Depends(require_tenant)):
     """Create a new channel integration for the current tenant.
 
-    Body: {channel: 'shopify'|'facebook'|..., name: str, credentials: dict, is_active?: bool}
+    Body: {channel: 'shopify'|'facebook'|'yalidine'|..., name: str, credentials: dict, is_active?: bool}
     """
     await require_ecom_feature(user)
     channel = (body.get("channel") or "").strip().lower()
@@ -66,15 +70,20 @@ async def create_integration(body: dict, user: dict = Depends(require_tenant)):
     if not isinstance(credentials, dict):
         raise HTTPException(status_code=400, detail="credentials يجب أن يكون كائن JSON")
 
+    # If credentials are populated, mark mode='live' so the UI shows the real status.
+    has_real_creds = any(bool(str(v).strip()) for v in credentials.values())
+
     integration_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    kind = CHANNELS[channel].get("kind", "sales")  # 'sales' (default) or 'shipping'
     doc = {
         "id": integration_id,
         "channel": channel,
+        "kind": kind,
         "name": name,
-        "credentials": credentials,            # opaque per-channel shape
+        "credentials": credentials,
         "is_active": bool(body.get("is_active", True)),
-        "mode": "mock",                        # P1: mock until real API keys land in P2
+        "mode": "live" if has_real_creds else "mock",
         "last_sync_at": None,
         "last_error": None,
         "stats": {"orders": 0, "leads": 0, "shipments": 0},
