@@ -389,3 +389,17 @@ See `/app/memory/test_credentials.md`
 - **📦 P2 (suggestion):** Bake `redis-server` and Resend SDK pin into a Dockerfile / base image so cold-spawned containers don't lose them.
 - **🎨 P3 (nice-to-have):** Date-range presets ("اليوم / آخر 7 أيام / هذا الشهر") on the Sales tab.
 - **🤖 P3 (QUEUED by user 2026-02 iter17):** AI Insights card on the Monitoring dashboard summarizing the latest 24 hrs (top sellers, churn risk, debt growth). Hourly refresh via Gemini or Claude. Leverage the now-stable Redis cache to keep LLM costs minimal. Gives super-admin a strategic daily view instead of raw numbers. Status: backlog, awaiting prioritization.
+
+## S22.5 — E-com Manual Order: Wilaya/Commune Selects + POS Product picker (2026-02 / iter 19)
+- **🐛 Bug fix #1** — `/ecom-hub/channels` no longer crashes (already fixed in iter-18.4; verified clean).
+- **🐛 Bug fix #2** — Manual-order dialog: Wilaya (`manual-order-wilaya-select`) and Commune (`manual-order-commune-select`) are now cascading Select dropdowns sourced from `data/algeriaGeo.js` (58 wilayas + their major communes). Picking a wilaya enables and populates the commune dropdown.
+- **✨ Feature** — Manual-order dialog: new green "🔎 بحث المنتج من المخزون" box ABOVE the items table. Uses existing `ProductSearchDropdown` to search the tenant's POS products (GET `/api/products`). Clicking a result auto-fills the **first empty** item row with name + sku (barcode) + price (retail_price), and shows "✓ مرتبط بمنتج المخزون" badge. Backend `_validate_items` (in `routes/ecom/orders_routes.py`) now persists optional `product_id` on each order item so the link back to inventory is preserved.
+- **🐛 Bug fix #3 (already in place — re-verified)** — POST `/api/purchases` syncs BOTH `purchase_price` (always when `update_product_prices` truthy/null) AND `selling_price` (when > 0). Tested with unit_price=999.99 / new_retail=1499.99 → product was updated correctly.
+- **Tests:** `backend/tests/test_iter19_bug_fixes.py` 3/3 PASS. Playwright frontend 4/4 fixes verified. 1 test order `ECO-DFEA1E08` + 1 seed product (`TEST_iter19 منتج`, retail=750, qty=11) left in FOAD@FOAD tenant for manual QA.
+- **Code-review nit applied post-test:** `addProductFromInventory` now finds the FIRST empty item row (was last); avoids skipping earlier blank rows when a user has expanded the items grid before picking from inventory.
+
+## Next Action Items
+- **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
+- **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
+- **🌐 Backlog:** Public shareable analytics dashboards (token-gated).
+- **♻️ Tech-debt (testing-agent suggestion):** Add a one-click "انتحال" (impersonate) button on `/saas-admin/subscribers` rows (`impersonate-btn-{tenant_id}`) so future QA / support sessions don't have to call the API + inject localStorage manually.

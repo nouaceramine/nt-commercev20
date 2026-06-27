@@ -62,15 +62,15 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
     product_id: product.id,
   });
 
-  // Insert a product into the items list (replace last empty row, else append)
+  // Insert a product into the items list (replace FIRST empty row, else append)
   const addProductFromInventory = (product) => {
     const newItem = productToItem(product);
     setItems(prev => {
-      const lastIdx = prev.length - 1;
-      const last = prev[lastIdx];
-      const lastIsEmpty = !last.name?.trim() && !last.sku?.trim() && !last.product_id;
-      if (lastIsEmpty) {
-        return prev.map((it, i) => (i === lastIdx ? newItem : it));
+      const firstEmptyIdx = prev.findIndex(it =>
+        !it.name?.trim() && !it.sku?.trim() && !it.product_id
+      );
+      if (firstEmptyIdx !== -1) {
+        return prev.map((it, i) => (i === firstEmptyIdx ? newItem : it));
       }
       return [...prev, newItem];
     });
