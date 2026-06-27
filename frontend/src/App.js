@@ -96,6 +96,7 @@ import PaymentsPage from "./pages/PaymentsPage";
 // E-Commerce Hub (P1+, gated by ecommerce_hub feature flag)
 import EcomHubPage from "./pages/ecom/EcomHubPage";
 import EcomChannelsPage from "./pages/ecom/EcomChannelsPage";
+import EcomGuidePage from "./pages/ecom/EcomGuidePage";
 
 // AI & Smart Accounting Pages
 import SmartDashboardPage from "./pages/SmartDashboardPage";
@@ -296,6 +297,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="ecommerce_hub">
             <EcomChannelsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/guide"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomGuidePage />
           </ProtectedRoute>
         }
       />

@@ -288,6 +288,17 @@ See `/app/memory/test_credentials.md`
 - **Tests:** `backend/tests/test_iter18_ecom_hub.py` (1 full-flow) + testing-agent-added `test_iter18_ecom_extra.py` (5 cases) — **6/6 PASS**. Frontend Playwright: feature-flags dialog (BETA), /ecom-hub manual order creation + table render, /ecom-hub/channels CRUD, flag-OFF tenant gets 403 with Arabic message. Existing routes (POS/sales/customers/reports) verified not broken by AuthContext change.
 - **MOCKED in P1 (acknowledged by user — س4:b):** Shipping labels return random YAL-/ZR-/MS- tracking but do NOT call real Yalidine/ZR/Maystro APIs. Channel test-connection always returns ok:true. UI shows yellow P1 mock banners on both /ecom-hub and /ecom-hub/channels.
 
+## S22.1 — Sidebar merge + Usage Guide (2026-02 / iter 18.1)
+- **Bug fix:** Two sidebar sections both titled "التجارة الإلكترونية" existed (legacy `ecommerce` + new `ecom-hub`). Removed the standalone section and merged its 2 items + new guide into the legacy section. Title upgraded to `🛍️ التجارة الإلكترونية` for visual parity. DOM audit confirmed: 1 section, 3 ecom links.
+- **Feature:** New `/ecom-hub/guide` page (`pages/ecom/EcomGuidePage.js`, ~370 LOC):
+  - 5-step quick-start with deep links to /ecom-hub and /ecom-hub/channels.
+  - Per-channel accordion (Shopify / Facebook / Instagram / WhatsApp / TikTok / Telegram / Viber) with step-by-step API-key acquisition + official docs link.
+  - Shipping-provider guides (Yalidine / ZR / Maystro).
+  - Visual order-lifecycle diagram (state machine).
+  - Tips card highlighting P1 mock-mode + best practices.
+- **`/ecom-hub` header:** new "دليل الاستخدام" button (data-testid='ecom-guide-link') between Refresh and Channels.
+- **Tests:** Backend 6/6 still PASS. Lint clean across all ecom pages.
+
 ## Next Action Items (User's deferred backlog)
 - **🛍️ P2 (E-Commerce Hub — TOP PRIORITY going forward):** Real Shopify webhooks (orders + stock sync) + real Yalidine API for shipping labels and tracking polling. User keys required: SHOPIFY_API_KEY / SHOPIFY_WEBHOOK_SECRET / YALIDINE_API_ID / YALIDINE_API_TOKEN.
 - **💬 P3 (E-Commerce Hub):** WhatsApp Business Cloud API (status updates SMS-like) + Meta Webhooks for FB/IG Leads → auto-populate `ecom_leads`.

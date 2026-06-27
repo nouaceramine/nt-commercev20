@@ -7,7 +7,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle } from 'lucide-react';
+import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
@@ -87,6 +87,12 @@ export default function EcomHubPage() {
               <RefreshCcw className={`w-4 h-4 ml-1 ${loading ? 'animate-spin' : ''}`} />
               تحديث
             </Button>
+            <Link to="/ecom-hub/guide">
+              <Button variant="outline" data-testid="ecom-guide-link">
+                <BookOpen className="w-4 h-4 ml-1" />
+                دليل الاستخدام
+              </Button>
+            </Link>
             <Link to="/ecom-hub/channels">
               <Button variant="outline" data-testid="ecom-channels-link">
                 <Link2 className="w-4 h-4 ml-1" />
