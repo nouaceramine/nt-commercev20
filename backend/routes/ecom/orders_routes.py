@@ -245,7 +245,11 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
 
 @router.put("/ecom/orders/{order_id}/status")
 async def update_order_status(order_id: str, body: dict, user: dict = Depends(require_tenant)):
-    """Transition an order to a new status. Enforces the state machine."""
+    """Transition an order to a new status. Enforces the state machine.
+
+    Side effect: if the tenant has an active WhatsApp integration AND the customer
+    has a phone, automatically sends them a status-update notification (fire-and-forget).
+    """
     await require_ecom_feature(user)
     new_status = (body.get("status") or "").strip().lower()
     if new_status not in ORDER_STATUS_KEYS:
@@ -272,7 +276,49 @@ async def update_order_status(order_id: str, body: dict, user: dict = Depends(re
             "$push": {"status_history": {"status": new_status, "at": now, "by": user.get("id"), "note": body.get("note", "")}},
         },
     )
+
+    # ── Auto-notify customer via WhatsApp when integration is configured ──
+    try:
+        await _maybe_notify_customer(order, new_status)
+    except Exception as exc:  # noqa: BLE001 — never let notification failures block status change
+        import logging
+        logging.getLogger(__name__).warning("WhatsApp notify failed for order %s: %s", order_id, exc)
+
     return {"ok": True, "status": new_status, "previous": current}
+
+
+# Cached lookup: is there an active WhatsApp integration with real creds?
+async def _maybe_notify_customer(order: dict, new_status: str) -> None:
+    """Send a WhatsApp message to the customer if a configured integration exists.
+
+    No-op when no WhatsApp integration is set up — keeps the feature opt-in.
+    """
+    phone = (order.get("customer") or {}).get("phone", "").strip()
+    if not phone:
+        return
+    integration = await db.ecom_integrations.find_one({
+        "channel": "whatsapp", "is_active": True,
+        "credentials.phone_number_id": {"$exists": True},
+        "credentials.access_token": {"$exists": True},
+    })
+    if not integration:
+        return
+    creds = integration.get("credentials") or {}
+    if not (creds.get("phone_number_id") and creds.get("access_token")):
+        return
+    template = {
+        "confirmed": f"تم تأكيد طلبك {order.get('order_code', '')}. سنبدأ بتحضيره فوراً.",
+        "packed":    f"طلبك {order.get('order_code', '')} جاهز للشحن.",
+        "shipped":   f"📦 تم شحن طلبك {order.get('order_code', '')}. رقم التتبع: {order.get('tracking_number') or 'سيتم تزويدك قريباً'}.",
+        "delivered": f"✅ شكراً لك! تم تسليم طلبك {order.get('order_code', '')}.",
+        "cancelled": f"تم إلغاء طلبك {order.get('order_code', '')}. للاستفسار تواصل معنا.",
+        "refunded":  f"تم استرداد طلبك {order.get('order_code', '')}.",
+    }
+    msg = template.get(new_status)
+    if not msg:
+        return
+    from services.ecom.whatsapp_service import send_text_message
+    await send_text_message(integration, phone, msg)
 
 
 @router.put("/ecom/orders/{order_id}")

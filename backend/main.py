@@ -866,10 +866,15 @@ async def startup():
         await db.ecom_leads.create_index("id", unique=True)
         await db.ecom_leads.create_index("created_at")
         await db.ecom_leads.create_index([("channel", 1), ("status", 1)])
+        await db.ecom_leads.create_index("ai_category")
+        await db.ecom_leads.create_index([("channel", 1), ("external_id", 1)], unique=True, sparse=True)
         # ecom_shipping_labels
         await db.ecom_shipping_labels.create_index("id", unique=True)
         await db.ecom_shipping_labels.create_index("order_id")
         await db.ecom_shipping_labels.create_index("tracking_number", unique=True, sparse=True)
+        # ecom_external_products (mirror of Shopify/TikTok inventory — iter 18.3)
+        await db.ecom_external_products.create_index([("channel", 1), ("integration_id", 1), ("external_id", 1)], unique=True)
+        await db.ecom_external_products.create_index("updated_at")
 
         print("✅ Database indexes created successfully (including accounting & AI)")
     except Exception as e:

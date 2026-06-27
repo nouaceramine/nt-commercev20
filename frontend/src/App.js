@@ -97,6 +97,7 @@ import PaymentsPage from "./pages/PaymentsPage";
 import EcomHubPage from "./pages/ecom/EcomHubPage";
 import EcomChannelsPage from "./pages/ecom/EcomChannelsPage";
 import EcomGuidePage from "./pages/ecom/EcomGuidePage";
+import EcomAnalyticsPage from "./pages/ecom/EcomAnalyticsPage";
 
 // AI & Smart Accounting Pages
 import SmartDashboardPage from "./pages/SmartDashboardPage";
@@ -306,6 +307,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="ecommerce_hub">
             <EcomGuidePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/analytics"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomAnalyticsPage />
           </ProtectedRoute>
         }
       />

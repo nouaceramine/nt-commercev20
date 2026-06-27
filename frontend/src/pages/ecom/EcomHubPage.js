@@ -7,7 +7,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff } from 'lucide-react';
+import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
@@ -32,6 +32,20 @@ export default function EcomHubPage() {
 
   // Auto-poll for new orders + fire desktop notification when count increases.
   useEcomOrderNotifications(notifEnabled);
+
+  // ── Onboarding tour: redirect to guide on first visit only ──
+  useEffect(() => {
+    const seen = localStorage.getItem('ecom_guide_seen');
+    if (!seen) {
+      localStorage.setItem('ecom_guide_seen', '1');
+      // Defer to avoid double-render; small grace period so the page doesn't flicker.
+      const t = setTimeout(() => {
+        toast.info('مرحباً! إليك دليل البداية السريعة لمركز التجارة الإلكترونية.', { duration: 4000 });
+        window.location.href = '/ecom-hub/guide';
+      }, 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
 
   const toggleNotifications = async () => {
     if (notifEnabled) {
@@ -120,6 +134,12 @@ export default function EcomHubPage() {
               {notifEnabled ? <Bell className="w-4 h-4 ml-1" /> : <BellOff className="w-4 h-4 ml-1" />}
               {notifEnabled ? 'التنبيهات مُفعَّلة' : 'تفعيل التنبيهات'}
             </Button>
+            <Link to="/ecom-hub/analytics">
+              <Button variant="outline" data-testid="ecom-analytics-link">
+                <BarChart3 className="w-4 h-4 ml-1" />
+                التحليلات
+              </Button>
+            </Link>
             <Link to="/ecom-hub/guide">
               <Button variant="outline" data-testid="ecom-guide-link">
                 <BookOpen className="w-4 h-4 ml-1" />

@@ -535,9 +535,10 @@ export const Layout = ({ children }) => {
       icon: Store,
       items: [
         // ── Unified E-Commerce Hub (P1+, gated by ecommerce_hub flag) ──
-        { path: '/ecom-hub',          icon: Inbox,      label: language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte unifiée',     featureKey: 'ecommerce_hub' },
-        { path: '/ecom-hub/channels', icon: Link2,      label: language === 'ar' ? 'قنوات البيع'           : 'Canaux de vente',  featureKey: 'ecommerce_hub' },
-        { path: '/ecom-hub/guide',    icon: BookOpen,   label: language === 'ar' ? 'دليل الاستخدام والربط'  : 'Guide & connexion', featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub',           icon: Inbox,      label: language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte unifiée',     featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/channels',  icon: Link2,      label: language === 'ar' ? 'قنوات البيع'           : 'Canaux de vente',  featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/analytics', icon: BarChart3,  label: language === 'ar' ? 'تحليلات التجارة'        : 'Analyses e-com',   featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/guide',     icon: BookOpen,   label: language === 'ar' ? 'دليل الاستخدام والربط'   : 'Guide & connexion', featureKey: 'ecommerce_hub' },
         // ── Legacy storefront tools (always available) ──
         { path: '/store', icon: Store, label: language === 'ar' ? 'المتجر' : 'Boutique', subFeature: 'online_store' },
         { path: '/loyalty', icon: Award, label: language === 'ar' ? 'الولاء' : 'Fidélité', featureKey: 'loyalty_points' },

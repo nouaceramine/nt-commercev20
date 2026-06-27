@@ -325,6 +325,30 @@ See `/app/memory/test_credentials.md`
 
 ## Next Action Items (User's deferred backlog)
 - **🛍️ P2 (E-Commerce Hub — TOP PRIORITY going forward):** Real Shopify webhooks (orders + stock sync) + real Yalidine API for shipping labels and tracking polling. User keys required: SHOPIFY_API_KEY / SHOPIFY_WEBHOOK_SECRET / YALIDINE_API_ID / YALIDINE_API_TOKEN.
+
+## S22.3 — P2.1 + P3 + P4 + P5 + Onboarding + Auto-SMS (2026-02 / iter 18.3)
+- **P2.1 Shopify products/inventory webhook** — `routes/ecom/webhooks_routes.py` now persists a per-channel mirror in `ecom_external_products` (upsert by external_id) so stock and analytics jobs have ground truth. HMAC-verified.
+- **P3 WhatsApp Cloud API** — `services/ecom/whatsapp_service.py` parses incoming messages → creates leads, sends outgoing text via Cloud API. GET handshake (`hub.verify_token`) + POST message webhook in `webhooks_routes.py`. Idempotent by `messages[].id`.
+- **P3 Meta Leads (FB/IG)** — Same `services/ecom/whatsapp_service.py` (shared parser). GET handshake + POST `leadgen` webhook → creates `ecom_leads` with form fields auto-mapped (full_name/phone_number/email + extras).
+- **P4 Telegram + Viber + TikTok webhooks** — `services/ecom/messaging_services.py` with `parse_telegram_update`, `parse_viber_event`, `parse_tiktok_order`. Telegram/Viber → leads; TikTok → orders (TIK-XXXXX prefix). All idempotent + auto-flip integration `mode='live'`.
+- **P5 Analytics** — `routes/ecom/analytics_routes.py`:
+  - `GET /api/ecom/analytics/revenue?days=N` — per-channel daily time series + totals + AOV
+  - `GET /api/ecom/analytics/funnel?days=N` — leads → orders → confirmed → shipped → delivered conversion %
+  - `GET /api/ecom/analytics/top-products?days=N&limit=K` — best-selling items aggregated across all channels (unwind items)
+- **P5 AI Lead Categorization** — `POST /api/ecom/leads/{id}/ai-categorize` uses Emergent LLM (gpt-4o-mini) to classify lead intent (interested / price_inquiry / support / complaint / spam / other) + 0-100 conversion score + Arabic reason. Result persisted on the lead doc; subsequent calls return cached value. Heuristic fallback when LLM unavailable.
+- **🔔 Auto-WhatsApp on status change** — `routes/ecom/orders_routes.py::update_order_status` now calls `_maybe_notify_customer()` which detects an active WhatsApp integration and sends an Arabic status message to the customer's phone (best-effort; never blocks the state transition).
+- **🎓 Onboarding tour** — `EcomHubPage.useEffect` checks `localStorage.ecom_guide_seen`; first visit redirects to `/ecom-hub/guide` with a friendly toast. Subsequent visits bypass.
+- **🎨 Analytics page** — `pages/ecom/EcomAnalyticsPage.js` (~250 LOC) with Recharts: KPI banner, daily-time-series LineChart per channel, horizontal BarChart for channel breakdown, conversion-funnel progress bars, top-products table. Period selector (7/30/90/365 days). Sidebar link "تحليلات التجارة" added.
+- **New indexes** — `ecom_leads.ai_category`, `(channel, external_id) unique sparse` (idempotent webhooks), and `ecom_external_products(channel, integration_id, external_id) unique`.
+- **Tests:** 16/16 PASS (6 iter-18 + 4 iter-18.2 + 6 iter-18.3 new):
+  - test_whatsapp_webhook_verify_and_create_lead (handshake + message → lead + idempotency)
+  - test_telegram_and_viber_webhooks
+  - test_meta_lead_webhook (Facebook leadgen with field_data)
+  - test_tiktok_order_webhook (order creation + idempotency)
+  - test_analytics_endpoints (revenue/funnel/top-products shapes)
+  - test_ai_categorize_lead (LLM call + cached re-call)
+- **Verified visually:** Analytics page renders LineChart + BarChart with real test data (35,800 DA across 3 channels).
+
 - **💬 P3 (E-Commerce Hub):** WhatsApp Business Cloud API (status updates SMS-like) + Meta Webhooks for FB/IG Leads → auto-populate `ecom_leads`.
 - **📱 P4 (E-Commerce Hub):** TikTok Marketing API + Telegram Bot + Viber service.
 - **📊 P5 (E-Commerce Hub):** Revenue analytics per channel + funnel charts + LLM-based lead categorization (uses existing Emergent LLM key).
