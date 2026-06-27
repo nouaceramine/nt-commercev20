@@ -164,6 +164,7 @@ export default function EcomChannelsPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {SUPPORTED_CHANNELS.map(key => {
                 const meta = CHANNELS[key];
+                if (!meta) return null;   // safety — channel not in frontend catalogue
                 const connectedCount = integrations.filter(i => i.channel === key).length;
                 return (
                   <button

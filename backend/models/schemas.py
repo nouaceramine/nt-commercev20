@@ -825,6 +825,10 @@ class PurchaseItem(BaseModel):
     quantity: int
     unit_price: float
     total: float
+    # Optional — when present, the product's purchase_price/selling_price are
+    # automatically updated to these values during the purchase create flow.
+    selling_price: Optional[float] = None
+    update_product_prices: Optional[bool] = True   # default ON so user gets the obvious behavior
 
 class PurchaseCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")

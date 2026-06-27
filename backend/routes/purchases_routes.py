@@ -59,7 +59,22 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         for item in p.items:
             product = await db.products.find_one({"id": item.product_id})
             old_quantity = product.get("quantity", 0) if product else 0
-            await db.products.update_one({"id": item.product_id}, {"$inc": {"quantity": item.quantity}})
+
+            # ── Build product update: quantity + optionally prices ──
+            product_updates: dict = {"$inc": {"quantity": item.quantity}}
+            set_fields: dict = {}
+            if product and item.product_id and (item.update_product_prices is None or item.update_product_prices):
+                # Always sync purchase_price to the latest unit_price on purchase
+                set_fields["purchase_price"] = float(item.unit_price)
+                # Sync selling_price only when explicitly passed (frontend may compute markup)
+                if item.selling_price is not None and item.selling_price > 0:
+                    set_fields["selling_price"] = float(item.selling_price)
+                set_fields["updated_at"] = now
+            if set_fields:
+                product_updates["$set"] = set_fields
+
+            await db.products.update_one({"id": item.product_id}, product_updates)
+
             if old_quantity == 0 and item.quantity > 0 and product:
                 await db.notifications.insert_one({
                     "id": str(uuid.uuid4()), "type": "restock",

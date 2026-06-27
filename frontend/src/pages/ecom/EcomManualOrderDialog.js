@@ -5,10 +5,11 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { Plus, Trash2, ShoppingBag } from 'lucide-react';
+import { Plus, Trash2, ShoppingBag, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '../../lib/apiClient';
 import { CHANNELS } from './ecomConstants';
+import { WILAYAS, getCommunes } from '../../data/algeriaGeo';
 
 const EMPTY_ITEM = { name: '', sku: '', qty: 1, price: 0 };
 

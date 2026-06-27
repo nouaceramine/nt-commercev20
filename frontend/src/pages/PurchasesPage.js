@@ -330,9 +330,21 @@ export default function PurchasesPage() {
 
     setLoading(true);
     try {
+      // Map cart items to backend schema. The backend now syncs:
+      //   purchase_price ← unit_price        (always)
+      //   selling_price  ← selling_price     (only when user enabled `updatePrices`)
+      const itemsPayload = cart.map(it => ({
+        product_id: it.product_id,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        total: it.total,
+        selling_price: it.updatePrices && it.newRetailPrice > 0 ? it.newRetailPrice : null,
+        update_product_prices: !!it.updatePrices || it.unit_price !== it.originalPurchasePrice,
+      }));
       const purchaseData = {
         supplier_id: selectedSupplier,
-        items: cart,
+        items: itemsPayload,
         total: subtotal,
         paid_amount: paidAmount,
         payment_method: paymentMethod,

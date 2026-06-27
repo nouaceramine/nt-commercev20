@@ -13,6 +13,10 @@ export const CHANNELS = {
   telegram:  { labelAr: 'تيليجرام',    icon: '✈️', color: 'bg-sky-100 text-sky-800 border-sky-200' },
   viber:     { labelAr: 'Viber',       icon: '🟣', color: 'bg-purple-100 text-purple-800 border-purple-200' },
   manual:    { labelAr: 'إدخال يدوي',  icon: '✍️', color: 'bg-gray-100 text-gray-800 border-gray-200' },
+  // Shipping carriers (kind='shipping' on backend) — saved as integrations for credential storage
+  yalidine:  { labelAr: 'يالدين (شحن)',     icon: '🚚', color: 'bg-orange-100 text-orange-800 border-orange-200', kind: 'shipping' },
+  zr:        { labelAr: 'ZR Express (شحن)', icon: '🚚', color: 'bg-red-100 text-red-800 border-red-200',         kind: 'shipping' },
+  maystro:   { labelAr: 'Maystro (شحن)',    icon: '🚚', color: 'bg-violet-100 text-violet-800 border-violet-200', kind: 'shipping' },
 };
 
 export const ORDER_STATUSES = {
