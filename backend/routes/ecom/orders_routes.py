@@ -51,13 +51,18 @@ def _validate_items(items_raw) -> list:
         qty = max(1, int(it.get("qty", 1) or 1))
         price = max(0.0, float(it.get("price", 0) or 0))
         total = round(qty * price, 2)
-        clean.append({
+        item_doc = {
             "name": name,
             "sku": (it.get("sku") or "").strip(),
             "qty": qty,
             "price": price,
             "total": total,
-        })
+        }
+        # Link back to POS inventory when the UI provided a product_id
+        product_id = it.get("product_id")
+        if isinstance(product_id, str) and product_id.strip():
+            item_doc["product_id"] = product_id.strip()
+        clean.append(item_doc)
     if not clean:
         raise HTTPException(status_code=400, detail="لا توجد منتجات صالحة")
     return clean

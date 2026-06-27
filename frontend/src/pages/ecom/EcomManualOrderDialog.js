@@ -1,31 +1,46 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { Plus, Trash2, ShoppingBag, Package } from 'lucide-react';
+import { Plus, Trash2, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '../../lib/apiClient';
 import { CHANNELS } from './ecomConstants';
 import { WILAYAS, getCommunes } from '../../data/algeriaGeo';
+import { ProductSearchDropdown } from '../../components/ProductSearchDropdown';
 
-const EMPTY_ITEM = { name: '', sku: '', qty: 1, price: 0 };
+const EMPTY_ITEM = { name: '', sku: '', qty: 1, price: 0, product_id: null };
 
 export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrations = [] }) {
   const [channel, setChannel] = useState('manual');
   const [integrationId, setIntegrationId] = useState('');
-  const [customer, setCustomer] = useState({ name: '', phone: '', address: '', city: '', wilaya: '' });
+  const [customer, setCustomer] = useState({ name: '', phone: '', address: '', city: '', wilaya: '', wilaya_code: '' });
   const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
   const [shippingFee, setShippingFee] = useState(0);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+
+  // Fetch POS products once when dialog opens
+  useEffect(() => {
+    if (!open || products.length > 0) return;
+    setProductsLoading(true);
+    apiClient.get('/products')
+      .then(res => setProducts(Array.isArray(res.data) ? res.data : []))
+      .catch(() => {/* silent — manual entry still works */})
+      .finally(() => setProductsLoading(false));
+  }, [open, products.length]);
+
+  const communes = useMemo(() => getCommunes(customer.wilaya_code), [customer.wilaya_code]);
 
   const reset = () => {
     setChannel('manual');
     setIntegrationId('');
-    setCustomer({ name: '', phone: '', address: '', city: '', wilaya: '' });
+    setCustomer({ name: '', phone: '', address: '', city: '', wilaya: '', wilaya_code: '' });
     setItems([{ ...EMPTY_ITEM }]);
     setShippingFee(0);
     setNotes('');
@@ -36,6 +51,35 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
 
   const updateItem = (idx, field, value) => {
     setItems(prev => prev.map((it, i) => (i === idx ? { ...it, [field]: value } : it)));
+  };
+
+  // Map a POS product → manual order item shape
+  const productToItem = (product) => ({
+    name: product.name_ar || product.name_en || product.name || '',
+    sku: product.barcode || product.article_code || '',
+    qty: 1,
+    price: Number(product.retail_price ?? product.price ?? 0),
+    product_id: product.id,
+  });
+
+  // Insert a product into the items list (replace last empty row, else append)
+  const addProductFromInventory = (product) => {
+    const newItem = productToItem(product);
+    setItems(prev => {
+      const lastIdx = prev.length - 1;
+      const last = prev[lastIdx];
+      const lastIsEmpty = !last.name?.trim() && !last.sku?.trim() && !last.product_id;
+      if (lastIsEmpty) {
+        return prev.map((it, i) => (i === lastIdx ? newItem : it));
+      }
+      return [...prev, newItem];
+    });
+    toast.success(`✓ ${newItem.name}`);
+  };
+
+  const onWilayaChange = (code) => {
+    const w = WILAYAS.find(x => x.code === code);
+    setCustomer(prev => ({ ...prev, wilaya_code: code, wilaya: w?.name_ar || '', city: '' }));
   };
 
   const submit = async () => {
@@ -53,12 +97,19 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
       const payload = {
         channel,
         integration_id: integrationId || null,
-        customer,
+        customer: {
+          name: customer.name,
+          phone: customer.phone,
+          address: customer.address,
+          city: customer.city,
+          wilaya: customer.wilaya,
+        },
         items: validItems.map(it => ({
           name: it.name.trim(),
           sku: it.sku.trim(),
           qty: Number(it.qty),
           price: Number(it.price),
+          product_id: it.product_id || null,
         })),
         shipping_fee: Number(shippingFee || 0),
         notes: notes.trim(),
@@ -80,7 +131,7 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto" dir="rtl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-emerald-600" />
@@ -99,7 +150,7 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
               <Select value={channel} onValueChange={setChannel}>
                 <SelectTrigger data-testid="manual-order-channel-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(CHANNELS).filter(([k]) => k !== 'pos').map(([key, meta]) => (
+                  {Object.entries(CHANNELS).filter(([k, meta]) => k !== 'pos' && meta.kind !== 'shipping').map(([key, meta]) => (
                     <SelectItem key={key} value={key}>{meta.icon} {meta.labelAr}</SelectItem>
                   ))}
                 </SelectContent>
@@ -127,27 +178,94 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
             <div className="grid grid-cols-2 gap-2">
               <Input placeholder="الاسم الكامل *" value={customer.name} onChange={e => setCustomer({ ...customer, name: e.target.value })} data-testid="manual-order-customer-name" />
               <Input placeholder="رقم الهاتف" value={customer.phone} onChange={e => setCustomer({ ...customer, phone: e.target.value })} data-testid="manual-order-customer-phone" />
-              <Input placeholder="الولاية" value={customer.wilaya} onChange={e => setCustomer({ ...customer, wilaya: e.target.value })} />
-              <Input placeholder="البلدية" value={customer.city} onChange={e => setCustomer({ ...customer, city: e.target.value })} />
+
+              {/* Wilaya dropdown */}
+              <div>
+                <Select value={customer.wilaya_code || undefined} onValueChange={onWilayaChange}>
+                  <SelectTrigger data-testid="manual-order-wilaya-select">
+                    <SelectValue placeholder="اختر الولاية" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {WILAYAS.map(w => (
+                      <SelectItem key={w.code} value={w.code}>{w.code} — {w.name_ar}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Commune dropdown — depends on wilaya */}
+              <div>
+                <Select
+                  value={customer.city || undefined}
+                  onValueChange={(v) => setCustomer({ ...customer, city: v })}
+                  disabled={!customer.wilaya_code}
+                >
+                  <SelectTrigger data-testid="manual-order-commune-select">
+                    <SelectValue placeholder={customer.wilaya_code ? 'اختر البلدية' : 'اختر الولاية أولاً'} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {communes.map(c => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <Input placeholder="العنوان التفصيلي" value={customer.address} onChange={e => setCustomer({ ...customer, address: e.target.value })} />
+          </div>
+
+          {/* Product search from POS inventory */}
+          <div className="bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-lg border border-emerald-200 dark:border-emerald-900 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                🔎 بحث المنتج من المخزون
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {productsLoading ? 'جارٍ التحميل...' : `${products.length} منتج متاح`}
+              </span>
+            </div>
+            <ProductSearchDropdown
+              products={products}
+              language="ar"
+              isRTL={true}
+              placeholder="ابحث بالاسم، الباركود، أو كود المنتج..."
+              onSelect={addProductFromInventory}
+              priceType="retail"
+              formatCurrency={(v) => Number(v || 0).toFixed(0)}
+              currency="دج"
+              showStock={true}
+              showPrice={true}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              اختر منتجاً ليُضاف تلقائياً إلى قائمة الطلب بسعره وكوده. يمكنك تعديل أي حقل بعد الإضافة.
+            </p>
           </div>
 
           {/* Items */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold text-muted-foreground">المنتجات</div>
+              <div className="text-xs font-semibold text-muted-foreground">المنتجات في الطلب</div>
               <Button type="button" size="sm" variant="outline" onClick={() => setItems([...items, { ...EMPTY_ITEM }])} data-testid="manual-order-add-item">
-                <Plus className="w-4 h-4 ml-1" /> إضافة منتج
+                <Plus className="w-4 h-4 ml-1" /> إضافة سطر يدوي
               </Button>
             </div>
             {items.map((it, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                <Input className="col-span-5" placeholder="اسم المنتج" value={it.name} onChange={e => updateItem(idx, 'name', e.target.value)} data-testid={`manual-order-item-name-${idx}`} />
+                <div className="col-span-5 flex flex-col">
+                  <Input
+                    placeholder="اسم المنتج"
+                    value={it.name}
+                    onChange={e => updateItem(idx, 'name', e.target.value)}
+                    data-testid={`manual-order-item-name-${idx}`}
+                  />
+                  {it.product_id && (
+                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 mt-0.5">✓ مرتبط بمنتج المخزون</span>
+                  )}
+                </div>
                 <Input className="col-span-2" placeholder="SKU" value={it.sku} onChange={e => updateItem(idx, 'sku', e.target.value)} />
                 <Input className="col-span-2" type="number" min="1" placeholder="الكمية" value={it.qty} onChange={e => updateItem(idx, 'qty', e.target.value)} data-testid={`manual-order-item-qty-${idx}`} />
                 <Input className="col-span-2" type="number" min="0" placeholder="السعر" value={it.price} onChange={e => updateItem(idx, 'price', e.target.value)} data-testid={`manual-order-item-price-${idx}`} />
-                <Button type="button" size="icon" variant="ghost" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== idx))} className="col-span-1">
+                <Button type="button" size="icon" variant="ghost" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== idx))} className="col-span-1" data-testid={`manual-order-remove-item-${idx}`}>
                   <Trash2 className="w-4 h-4 text-rose-500" />
                 </Button>
               </div>
