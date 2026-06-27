@@ -407,7 +407,13 @@ See `/app/memory/test_credentials.md`
 - **Tests** — `tests/test_iter20_inventory_sync.py` (2/2) + `tests/test_iter20_email_templates.py` (5/5) + regression iter18.4 + iter19 = **13/13 pytest PASS**. Playwright 5/5 features verified end-to-end (iteration_20.json).
 - **Backlog flagged by testing agent** (low priority): Pydantic `EmailStr` at tenant creation; actual range in CSV filenames; chip in order dialog when no items have `product_id`.
 
-## Next Action Items (post-iter-20)
+## S22.7 — Strict Email Validation (2026-02 / iter 21)
+- **🛡️ Backend** — `routes/saas/schemas.py` now applies a strict regex validator (`^...@...\.[A-Za-z]{2,}$`) on both `TenantCreate.email` and `TenantUpdate.email`. Rejects malformed addresses like `FOAD@FOAD`, `user@localhost`, `@nodomain.com`, etc. Accepts standard `name@domain.tld` (auto-lowered + stripped). Arabic error message: "صيغة البريد الإلكتروني غير صحيحة — يجب أن يحتوي على نطاق صالح".
+- **🚩 Frontend** — `/saas-admin/subscribers` now visually flags any tenant with an invalid email: red strike-through email + small rose pill `[⚠️ إصلاح]` (`data-testid='fix-email-btn-{tid}'`). Clicking the pill opens the existing edit-tenant dialog focused on the email field. The same `EMAIL_RE` regex mirrors the backend so the UI and API are 1:1 consistent.
+- **Tests** — `tests/test_iter21_email_validation.py` **17/17 PASS** (9 negative cases + 5 positive cases + 3 update-flow cases). Total project pytest suite: **30+ passing**.
+- **No data migration** — existing invalid emails (e.g. `FOAD@FOAD`) remain in DB but are surfaced visually to the admin for manual cleanup. Pydantic validates only on write, never on read.
+
+## Next Action Items (post-iter-21)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).

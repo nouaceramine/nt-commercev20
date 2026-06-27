@@ -35,7 +35,7 @@ import {
 import {
   Users, Plus, Edit, Trash2, RefreshCw, Eye, EyeOff, Ban, Check,
   ShoppingBag, Truck, Store, Wallet, Sliders, LogIn, Copy,
-  Banknote, CreditCard, Wifi, Server, UserCog, Search,
+  Banknote, CreditCard, Wifi, Server, UserCog, Search, AlertTriangle,
 } from 'lucide-react';
 import { formatShortDate } from '../../../utils/globalDateFormatter';
 import { SaasPageHeader } from './SaasPageHeader';
@@ -59,6 +59,12 @@ const ALL_FEATURES = [
   { key: 'loyalty_points',  labelAr: 'نقاط الولاء' },
   { key: 'ecommerce_hub',   labelAr: '🛍️ مركز التجارة الإلكترونية الموحّد', optIn: true },
 ];
+
+// Pragmatic email validator — mirrors the backend regex in routes/saas/schemas.py.
+// Rejects tokens like "FOAD@FOAD" that pass naive checks but no real provider accepts.
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const isValidEmail = (e) => typeof e === 'string' && EMAIL_RE.test(e.trim());
+
 
 const isExpiringSoon = (endDate) => {
   if (!endDate) return false;
@@ -433,7 +439,23 @@ export default function SubscribersPage() {
                         data-testid={`tenant-name-${tenant.id}`}
                       >
                         <p className="font-medium hover:underline">{tenant.name}</p>
-                        <p className="text-sm text-muted-foreground">{tenant.email}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-sm ${isValidEmail(tenant.email) ? 'text-muted-foreground' : 'text-rose-600 font-medium line-through decoration-rose-400'}`}>
+                            {tenant.email}
+                          </p>
+                          {!isValidEmail(tenant.email) && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openTenantDialog(tenant); }}
+                              title="إيميل غير صالح — اضغط للإصلاح"
+                              data-testid={`fix-email-btn-${tenant.id}`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-700 text-[10px] font-bold transition-colors"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              إصلاح
+                            </button>
+                          )}
+                        </div>
                         {tenant.company_name && (
                           <p className="text-xs text-muted-foreground">{tenant.company_name}</p>
                         )}

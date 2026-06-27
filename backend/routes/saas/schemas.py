@@ -1,6 +1,23 @@
 """SaaS Schemas - Pydantic models for SaaS routes"""
+import re
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+# RFC-pragmatic regex: requires `local@domain.tld` with a 2+ char TLD.
+# Rejects single-token addresses like `FOAD@FOAD` that the stdlib `email`
+# spec technically allows but no public mail provider accepts.
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+
+def _validate_email(value: Optional[str]) -> Optional[str]:
+    """Reusable email validator — None passes through (for partial updates)."""
+    if value is None or value == "":
+        return value
+    cleaned = value.strip().lower()
+    if not _EMAIL_RE.match(cleaned):
+        raise ValueError("صيغة البريد الإلكتروني غير صحيحة — يجب أن يحتوي على نطاق صالح (مثل user@example.com)")
+    return cleaned
 
 
 class PlanFeatures(BaseModel):
@@ -94,6 +111,11 @@ class TenantCreate(BaseModel):
     business_type: str = "retailer"
     role: str = "admin"
 
+    @field_validator("email")
+    @classmethod
+    def _validate_create_email(cls, v: str) -> str:
+        return _validate_email(v)
+
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
@@ -108,6 +130,11 @@ class TenantUpdate(BaseModel):
     recharge_mode: Optional[str] = None
     self_bridge_url: Optional[str] = None
     self_bridge_api_key: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def _validate_update_email(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_email(v)
 
 
 class TenantResponse(BaseModel):
