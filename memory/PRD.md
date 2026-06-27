@@ -398,7 +398,16 @@ See `/app/memory/test_credentials.md`
 - **Tests:** `backend/tests/test_iter19_bug_fixes.py` 3/3 PASS. Playwright frontend 4/4 fixes verified. 1 test order `ECO-DFEA1E08` + 1 seed product (`TEST_iter19 منتج`, retail=750, qty=11) left in FOAD@FOAD tenant for manual QA.
 - **Code-review nit applied post-test:** `addProductFromInventory` now finds the FIRST empty item row (was last); avoids skipping earlier blank rows when a user has expanded the items grid before picking from inventory.
 
-## Next Action Items
+## S22.6 — Inventory Sync + Quick wins (2026-02 / iter 20)
+- **✨ Major** — POS↔E-com **مزامنة المخزون الفورية**. Transition order to `confirmed` ⇒ `$inc -qty` on each `product_id`-linked POS product; transition to `cancelled`/`refunded` ⇒ restore. Idempotent via `inventory_deducted` flag + `inventory_deductions[]` audit trail. Response surfaces `{deducted, restored, warnings}` so the UI can toast detailed feedback. Order-detail header now shows a 📦 badge when stock is deducted.
+- **♻️ Quick win** — **Impersonate button** (`impersonate-btn-{tenant_id}`, LogIn icon, purple) on every row of `/saas-admin/subscribers`. Cuts QA / support cycle time from 3+ clicks to 2.
+- **📊 Quick win** — **CSV export** on `/ecom-hub/analytics` (`analytics-export-csv-btn` → 3 files with UTF-8 BOM for Arabic Excel support).
+- **🖨️ Quick win** — **PDF/Print invoice** (`order-print-invoice-btn`) — A4-styled HTML invoice printed from the browser; "Save as PDF" handles export with no backend dependency.
+- **✉️ Foundations** — `services/email_templates.py` with 5 RTL templates (`welcome_tenant_email`, `debt_reminder_email`, `impersonation_notice_email`, `order_confirmation_email`, `generic_alert_email`). Wired into `tenant_debts_routes.remind` and `health_alerts_service`. Ready for real Resend delivery once `RESEND_API_KEY` is set.
+- **Tests** — `tests/test_iter20_inventory_sync.py` (2/2) + `tests/test_iter20_email_templates.py` (5/5) + regression iter18.4 + iter19 = **13/13 pytest PASS**. Playwright 5/5 features verified end-to-end (iteration_20.json).
+- **Backlog flagged by testing agent** (low priority): Pydantic `EmailStr` at tenant creation; actual range in CSV filenames; chip in order dialog when no items have `product_id`.
+
+## Next Action Items (post-iter-20)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).
