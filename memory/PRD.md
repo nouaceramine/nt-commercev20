@@ -269,4 +269,4 @@ See `/app/memory/test_credentials.md`
 - **🔑 P1 (USER DEFERRED):** Provide `RESEND_API_KEY` + verified `SENDER_EMAIL` to flip email provider from `mock` → `resend`. Single env edit + `sudo supervisorctl restart backend` and tenant-debt email reminders go live.
 - **📦 P2 (suggestion):** Bake `redis-server` and Resend SDK pin into a Dockerfile / base image so cold-spawned containers don't lose them.
 - **🎨 P3 (nice-to-have):** Date-range presets ("اليوم / آخر 7 أيام / هذا الشهر") on the Sales tab.
-- **🤖 P3 (suggestion):** AI insight card on the Monitoring dashboard summarizing the latest 24 hrs (top sellers, churn risk, debt growth) — leverages the now-stable Redis cache to keep AI calls cheap.
+- **🤖 P3 (QUEUED by user 2026-02 iter17):** AI Insights card on the Monitoring dashboard summarizing the latest 24 hrs (top sellers, churn risk, debt growth). Hourly refresh via Gemini or Claude. Leverage the now-stable Redis cache to keep LLM costs minimal. Gives super-admin a strategic daily view instead of raw numbers. Status: backlog, awaiting prioritization.
