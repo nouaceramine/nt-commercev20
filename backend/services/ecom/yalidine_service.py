@@ -40,6 +40,39 @@ def _extract_creds(integration: Optional[dict]) -> tuple[str, str]:
     return api_id, api_token
 
 
+async def ping(integration: dict) -> dict:
+    """Lightweight connectivity check — fetches Yalidine's wilayas list.
+
+    Returns {ok: True, wilayas_count, sample_wilaya} on success.
+    Raises YalidineCredentialsMissing or YalidineAPIError on failure.
+    """
+    api_id, api_token = _extract_creds(integration)
+    headers = {"X-API-ID": api_id, "X-API-TOKEN": api_token}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{YALIDINE_BASE_URL}/wilayas/", headers=headers)
+    except httpx.HTTPError as exc:
+        raise YalidineAPIError(f"Network error: {exc}") from exc
+
+    if resp.status_code == 401 or resp.status_code == 403:
+        raise YalidineAPIError("مفاتيح Yalidine غير صحيحة (401/403)")
+    if resp.status_code >= 400:
+        raise YalidineAPIError(f"Yalidine returned HTTP {resp.status_code}: {resp.text[:200]}")
+
+    data = resp.json()
+    # Response shape: {"data": [{id, name, ...}], "total_data": N} OR a plain list
+    wilayas = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(wilayas, list):
+        raise YalidineAPIError("Unexpected Yalidine response shape")
+    sample = wilayas[0] if wilayas else None
+    return {
+        "ok": True,
+        "wilayas_count": len(wilayas),
+        "sample_wilaya": (sample or {}).get("name") if isinstance(sample, dict) else None,
+    }
+
+
+
 async def create_parcel(integration: dict, order: dict) -> dict:
     """Create a parcel/shipment in Yalidine for the given order.
 

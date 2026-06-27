@@ -34,13 +34,16 @@ async def get_email_settings(admin: dict = Depends(get_super_admin)):
     """Current effective email settings — keys MASKED. Includes the active provider."""
     doc = await main_db.platform_settings.find_one({"_id": "email_settings"}) or {}
     return {
-        "provider": await get_email_provider_async(),
-        "sender_email": doc.get("sender_email") or "",
-        "resend_api_key_masked": _mask(doc.get("resend_api_key", "")),
+        "provider":             await get_email_provider_async(),
+        "provider_preference":  doc.get("provider_preference") or "auto",
+        "sender_email":         doc.get("sender_email") or "",
+        "resend_api_key_masked":   _mask(doc.get("resend_api_key", "")),
         "sendgrid_api_key_masked": _mask(doc.get("sendgrid_api_key", "")),
-        "has_resend_key": bool(doc.get("resend_api_key")),
+        "brevo_api_key_masked":    _mask(doc.get("brevo_api_key", "")),
+        "has_resend_key":   bool(doc.get("resend_api_key")),
         "has_sendgrid_key": bool(doc.get("sendgrid_api_key")),
-        "updated_at": doc.get("updated_at"),
+        "has_brevo_key":    bool(doc.get("brevo_api_key")),
+        "updated_at":       doc.get("updated_at"),
     }
 
 
@@ -48,17 +51,22 @@ async def get_email_settings(admin: dict = Depends(get_super_admin)):
 async def update_email_settings(body: dict, admin: dict = Depends(get_super_admin)):
     """Save email provider settings. Empty string clears a key; null/missing keeps it.
 
-    Body: {resend_api_key?: str|null, sendgrid_api_key?: str|null, sender_email?: str|null}
+    Body: {resend_api_key?, sendgrid_api_key?, brevo_api_key?, sender_email?, provider_preference?}
+
+    provider_preference: 'auto' | 'resend' | 'sendgrid' | 'brevo' | 'mock'
     """
     existing = await main_db.platform_settings.find_one({"_id": "email_settings"}) or {}
     updates = {"updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": admin.get("id")}
 
-    for key in ("resend_api_key", "sendgrid_api_key", "sender_email"):
+    for key in ("resend_api_key", "sendgrid_api_key", "brevo_api_key", "sender_email", "provider_preference"):
         if key in body:
             val = body[key]
             if val is None:
                 continue
-            updates[key] = str(val).strip()
+            cleaned = str(val).strip()
+            if key == "provider_preference" and cleaned not in ("auto", "resend", "sendgrid", "brevo", "mock"):
+                raise HTTPException(status_code=400, detail=f"قيمة مزوِّد غير صالحة: {cleaned}")
+            updates[key] = cleaned
 
     merged = {**existing, **updates, "_id": "email_settings"}
     await main_db.platform_settings.update_one(
@@ -70,7 +78,7 @@ async def update_email_settings(body: dict, admin: dict = Depends(get_super_admi
     return {
         "ok": True,
         "provider": await get_email_provider_async(),
-        "saved_keys": [k for k in ("resend_api_key", "sendgrid_api_key", "sender_email") if k in updates],
+        "saved_keys": [k for k in ("resend_api_key", "sendgrid_api_key", "brevo_api_key", "sender_email", "provider_preference") if k in updates],
     }
 
 

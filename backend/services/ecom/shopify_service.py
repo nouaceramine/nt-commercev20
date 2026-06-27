@@ -39,6 +39,60 @@ def verify_shopify_hmac(raw_body: bytes, hmac_header: str, secret: str) -> bool:
         return False
 
 
+class ShopifyAPIError(Exception):
+    """Raised when Shopify returns a non-2xx response."""
+
+
+async def ping(integration: dict) -> dict:
+    """Lightweight connectivity check — fetches GET /admin/api/2024-10/shop.json
+
+    Requires `shop_domain` (e.g. `my-store.myshopify.com`) and `admin_api_key`
+    (Shopify Admin API access token starting with `shpat_`) in credentials.
+
+    Returns {ok: True, shop_name, currency, plan} on success.
+    """
+    import httpx
+    creds = (integration or {}).get("credentials") or {}
+    domain = (creds.get("shop_domain") or "").strip().rstrip("/")
+    token = (creds.get("admin_api_key") or "").strip()
+    if not domain or not token:
+        raise ShopifyAPIError("shop_domain و admin_api_key مطلوبان")
+
+    # Allow user to enter either "store.myshopify.com" or full URL
+    if domain.startswith("http"):
+        domain = domain.split("//", 1)[1]
+    if "/" in domain:
+        domain = domain.split("/", 1)[0]
+    if not domain.endswith(".myshopify.com") and "myshopify" not in domain:
+        # Be lenient — let Shopify itself reject if domain is wrong
+        pass
+
+    url = f"https://{domain}/admin/api/2024-10/shop.json"
+    headers = {"X-Shopify-Access-Token": token, "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise ShopifyAPIError(f"Network error: {exc}") from exc
+
+    if resp.status_code in (401, 403):
+        raise ShopifyAPIError(f"مفاتيح Shopify غير صحيحة (HTTP {resp.status_code}) — تحقَّق من admin_api_key")
+    if resp.status_code == 404:
+        raise ShopifyAPIError(f"النطاق غير موجود ({domain}) — تأكَّد من shop_domain")
+    if resp.status_code >= 400:
+        raise ShopifyAPIError(f"Shopify returned HTTP {resp.status_code}: {resp.text[:200]}")
+
+    data = resp.json().get("shop") or {}
+    return {
+        "ok": True,
+        "shop_name": data.get("name"),
+        "currency": data.get("currency"),
+        "plan": data.get("plan_display_name") or data.get("plan_name"),
+        "domain": data.get("myshopify_domain"),
+    }
+
+
+
 def parse_shopify_order(payload: dict, integration_id: str) -> dict:
     """Map a Shopify order webhook payload to our internal `ecom_orders` shape.
 

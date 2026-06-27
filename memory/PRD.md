@@ -413,7 +413,19 @@ See `/app/memory/test_credentials.md`
 - **Tests** — `tests/test_iter21_email_validation.py` **17/17 PASS** (9 negative cases + 5 positive cases + 3 update-flow cases). Total project pytest suite: **30+ passing**.
 - **No data migration** — existing invalid emails (e.g. `FOAD@FOAD`) remain in DB but are surfaced visually to the admin for manual cleanup. Pydantic validates only on write, never on read.
 
-## Next Action Items (post-iter-21)
+## S22.8 — Brevo (Algeria-friendly) Email Provider (2026-02 / iter 22)
+- **🚨 Problem** — User in Algeria tried Resend → rejected (Resend blocks sign-ups from many MENA countries).
+- **✨ Solution** — Multi-provider email service with explicit user preference:
+  - **Backend** — `services/email_service.py` rewritten to support **Brevo** (Sendinblue) as a first-class provider. Direct REST call to `https://api.brevo.com/v3/smtp/email` via httpx (no extra SDK dep). Auto-chain priority is now: **brevo → resend → sendgrid → mock** (Brevo prioritised for MENA region). Users can override via `provider_preference` field: `auto | brevo | resend | sendgrid | mock`.
+  - **API** — `GET/PUT /api/saas/email-settings` now expose `brevo_api_key_masked`, `has_brevo_key`, `provider_preference`. PUT validates preference enum.
+  - **Frontend** — `EmailSettingsPage` redesigned: new "المزوِّد المُفضَّل" dropdown (`provider-preference-select`), Brevo card highlighted as "موصى به 🇩🇿", quick-start guide for Algerian users with direct link to brevo.com.
+- **Why Brevo for Algeria:**
+  - ✓ Accepts sign-ups from Algeria/Morocco/Tunisia (Resend does not)
+  - ✓ 300 transactional emails/day on the free tier
+  - ✓ Easy DNS verification via Brevo's "Senders" panel
+- **Tests** — `tests/test_iter22_multi_provider_email.py` **10/10 PASS** covering: explicit preferences (brevo/resend/mock), auto-chain priority, fallback when preferred key missing, full Brevo POST endpoint verification, HTTP-error handling.
+
+## Next Action Items (post-iter-22)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).
