@@ -50,12 +50,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _debts_cache_subkey(only_with_debt: bool = True, **_kwargs) -> str:
+    """Per-call sub-key for the tenant-debts cache. Variants per filter:
+       v=1 → only_with_debt=True (default, debt-only)
+       v=0 → only_with_debt=False (all tenant wallets)
+    """
+    return f"v={int(bool(only_with_debt))}"
+
+
 @router.get("/saas/tenant-debts")
-@cached_json(
-    prefix=_DEBTS_KEY_PREFIX,
-    ttl=15,
-    key_fn=lambda only_with_debt=True, admin=None: f"v={int(bool(only_with_debt))}",
-)
+@cached_json(prefix=_DEBTS_KEY_PREFIX, ttl=15, key_fn=_debts_cache_subkey)
 async def list_tenant_debts(
     only_with_debt: bool = True,
     admin: dict = Depends(get_super_admin),

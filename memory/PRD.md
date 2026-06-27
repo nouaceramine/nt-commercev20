@@ -249,10 +249,24 @@ See `/app/memory/test_credentials.md`
 - **Tests:** `backend/tests/test_iter16_cleanup_perf.py` 16/16 PASS. Frontend Playwright 100% across all 10 kept + 6 extracted routes.
 - **Polish applied post-test:** `re.escape` in sales search (replaces hand-rolled metachar escape), removed 5 redundant eslint-disable directives, re-added the debounced-search useEffect that was reverted in the test diff.
 
-## Next Action Items
-- **🔑 P1:** Provide `RESEND_API_KEY` + `SENDER_EMAIL` (verified domain) to flip email provider mock → resend.
-- **🚀 P2:** Promote the cache boilerplate (key gen + `cached:true`/`served_at` stamping) into the `@cached_json` decorator in `utils/cache.py` so the next hot endpoint is one-line to cache.
-- **🧰 P2:** Sweep `SaasAdminPage.js` to remove the now-orphan state setters (`openTenantDialog`, `settleDebtDialogOpen`, plan/wallet/feature-flags state, etc.) — currently dead code kept intentionally for one iteration of safety.
-- **🪙 P3:** Seed ~60 sales for a TEST tenant in CI so the Sales-tab `sales-pagination` footer is exercised by automation.
-- **📊 P3:** Add date-range pickers to the Sales tab (backend already supports `since`/`until`).
-- **🛡️ P3:** Consider an explicit cache invalidation hook in `/saas/saas-payments/add` (currently relies on TTL).
+## S21 — Final polish: decorator promotion + SaasAdminPage deep clean + Sales date filters + seed (2026-02 / iter 17)
+- **P2 @cached_json decorator promoted** (`utils/cache.py`):
+  - New `stamp=True` mode auto-injects `cached:true` + ISO `served_at` on warm dict hits.
+  - Persisted payload is *clean* — the decorator strips the stamp fields before SET so they don't accumulate across refreshes.
+  - Refactored 3 endpoints to one-line cache: `/saas/platform-stats` (10s), `/saas/stats` (15s), `/saas/tenant-debts` (15s, per-`only_with_debt` variant via `_debts_cache_subkey` helper).
+- **P2 `SaasAdminPage.js` deep clean — 3066 → 1113 lines (-63% from S17 baseline):**
+  - Removed all orphan state, handlers, dialogs (settle-debt, tenant CRUD, plan CRUD, extend, impersonate, wallet-charge, feature-flags, bridge, agent, agent-transactions, add-payment).
+  - Pruned 60+ unused lucide-react icon imports.
+  - Kept only the 11 still-served tabs (platform-catalog, recharge-mgmt, finance, databases, monitoring, alerts, withdrawals, ai-assistant, impersonation-logs, default-pos-shortcuts) + Reject Withdrawal Dialog + Recharge Edit Dialog + Platform Catalog Dialog.
+- **P3 Sales tab date filters:**
+  - `pages/CardsServicePage.js` — 2 date inputs (`sales-since-input` / `sales-until-input`) + `sales-clear-filters-btn` (visible only when any filter active). Debounced (300ms) server-side filter via `?since=` / `?until=`. Backend already supported these in iter 16; this iter wires the UI.
+- **P3 Pagination QA seed:**
+  - `backend/scripts/seed_platform_card_sales.py` — idempotent (rows tagged `seed_tag='iter17-pagination'`). 60 sales spread over ~13 hours, mixed operators/methods/customers. Run: `python -m scripts.seed_platform_card_sales [tenant_id] [count]`.
+- **Tests:** 20/20 pytest PASS + 17/17 frontend routes + 6/6 extracted-page testids + 60-row pagination footer validated. Lint clean across all modified files.
+- **Infra note**: Redis binary went missing once during a container fork; resolved via `apt-get install -y redis-server`. Recommend baking into base image to avoid recurrence.
+
+## Next Action Items (User's deferred backlog)
+- **🔑 P1 (USER DEFERRED):** Provide `RESEND_API_KEY` + verified `SENDER_EMAIL` to flip email provider from `mock` → `resend`. Single env edit + `sudo supervisorctl restart backend` and tenant-debt email reminders go live.
+- **📦 P2 (suggestion):** Bake `redis-server` and Resend SDK pin into a Dockerfile / base image so cold-spawned containers don't lose them.
+- **🎨 P3 (nice-to-have):** Date-range presets ("اليوم / آخر 7 أيام / هذا الشهر") on the Sales tab.
+- **🤖 P3 (suggestion):** AI insight card on the Monitoring dashboard summarizing the latest 24 hrs (top sellers, churn risk, debt growth) — leverages the now-stable Redis cache to keep AI calls cheap.
