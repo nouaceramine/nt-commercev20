@@ -265,6 +265,38 @@ See `/app/memory/test_credentials.md`
 - **Tests:** 20/20 pytest PASS + 17/17 frontend routes + 6/6 extracted-page testids + 60-row pagination footer validated. Lint clean across all modified files.
 - **Infra note**: Redis binary went missing once during a container fork; resolved via `apt-get install -y redis-server`. Recommend baking into base image to avoid recurrence.
 
+## S22 — E-Commerce Hub P1 (Feature flag + Base infra + Unified Inbox + Manual orders) (2026-02 / iter 18)
+- **P0 Feature flag — `ecommerce_hub` OPT-IN (default OFF per tenant):**
+  - Backend: `SUPPORTED_FEATURES` in `routes/saas/tenants_routes.py` adds `ecommerce_hub`; new `OPT_IN_FEATURES = {"ecommerce_hub"}` flips the default-True resolver to default-False for opt-in keys. Same opt-in injection added in `main.py` `get_current_user` and `tenants_routes.impersonate_tenant`.
+  - Frontend: `pages/admin/saas/SubscribersPage.js` ALL_FEATURES gets the new key with `optIn:true`, rendered with an amber BETA badge.
+  - `contexts/AuthContext.js` mirrors `OPT_IN_FEATURES` so `isFeatureEnabled('ecommerce_hub')` returns false when the key is missing.
+- **P1 Backend — `/api/ecom/*` (4 routers, ~700 LOC, all gated by `await require_ecom_feature(user)`):**
+  - `routes/ecom/constants.py` — channels (8) + statuses (7) + shipping providers (4) + state-machine transitions + async feature-gate helper that falls back to a Mongo lookup when the user object lacks `features` (utils/auth.get_current_user does not inject features).
+  - `routes/ecom/integrations_routes.py` — channel CRUD (Shopify/FB/IG/TikTok/WhatsApp/Telegram/Viber). Credentials are stored opaque and REDACTED in responses. Mock test endpoint always returns ok:true.
+  - `routes/ecom/orders_routes.py` — unified inbox (`ecom_orders` collection). List/filter (channel/status/search/date range/pagination), summary aggregates (by_channel, by_status, today, 7d), CRUD + state-machine `PUT /status` with allowed-transitions validation. DELETE requires status ∈ {cancelled, refunded}.
+  - `routes/ecom/leads_routes.py` — multi-channel leads CRUD with status pipeline (new→contacted→qualified→converted|lost).
+  - `routes/ecom/shipping_routes.py` — mock label creation. Auto-bumps order status to 'shipped' if currently confirmed/packed. Tracking number prefix per provider (YAL-/ZR-/MS-).
+  - Mounted via `modules/ecom.py` → `routes/ecom_routes.py` aggregator (added to `modules/__init__.py` MODULES list).
+- **P1 Frontend — `/ecom-hub` + `/ecom-hub/channels` (~900 LOC, RTL Arabic-first):**
+  - `pages/ecom/ecomConstants.js` — single source of truth (channels/statuses/providers + NEXT_STATUSES state-machine mirror).
+  - `pages/ecom/EcomHubPage.js` — unified inbox: 4 KPI cards (today/7d/total/new), per-channel breakdown buttons, status filter tabs, search + channel filter, orders table with channel/status badges, P1 mock-mode banner, BETA badge.
+  - `pages/ecom/EcomChannelsPage.js` — 7 connectable channel cards with per-channel credential schemas (Shopify/FB/IG/TikTok/WhatsApp/Telegram/Viber). Connect/edit dialog uses password inputs; existing creds preserved on edit when blank.
+  - `pages/ecom/EcomManualOrderDialog.js` — full manual order entry: channel select, customer fields, dynamic items grid, shipping_fee, live totals.
+  - `pages/ecom/EcomOrderDetailDialog.js` — order detail with state-machine transition buttons, mock shipping-label generation, status history audit trail.
+  - `components/Layout.js` — new tenant sidebar section `🛍️ التجارة الإلكترونية` with featureKey gate.
+  - `App.js` — two new routes guarded by `<ProtectedRoute featureKey="ecommerce_hub">`.
+- **Tests:** `backend/tests/test_iter18_ecom_hub.py` (1 full-flow) + testing-agent-added `test_iter18_ecom_extra.py` (5 cases) — **6/6 PASS**. Frontend Playwright: feature-flags dialog (BETA), /ecom-hub manual order creation + table render, /ecom-hub/channels CRUD, flag-OFF tenant gets 403 with Arabic message. Existing routes (POS/sales/customers/reports) verified not broken by AuthContext change.
+- **MOCKED in P1 (acknowledged by user — س4:b):** Shipping labels return random YAL-/ZR-/MS- tracking but do NOT call real Yalidine/ZR/Maystro APIs. Channel test-connection always returns ok:true. UI shows yellow P1 mock banners on both /ecom-hub and /ecom-hub/channels.
+
+## Next Action Items (User's deferred backlog)
+- **🛍️ P2 (E-Commerce Hub — TOP PRIORITY going forward):** Real Shopify webhooks (orders + stock sync) + real Yalidine API for shipping labels and tracking polling. User keys required: SHOPIFY_API_KEY / SHOPIFY_WEBHOOK_SECRET / YALIDINE_API_ID / YALIDINE_API_TOKEN.
+- **💬 P3 (E-Commerce Hub):** WhatsApp Business Cloud API (status updates SMS-like) + Meta Webhooks for FB/IG Leads → auto-populate `ecom_leads`.
+- **📱 P4 (E-Commerce Hub):** TikTok Marketing API + Telegram Bot + Viber service.
+- **📊 P5 (E-Commerce Hub):** Revenue analytics per channel + funnel charts + LLM-based lead categorization (uses existing Emergent LLM key).
+- **🔑 (USER DEFERRED):** Provide `RESEND_API_KEY` + verified `SENDER_EMAIL` to flip email provider from `mock` → `resend`.
+- **🤖 (QUEUED):** AI Insights card on Monitoring dashboard (hourly snapshot).
+
+
 ## Next Action Items (User's deferred backlog)
 - **🔑 P1 (USER DEFERRED):** Provide `RESEND_API_KEY` + verified `SENDER_EMAIL` to flip email provider from `mock` → `resend`. Single env edit + `sudo supervisorctl restart backend` and tenant-debt email reminders go live.
 - **📦 P2 (suggestion):** Bake `redis-server` and Resend SDK pin into a Dockerfile / base image so cold-spawned containers don't lose them.
