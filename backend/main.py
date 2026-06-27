@@ -253,7 +253,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             if tenant:
                 plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
                 if plan:
-                    user["features"] = {**plan.get("features", {}), **tenant.get("features_override", {})}
+                    features_map = {**plan.get("features", {}), **tenant.get("features_override", {})}
+                    # ── Opt-in features: explicit `false` default when neither plan nor tenant set them ──
+                    # `ecommerce_hub` is OFF unless super-admin manually toggles it on per tenant.
+                    OPT_IN_FEATURES = ("ecommerce_hub",)
+                    for opt_key in OPT_IN_FEATURES:
+                        if opt_key not in features_map:
+                            features_map[opt_key] = False
+                    user["features"] = features_map
                     user["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
                 user["company_name"] = tenant.get("company_name", "")
             return user

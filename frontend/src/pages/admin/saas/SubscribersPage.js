@@ -57,6 +57,7 @@ const ALL_FEATURES = [
   { key: 'thermal_print',   labelAr: 'الطباعة الحرارية' },
   { key: 'credit_sales',    labelAr: 'البيع بالدين' },
   { key: 'loyalty_points',  labelAr: 'نقاط الولاء' },
+  { key: 'ecommerce_hub',   labelAr: '🛍️ مركز التجارة الإلكترونية الموحّد', optIn: true },
 ];
 
 const isExpiringSoon = (endDate) => {
@@ -307,11 +308,15 @@ export default function SubscribersPage() {
       const res = await apiClient.get(`/saas/tenants/${tenant.id}/features`);
       const resolved = res.data?.resolved || {};
       const init = {};
-      ALL_FEATURES.forEach(f => { init[f.key] = resolved[f.key] !== undefined ? Boolean(resolved[f.key]) : true; });
+      ALL_FEATURES.forEach(f => {
+        // Opt-in features (e.g. ecommerce_hub) default to false; others default to true.
+        const fallback = f.optIn ? false : true;
+        init[f.key] = resolved[f.key] !== undefined ? Boolean(resolved[f.key]) : fallback;
+      });
       setTenantFeatureFlags(init);
     } catch {
       const init = {};
-      ALL_FEATURES.forEach(f => { init[f.key] = true; });
+      ALL_FEATURES.forEach(f => { init[f.key] = f.optIn ? false : true; });
       setTenantFeatureFlags(init);
     }
   };
@@ -800,10 +805,17 @@ export default function SubscribersPage() {
               {ALL_FEATURES.map(feature => {
                 const isEnabled = tenantFeatureFlags[feature.key] !== false;
                 return (
-                  <div key={feature.key} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors ${isEnabled ? 'bg-green-50 border-green-200' : 'bg-muted/40 border-muted'}`}>
-                    <span className={`text-sm font-medium ${isEnabled ? 'text-green-800' : 'text-muted-foreground'}`}>
-                      {feature.labelAr}
-                    </span>
+                  <div key={feature.key} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors ${isEnabled ? (feature.optIn ? 'bg-amber-50 border-amber-300' : 'bg-green-50 border-green-200') : 'bg-muted/40 border-muted'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${isEnabled ? (feature.optIn ? 'text-amber-800' : 'text-green-800') : 'text-muted-foreground'}`}>
+                        {feature.labelAr}
+                      </span>
+                      {feature.optIn && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 font-semibold">
+                          BETA
+                        </span>
+                      )}
+                    </div>
                     <Switch
                       checked={isEnabled}
                       onCheckedChange={(checked) => setTenantFeatureFlags(prev => ({ ...prev, [feature.key]: checked }))}

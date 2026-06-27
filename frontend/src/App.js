@@ -93,6 +93,10 @@ import TenantDashboardPage from "./pages/TenantDashboardPage";
 import EmailNotificationsPage from "./pages/EmailNotificationsPage";
 import PaymentsPage from "./pages/PaymentsPage";
 
+// E-Commerce Hub (P1+, gated by ecommerce_hub feature flag)
+import EcomHubPage from "./pages/ecom/EcomHubPage";
+import EcomChannelsPage from "./pages/ecom/EcomChannelsPage";
+
 // AI & Smart Accounting Pages
 import SmartDashboardPage from "./pages/SmartDashboardPage";
 import AIChatPage from "./pages/AIChatPage";
@@ -275,6 +279,23 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="ai_bots">
             <AIAgentsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* E-Commerce Hub — gated by ecommerce_hub feature flag (super-admin opt-in) */}
+      <Route
+        path="/ecom-hub"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomHubPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/channels"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomChannelsPage />
           </ProtectedRoute>
         }
       />

@@ -106,16 +106,25 @@ export const AuthProvider = ({ children }) => {
    *
    * Super admins always return true. Missing/undefined flags default to enabled.
    */
+  /**
+   * Opt-in features default to DISABLED when the resolved features map doesn't
+   * mention them — i.e. they must be explicitly enabled (super-admin per-tenant).
+   * Mirrors OPT_IN_FEATURES in backend main.py.
+   */
+  const OPT_IN_FEATURES = new Set(['ecommerce_hub']);
+
   const isFeatureEnabled = (featureKey, subFeatureKey = null) => {
     // Super admin has all features
     if (user?.role === 'super_admin') return true;
-    // If no features set, allow all (default behavior)
-    if (!features) return true;
+    // If no features set, allow all (default behavior) — but still gate opt-in ones.
+    if (!features) return !OPT_IN_FEATURES.has(featureKey);
 
     const feature = features[featureKey];
 
-    // Feature key not present in the features map → enabled by default
-    if (feature === undefined || feature === null) return true;
+    // Feature key not present → enabled by default UNLESS it's opt-in
+    if (feature === undefined || feature === null) {
+      return !OPT_IN_FEATURES.has(featureKey);
+    }
 
     // ── Flat boolean flag (new per-tenant override format) ──
     if (typeof feature === 'boolean') {

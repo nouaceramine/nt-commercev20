@@ -18,6 +18,8 @@ import {
   X,
   Search,
   Globe,
+  Inbox,
+  Link2,
   Shield,
   Users,
   ShoppingCart,
@@ -433,6 +435,16 @@ export const Layout = ({ children }) => {
       icon: Receipt,
       items: [
         { path: '/expenses', icon: Receipt, label: language === 'ar' ? 'المصاريف' : 'Dépenses' },
+      ]
+    },
+    {
+      id: 'ecom-hub',
+      featureKey: 'ecommerce_hub',
+      title: language === 'ar' ? '🛍️ التجارة الإلكترونية' : 'E-Commerce',
+      icon: Globe,
+      items: [
+        { path: '/ecom-hub',          icon: Inbox, label: language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte unifiée', featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/channels', icon: Link2, label: language === 'ar' ? 'قنوات البيع'        : 'Canaux de vente',  featureKey: 'ecommerce_hub' },
       ]
     },
     {

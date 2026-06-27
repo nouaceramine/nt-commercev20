@@ -1,0 +1,43 @@
+{
+  "summary": "Iter-18 E-Commerce Hub P1 — ALL GREEN. Backend pytest 6/6 (test_iter18_ecom_hub.py + new test_iter18_ecom_extra.py). Frontend Playwright: super-admin login → feature-flags dialog shows '🛍️ مركز التجارة الإلكترونية الموحّد' with BETA badge → impersonate FOAD tenant → /ecom-hub renders (KPI cards, channel breakdown, status tabs, search, channel filter), manual-order dialog creates order ECO-7452EFF0 (TEST_UI_BUYER_18, 2000 DA, appears in table) → /ecom-hub/channels renders with all 7 channels (shopify/facebook/instagram/tiktok/whatsapp/telegram/viber), shopify integration created (متجرنا الرئيسي shows '1 مرتبط'), test-connection & delete buttons clickable. With flag OFF the lock screen renders correctly with Arabic 'الميزة غير مفعّلة'. Existing /customers (non-ecom) route still accessible after AuthContext/Layout changes — smoke test for core endpoints (saas/tenants, saas/plans, saas/platform-stats, auth/me, customers, products, sales, expenses) all <500.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/ecom-hub/channels", "issues": ["Cosmetic: yellow 'P1 — وضع المحاكاة' banner correctly informs that channels are mocked; no contrast issue. Manual-order dialog uses keyboard-default number inputs for qty/price which is fine. Sidebar entries 'صندوق الطلبات الموحَّد' and 'قنوات البيع' only visible when sidebar is expanded; this matches existing Layout collapse behaviour."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter18_ecom_hub.py",
+    "/app/backend/tests/test_iter18_ecom_extra.py",
+    "/app/test_reports/pytest/iteration_18.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "constants.py:require_ecom_feature — now async and falls back to a Mongo lookup when the user object lacks `features`. This is correct (utils/auth.get_current_user doesn't inject features). Verified working via 403 Arabic message test for tenants[1].",
+    "Credential redaction is robust: shopify api_key, facebook access_token, whatsapp phone_number_id all confirmed redacted in POST /api/ecom/integrations responses (raw secret never present in response payload).",
+    "Order state machine — verified packed→delivered REJECTED (400), confirmed→packed→shipping-label→shipped path works. Tracking number starts with 'YAL-' and order.tracking_number/courier persisted.",
+    "DELETE /api/ecom/orders/{id} guard verified: returns 400 unless status in {cancelled, refunded}. Tested with `new`, `shipped`, and `refunded` states.",
+    "Smoke test passed: existing endpoints (saas/tenants, saas/plans, auth/me, customers, products, sales, expenses) all <500 after AuthContext/Layout edits. /customers route still accessible in browser.",
+    "MOCKED INTEGRATIONS: Shipping labels and channel test-connection are explicitly mocked (mode:'mock_real_provider_pending'). UI shows yellow P1 mock banner on both /ecom-hub and /ecom-hub/channels. Acceptable for P1 — flagged for P2-P4.",
+    "Test ordering side-effect: backend test_iter18_ecom_hub.py disables the flag for tenants[0] at the end. If a human/main-agent wants to manually verify /ecom-hub after running pytest, they must re-enable the flag (already done by this testing agent — FOAD tenant flag is currently ON)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter18_ecom_extra.py (NEW — 5 additional pytest cases)",
+    "/app/test_reports/pytest/iteration_18.xml (JUnit XML, 6/6 pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 pytest — full ecom flow + 403 Arabic msg + cred redaction + smoke for existing features + order math + lead lifecycle)",
+    "frontend": "100% — feature-flags dialog OK, /ecom-hub OK, manual-order dialog creates order persisted in table, /ecom-hub/channels OK with 7 cards, integration CRUD OK, lock screen renders for flag-off path, existing routes (/customers) still work"
+  },
+  "test_credentials": "Super-admin: admin@ntcommerce.com / Admin@2024 (verified). Tenant with ecommerce_hub:true → f2e36d2d-2a58-47c1-bdf5-c87f4bd7ae54 (FOAD@FOAD) — flag re-enabled at end of this testing run for main-agent self-test.",
+  "seed_data_creation": "Created 1 test order (ECO-7452EFF0, TEST_UI_BUYER_18, 2000 DA, status=new, channel=manual) on FOAD tenant via UI. Not cleaned up — visible in /ecom-hub for visual verification by main agent. Backend tests are self-cleaning (delete order/lead/integration in teardown).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter-18 introduced E-Commerce Hub P1 (feature flag + ecom routes + UI). Flag is OPT-IN (default false). require_ecom_feature is async and reads tenant.features_override from main_db when user object lacks features. UI tested via super-admin → impersonate FOAD tenant (f2e36d2d-…). All 7 channels render; shopify dialog has 2 cred fields (api_key + access_token style). Mocked: shipping labels return YAL-{rand} without calling Yalidine; integration /test endpoint always returns ok:true. Existing iter-17 features (POS/sales/customers/reports/saas-admin) confirmed not broken by AuthContext.isFeatureEnabled OPT_IN_FEATURES change. FOAD tenant currently has ecommerce_hub:true; tenants[1+] default to false.",
+  "rca of the issue": "No issues found. One observation: the existing tests left tenants[0] flag DISABLED at the end of test_ecom_hub_full_flow. Re-running UI verification after pytest requires re-enabling the flag — this testing agent did so at the very end via PUT /api/saas/tenants/{id}/features {ecommerce_hub: true}. No code change needed; this is intended test isolation behavior."
+}

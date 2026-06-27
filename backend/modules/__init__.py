@@ -58,6 +58,7 @@ COMPONENT_MODULES = [
     "settings",
     "saas",
     "installments",
+    "ecom",
 ]
 
 

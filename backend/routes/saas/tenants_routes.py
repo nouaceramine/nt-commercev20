@@ -36,11 +36,15 @@ from services.wallet_service import credit_wallet, get_or_create_wallet
 
 router = APIRouter(tags=["SaaS Tenants"])
 
-# 16 supported feature keys for per-tenant overrides
+# Supported feature keys for per-tenant overrides.
+# `ecommerce_hub` gates the unified E-Commerce Hub (multi-channel orders inbox,
+# channels CRUD, shipping labels, AI insights). Disabled by default at the tenant
+# level — super admin must manually enable it via the Subscribers → feature flags dialog.
 SUPPORTED_FEATURES = {
     "pos", "inventory", "customers", "recharge", "iptv", "maintenance",
     "wallet", "commission", "reports", "backup", "ai_bots", "barcode",
-    "thermal_print", "credit_sales", "loyalty_points"
+    "thermal_print", "credit_sales", "loyalty_points",
+    "ecommerce_hub",
 }
 
 
@@ -138,6 +142,10 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
 
     plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
     features = {**(plan.get("features") or {}), **(tenant.get("features_override") or {})} if plan else {}
+    # ── Opt-in features default OFF when neither plan nor tenant set them ──
+    for opt_key in ("ecommerce_hub",):
+        if opt_key not in features:
+            features[opt_key] = False
     limits = {**(plan.get("limits") or {}), **(tenant.get("limits_override") or {})} if plan else {}
 
     # ── Impersonation Audit Log ──
@@ -382,15 +390,18 @@ async def get_tenant_features(tenant_id: str, admin: dict = Depends(get_super_ad
     plan_features_raw = plan.get("features", {})
 
     # Normalise plan features to flat booleans — plans may store nested {enabled, subFeatures}
+    # `ecommerce_hub` is opt-in (default disabled): super admin must explicitly toggle it on per tenant.
+    OPT_IN_FEATURES = {"ecommerce_hub"}
     plan_defaults: dict = {}
     for key in SUPPORTED_FEATURES:
         val = plan_features_raw.get(key)
         if isinstance(val, dict):
-            plan_defaults[key] = bool(val.get("enabled", True))
+            plan_defaults[key] = bool(val.get("enabled", key not in OPT_IN_FEATURES))
         elif isinstance(val, bool):
             plan_defaults[key] = val
         else:
-            plan_defaults[key] = True  # default: enabled when plan has no opinion
+            # default: enabled when plan has no opinion, except for opt-in features
+            plan_defaults[key] = key not in OPT_IN_FEATURES
 
     overrides = tenant.get("features_override") or {}
     resolved = {**plan_defaults, **{k: bool(v) for k, v in overrides.items() if k in SUPPORTED_FEATURES}}
