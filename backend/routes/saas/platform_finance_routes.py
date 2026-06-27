@@ -384,6 +384,114 @@ def build_financial_router() -> APIRouter:
             "iptv":  [{"id": p["id"], "label": p.get("name", "—"), "type": "iptv"} for p in iptv_pkgs],
         }
 
+    # ── Code Trace — full lifecycle of a stock code/ICCID ────────────────
+    @router.get("/admin/supplier/trace")
+    async def trace_code(code: str = Query(..., min_length=2), admin: dict = Depends(get_super_admin)):
+        """Find a code across all stock collections (card / sim / idoom) and return
+        its complete lifecycle: origin (purchase + external supplier + cost),
+        current status, and — if sold — which tenant bought it and when.
+
+        Used by the Trace UI sub-tab to answer: 'where did this code come from
+        and where did it go?'
+        """
+        cleaned = (code or "").strip()
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="أدخل كود")
+
+        # Probe all 3 stock collections
+        stock = None
+        stock_type = None
+        for type_key, coll_name in (("card", "platform_card_stock"), ("sim", "platform_sim_stock"), ("idoom", "platform_idoom_stock")):
+            doc = await getattr(main_db, coll_name).find_one({"code": cleaned}, {"_id": 0})
+            if doc:
+                stock = doc
+                stock_type = type_key
+                break
+
+        if not stock:
+            return {"found": False, "code": cleaned}
+
+        # Look up catalog metadata
+        catalog_coll_name = {"card": "platform_card_catalog", "sim": "platform_sim_catalog", "idoom": "platform_idoom_catalog"}[stock_type]
+        catalog = await getattr(main_db, catalog_coll_name).find_one(
+            {"id": stock.get("catalog_id")},
+            {"_id": 0},
+        ) or {}
+
+        # Origin: tracked via source_purchase_id (set by upload-codes endpoint)
+        origin = None
+        purchase_id = stock.get("source_purchase_id")
+        if purchase_id:
+            purchase = await main_db.supplier_purchases.find_one({"id": purchase_id}, {"_id": 0})
+            if purchase:
+                supplier = await main_db.external_suppliers.find_one({"id": purchase.get("supplier_id")}, {"_id": 0}) or {}
+                # Find the specific line whose catalog_id matches the stock's
+                matched_item = next(
+                    (it for it in (purchase.get("items") or []) if it.get("catalog_id") == stock.get("catalog_id") and it.get("type") == stock_type),
+                    None,
+                )
+                origin = {
+                    "purchase_id":   purchase["id"],
+                    "purchase_date": purchase.get("purchase_date"),
+                    "supplier_id":   purchase.get("supplier_id"),
+                    "supplier_name": purchase.get("supplier_name"),
+                    "supplier_phone": supplier.get("phone", ""),
+                    "unit_cost":     matched_item.get("unit_cost") if matched_item else None,
+                    "purchase_label": matched_item.get("label") if matched_item else None,
+                }
+
+        # Sale: if status=='sold' or tenant_id is set, look up the supplier_order line
+        sale = None
+        if stock.get("status") == "sold" or stock.get("tenant_id"):
+            # supplier_orders.items[].code_ids includes the stock.id
+            order = await main_db.supplier_orders.find_one(
+                {"items.code_ids": stock["id"]},
+                {"_id": 0, "id": 1, "tenant_id": 1, "created_at": 1, "items": 1, "total": 1, "status": 1},
+            )
+            tenant_name = "—"
+            sold_unit_price = None
+            if order:
+                tenant = await main_db.saas_tenants.find_one({"id": order.get("tenant_id")}, {"_id": 0, "name": 1, "company_name": 1}) or {}
+                tenant_name = tenant.get("name") or tenant.get("company_name") or order.get("tenant_id", "")[:8]
+                # Find which order item this code belonged to to extract price
+                for it in (order.get("items") or []):
+                    if stock["id"] in (it.get("code_ids") or []):
+                        sold_unit_price = it.get("unit_price")
+                        break
+            sale = {
+                "order_id":   (order or {}).get("id"),
+                "tenant_id":  stock.get("tenant_id") or (order or {}).get("tenant_id"),
+                "tenant_name": tenant_name,
+                "sold_at":    stock.get("sold_at") or (order or {}).get("created_at"),
+                "sold_unit_price": sold_unit_price,
+                "order_status": (order or {}).get("status"),
+            }
+
+        # Compute simple profit (sold_price - unit_cost) if both known
+        profit = None
+        if sale and sale.get("sold_unit_price") is not None and origin and origin.get("unit_cost") is not None:
+            profit = round(float(sale["sold_unit_price"]) - float(origin["unit_cost"]), 2)
+
+        return {
+            "found":         True,
+            "code":          cleaned,
+            "stock_type":    stock_type,
+            "stock_id":      stock["id"],
+            "status":        stock.get("status"),
+            "created_at":    stock.get("created_at"),
+            "catalog":       {
+                "id":           catalog.get("id"),
+                "operator":     catalog.get("operator"),
+                "tier":         catalog.get("tier"),
+                "name_ar":      catalog.get("name_ar"),
+                "denomination": catalog.get("denomination"),
+                "default_price": catalog.get("default_price"),
+            },
+            "origin":        origin,
+            "sale":          sale,
+            "unit_profit":   profit,
+        }
+
     # ── Upload codes against a specific purchase (later ICCIDs) ─────────
     @router.post("/admin/supplier/purchases/{pid}/upload-codes")
     async def upload_purchase_codes(

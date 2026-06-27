@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { toast } from "sonner";
 import apiClient from "../../lib/apiClient";
-import { Loader2, Plus, Trash2, TrendingUp, TrendingDown, Wallet, Users, Truck, Receipt, Pencil, Banknote, AlertTriangle, RefreshCw, Upload, FileText } from "lucide-react";
+import { Loader2, Plus, Trash2, TrendingUp, TrendingDown, Wallet, Users, Truck, Receipt, Pencil, Banknote, AlertTriangle, RefreshCw, Upload, FileText, Search, Package, CheckCircle2, XCircle } from "lucide-react";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-DZ", { maximumFractionDigits: 2 });
 
@@ -94,6 +94,7 @@ export function PlatformFinanceTab() {
           <TabsTrigger value="dashboard" data-testid="finance-tab-dashboard">📊 لوحة المعلومات</TabsTrigger>
           <TabsTrigger value="suppliers" data-testid="finance-tab-suppliers">🏭 الموردون ({suppliers.length})</TabsTrigger>
           <TabsTrigger value="purchases" data-testid="finance-tab-purchases">📦 المشتريات ({purchases.length})</TabsTrigger>
+          <TabsTrigger value="trace" data-testid="finance-tab-trace">🔍 تتبُّع كود</TabsTrigger>
         </TabsList>
 
         {/* ── DASHBOARD ─────────────────────────────────────────────────── */}
@@ -310,6 +311,12 @@ export function PlatformFinanceTab() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ── TRACE ────────────────────────────────────────────────────── */}
+        <TabsContent value="trace" className="mt-3">
+          <CodeTraceCard />
+        </TabsContent>
+
       </Tabs>
 
       {/* Dialogs */}
@@ -779,6 +786,184 @@ function UploadCodesForPurchaseDialog({ purchase, onClose, onDone }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+// ── Code Trace Card — search any code/ICCID and see its full journey ────
+const STATUS_META = {
+  available: { color: "bg-emerald-100 text-emerald-800", icon: CheckCircle2, label: "متاح في المخزون" },
+  reserved:  { color: "bg-amber-100 text-amber-800",     icon: Loader2,      label: "محجوز" },
+  sold:      { color: "bg-blue-100 text-blue-800",       icon: Package,      label: "تم البيع" },
+};
+
+const STOCK_TYPE_LABELS = { card: "بطاقة شحن", sim: "شريحة SIM (ICCID)", idoom: "كود Idoom" };
+
+function CodeTraceCard() {
+  const [code, setCode] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const search = async () => {
+    const q = code.trim();
+    if (!q) { toast.error("أدخل كوداً للبحث"); return; }
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await apiClient.get(`/admin/supplier/trace?code=${encodeURIComponent(q)}`);
+      setResult(res.data);
+      if (!res.data.found) toast.warning("لم يُعثر على الكود في أي مخزون");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "فشل البحث");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Search className="h-4 w-4 text-indigo-600" /> تتبُّع كود في سلسلة التوريد
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          الصق أي كود (بطاقة شحن، ICCID شريحة، أو كود Idoom) وسيعرض لك النظام رحلته الكاملة:
+          من أي مورد جاء، بسعر كم، حالته الحالية، ولمن بِعتَه.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-2">
+          <Input
+            placeholder="مثال: ICCID-A7F3B2D9... أو 1234567890"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && search()}
+            className="font-mono"
+            data-testid="trace-code-input"
+          />
+          <Button onClick={search} disabled={busy} data-testid="trace-search-btn">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin ms-1" /> : <Search className="h-4 w-4 ms-1" />} ابحث
+          </Button>
+        </div>
+
+        {result && !result.found && (
+          <div className="bg-rose-50 border border-rose-200 rounded p-4 text-rose-800 flex gap-2 items-center" data-testid="trace-not-found">
+            <XCircle className="h-5 w-5" />
+            <div>
+              <div className="font-semibold">الكود غير موجود</div>
+              <div className="text-xs">الكود <span className="font-mono">{result.code}</span> لم يُسجَّل في أي من مخازن البطاقات / الشرائح / Idoom.</div>
+            </div>
+          </div>
+        )}
+
+        {result?.found && (
+          <div className="space-y-3" data-testid="trace-result">
+            {/* Header card */}
+            <div className="bg-gradient-to-l from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-4">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="font-mono text-base font-bold">{result.code}</span>
+                <Badge>{STOCK_TYPE_LABELS[result.stock_type]}</Badge>
+                <StatusBadge status={result.status} />
+              </div>
+              {result.catalog && (
+                <div className="text-sm text-muted-foreground">
+                  {result.catalog.operator && <>المُشغِّل: <strong>{result.catalog.operator}</strong> · </>}
+                  {result.catalog.tier && <>المستوى: <strong>{result.catalog.tier === "wholesale" ? "جملة" : "تجزئة"}</strong> · </>}
+                  {result.catalog.denomination && <>الفئة: <strong>{result.catalog.denomination} دج</strong> · </>}
+                  {result.catalog.name_ar && <>{result.catalog.name_ar}</>}
+                </div>
+              )}
+            </div>
+
+            {/* Journey timeline */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <TimelineStep
+                icon={<Truck className="h-5 w-5 text-purple-600" />}
+                title="١. المنشأ (Origin)"
+                empty={!result.origin}
+                emptyMsg="لم يُسجَّل مصدر — كود قديم قبل نظام التتبُّع"
+              >
+                {result.origin && (
+                  <>
+                    <div className="text-sm font-semibold">{result.origin.supplier_name || "—"}</div>
+                    {result.origin.supplier_phone && <div className="text-xs font-mono text-muted-foreground">📞 {result.origin.supplier_phone}</div>}
+                    <div className="text-xs mt-1">تاريخ الشراء: <strong>{result.origin.purchase_date?.slice(0, 10)}</strong></div>
+                    {result.origin.unit_cost != null && (
+                      <div className="text-xs mt-1">سعر التكلفة: <strong className="text-rose-700">{fmt(result.origin.unit_cost)} دج</strong></div>
+                    )}
+                  </>
+                )}
+              </TimelineStep>
+
+              <TimelineStep
+                icon={<Package className="h-5 w-5 text-emerald-600" />}
+                title="٢. الحالة الحالية"
+              >
+                <div className="text-sm">
+                  <StatusBadge status={result.status} />
+                </div>
+                {result.created_at && (
+                  <div className="text-xs text-muted-foreground mt-2">
+                    تاريخ الدخول للمخزون: {new Date(result.created_at).toLocaleString("ar-DZ")}
+                  </div>
+                )}
+              </TimelineStep>
+
+              <TimelineStep
+                icon={<Users className="h-5 w-5 text-blue-600" />}
+                title="٣. البيع"
+                empty={!result.sale}
+                emptyMsg={result.status === "available" ? "لم يُبَع بعد — متاح في المخزون" : "غير متاح"}
+              >
+                {result.sale && (
+                  <>
+                    <div className="text-sm font-semibold">{result.sale.tenant_name}</div>
+                    {result.sale.sold_at && (
+                      <div className="text-xs mt-1">تاريخ البيع: <strong>{new Date(result.sale.sold_at).toLocaleString("ar-DZ")}</strong></div>
+                    )}
+                    {result.sale.sold_unit_price != null && (
+                      <div className="text-xs mt-1">سعر البيع: <strong className="text-emerald-700">{fmt(result.sale.sold_unit_price)} دج</strong></div>
+                    )}
+                  </>
+                )}
+              </TimelineStep>
+            </div>
+
+            {/* Profit bar */}
+            {result.unit_profit != null && (
+              <div className={`rounded-lg p-3 border-2 ${result.unit_profit >= 0 ? "bg-emerald-50 border-emerald-300" : "bg-rose-50 border-rose-300"}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold">💹 الربح من هذا الكود</span>
+                  <span className={`text-xl font-bold ${result.unit_profit >= 0 ? "text-emerald-700" : "text-rose-700"}`} data-testid="trace-unit-profit">
+                    {result.unit_profit >= 0 ? "+" : ""}{fmt(result.unit_profit)} دج
+                  </span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  = سعر البيع ({fmt(result.sale?.sold_unit_price || 0)}) − سعر التكلفة ({fmt(result.origin?.unit_cost || 0)})
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusBadge({ status }) {
+  const meta = STATUS_META[status] || { color: "bg-gray-100 text-gray-700", label: status || "—" };
+  return <Badge className={meta.color}>{meta.label}</Badge>;
+}
+
+function TimelineStep({ icon, title, children, empty, emptyMsg }) {
+  return (
+    <div className="border rounded-lg p-3 bg-card">
+      <div className="flex items-center gap-2 mb-2 pb-2 border-b">
+        {icon}
+        <span className="text-sm font-semibold">{title}</span>
+      </div>
+      {empty ? (
+        <div className="text-xs text-muted-foreground italic">{emptyMsg}</div>
+      ) : children}
+    </div>
   );
 }
 

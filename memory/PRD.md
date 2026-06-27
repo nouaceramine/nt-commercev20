@@ -464,7 +464,26 @@ not just at purchase time.
 - **🧪 Tests** — `tests/test_iter24_platform_finance.py` **5/5 PASS** covering: CRUD + delete-protection, balance recompute through purchase→payment cycle, KPI summary shape, all-4-catalogs reference, full ICCID upload happy path (3 codes + dedupe + reach quota), iptv-rejected path. Total suite: **37/37 PASS**.
 - **What "money management" now covers** — ✅ external suppliers, ✅ purchases (cost), ✅ payments to suppliers (AP), ✅ revenue from tenants (already tracked), ✅ gross profit, ✅ platform wallet, ✅ top customers, ✅ top suppliers, ✅ accounts-payable dashboard alert, ✅ deferred code/ICCID upload tied to specific purchases.
 
-## Next Action Items (post-iter-24)
+## S22.11 — Code Trace (سلسلة توريد قابلة للتدقيق) (2026-02 / iter 25)
+
+User asked: "بناء شجرة تتبُّع الكود" — given any code in the platform stock, surface its
+complete origin → status → destination story.
+
+- **🆕 Backend** — `GET /admin/supplier/trace?code=...` auto-probes all 3 stock collections
+  (`platform_card_stock`, `platform_sim_stock`, `platform_idoom_stock`). Returns
+  `{found, stock_type, status, catalog, origin, sale, unit_profit}` where:
+  - **origin** = the purchase + external supplier + unit_cost (via `source_purchase_id` we set in the upload-codes flow in iter-24).
+  - **sale** = the `supplier_orders` line whose `code_ids` contains this stock id → tenant_id, tenant_name, sold_at, sold_unit_price.
+  - **unit_profit** = sold_unit_price − unit_cost (when both are known).
+- **🎨 Frontend** — New "🔍 تتبُّع كود" sub-tab in `/saas-admin/supplier → إدارة المال`. UX:
+  - One search box (RTL, monospace) that takes any code (paste or type) + Enter to search.
+  - 3-step horizontal timeline: Origin (مورد + سعر تكلفة + تاريخ شراء) → Status (badge ملوَّن) → Sale (مستأجر + سعر بيع + تاريخ).
+  - Profit footer card highlighted in emerald (positive) or rose (negative) with the math broken down: `= 250 − 100 = +150 دج`.
+  - Not-found path shows a friendly rose box explaining the code isn't in any stock.
+- **🧪 Tests** — `tests/test_iter25_code_trace.py` **4/4 PASS**: not-found, just-uploaded-with-origin, sold-with-profit, empty-code-rejected.
+- **Auth-throttle fix** — Cached the super-admin token at module level inside iter-25 tests so the brute-force throttle (`429`) doesn't fire when running the full suite back-to-back. Pattern can be applied to other iter-* tests if needed later.
+
+## Next Action Items (post-iter-25)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).
