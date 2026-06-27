@@ -351,6 +351,34 @@ See `/app/memory/test_credentials.md`
 
 - **💬 P3 (E-Commerce Hub):** WhatsApp Business Cloud API (status updates SMS-like) + Meta Webhooks for FB/IG Leads → auto-populate `ecom_leads`.
 - **📱 P4 (E-Commerce Hub):** TikTok Marketing API + Telegram Bot + Viber service.
+
+## S22.4 — AI Co-pilot + Health Alerts + RAG categorizer + Dockerfile (2026-02 / iter 18.4)
+- **🤖 AI Co-pilot للتحليلات** — `services/ecom/copilot_service.py` يبني سياق JSON محدَّث (إيرادات per channel، deltas مقارنة بالفترة السابقة، top products، leads conversion) ويرسله لـ Emergent LLM (gpt-4o-mini) مع system prompt عربي. POST `/api/ecom/analytics/copilot` بـ `{question, session_id, days}`. ذاكرة محادثة per-session في الـ RAM. Heuristic fallback عند غياب LLM.
+- **🤖 Frontend Chat** — `pages/ecom/EcomCopilotChat.js` (~120 LOC) — Quick prompts، messages bubbles، input عربي RTL، typing indicator، مدمج بصفحة `/ecom-hub/analytics` تحت الـ KPI cards.
+- **🤖 RAG-aware Lead Categorizer** — `categorize_lead_with_context()` يدمج: نسبة التحويل التاريخية للقناة + عدد الرسائل السابقة من نفس الرقم في الـ prompt. القيمة المُحفوظة على الـ lead doc تتضمن `ai_source: 'llm_rag'` و `ai_context: {channel_conversion_pct, prior_from_same_phone}` للشفافية.
+- **⚠️ Health Score Alerts** — `services/health_alerts_service.py` يقرأ AI Insights ويفجِّر تنبيهاً (severity warning < 75، critical < 50). يحفظ في `main_db.platform_alerts` ويُرسل إيميلاً لكل السوبر-أدمن. Throttling: لا يُكرَّر نفس severity إلا بعد 24h. مدمج في `GET /api/saas/ai-insights` كـ side-effect.
+- **⚠️ Health Alerts UI** — `pages/admin/components/HealthAlertsCard.js` على Monitoring dashboard. يُظهر التنبيهات الـ open مع زر "أُقِرّ" (resolve). يخفي نفسه إذا score >= 75 (إذا لا يوجد تاريخ تنبيهات).
+- **🐳 Dockerfile.base** — Single-container production-ready: Python 3.11 + Node 20 + Nginx + Redis 7 + Supervisor. Builds React frontend ويصدِّمه عبر Nginx، يدير uvicorn + redis + nginx عبر supervisord. HEALTHCHECK يستخدم `/api/health`. ARG `REACT_APP_BACKEND_URL` للـ build-time.
+- **📄 DEPLOYMENT.md** — Quick-start guide مع جدول env vars + ASCII architecture + webhook URL templates لكل قناة + scaling guide.
+- **3 new endpoints:**
+  - `POST /api/ecom/analytics/copilot` — conversational analytics
+  - `GET  /api/saas/health-alerts` — list with open_count
+  - `POST /api/saas/health-alerts/{id}/resolve` — mark resolved
+- **Tests:** 19/19 PASS (6 + 5 + 6 + 3 new in `test_iter18_4_copilot_health_rag.py`):
+  - test_copilot_returns_arabic_answer (multi-turn session)
+  - test_health_alerts_endpoint
+  - test_rag_lead_categorizer_uses_context
+- **Verified visually:** Co-pilot answered "ما هي أفضل قناة بيع لديّ هذا الشهر؟" with detailed Arabic LLM reply citing per-channel revenue (manual 17,668 / Shopify 17,500 / TikTok 12,800).
+
+## Next Action Items
+- **🔑 USER ACTION REQUIRED — أدخل المفاتيح الحقيقية:**
+  - Shopify per integration via `/ecom-hub/channels` (shop_domain + admin_api_key + webhook_secret)
+  - Yalidine per integration (api_id + api_token)
+  - WhatsApp / Meta / TikTok / Telegram / Viber — كذلك
+  - Resend عبر `/saas-admin/email-settings`
+- **🎨 Backlog**: تصميم email templates أجمل، CSV export للتحليلات، PDF invoices للطلبات.
+- **🌐 Backlog**: مشاركة لوحات تحليلات للعملاء (public dashboards مع شيفرة وصول).
+
 - **📊 P5 (E-Commerce Hub):** Revenue analytics per channel + funnel charts + LLM-based lead categorization (uses existing Emergent LLM key).
 - **🔑 (USER DEFERRED):** Provide `RESEND_API_KEY` + verified `SENDER_EMAIL` to flip email provider from `mock` → `resend`.
 - **🤖 (QUEUED):** AI Insights card on Monitoring dashboard (hourly snapshot).

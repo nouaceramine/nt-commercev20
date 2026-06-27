@@ -188,7 +188,9 @@ _LEAD_SYS_PROMPT = (
 async def categorize_lead(lead_id: str, user: dict = Depends(require_tenant)):
     """LLM classifies the lead message and stores the result on the lead doc.
 
-    Cached on the lead — re-call returns the existing result unless force_refresh.
+    Iter 18.4: uses the RAG-lite categorizer which feeds channel conversion
+    history + prior-leads-from-same-phone into the prompt.
+    Cached on the lead — re-call returns the existing result.
     """
     await require_ecom_feature(user)
     lead = await db.ecom_leads.find_one({"id": lead_id})
@@ -203,40 +205,31 @@ async def categorize_lead(lead_id: str, user: dict = Depends(require_tenant)):
             "cached": True,
         }
 
-    message = (lead.get("message") or "").strip() or "(no message)"
-    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
-
-    # Default heuristic when LLM unavailable
-    category, score, reason = "other", 50, "تصنيف افتراضي (لا يوجد LLM)"
-
-    if key:
-        try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage as EmUserMessage
-            chat = (
-                LlmChat(api_key=key, session_id=f"lead-{uuid.uuid4()}", system_message=_LEAD_SYS_PROMPT)
-                .with_model("openai", "gpt-4o-mini")
-            )
-            resp = await chat.send_message(EmUserMessage(text=message))
-            text = resp if isinstance(resp, str) else getattr(resp, "content", str(resp))
-            text = text.strip()
-            if text.startswith("```"):
-                text = text.strip("`").lstrip("json").strip()
-            parsed = json.loads(text)
-            cat = (parsed.get("category") or "other").lower()
-            if cat in _LEAD_CATEGORIES:
-                category = cat
-            score = max(0, min(100, int(parsed.get("score", 50) or 50)))
-            reason = parsed.get("reason_ar") or parsed.get("reason") or reason
-        except Exception as exc:
-            logger.warning("Lead AI categorization failed: %s", exc)
+    from services.ecom.copilot_service import categorize_lead_with_context
+    result = await categorize_lead_with_context(lead, db)
 
     await db.ecom_leads.update_one(
         {"id": lead_id},
         {"$set": {
-            "ai_category": category,
-            "ai_score": score,
-            "ai_reason": reason,
+            "ai_category": result["category"],
+            "ai_score": result["score"],
+            "ai_reason": result["reason_ar"],
+            "ai_source": result.get("source", "llm"),
+            "ai_context": result.get("context_used"),
             "ai_categorized_at": datetime.now(timezone.utc).isoformat(),
         }},
     )
-    return {"category": category, "score": score, "reason_ar": reason, "cached": False}
+    return {**result, "cached": False}
+
+
+# ─── AI Co-pilot conversational endpoint (iter 18.4) ────────────────────────
+@router.post("/ecom/analytics/copilot")
+async def analytics_copilot(body: dict, user: dict = Depends(require_tenant)):
+    """Conversational analytics. Body: {question: str, session_id?: str, days?: int}"""
+    await require_ecom_feature(user)
+    from services.ecom.copilot_service import answer_copilot_question
+    return await answer_copilot_question(
+        question=body.get("question", ""),
+        session_id=body.get("session_id"),
+        days=int(body.get("days", 30) or 30),
+    )

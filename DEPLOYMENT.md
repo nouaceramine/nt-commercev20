@@ -1,292 +1,99 @@
-# دليل النشر - NT Commerce Deployment Guide
+# Deployment Guide — NT Commerce v16 (iter 18.4)
 
-## 📋 المتطلبات الأساسية
+## Quick Start (single-container)
 
-### متطلبات الخادم
-- **CPU**: 2 cores minimum
-- **RAM**: 4GB minimum (8GB recommended)
-- **Storage**: 20GB SSD
-- **OS**: Ubuntu 22.04 LTS / Debian 11+
+This repository ships a production-ready `Dockerfile.base` that bakes in **Python 3.11, Node 20, Nginx, Redis, and Supervisor**. Build once, run anywhere.
 
-### البرمجيات المطلوبة
-- Docker & Docker Compose
-- Nginx (للـ reverse proxy)
-- SSL Certificate (Let's Encrypt)
-
----
-
-## 🐳 النشر باستخدام Docker
-
-### 1. إنشاء docker-compose.yml
-
-```yaml
-version: '3.8'
-
-services:
-  mongodb:
-    image: mongo:6
-    container_name: ntcommerce-mongo
-    restart: always
-    volumes:
-      - mongo_data:/data/db
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
-    networks:
-      - ntcommerce-network
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: ntcommerce-backend
-    restart: always
-    ports:
-      - "8001:8001"
-    environment:
-      - MONGO_URL=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017
-      - DB_NAME=ntcommerce
-      - JWT_SECRET=${JWT_SECRET}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-    depends_on:
-      - mongodb
-    networks:
-      - ntcommerce-network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: ntcommerce-frontend
-    restart: always
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_BACKEND_URL=${BACKEND_URL}
-    networks:
-      - ntcommerce-network
-
-volumes:
-  mongo_data:
-
-networks:
-  ntcommerce-network:
-    driver: bridge
-```
-
-### 2. Dockerfile للـ Backend
-
-```dockerfile
-# backend/Dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application
-COPY . .
-
-# Expose port
-EXPOSE 8001
-
-# Run the application
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
-```
-
-### 3. Dockerfile للـ Frontend
-
-```dockerfile
-# frontend/Dockerfile
-FROM node:18-alpine AS builder
-
-WORKDIR /app
-
-# Install dependencies
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
-
-# Copy source and build
-COPY . .
-RUN yarn build
-
-# Production image
-FROM nginx:alpine
-COPY --from=builder /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-EXPOSE 3000
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-### 4. تشغيل Docker Compose
-
+### 1. Build
 ```bash
-# إنشاء ملف .env
-cp .env.example .env
-nano .env  # تعديل المتغيرات
-
-# بناء وتشغيل
-docker-compose up -d --build
-
-# التحقق من الحالة
-docker-compose ps
-docker-compose logs -f
+docker build \
+  --build-arg REACT_APP_BACKEND_URL=https://your-app.example.com \
+  -f Dockerfile.base \
+  -t ntcommerce/v16:latest .
 ```
 
----
-
-## 🔒 إعداد SSL مع Nginx
-
-### nginx.conf
-
-```nginx
-server {
-    listen 80;
-    server_name yourdomain.com;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name yourdomain.com;
-
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
-    # Frontend
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # Backend API
-    location /api {
-        proxy_pass http://localhost:8001;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Static files
-    location /static {
-        proxy_pass http://localhost:8001/static;
-    }
-}
-```
-
-### تثبيت SSL
-
+### 2. Run
 ```bash
-# تثبيت Certbot
-sudo apt install certbot python3-certbot-nginx
-
-# الحصول على شهادة
-sudo certbot --nginx -d yourdomain.com
-
-# تجديد تلقائي
-sudo certbot renew --dry-run
+docker run -d --name ntc \
+  -p 80:80 \
+  -e MONGO_URL='mongodb+srv://USER:PASS@cluster.mongodb.net' \
+  -e DB_NAME='ntcommerce_prod' \
+  -e SECRET_KEY="$(openssl rand -hex 32)" \
+  -e RESEND_API_KEY='re_xxxxxxxxxxxxxxxx' \
+  -e SENDER_EMAIL='noreply@yourdomain.com' \
+  -e EMERGENT_LLM_KEY='sk-emergent-xxxxxxxx' \
+  ntcommerce/v16:latest
 ```
 
----
-
-## 📊 المراقبة والصيانة
-
-### سجلات التطبيق
-
+### 3. Verify
 ```bash
-# عرض سجلات Backend
-docker-compose logs -f backend
-
-# عرض سجلات Frontend
-docker-compose logs -f frontend
-
-# عرض سجلات MongoDB
-docker-compose logs -f mongodb
+curl http://localhost/api/health
+# → {"status":"ok"}
 ```
 
-### النسخ الاحتياطي
+## Required environment variables
 
-```bash
-# نسخ احتياطي لقاعدة البيانات
-docker exec ntcommerce-mongo mongodump \
-    --username admin \
-    --password $MONGO_PASSWORD \
-    --out /backup/$(date +%Y%m%d)
+| Variable | Required | Purpose |
+|---|---|---|
+| `MONGO_URL` | ✅ | MongoDB connection (Atlas / self-hosted) |
+| `DB_NAME` | ✅ | Database name (isolates dev/staging/prod) |
+| `SECRET_KEY` | ✅ | JWT signing — generate with `openssl rand -hex 32` |
+| `EMERGENT_LLM_KEY` | ✅ | LLM (AI Insights + Co-pilot + Lead categorization) |
+| `RESEND_API_KEY` | ⚪ | Email (Resend) — falls back to mock if absent |
+| `SENDER_EMAIL` | ⚪ | Verified sender domain for Resend |
+| `SENDGRID_API_KEY` | ⚪ | Email (SendGrid) fallback |
+| `CACHE_REDIS_URL` | auto | Set inside Dockerfile to `redis://127.0.0.1:6379/0` |
 
-# نسخ من الحاوية
-docker cp ntcommerce-mongo:/backup ./backups/
+> **Note:** `RESEND_API_KEY` and `SENDER_EMAIL` can ALSO be configured at runtime by the super-admin via `/saas-admin/email-settings` (stored in `main_db.platform_settings`). DB values take precedence over env.
+
+## Architecture (single-container)
+
+```
+┌──────────────────────── nginx :80 ────────────────────────┐
+│  • static /app/frontend/build (React SPA)                  │
+│  • /api/* → http://127.0.0.1:8001 (FastAPI)               │
+└────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┴────────────────────┐
+        ▼                                          ▼
+┌──── uvicorn :8001 ──────┐               ┌── redis :6379 ───┐
+│  FastAPI + supervisor   │               │ @cached_json     │
+│  • 2 workers            │               │ • 1-hr AI cache  │
+│  • all routes /api/*    │ ◄────────────►│ • debt stats     │
+└─────────────────────────┘               └──────────────────┘
+                │
+                ▼
+        ┌─── External MongoDB Atlas ───┐
+        │  • main_db.saas_*             │
+        │  • tenant_<id>.ecom_*         │
+        └───────────────────────────────┘
 ```
 
-### التحديثات
+## Webhooks (real channel integrations)
 
-```bash
-# سحب آخر التغييرات
-git pull origin main
+Once deployed, configure these webhook URLs in each external channel. The frontend Channels page auto-displays the Shopify URL when editing an integration; other channels follow the same pattern.
 
-# إعادة بناء ونشر
-docker-compose down
-docker-compose up -d --build
+| Channel | URL Template |
+|---|---|
+| Shopify orders | `…/api/ecom/webhooks/shopify/{TENANT_ID}/{INTEGRATION_ID}/orders` |
+| Shopify products | `…/api/ecom/webhooks/shopify/{TENANT_ID}/{INTEGRATION_ID}/products` |
+| WhatsApp Cloud API | `…/api/ecom/webhooks/whatsapp/{TENANT_ID}/{INTEGRATION_ID}` |
+| Meta (FB/IG leads) | `…/api/ecom/webhooks/meta/{TENANT_ID}/{INTEGRATION_ID}` |
+| Telegram Bot | `…/api/ecom/webhooks/telegram/{TENANT_ID}/{INTEGRATION_ID}` |
+| Viber Bot | `…/api/ecom/webhooks/viber/{TENANT_ID}/{INTEGRATION_ID}` |
+| TikTok Shop | `…/api/ecom/webhooks/tiktok/{TENANT_ID}/{INTEGRATION_ID}` |
 
-# تنظيف الصور القديمة
-docker image prune -f
-```
+## Scaling beyond a single container
 
----
+When traffic exceeds ~1k req/s on a single node:
+1. Move Redis to managed (Upstash / Elasticache) → set `CACHE_REDIS_URL=redis://...`.
+2. Remove in-container redis from `supervisord.conf`.
+3. Run multiple replicas behind a load balancer (Cloudflare, ALB, Nginx Plus).
+4. Optional: split nginx and uvicorn into separate services (Kubernetes Deployment + Service).
 
-## ⚙️ متغيرات البيئة المطلوبة
+## Health monitoring
 
-| المتغير | الوصف | مثال |
-|---------|-------|------|
-| `MONGO_URL` | رابط MongoDB | `mongodb://user:pass@host:27017` |
-| `DB_NAME` | اسم قاعدة البيانات | `ntcommerce` |
-| `JWT_SECRET` | مفتاح JWT | `random-secure-string` |
-| `STRIPE_SECRET_KEY` | مفتاح Stripe | `sk_live_...` |
-| `SENDGRID_API_KEY` | مفتاح SendGrid | `SG...` |
-| `BACKEND_URL` | رابط Backend | `https://api.yourdomain.com` |
-
----
-
-## 🔧 استكشاف الأخطاء
-
-### مشاكل شائعة
-
-1. **خطأ في الاتصال بـ MongoDB**
-   ```bash
-   docker-compose logs mongodb
-   # تأكد من صحة MONGO_URL
-   ```
-
-2. **خطأ 502 Bad Gateway**
-   ```bash
-   # تأكد من أن Backend يعمل
-   docker-compose ps
-   curl http://localhost:8001/health
-   ```
-
-3. **مشاكل CORS**
-   ```bash
-   # تأكد من إعدادات CORS في Backend
-   # وأن REACT_APP_BACKEND_URL صحيح
-   ```
-
----
-
-## 📞 الدعم
-
-للمساعدة في النشر، تواصل معنا:
-- 📧 support@ntcommerce.com
+The container exposes `/api/health` for orchestrators. The super-admin dashboard at `/saas-admin` shows:
+- **AI Insights Card** — hourly LLM platform-health snapshot
+- **Health Alerts Card** — listed when score < 75 with one-click resolve
+- Email alerts auto-sent to all super-admins when severity ≥ warning (throttled to 1/24h per severity)

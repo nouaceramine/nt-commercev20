@@ -1,0 +1,114 @@
+# NT Commerce v16 — Production Base Image
+#
+# Builds a self-contained image with:
+#   • Python 3.11 + FastAPI backend (uvicorn, supervised)
+#   • Node 20 + Yarn for building the React frontend (served via nginx)
+#   • Redis 7 (local, on the same container — for low-latency @cached_json)
+#   • Supervisor (orchestrates: backend, nginx, redis-server)
+#   • All Python deps including `resend` (email), `emergentintegrations` (LLM)
+#
+# Build:
+#   docker build -f Dockerfile.base -t ntcommerce/v16:latest .
+#
+# Run (env-driven):
+#   docker run -p 80:80 -e MONGO_URL='mongodb+srv://...' -e DB_NAME='ntc' \
+#              -e RESEND_API_KEY='re_xxx' -e SENDER_EMAIL='noreply@yourdomain.com' \
+#              -e EMERGENT_LLM_KEY='sk-xxx' ntcommerce/v16:latest
+#
+# Notes:
+#   • MongoDB is expected to run OUTSIDE the container (Atlas / managed). DB_NAME isolates DBs per env.
+#   • Redis is in-container only (single-node, sized for ~5k QPS). For multi-node, replace
+#     CACHE_REDIS_URL with an external Redis (Upstash / Elasticache).
+
+FROM python:3.11-slim AS python-base
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# OS deps: nginx (serves frontend) + redis + supervisor + node 20 (for frontend build)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nginx redis-server supervisor curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g yarn \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python deps ────────────────────────────────────────────────────────────
+WORKDIR /app
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /app/backend/requirements.txt \
+    && pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+
+# ── Build the frontend ─────────────────────────────────────────────────────
+COPY frontend/package.json frontend/yarn.lock /app/frontend/
+WORKDIR /app/frontend
+RUN yarn install --frozen-lockfile
+COPY frontend /app/frontend
+# The build expects REACT_APP_BACKEND_URL at build time — pass --build-arg
+ARG REACT_APP_BACKEND_URL=https://your-app.example.com
+ENV REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL}
+RUN yarn build
+
+# ── Copy the backend code ──────────────────────────────────────────────────
+COPY backend /app/backend
+
+# ── Nginx — serve built frontend + proxy /api → backend:8001 ───────────────
+RUN rm /etc/nginx/sites-enabled/default
+COPY <<'NGINX' /etc/nginx/conf.d/ntc.conf
+server {
+    listen 80 default_server;
+    root /app/frontend/build;
+    index index.html;
+    client_max_body_size 50M;
+
+    # API → backend
+    location /api/ {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+NGINX
+
+# ── Supervisor — manage redis + backend + nginx ────────────────────────────
+COPY <<'SUPER' /etc/supervisor/conf.d/ntc.conf
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisord.log
+
+[program:redis]
+command=/usr/bin/redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no
+autorestart=true
+stdout_logfile=/var/log/redis.log
+stderr_logfile=/var/log/redis.err.log
+
+[program:backend]
+command=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8001 --workers 2
+directory=/app/backend
+environment=CACHE_REDIS_URL="redis://127.0.0.1:6379/0"
+autorestart=true
+stdout_logfile=/var/log/backend.log
+stderr_logfile=/var/log/backend.err.log
+
+[program:nginx]
+command=/usr/sbin/nginx -g "daemon off;"
+autorestart=true
+stdout_logfile=/var/log/nginx.log
+stderr_logfile=/var/log/nginx.err.log
+SUPER
+
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1/api/health || exit 1
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

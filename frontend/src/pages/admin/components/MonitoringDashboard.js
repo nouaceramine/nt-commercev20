@@ -12,6 +12,7 @@ import {
 import PlatformCapacityCard from './PlatformCapacityCard';
 import { ServiceStatusMap } from './ServiceStatusMap';
 import AIInsightsCard from './AIInsightsCard';
+import HealthAlertsCard from './HealthAlertsCard';
 
 const QUICK_LINKS = [
   { to: '/saas-admin/subscribers',       Icon: Users,         labelAr: 'المشتركين' },
@@ -161,6 +162,9 @@ export const MonitoringDashboard = () => {
 
       {/* AI-Powered Platform Insights (iter 18.2) */}
       <AIInsightsCard />
+
+      {/* Health Score Alerts (iter 18.4) */}
+      <HealthAlertsCard />
 
       {/* Platform Capacity */}
       <PlatformCapacityCard />

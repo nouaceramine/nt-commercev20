@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { BarChart3, TrendingUp, Trophy, Activity, ArrowRight, RefreshCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
+import { EcomCopilotChat } from './EcomCopilotChat';
 
 const CHANNEL_HEX = {
   pos: '#10b981', shopify: '#96bf48', facebook: '#1877f2', instagram: '#e4405f',
@@ -120,6 +121,9 @@ export default function EcomAnalyticsPage() {
             </CardContent></Card>
           </div>
         )}
+
+        {/* AI Co-pilot (iter 18.4) */}
+        <EcomCopilotChat days={days} />
 
         {/* Revenue time series */}
         <Card>

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
-from config.database import db, client
+from config.database import db, client, main_db
 from utils.cache import cached_json
 from .schemas import SubscriptionPaymentResponse
 from .helpers import get_super_admin
@@ -222,8 +222,19 @@ async def _generate_cached_insights(admin: dict) -> dict:
 
 @router.get("/saas/ai-insights")
 async def get_ai_insights(admin: dict = Depends(get_super_admin)):
-    """LLM-powered platform health snapshot — refreshed hourly via Redis cache."""
-    return await _generate_cached_insights(admin)
+    """LLM-powered platform health snapshot — refreshed hourly via Redis cache.
+
+    Side-effect: evaluates the score and fires a Health Alert (email + DB row)
+    when severity changes or 24h elapsed since the last same-severity alert.
+    """
+    insights = await _generate_cached_insights(admin)
+    try:
+        from services.health_alerts_service import evaluate_and_alert
+        await evaluate_and_alert(insights)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Health alert evaluation failed: %s", exc)
+    return insights
 
 
 @router.post("/saas/ai-insights/refresh")
@@ -235,3 +246,45 @@ async def refresh_ai_insights(admin: dict = Depends(get_super_admin)):
     except Exception:
         pass
     return await _generate_cached_insights(admin)
+
+
+@router.get("/saas/health-alerts")
+async def list_health_alerts(
+    limit: int = 50,
+    admin: dict = Depends(get_super_admin),
+):
+    """Recent health alerts (most recent first). Lightweight projection."""
+    rows = await main_db.platform_alerts.find(
+        {"kind": "health_score"},
+        {"_id": 0, "metrics_snapshot": 0},
+    ).sort("created_at", -1).limit(max(1, min(limit, 200))).to_list(200)
+    open_count = await main_db.platform_alerts.count_documents(
+        {"kind": "health_score", "resolved_at": None}
+    )
+    return {"items": rows, "open_count": open_count}
+
+
+@router.post("/saas/health-alerts/{alert_id}/resolve")
+async def resolve_health_alert(alert_id: str, admin: dict = Depends(get_super_admin)):
+    """Mark a health alert as resolved (audit trail of admin acknowledgement)."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(alert_id)
+    except Exception:
+        # Allow string id matching too (defensive)
+        result = await main_db.platform_alerts.update_one(
+            {"_id": alert_id, "resolved_at": None},
+            {"$set": {"resolved_at": datetime.now(timezone.utc).isoformat(), "resolved_by": admin.get("id")}},
+        )
+        if result.matched_count == 0:
+            from fastapi import HTTPException as _HE
+            raise _HE(status_code=404, detail="Alert not found")
+        return {"ok": True}
+    result = await main_db.platform_alerts.update_one(
+        {"_id": oid, "resolved_at": None},
+        {"$set": {"resolved_at": datetime.now(timezone.utc).isoformat(), "resolved_by": admin.get("id")}},
+    )
+    if result.matched_count == 0:
+        from fastapi import HTTPException as _HE
+        raise _HE(status_code=404, detail="Alert not found")
+    return {"ok": True}
