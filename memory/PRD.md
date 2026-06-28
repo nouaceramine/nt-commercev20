@@ -565,3 +565,38 @@ Built per `Event_Driven_Sync_System_Requirements.docx`. User chose 1a (run all 4
 - **P3 — Shareable analytics dashboards via token-gated links.**
 - **P3 — Email template polish + CSV export for analytics + per-order PDF invoices.**
 - **Backlog (tech-debt)** — Split `PlatformFinanceTab.js` (~1000 LOC) and `SaasAdminPage.js` (~1100 LOC) into smaller route-level components.
+
+---
+
+## Iteration 28 — Commercial Launch Preparation (Feb 2026)
+
+User intent: تجهيز النظام للبيع التجاري. أنجزنا:
+
+### Deployment hardening
+- Removed `scikit-learn==1.9.0`, `scipy==1.17.1`, `numpy==2.4.6`, `joblib`, `threadpoolctl` from `requirements.txt` (blockers on Emergent 250m CPU / 1Gi RAM Kubernetes).
+- Refactored `robots/inventory_robot.py` to use pure-Python OLS linear regression (`_linreg_slope_intercept`) instead of `sklearn.LinearRegression` + numpy.
+- Refactored `robots/prediction_robot.py` to use `sum(...) / len(...)` instead of `np.mean`.
+- Updated `.gitignore` to no longer block `.env` / `.env.*` / `*.env` (required by Emergent deployment).
+- Suppressed benign `ResizeObserver loop completed with undelivered notifications` overlay in `/app/frontend/src/index.js`.
+
+### Landing page enhancement (`/`)
+- `/` now serves `LandingPage` for unauthenticated visitors via a new `HomeRouter` component in App.js (still routes authenticated users to their proper dashboards).
+- Added 4 new sections to `LandingPage.js`:
+  1. **Pain Points** (6 problem → solution cards in Arabic).
+  2. **Dashboard Preview** (4 feature showcase cards with glow effects: POS, Dashboard, E-commerce+Yalidine, Cards/Idoom/SIM).
+  3. **FAQ** (8 collapsible Q&A items with interactive expand/collapse).
+  4. **Contact/Demo Booking** (3 contact channel cards + WhatsApp-prefilled form).
+- Updated nav to include FAQ + Contact links.
+- All sections have `data-testid` attributes for QA.
+
+### Production credentials prepared
+- Generated cryptographically-strong JWT_SECRET_KEY using `secrets.token_urlsafe(64)`.
+- Documented full Upstash Redis setup playbook (free tier, eu-west-1 region recommended for Algeria).
+
+## Next Action Items (post-iter-28)
+- **🚀 IMMEDIATE:** User to Save to GitHub + Deploy on Emergent with the prepared env vars.
+- **⚙️ Post-deploy:** Update placeholder WhatsApp number `+213 555 000 000` in `LandingPage.js` (3 occurrences) with real business contact.
+- **🎨 P3:** Add real product screenshots to Dashboard Preview section (currently icon-only).
+- **🎨 P3:** Wire real testimonials (replace 3 hardcoded ones with DB-backed `/api/saas/testimonials`).
+- **📊 P2:** Add Google Analytics + Meta Pixel to LandingPage for conversion tracking.
+- **🔍 P2:** SEO meta tags + Open Graph + sitemap.xml for landing page.

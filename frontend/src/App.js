@@ -240,6 +240,32 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
+// Home route: shows LandingPage for unauthenticated visitors,
+// otherwise routes to the correct dashboard per role.
+const HomeRouter = () => {
+  const { isAuthenticated, loading, isSuperAdmin, isAgent } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LandingPage />;
+  }
+  if (isSuperAdmin) return <Navigate to="/saas-admin" replace />;
+  if (isAgent) return <Navigate to="/agent/dashboard" replace />;
+  // Authenticated tenant/cashier/admin → real dashboard
+  return (
+    <ProtectedRoute>
+      <DashboardPage />
+    </ProtectedRoute>
+  );
+};
+
 function AppRoutes() {
   return (
     <Routes>
@@ -512,13 +538,10 @@ function AppRoutes() {
       />
 
       {/* Protected Routes */}
+      {/* `/` shows landing page for guests; dashboard for authenticated users */}
       <Route
         path="/"
-        element={
-          <ProtectedRoute>
-            <DashboardPage />
-          </ProtectedRoute>
-        }
+        element={<HomeRouter />}
       />
       <Route
         path="/pos"
