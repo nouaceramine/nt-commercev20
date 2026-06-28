@@ -175,7 +175,7 @@ export default function LandingPage() {
     e.preventDefault();
     // Build WhatsApp message
     const text = `استفسار من ${contact.name || 'زائر'} (${contact.phone || '-'}): ${contact.message || ''}`;
-    const whatsappUrl = `https://wa.me/213555000000?text=${encodeURIComponent(text)}`;
+    const whatsappUrl = `https://wa.me/213550552912?text=${encodeURIComponent(text)}`;
     window.open(whatsappUrl, '_blank');
     setContactSent(true);
     setTimeout(() => setContactSent(false), 4000);
@@ -638,7 +638,7 @@ export default function LandingPage() {
 
               <div className="space-y-4">
                 <a
-                  href="https://wa.me/213555000000"
+                  href="https://wa.me/213550552912"
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-4 p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50 transition group"
                   data-testid="contact-whatsapp"
@@ -648,13 +648,13 @@ export default function LandingPage() {
                   </div>
                   <div className="flex-1">
                     <div className="font-bold text-gray-900">WhatsApp</div>
-                    <div className="text-sm text-gray-600" dir="ltr">+213 555 000 000</div>
+                    <div className="text-sm text-gray-600" dir="ltr">+213 550 55 29 12</div>
                   </div>
                   <ChevronRight className="h-5 w-5 text-emerald-600 group-hover:-translate-x-1 transition" />
                 </a>
 
                 <a
-                  href="mailto:sales@ntcommerce.com"
+                  href="mailto:contact@nt.dz"
                   className="flex items-center gap-4 p-4 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-50 transition group"
                   data-testid="contact-email"
                 >
@@ -663,13 +663,13 @@ export default function LandingPage() {
                   </div>
                   <div className="flex-1">
                     <div className="font-bold text-gray-900">البريد الإلكتروني</div>
-                    <div className="text-sm text-gray-600" dir="ltr">sales@ntcommerce.com</div>
+                    <div className="text-sm text-gray-600" dir="ltr">contact@nt.dz</div>
                   </div>
                   <ChevronRight className="h-5 w-5 text-blue-600 group-hover:-translate-x-1 transition" />
                 </a>
 
                 <a
-                  href="tel:+213555000000"
+                  href="tel:+213550552912"
                   className="flex items-center gap-4 p-4 rounded-xl border border-purple-200 bg-purple-50/50 hover:bg-purple-50 transition group"
                   data-testid="contact-phone"
                 >
@@ -678,7 +678,7 @@ export default function LandingPage() {
                   </div>
                   <div className="flex-1">
                     <div className="font-bold text-gray-900">الهاتف</div>
-                    <div className="text-sm text-gray-600" dir="ltr">+213 555 000 000</div>
+                    <div className="text-sm text-gray-600" dir="ltr">+213 550 55 29 12</div>
                   </div>
                   <ChevronRight className="h-5 w-5 text-purple-600 group-hover:-translate-x-1 transition" />
                 </a>
@@ -711,7 +711,7 @@ export default function LandingPage() {
                       value={contact.phone}
                       onChange={(e) => setContact({ ...contact, phone: e.target.value })}
                       className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition"
-                      placeholder="0555 00 00 00"
+                      placeholder="0550 55 29 12"
                       dir="ltr"
                       required
                     />
@@ -800,13 +800,13 @@ export default function LandingPage() {
               <ul className="space-y-2 text-sm">
                 <li><a href="#faq" className="hover:text-white transition">الأسئلة الشائعة</a></li>
                 <li><a href="#contact" className="hover:text-white transition">تواصل معنا</a></li>
-                <li><a href="https://wa.me/213555000000" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">WhatsApp</a></li>
+                <li><a href="https://wa.me/213550552912" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">WhatsApp</a></li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold text-white mb-4">تواصل معنا</h4>
               <ul className="space-y-2 text-sm">
-                <li>support@ntcommerce.com</li>
+                <li>support@nt.dz</li>
                 <li dir="ltr">+213 XXX XXX XXX</li>
               </ul>
             </div>
