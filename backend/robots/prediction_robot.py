@@ -10,10 +10,10 @@ import uuid
 logger = logging.getLogger(__name__)
 
 try:
-    import numpy as np
+    import numpy as np  # noqa: F401 — kept for compat; not required after refactor
     ML_AVAILABLE = True
 except ImportError:
-    ML_AVAILABLE = False
+    ML_AVAILABLE = True  # we now use pure-Python statistics
 
 
 class PredictionRobot:
@@ -85,7 +85,7 @@ class PredictionRobot:
                 sales = await tdb.sales.find({"created_at": {"$gte": cutoff}}, {"_id": 0, "total": 1}).to_list(None)
                 if sales and ML_AVAILABLE:
                     totals = [s.get("total", 0) for s in sales]
-                    daily_avg = np.mean(totals) if totals else 0
+                    daily_avg = (sum(totals) / len(totals)) if totals else 0
                     total_predicted += daily_avg * days
                 elif sales:
                     daily_avg = sum(s.get("total", 0) for s in sales) / max(len(sales), 1)

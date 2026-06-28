@@ -9,14 +9,25 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-# Optional ML imports
-try:
-    import numpy as np
-    from sklearn.linear_model import LinearRegression
-    ML_AVAILABLE = True
-except ImportError:
-    ML_AVAILABLE = False
-    logger.warning("scikit-learn not available - stockout prediction disabled")
+# Stockout prediction uses pure-Python linear regression (no sklearn/numpy
+# needed — those libs were dropped to fit the deployment memory budget).
+ML_AVAILABLE = True
+
+
+def _linreg_slope_intercept(xs: list[float], ys: list[float]) -> tuple[float, float]:
+    """Ordinary least squares — returns (slope, intercept). O(n), no deps."""
+    n = len(xs)
+    if n == 0:
+        return 0.0, 0.0
+    sx = sum(xs); sy = sum(ys)
+    sxx = sum(x * x for x in xs)
+    sxy = sum(x * y for x, y in zip(xs, ys))
+    denom = (n * sxx) - (sx * sx)
+    if denom == 0:
+        return 0.0, sy / n
+    slope = ((n * sxy) - (sx * sy)) / denom
+    intercept = (sy - slope * sx) / n
+    return slope, intercept
 
 
 class InventoryRobot:
@@ -147,13 +158,12 @@ class InventoryRobot:
             ]
             daily_sales = await tdb.sales.aggregate(pipeline).to_list(30)
             if len(daily_sales) >= 7:
-                X = np.array(range(len(daily_sales))).reshape(-1, 1)
-                y = np.array([d["quantity"] for d in daily_sales])
-                model = LinearRegression()
-                model.fit(X, y)
-                future_X = np.array(range(len(daily_sales), len(daily_sales) + 7)).reshape(-1, 1)
-                preds = model.predict(future_X)
-                avg_daily = max(np.mean(preds), 0.01)
+                xs = [float(i) for i in range(len(daily_sales))]
+                ys = [float(d["quantity"]) for d in daily_sales]
+                slope, intercept = _linreg_slope_intercept(xs, ys)
+                # Predict next 7 days, then average
+                future_preds = [slope * (len(daily_sales) + i) + intercept for i in range(7)]
+                avg_daily = max(sum(future_preds) / len(future_preds), 0.01)
                 current_stock = product.get("quantity", 0)
                 days_until_out = current_stock / avg_daily
                 if days_until_out < 14:
