@@ -362,6 +362,105 @@ def build_financial_router() -> APIRouter:
             },
             "top_tenants":   top_tenants,
             "top_suppliers": top_suppliers,
+            "daily_trend":   await _build_daily_trend(cutoff, cutoff_date),
+        }
+
+    # ── Product-level profitability ──────────────────────────────────────
+    @router.get("/admin/supplier/financial/product-profitability")
+    async def product_profitability(
+        admin: dict = Depends(get_super_admin),
+        catalog_id: str = Query(..., min_length=1),
+        stock_type: str = Query(..., pattern="^(card|sim|idoom)$"),
+    ):
+        """Per-product P&L: total qty sold, gross revenue, total cost, gross
+        profit, margin %, best customer (tenant) — all derived from the
+        per-code stock rows + supplier_orders + supplier_purchases data.
+
+        UX: super-admin picks a catalog item from a dropdown and sees how
+        profitable that SKU actually is, with a recommendation if margin is low.
+        """
+        catalog_coll = {"card": "platform_card_catalog", "sim": "platform_sim_catalog", "idoom": "platform_idoom_catalog"}[stock_type]
+        stock_coll_name = {"card": "platform_card_stock", "sim": "platform_sim_stock", "idoom": "platform_idoom_stock"}[stock_type]
+        catalog = await getattr(main_db, catalog_coll).find_one({"id": catalog_id}, {"_id": 0})
+        if not catalog:
+            raise HTTPException(status_code=404, detail="فئة الكاتالوج غير موجودة")
+
+        # All stock rows for this catalog item
+        total_stock = await getattr(main_db, stock_coll_name).count_documents({"catalog_id": catalog_id})
+        available = await getattr(main_db, stock_coll_name).count_documents({"catalog_id": catalog_id, "status": "available"})
+        sold = await getattr(main_db, stock_coll_name).count_documents({"catalog_id": catalog_id, "status": "sold"})
+        sold_stock_ids = [d["id"] async for d in getattr(main_db, stock_coll_name).find({"catalog_id": catalog_id, "status": "sold"}, {"_id": 0, "id": 1})]
+
+        # Revenue — sum of unit_price for matching order lines
+        revenue = 0.0
+        tenant_breakdown: dict = {}
+        if sold_stock_ids:
+            async for order in main_db.supplier_orders.find(
+                {"items.code_ids": {"$in": sold_stock_ids}},
+                {"_id": 0, "tenant_id": 1, "items": 1},
+            ):
+                tid = order.get("tenant_id")
+                for it in (order.get("items") or []):
+                    matches = [cid for cid in (it.get("code_ids") or []) if cid in sold_stock_ids]
+                    if matches and it.get("unit_price") is not None:
+                        line_rev = float(it["unit_price"]) * len(matches)
+                        revenue += line_rev
+                        if tid:
+                            tenant_breakdown[tid] = tenant_breakdown.get(tid, {"qty": 0, "revenue": 0.0})
+                            tenant_breakdown[tid]["qty"] += len(matches)
+                            tenant_breakdown[tid]["revenue"] += line_rev
+
+        # Cost — pulled from any purchase line that targets this catalog item.
+        # Uses the weighted average cost across all purchases (closest to FIFO without per-code tracking)
+        cost_pipeline = [
+            {"$unwind": "$items"},
+            {"$match": {"items.catalog_id": catalog_id, "items.type": stock_type}},
+            {"$group": {
+                "_id": None,
+                "total_qty": {"$sum": "$items.quantity"},
+                "total_cost": {"$sum": {"$multiply": ["$items.quantity", "$items.unit_cost"]}},
+            }},
+        ]
+        cost_doc = await main_db.supplier_purchases.aggregate(cost_pipeline).to_list(1)
+        avg_unit_cost = (cost_doc[0]["total_cost"] / cost_doc[0]["total_qty"]) if cost_doc and cost_doc[0]["total_qty"] > 0 else 0.0
+        cost_of_sold = round(avg_unit_cost * sold, 2)
+        gross_profit = round(revenue - cost_of_sold, 2)
+        margin_pct = round((gross_profit / revenue * 100), 1) if revenue > 0 else 0.0
+
+        # Best customer
+        best_tenant = None
+        if tenant_breakdown:
+            best_tid = max(tenant_breakdown, key=lambda k: tenant_breakdown[k]["revenue"])
+            t = await main_db.saas_tenants.find_one({"id": best_tid}, {"_id": 0, "name": 1, "company_name": 1}) or {}
+            best_tenant = {
+                "tenant_id":   best_tid,
+                "tenant_name": t.get("name") or t.get("company_name") or best_tid[:8],
+                "qty_bought":  tenant_breakdown[best_tid]["qty"],
+                "revenue":     round(tenant_breakdown[best_tid]["revenue"], 2),
+            }
+
+        # Lightweight recommendation engine
+        recommendation = None
+        if revenue > 0:
+            if margin_pct < 10:
+                recommendation = "📉 الهامش منخفض جداً — فكِّر برفع سعر البيع أو التفاوض على سعر شراء أقل."
+            elif margin_pct < 20:
+                recommendation = "💡 الهامش متوسط — رفع السعر بنسبة 5-10% قد يكون آمناً."
+            elif margin_pct > 40:
+                recommendation = "🏆 هامش ممتاز — ركِّز جهد المبيعات على هذا المنتج!"
+
+        return {
+            "catalog_id":   catalog_id,
+            "stock_type":   stock_type,
+            "catalog":      catalog,
+            "inventory":    {"total": total_stock, "available": available, "sold": sold},
+            "revenue":      round(revenue, 2),
+            "avg_unit_cost": round(avg_unit_cost, 2),
+            "cost_of_sold": cost_of_sold,
+            "gross_profit": gross_profit,
+            "margin_pct":   margin_pct,
+            "best_tenant":  best_tenant,
+            "recommendation": recommendation,
         }
 
     # ── Catalog reference (for the Purchase-form item dropdown) ──────────
@@ -561,3 +660,39 @@ def build_financial_router() -> APIRouter:
         }
 
     return router
+
+
+async def _build_daily_trend(cutoff_iso: str, cutoff_date: str) -> list:
+    """Per-day {date, revenue, cost, profit} buckets for the dashboard chart.
+
+    Aggregates `supplier_orders.total` (revenue side) and
+    `supplier_purchases.total_cost` (cost side) by ISO day. Profit per day
+    is derived client-side from both numbers.
+    """
+    # Revenue per day
+    rev_by_day: dict = {}
+    async for row in main_db.supplier_orders.aggregate([
+        {"$match": {"status": "completed", "created_at": {"$gte": cutoff_iso}}},
+        {"$group": {"_id": {"$substr": ["$created_at", 0, 10]}, "revenue": {"$sum": "$total"}}},
+    ]):
+        rev_by_day[row["_id"]] = round(float(row["revenue"]), 2)
+
+    # Cost per day
+    cost_by_day: dict = {}
+    async for row in main_db.supplier_purchases.aggregate([
+        {"$match": {"purchase_date": {"$gte": cutoff_date}}},
+        {"$group": {"_id": {"$substr": ["$purchase_date", 0, 10]}, "cost": {"$sum": "$total_cost"}}},
+    ]):
+        cost_by_day[row["_id"]] = round(float(row["cost"]), 2)
+
+    all_days = sorted(set(rev_by_day) | set(cost_by_day))
+    return [
+        {
+            "date":   d,
+            "revenue": rev_by_day.get(d, 0),
+            "cost":    cost_by_day.get(d, 0),
+            "profit":  round(rev_by_day.get(d, 0) - cost_by_day.get(d, 0), 2),
+        }
+        for d in all_days
+    ]
+

@@ -483,7 +483,39 @@ complete origin → status → destination story.
 - **🧪 Tests** — `tests/test_iter25_code_trace.py` **4/4 PASS**: not-found, just-uploaded-with-origin, sold-with-profit, empty-code-rejected.
 - **Auth-throttle fix** — Cached the super-admin token at module level inside iter-25 tests so the brute-force throttle (`429`) doesn't fire when running the full suite back-to-back. Pattern can be applied to other iter-* tests if needed later.
 
-## Next Action Items (post-iter-25)
+## S22.12 — Big Bang Iteration: Ping + Quick wins + Charts + Profitability + PDF (2026-02 / iter 26)
+
+User asked: "اختر انت واكمل كل شيئ" — autonomy to ship everything actionable. Delivered 6 wins
+in one iteration. All 45 backend tests pass.
+
+### 🚦 Backend additions
+1. **Live ping for Shopify/Yalidine** (`routes/ecom/integrations_routes.py`) — wired the existing `ping()` services into `POST /ecom/integrations/{id}/test`. Returns `ok/error` + Arabic message — users see "✅ متصل بنجاح بمتجر X" or "❌ مفاتيح غير صحيحة" instead of the old stub-success.
+2. **Daily trend in financial summary** — `GET /admin/supplier/financial/summary?days=N` now returns `daily_trend: [{date, revenue, cost, profit}]` for chart rendering.
+3. **Product Profitability endpoint** — `GET /admin/supplier/financial/product-profitability?catalog_id=...&stock_type=card|sim|idoom` computes per-SKU revenue, cost-of-sold (weighted-avg), gross profit, margin %, best tenant, and a recommendation string (low margin → "ارفع السعر", high margin → "ركِّز جهدك هنا").
+
+### 🎨 Frontend additions
+4. **Recharts daily-trend chart** on the Finance dashboard sub-tab — 3-line chart (revenue/cost/profit), Arabic legend, RTL-aware tooltips.
+5. **"🎯 ربحية المنتج" sub-tab** in Finance — picks any item from the unified card/sim/idoom catalog dropdown, shows 4 KPI cards + best tenant card + smart-recommendation banner.
+6. **"📥 وضع التتبُّع الجماعي (CSV)"** toggle inside the Trace sub-tab — paste up to 500 codes, parallel-fans-out to the trace endpoint, downloads a single CSV with 11 columns (origin / status / sale / profit per code).
+7. **"📄 طباعة / PDF"** button on Finance dashboard — `lib/financeMonthlyReport.js` builds an A4 print-ready monthly P&L report (KPI grid + Top 5 tables + daily breakdown) using the same window.print() pattern as the e-com invoice. No backend dep, ready to "Save as PDF".
+8. **Inventory-link warning chip** in `EcomManualOrderDialog` — yellow banner when items have no `product_id`, reminding the user that stock won't auto-decrement on confirmation.
+
+### 🧪 Tests
+- `test_iter26_finance_extensions.py` **4/4 PASS** (daily_trend shape + profitability happy path + invalid-input rejection + margin calculation with simulated sale).
+- Full regression: **45/45 PASS** across iter-20 / 21 / 22 / 24 / 25 / 26.
+- Lint clean on all 5 changed/created files.
+
+### What this completes from the user's roadmap
+- ✅ #2 Ping endpoints (live)
+- ✅ #4 Recharts on Finance dashboard
+- ✅ #6 Product profitability report
+- ✅ #7 CSV export for Code Trace (bulk mode)
+- ✅ #3 PDF monthly report
+- ✅ #11 Inventory chip warning
+
+Remaining open: #5 WMS-Lite (heavy — deferred), #8 Shareable public dashboards (heavy — deferred), #9 EmailStr (already done in iter-21), #10 actual range in CSV filename (cosmetic — skipped).
+
+## Next Action Items (post-iter-26)
 - **🛍️ User adoption:** Switch from mock to live by entering real keys via `/ecom-hub/channels` (Shopify/Yalidine/WhatsApp/Meta/TikTok/Telegram/Viber) and `/saas-admin/email-settings` (Resend).
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).

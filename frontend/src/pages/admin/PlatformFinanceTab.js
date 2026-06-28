@@ -21,7 +21,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { toast } from "sonner";
 import apiClient from "../../lib/apiClient";
+import { downloadCsv, todayStamp } from "../../lib/csvExport";
+import { printFinanceMonthlyReport } from "../../lib/financeMonthlyReport";
 import { Loader2, Plus, Trash2, TrendingUp, TrendingDown, Wallet, Users, Truck, Receipt, Pencil, Banknote, AlertTriangle, RefreshCw, Upload, FileText, Search, Package, CheckCircle2, XCircle } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-DZ", { maximumFractionDigits: 2 });
 
@@ -86,6 +89,17 @@ export function PlatformFinanceTab() {
           <Button variant="outline" size="sm" onClick={loadAll} disabled={loading} data-testid="finance-refresh">
             <RefreshCw className={`h-4 w-4 me-1 ${loading ? "animate-spin" : ""}`} /> تحديث
           </Button>
+          <Button
+            variant="outline" size="sm"
+            disabled={!summary || loading}
+            onClick={() => {
+              const res = printFinanceMonthlyReport({ rangeDays: days, summary });
+              if (!res.ok && res.reason === "popup_blocked") toast.error("اسمح بالنوافذ المنبثقة للطباعة");
+            }}
+            data-testid="finance-print-pdf-btn"
+          >
+            <FileText className="h-4 w-4 me-1" /> طباعة / PDF
+          </Button>
         </div>
       </div>
 
@@ -94,6 +108,7 @@ export function PlatformFinanceTab() {
           <TabsTrigger value="dashboard" data-testid="finance-tab-dashboard">📊 لوحة المعلومات</TabsTrigger>
           <TabsTrigger value="suppliers" data-testid="finance-tab-suppliers">🏭 الموردون ({suppliers.length})</TabsTrigger>
           <TabsTrigger value="purchases" data-testid="finance-tab-purchases">📦 المشتريات ({purchases.length})</TabsTrigger>
+          <TabsTrigger value="profitability" data-testid="finance-tab-profitability">🎯 ربحية المنتج</TabsTrigger>
           <TabsTrigger value="trace" data-testid="finance-tab-trace">🔍 تتبُّع كود</TabsTrigger>
         </TabsList>
 
@@ -123,6 +138,29 @@ export function PlatformFinanceTab() {
                     لديك <strong>{fmt(kpis.total_accounts_payable)} دج</strong> ديون متراكمة لـ <strong>{kpis.suppliers_with_debt}</strong> مورد.
                     راجع تفاصيلهم في تبويب <span className="font-semibold">الموردون</span>.
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Daily trend chart — only render when we have data */}
+          {(summary?.daily_trend?.length || 0) > 0 && (
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-indigo-600" /> اتجاه الإيرادات/التكاليف اليومي</CardTitle></CardHeader>
+              <CardContent>
+                <div style={{ width: "100%", height: 260 }} data-testid="finance-trend-chart">
+                  <ResponsiveContainer>
+                    <LineChart data={summary.daily_trend} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => (d || "").slice(5)} />
+                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : v} />
+                      <Tooltip formatter={(v) => `${Number(v).toLocaleString("ar-DZ")} دج`} labelStyle={{ direction: "ltr" }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Line type="monotone" dataKey="revenue" name="إيرادات" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="cost"    name="تكاليف" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="profit"  name="ربح"    stroke="#6366f1" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               </CardContent>
             </Card>
@@ -315,6 +353,11 @@ export function PlatformFinanceTab() {
         {/* ── TRACE ────────────────────────────────────────────────────── */}
         <TabsContent value="trace" className="mt-3">
           <CodeTraceCard />
+        </TabsContent>
+
+        {/* ── PRODUCT PROFITABILITY ─────────────────────────────────────── */}
+        <TabsContent value="profitability" className="mt-3">
+          <ProductProfitabilityCard />
         </TabsContent>
 
       </Tabs>
@@ -803,6 +846,9 @@ function CodeTraceCard() {
   const [code, setCode] = useState("");
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const search = async () => {
     const q = code.trim();
@@ -818,43 +864,113 @@ function CodeTraceCard() {
     } finally { setBusy(false); }
   };
 
+  // Bulk: trace many codes at once → download CSV
+  const bulkExport = async () => {
+    const codes = bulkText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (codes.length === 0) { toast.error("الصق قائمة أكواد أولاً (سطر لكل كود)"); return; }
+    if (codes.length > 500) { toast.error("الحد الأقصى 500 كود في كل عملية"); return; }
+    setBulkBusy(true);
+    try {
+      // Fan-out tracer calls in parallel (browser caps the concurrency anyway)
+      const results = await Promise.allSettled(
+        codes.map(c => apiClient.get(`/admin/supplier/trace?code=${encodeURIComponent(c)}`).then(r => r.data))
+      );
+      const rows = results.map((r, i) => {
+        if (r.status !== "fulfilled" || !r.value.found) {
+          return [codes[i], "غير موجود", "", "", "", "", "", "", "", "", ""];
+        }
+        const d = r.value;
+        return [
+          d.code,
+          STOCK_TYPE_LABELS[d.stock_type] || d.stock_type,
+          d.catalog?.operator || "",
+          d.catalog?.denomination || d.catalog?.name_ar || "",
+          d.status || "",
+          d.origin?.supplier_name || "",
+          d.origin?.purchase_date || "",
+          d.origin?.unit_cost ?? "",
+          d.sale?.tenant_name || "",
+          d.sale?.sold_unit_price ?? "",
+          d.unit_profit ?? "",
+        ];
+      });
+      const headers = ["الكود", "النوع", "المُشغِّل", "الفئة", "الحالة", "المورد", "تاريخ الشراء", "سعر التكلفة", "المستأجر المشتري", "سعر البيع", "الربح"];
+      downloadCsv(`code-trace-${todayStamp()}-${codes.length}codes.csv`, headers, rows);
+      const foundCount = results.filter(r => r.status === "fulfilled" && r.value.found).length;
+      toast.success(`✅ صُدِّر تتبُّع ${foundCount}/${codes.length} كود إلى CSV`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "فشل التصدير");
+    } finally { setBulkBusy(false); }
+  };
+
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Search className="h-4 w-4 text-indigo-600" /> تتبُّع كود في سلسلة التوريد
-        </CardTitle>
-        <p className="text-xs text-muted-foreground mt-1">
-          الصق أي كود (بطاقة شحن، ICCID شريحة، أو كود Idoom) وسيعرض لك النظام رحلته الكاملة:
-          من أي مورد جاء، بسعر كم، حالته الحالية، ولمن بِعتَه.
-        </p>
+      <CardHeader className="pb-3 flex flex-row items-start justify-between flex-wrap gap-2">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Search className="h-4 w-4 text-indigo-600" /> تتبُّع كود في سلسلة التوريد
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            الصق أي كود (بطاقة شحن، ICCID شريحة، أو كود Idoom) وسيعرض لك النظام رحلته الكاملة.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setBulkMode(!bulkMode)} data-testid="trace-toggle-bulk">
+          {bulkMode ? "🔍 وضع البحث المفرد" : "📥 وضع التتبُّع الجماعي (CSV)"}
+        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex gap-2">
-          <Input
-            placeholder="مثال: ICCID-A7F3B2D9... أو 1234567890"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && search()}
-            className="font-mono"
-            data-testid="trace-code-input"
-          />
-          <Button onClick={search} disabled={busy} data-testid="trace-search-btn">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin ms-1" /> : <Search className="h-4 w-4 ms-1" />} ابحث
-          </Button>
-        </div>
-
-        {result && !result.found && (
-          <div className="bg-rose-50 border border-rose-200 rounded p-4 text-rose-800 flex gap-2 items-center" data-testid="trace-not-found">
-            <XCircle className="h-5 w-5" />
-            <div>
-              <div className="font-semibold">الكود غير موجود</div>
-              <div className="text-xs">الكود <span className="font-mono">{result.code}</span> لم يُسجَّل في أي من مخازن البطاقات / الشرائح / Idoom.</div>
+        {bulkMode ? (
+          <>
+            <div className="text-xs bg-indigo-50 border border-indigo-200 rounded p-2 text-indigo-900">
+              💡 الصق قائمة من الأكواد (سطر لكل كود — حتى 500 كود) ثم اضغط تصدير. ستحصل على ملف CSV
+              بتفاصيل المصدر، الحالة، والمشتري لكل كود — مثالي للجرد والمراجعة.
             </div>
-          </div>
+            <textarea
+              rows={10}
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              className="w-full border rounded p-2 font-mono text-sm"
+              placeholder="ICCID-A7F3B2D9...&#10;ICCID-FB28C100...&#10;1234567890..."
+              data-testid="trace-bulk-textarea"
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {bulkText.split(/\r?\n/).filter(s => s.trim()).length} كود مُدخَل
+              </span>
+              <Button onClick={bulkExport} disabled={bulkBusy} data-testid="trace-bulk-export">
+                {bulkBusy ? <Loader2 className="h-4 w-4 animate-spin ms-1" /> : <FileText className="h-4 w-4 ms-1" />} تصدير CSV
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <Input
+                placeholder="مثال: ICCID-A7F3B2D9... أو 1234567890"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && search()}
+                className="font-mono"
+                data-testid="trace-code-input"
+              />
+              <Button onClick={search} disabled={busy} data-testid="trace-search-btn">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin ms-1" /> : <Search className="h-4 w-4 ms-1" />} ابحث
+              </Button>
+            </div>
+
+            {result && !result.found && (
+              <div className="bg-rose-50 border border-rose-200 rounded p-4 text-rose-800 flex gap-2 items-center" data-testid="trace-not-found">
+                <XCircle className="h-5 w-5" />
+                <div>
+                  <div className="font-semibold">الكود غير موجود</div>
+                  <div className="text-xs">الكود <span className="font-mono">{result.code}</span> لم يُسجَّل في أي من مخازن البطاقات / الشرائح / Idoom.</div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
-        {result?.found && (
+        {result?.found && !bulkMode && (
           <div className="space-y-3" data-testid="trace-result">
             {/* Header card */}
             <div className="bg-gradient-to-l from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-4">
@@ -964,6 +1080,131 @@ function TimelineStep({ icon, title, children, empty, emptyMsg }) {
         <div className="text-xs text-muted-foreground italic">{emptyMsg}</div>
       ) : children}
     </div>
+  );
+}
+
+
+// ── Product Profitability Card — per-SKU P&L analyser ────────────────────
+function ProductProfitabilityCard() {
+  const [catalogs, setCatalogs] = useState({ card: [], sim: [], idoom: [] });
+  const [selected, setSelected] = useState(null);  // {id, type}
+  const [report, setReport] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    apiClient.get("/admin/supplier/catalog-reference")
+      .then(res => setCatalogs(res.data || { card: [], sim: [], idoom: [] }))
+      .catch(() => toast.error("فشل تحميل الكاتالوج"));
+  }, []);
+
+  const flat = [
+    ...(catalogs.card || []).map(c => ({ ...c, type: "card" })),
+    ...(catalogs.sim || []).map(c => ({ ...c, type: "sim" })),
+    ...(catalogs.idoom || []).map(c => ({ ...c, type: "idoom" })),
+  ];
+
+  const analyse = async (item) => {
+    setSelected(item);
+    setReport(null);
+    if (!item) return;
+    setBusy(true);
+    try {
+      const res = await apiClient.get(
+        `/admin/supplier/financial/product-profitability?catalog_id=${item.id}&stock_type=${item.type}`,
+      );
+      setReport(res.data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "فشل التحليل");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-emerald-600" /> تقرير ربحية المنتج
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          اختر فئة من الكاتالوج (بطاقة شحن، شريحة SIM، أو Idoom) ليُحلِّل النظام مبيعاتها، تكلفتها،
+          هامش ربحها، أفضل مستأجر يشتريها، ويعطيك توصية ذكية.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Select
+          value={selected ? `${selected.type}:${selected.id}` : ""}
+          onValueChange={(v) => {
+            const [type, id] = v.split(":");
+            const found = flat.find(it => it.type === type && it.id === id);
+            analyse(found);
+          }}
+        >
+          <SelectTrigger data-testid="profitability-product-select"><SelectValue placeholder="اختر منتجاً..." /></SelectTrigger>
+          <SelectContent className="max-h-72">
+            {flat.map(it => (
+              <SelectItem key={`${it.type}:${it.id}`} value={`${it.type}:${it.id}`}>
+                {it.type === "card" ? "💳" : it.type === "sim" ? "📱" : "🌐"} {it.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {busy && <div className="text-center text-muted-foreground py-6"><Loader2 className="h-5 w-5 animate-spin inline" /> جارٍ التحليل...</div>}
+
+        {report && !busy && (
+          <div className="space-y-3" data-testid="profitability-report">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <KpiCard icon={<Package className="h-4 w-4" />} label="إجمالي المخزون" value={report.inventory.total} suffix="" sub={`متاح ${report.inventory.available} · مُباع ${report.inventory.sold}`} color="indigo" testId="prof-kpi-inventory" />
+              <KpiCard icon={<TrendingUp className="h-4 w-4" />} label="الإيرادات" value={fmt(report.revenue)} suffix="دج" sub="من المبيعات" color="emerald" testId="prof-kpi-revenue" />
+              <KpiCard icon={<TrendingDown className="h-4 w-4" />} label="تكلفة المُباع" value={fmt(report.cost_of_sold)} suffix="دج" sub={`متوسط ${fmt(report.avg_unit_cost)} لكل وحدة`} color="rose" testId="prof-kpi-cost" />
+              <KpiCard
+                icon={<Wallet className="h-4 w-4" />}
+                label="الربح الإجمالي"
+                value={fmt(report.gross_profit)} suffix="دج"
+                sub={`هامش ${report.margin_pct}%`}
+                color={report.gross_profit >= 0 ? "emerald" : "rose"}
+                testId="prof-kpi-profit"
+              />
+            </div>
+
+            {report.best_tenant && (
+              <Card className="bg-gradient-to-l from-blue-50 to-cyan-50 border-blue-200">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-5 w-5 text-blue-600" />
+                      <div>
+                        <div className="text-xs text-muted-foreground">أفضل مستأجر يشتري هذا المنتج</div>
+                        <div className="text-base font-bold">{report.best_tenant.tenant_name}</div>
+                      </div>
+                    </div>
+                    <div className="text-end">
+                      <div className="text-xs text-muted-foreground">اشترى {report.best_tenant.qty_bought} وحدة</div>
+                      <div className="text-base font-bold text-emerald-700">{fmt(report.best_tenant.revenue)} دج</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {report.recommendation && (
+              <div className={`rounded-lg p-3 border-2 ${
+                report.margin_pct < 10 ? "bg-rose-50 border-rose-300 text-rose-900" :
+                report.margin_pct < 20 ? "bg-amber-50 border-amber-300 text-amber-900" :
+                "bg-emerald-50 border-emerald-300 text-emerald-900"
+              }`} data-testid="profitability-recommendation">
+                <div className="text-sm font-semibold">{report.recommendation}</div>
+              </div>
+            )}
+
+            {report.revenue === 0 && (
+              <div className="text-sm text-muted-foreground italic text-center py-3">
+                لم يُبَع هذا المنتج بعد — حلِّل بعد أول عملية بيع لرؤية الأرقام الحقيقية.
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

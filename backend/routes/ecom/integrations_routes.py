@@ -121,17 +121,54 @@ async def update_integration(integration_id: str, body: dict, user: dict = Depen
 
 @router.post("/ecom/integrations/{integration_id}/test")
 async def test_integration(integration_id: str, user: dict = Depends(require_tenant)):
-    """Ping the integration (mock: always succeeds with 'mock_mode')."""
+    """Live ping of the integration's real API.
+
+    Dispatches by channel:
+      • shopify  → GET /admin/api/2024-10/shop.json
+      • yalidine → GET /v1/wilayas/  (returns count + sample wilaya)
+      • others   → mock-mode response until those providers get a ping helper
+
+    Always 200 — the response body's `ok` / `error` fields tell the UI which
+    integrations actually work and which need credential fixes.
+    """
     await require_ecom_feature(user)
     existing = await db.ecom_integrations.find_one({"id": integration_id})
     if not existing:
         raise HTTPException(status_code=404, detail="التكامل غير موجود")
-    # P2: dispatch by channel to real test endpoints.
+    channel = existing.get("channel", "")
+    mode = existing.get("mode", "mock")
+
+    # ── Shopify ──────────────────────────────────────────────────────
+    if channel == "shopify":
+        from services.ecom.shopify_service import ping as shopify_ping, ShopifyAPIError
+        try:
+            data = await shopify_ping(existing)
+            return {"ok": True, "mode": "live", "channel": "shopify", "details": data,
+                    "message": f"✅ متصل بنجاح بمتجر '{data.get('shop_name')}'"}
+        except ShopifyAPIError as exc:
+            return {"ok": False, "mode": mode, "channel": "shopify", "error": str(exc),
+                    "message": f"❌ فشل الاتصال: {exc}"}
+
+    # ── Yalidine ─────────────────────────────────────────────────────
+    if channel == "yalidine":
+        from services.ecom.yalidine_service import (
+            ping as yali_ping, YalidineCredentialsMissing, YalidineAPIError,
+        )
+        try:
+            data = await yali_ping(existing)
+            return {"ok": True, "mode": "live", "channel": "yalidine", "details": data,
+                    "message": f"✅ متصل بنجاح بـ Yalidine — {data.get('wilayas_count')} ولاية متاحة"}
+        except (YalidineCredentialsMissing, YalidineAPIError) as exc:
+            return {"ok": False, "mode": mode, "channel": "yalidine", "error": str(exc),
+                    "message": f"❌ {exc}"}
+
+    # ── Others (FB / IG / TikTok / WhatsApp / Telegram / Viber) ──────
+    # No live ping helper yet — surface mock status honestly.
     return {
         "ok": True,
-        "mode": existing.get("mode", "mock"),
-        "channel": existing["channel"],
-        "message": "وضع المحاكاة — جاهز للاتصال الحقيقي عند إضافة المفاتيح الفعلية.",
+        "mode": mode,
+        "channel": channel,
+        "message": "وضع المحاكاة — لم يُضَف فحص الاتصال الحقيقي لهذه القناة بعد.",
     }
 
 

@@ -249,6 +249,11 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
                 <Plus className="w-4 h-4 ml-1" /> إضافة سطر يدوي
               </Button>
             </div>
+            {!items.some(it => it.product_id) && items.some(it => it.name?.trim()) && (
+              <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1.5">
+                ⚠️ لا يوجد منتج مرتبط بالمخزون — لن يتم خصم المخزون تلقائياً عند تأكيد الطلب. اربطه من البحث أعلاه إن أردت التتبُّع.
+              </div>
+            )}
             {items.map((it, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center">
                 <div className="col-span-5 flex flex-col">
