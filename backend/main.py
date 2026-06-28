@@ -670,6 +670,10 @@ app.include_router(build_supplier_router(), prefix="/api")
 from routes.saas.platform_finance_routes import build_financial_router
 app.include_router(build_financial_router(), prefix="/api")
 
+# ============ EVENT BUS OBSERVABILITY (Phase 4 dashboard backend) ============
+from routes.saas.event_bus_routes import router as event_bus_router
+app.include_router(event_bus_router, prefix="/api")
+
 # ============ SYSTEM LOGS ============
 from routes.system_logs_routes import router as system_logs_router, log_backend_exception
 app.include_router(system_logs_router, prefix="/api")
@@ -760,6 +764,25 @@ async def startup():
     asyncio.create_task(robot_manager.start_all())
     _set_robot_manager_in_diagnostics(robot_manager)
     logger.info("Robots initialized and starting in background")
+
+    # ── Event-Driven Architecture: start Redis Streams consumer ──────────
+    try:
+        from services.event_bus import event_bus
+        from services.event_consumers import register_handlers
+        await event_bus.start(main_db)
+        register_handlers(event_bus)
+        asyncio.create_task(event_bus.consume_loop())
+        # inventory_movements idempotency index
+        try:
+            await main_db.inventory_movements.create_index("id", unique=True)
+            await main_db.inventory_movements.create_index("tenant_id")
+            await main_db.inventory_movements.create_index("event_type")
+            await main_db.inventory_movements.create_index("created_at")
+        except Exception:
+            pass
+        logger.info("Event bus consumer started (Redis Streams EDA)")
+    except Exception as eda_exc:
+        logger.warning("Event bus failed to start (non-fatal): %s", eda_exc)
     # Feature flag manager
     _ffm = FeatureFlagManager(main_db)
     set_feature_flag_manager(_ffm)
@@ -901,6 +924,11 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     await robot_manager.stop_all()
+    try:
+        from services.event_bus import event_bus
+        event_bus.stop()
+    except Exception:
+        pass
     client.close()
 
 # ============ MOTHERBOARD CORE ============

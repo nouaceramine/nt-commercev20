@@ -201,6 +201,24 @@ def build_financial_router() -> APIRouter:
         }
         await main_db.supplier_purchases.insert_one(doc)
 
+        # ── EDA: emit purchase.created (dual-write — non-blocking) ──────
+        try:
+            from services.event_bus import event_bus
+            await event_bus.publish(
+                "purchase.created",
+                {
+                    "purchase_id": doc["id"],
+                    "supplier_id": doc["supplier_id"],
+                    "supplier_name": doc["supplier_name"],
+                    "total_cost": doc["total_cost"],
+                    "items": doc["items"],
+                },
+                tenant_id="platform",
+                source="platform_finance_routes",
+            )
+        except Exception:
+            pass
+
         # If paid > 0, record an implicit payment row too — keeps audit clean
         if paid > 0:
             await main_db.supplier_payments.insert_one({
@@ -228,6 +246,17 @@ def build_financial_router() -> APIRouter:
         # Cascade — drop any implicit payment row tied to this purchase
         await main_db.supplier_payments.delete_many({"linked_purchase_id": pid})
         await _recompute_supplier_balance(existing["supplier_id"])
+        # ── EDA: emit purchase.deleted (compensation) ──────────────────
+        try:
+            from services.event_bus import event_bus
+            await event_bus.publish(
+                "purchase.deleted",
+                {"purchase_id": pid, "supplier_id": existing["supplier_id"]},
+                tenant_id="platform",
+                source="platform_finance_routes",
+            )
+        except Exception:
+            pass
         return {"ok": True}
 
     # ── Payments ─────────────────────────────────────────────────────────
@@ -658,6 +687,25 @@ def build_financial_router() -> APIRouter:
             {"id": pid},
             {"$set": {f"items.{item_index}.codes_uploaded": total_uploaded_so_far}},
         )
+
+        # ── EDA: emit purchase.codes_uploaded (dual-write) ───────────────
+        try:
+            from services.event_bus import event_bus
+            if len(new_docs) > 0:
+                await event_bus.publish(
+                    "purchase.codes_uploaded",
+                    {
+                        "purchase_id": pid,
+                        "item_index": item_index,
+                        "count": len(new_docs),
+                        "stock_type": item_type,
+                    },
+                    tenant_id="platform",
+                    source="platform_finance_routes",
+                )
+        except Exception:
+            pass
+
         return {
             "inserted": len(new_docs),
             "skipped":  len(codes) - len(new_docs),

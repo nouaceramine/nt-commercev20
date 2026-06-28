@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 27 EDA backend testing complete. All 4 phases verified: bus infrastructure (Redis Streams nt:events + group nt:workers with 2 consumers + 9 registered handlers + unique idx on processed_events.event_id), publish/consume + idempotency + retry-to-DLQ, real-HTTP publishers (purchase.created via POST /api/admin/supplier/purchases verified end-to-end through dual-write into processed_events), and observability endpoints (/api/admin/event-bus/{stats,processed,dlq,movements,replay}). Regression: all 42 tests from iter20-26 still pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/admin/event-bus/replay/{event_id}", "issue": "Returns HTTP 200 with {ok:false, error:'event not found'} for missing event_id instead of 404. Functional but inconsistent with REST norms; client/UI must check body.ok."},
+      {"endpoint": "tests/test_iter27_eda.py", "issue": "DeprecationWarning: redis.asyncio Redis.close() — should use aclose(). Cosmetic only."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter27_eda.py",
+    "/app/backend/tests/test_iter27_eda_http.py",
+    "/app/test_reports/pytest/iteration_21_eda.xml",
+    "/app/test_reports/pytest/iteration_21_eda_http.xml",
+    "/app/test_reports/pytest/iteration_21_regression.xml"
+  ],
+  "action_items": [
+    "(Optional) Switch replay endpoint to 404 when event_id not found, or document the 200+ok:false contract.",
+    "(Optional cleanup) Replace redis_async.close() with aclose() in test_iter27_eda.py to silence deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "Dual-write pattern correctly implemented: sync routes do their work first, then publish events inside try/except so publish failures never break HTTP flow (verified in platform_finance_routes.py L204-220).",
+    "Event schema (models/events.py) correctly serialises all wire fields as strings (Redis Streams requirement) and round-trips cleanly.",
+    "Idempotency via unique index on processed_events.event_id is enforced at the DB layer — duplicate-publish test confirms second event is silently ACK'd.",
+    "Consumer registers all 9 handlers as per spec (purchase.created, purchase.codes_uploaded, sale.completed, sale.refunded, ecom_order.confirmed, ecom_order.cancelled, tenant.subscription.expired, tenant.subscription.renewed, test.ping).",
+    "ecom_order.confirmed deducts stock atomically and sets _eda_stock_deducted flag — verified idempotent on double-publish (stock deducted exactly once)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter27_eda_http.py (new — HTTP integration tests added by testing agent)"
+  ],
+  "success_rate": {"backend": "100% (61/61 tests passed: 13 EDA + 6 EDA-HTTP + 42 regression)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "Super admin admin@ntcommerce.com / Admin@2024 used via /api/saas-admin/login — works.",
+  "seed_data_creation": "Tests create TEST_-prefixed external supplier when none exists; clean up their own processed_events and inventory_movements rows.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 27 EDA is solid. New regression file at /app/backend/tests/test_iter27_eda_http.py covers real-HTTP publish path for purchase.created and all 5 /admin/event-bus/* endpoints. Note the replay endpoint returns 200 with ok:false for not-found (by design). Codes upload + sale POST + ecom order PUT publishers were not exercised end-to-end via HTTP (would require building full tenant fixtures); their consumers are covered by direct Redis publish in test_iter27_eda.py which validates the consume side. If you want full HTTP coverage of those, you'll need to seed a tenant + product fixture first.",
+  "rca of the issue": "No bugs found. All assertions hold against the live system."
+}

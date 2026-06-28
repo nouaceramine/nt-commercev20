@@ -294,6 +294,36 @@ async def update_order_status(order_id: str, body: dict, user: dict = Depends(re
         import logging
         logging.getLogger(__name__).warning("WhatsApp notify failed for order %s: %s", order_id, exc)
 
+    # ── EDA: emit ecom_order.confirmed / .cancelled (dual-write) ─────────
+    try:
+        from services.event_bus import event_bus
+        tenant_id = user.get("tenant_id") or "platform"
+        if new_status == "confirmed":
+            await event_bus.publish(
+                "ecom_order.confirmed",
+                {
+                    "order_id": order_id,
+                    "order_code": order.get("order_code"),
+                    "items": [
+                        {"product_id": it.get("product_id"), "quantity": int(it.get("qty", 0) or 0), "name": it.get("name")}
+                        for it in (order.get("items") or []) if it.get("product_id")
+                    ],
+                    "total": order.get("total"),
+                    "channel": order.get("channel"),
+                },
+                tenant_id=tenant_id,
+                source="ecom.orders_routes",
+            )
+        elif new_status in ("cancelled", "refunded"):
+            await event_bus.publish(
+                "ecom_order.cancelled",
+                {"order_id": order_id, "new_status": new_status},
+                tenant_id=tenant_id,
+                source="ecom.orders_routes",
+            )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "status": new_status,

@@ -133,6 +133,7 @@ import SaasAdminPage from "./pages/admin/SaasAdminPage";
 import FeatureFlagsPage from "./pages/admin/FeatureFlagsPage";
 import SystemLogsPage from "./pages/SystemLogsPage";
 import SupplierAdminPage from "./pages/admin/SupplierAdminPage";
+import EventBusDashboard from "./pages/admin/EventBusDashboard";
 import SaasPaymentsPage from "./pages/admin/saas/PaymentsPage";
 import SaasPlansPage from "./pages/admin/saas/PlansPage";
 import SaasTenantDebtsPage from "./pages/admin/saas/TenantDebtsPage";
@@ -498,6 +499,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute superAdminOnly>
             <SupplierAdminPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/saas-admin/event-bus"
+        element={
+          <ProtectedRoute superAdminOnly>
+            <EventBusDashboard />
           </ProtectedRoute>
         }
       />

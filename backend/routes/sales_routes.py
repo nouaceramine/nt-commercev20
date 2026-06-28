@@ -158,6 +158,26 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
             })
 
         sale_doc.pop("_id", None)
+
+        # ── EDA: emit sale.completed (dual-write, non-blocking) ──────────
+        try:
+            from services.event_bus import event_bus
+            await event_bus.publish(
+                "sale.completed",
+                {
+                    "sale_id": sale_id,
+                    "invoice_number": invoice_number,
+                    "total": final_total,
+                    "paid_amount": s.paid_amount,
+                    "items": [{"product_id": it.product_id, "quantity": it.quantity, "price": it.price} for it in s.items],
+                    "channel": "pos",
+                },
+                tenant_id=user.get("tenant_id") or "platform",
+                source="sales_routes",
+            )
+        except Exception:
+            pass
+
         return sale_doc
 
     # ── Get Sales ──
