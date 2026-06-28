@@ -234,7 +234,10 @@ async def test_purchase_created_consumer_writes_movement():
         await main_db.inventory_movements.delete_one({"id": eid})
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": eid})
     finally:
-        await r.close()
+        try:
+            await r.aclose()
+        except AttributeError:
+            await r.close()
         mongo.close()
 
 
@@ -257,7 +260,10 @@ async def test_sale_completed_consumer_writes_movement():
         await main_db.inventory_movements.delete_one({"id": eid})
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": eid})
     finally:
-        await r.close()
+        try:
+            await r.aclose()
+        except AttributeError:
+            await r.close()
         mongo.close()
 
 
@@ -297,7 +303,10 @@ async def test_ecom_order_confirmed_deducts_stock_idempotent():
         await main_db.inventory_movements.delete_many({"id": {"$in": [eid1, eid2]}})
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": {"$in": [eid1, eid2]}})
     finally:
-        await r.close()
+        try:
+            await r.aclose()
+        except AttributeError:
+            await r.close()
         mongo.close()
 
 
@@ -326,7 +335,10 @@ async def test_tenant_subscription_expired_disables_tenant():
         await main_db.inventory_movements.delete_many({"id": eid})
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": eid})
     finally:
-        await r.close()
+        try:
+            await r.aclose()
+        except AttributeError:
+            await r.close()
         mongo.close()
 
 
@@ -380,7 +392,10 @@ async def test_event_bus_processed_endpoint(admin_token):
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": eid})
         await main_db.inventory_movements.delete_many({"id": eid})
     finally:
-        await r.close()
+        try:
+            await r.aclose()
+        except AttributeError:
+            await r.close()
         mongo.close()
 
 

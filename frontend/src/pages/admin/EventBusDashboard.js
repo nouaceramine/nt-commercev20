@@ -98,7 +98,8 @@ export default function EventBusDashboard() {
         toast.error(r.data?.error || "فشل إعادة الإرسال");
       }
     } catch (e) {
-      toast.error("فشل إعادة الإرسال");
+      const msg = e?.response?.data?.detail || e?.message || "فشل إعادة الإرسال";
+      toast.error(msg);
     }
   };
 

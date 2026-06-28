@@ -76,9 +76,10 @@ async def list_processed_events(
 async def replay_event(event_id: str, _admin: dict = Depends(get_super_admin)):
     """Re-publish an event that was sent to DLQ. The processed_events doc is
     deleted first so idempotency doesn't short-circuit the retry."""
+    from fastapi import HTTPException
     doc = await main_db[PROCESSED_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
     if not doc:
-        return {"ok": False, "error": "event not found"}
+        raise HTTPException(status_code=404, detail="event not found")
     await main_db[PROCESSED_COLLECTION].delete_one({"event_id": event_id})
     new_id = await event_bus.publish(
         doc["event_type"],

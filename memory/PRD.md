@@ -520,3 +520,48 @@ Remaining open: #5 WMS-Lite (heavy — deferred), #8 Shareable public dashboards
 - **🎨 Backlog:** Email template polish, CSV export for analytics, PDF invoices per order.
 - **🌐 Backlog:** Public shareable analytics dashboards (token-gated).
 - **♻️ Tech-debt (testing-agent suggestion):** Add a one-click "انتحال" (impersonate) button on `/saas-admin/subscribers` rows (`impersonate-btn-{tenant_id}`) so future QA / support sessions don't have to call the API + inject localStorage manually.
+
+---
+
+## Iteration 27 — Event-Driven Architecture (EDA) — Feb 2026
+
+Built per `Event_Driven_Sync_System_Requirements.docx`. User chose 1a (run all 4 phases continuously) + 2a (Redis Streams) + 3a (dual-write safe).
+
+### Phase 1 — Bus Infrastructure ✅
+- `/app/backend/models/events.py`: canonical `Event`/`EventMetadata`/`ProcessedEvent` Pydantic schemas with `to_wire`/`from_wire` serializers (Redis Streams requires string fields).
+- `/app/backend/services/event_bus.py`: `RedisEventBus` singleton — `publish()`, `consume_loop()`, `_handle_message()` with idempotency-via-unique-index on `processed_events.event_id`, MAX_RETRIES=3, DLQ stream `nt:events:dlq`, consumer group `nt:workers` on stream `nt:events`.
+- `/app/backend/main.py` `@app.on_event('startup')` now calls `event_bus.start(main_db)` + `register_handlers(bus)` + `asyncio.create_task(event_bus.consume_loop())`.
+- MongoDB collections: `processed_events` (audit/idempotency) + `inventory_movements` (cross-tenant audit feed). Both have unique idx on `event_id`/`id`.
+
+### Phase 2 — purchase.created PoC ✅
+- `platform_finance_routes.add_purchase` now dual-writes: original sync logic intact, + `event_bus.publish('purchase.created', …)` in try/except (non-fatal).
+- `handle_purchase_created` consumer writes a row in `main_db.inventory_movements` with aggregated `by_type` (card/sim/idoom counts).
+
+### Phase 3 — Critical wiring + Saga compensation ✅
+- `sales_routes.create_sale` → publishes `sale.completed`.
+- `ecom.orders_routes.update_order_status` → publishes `ecom_order.confirmed` and `ecom_order.cancelled` on status transitions.
+- `platform_finance_routes.delete_purchase` → publishes `purchase.deleted` (compensation).
+- `platform_finance_routes.upload_purchase_codes` → publishes `purchase.codes_uploaded`.
+- Consumer `handle_ecom_order_confirmed` uses per-order `_eda_stock_deducted` flag — guaranteed idempotent stock deduction even on bus retries.
+- Consumer `handle_tenant_subscription_expired` flips `saas_tenants.subscription_status='expired'` + `is_active=false` + sends Brevo email best-effort.
+
+### Phase 4 — Observability ✅
+- `/app/backend/routes/saas/event_bus_routes.py`: 5 endpoints under `/api/admin/event-bus/{stats,processed,dlq,movements,replay/{event_id}}`. Returns full stream metrics + last-24h aggregates + top event types.
+- `/app/frontend/src/pages/admin/EventBusDashboard.js`: real-time dashboard (auto-refresh 5s) with 7 KPI tiles, top-event pills, 3 tabs (Processed/DLQ/Movements), one-click replay button on DLQ rows. Routed at `/saas-admin/event-bus`, sidebar link added in `Layout.js` under "النظام".
+
+### Tests — 100% pass
+- `/app/backend/tests/test_iter27_eda.py` — 13 tests (schema + Redis E2E + per-handler + observability endpoints).
+- `/app/backend/tests/test_iter27_eda_http.py` — 6 HTTP tests (added by testing agent).
+- Regression: 42/42 pre-existing tests still pass. **Total: 61/61.**
+
+### Operational notes
+- Redis was missing from container; installed via `apt-get install redis-server` and reused existing supervisor `[program:redis]` block.
+- Replay endpoint now returns HTTP 404 when event_id not found (was 200+ok:false — fixed per testing-agent feedback).
+- Bus is fully non-fatal: if Redis is unreachable, publishers silently skip (log a debug line) and HTTP flow continues unchanged.
+
+## Next Action Items (post-iter-27)
+- **P3 — WMS-Lite movement dashboard for tenants** — surface `inventory_movements` filtered by tenant_id (currently only super-admin sees them via `/saas-admin/event-bus`).
+- **P3 — WebSocket push** — convert tenant polling for orders/notifications to a thin WS layer that subscribes to bus events.
+- **P3 — Shareable analytics dashboards via token-gated links.**
+- **P3 — Email template polish + CSV export for analytics + per-order PDF invoices.**
+- **Backlog (tech-debt)** — Split `PlatformFinanceTab.js` (~1000 LOC) and `SaasAdminPage.js` (~1100 LOC) into smaller route-level components.
