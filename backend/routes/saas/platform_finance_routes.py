@@ -440,14 +440,19 @@ def build_financial_router() -> APIRouter:
             }
 
         # Lightweight recommendation engine
+        no_cost_data = (cost_doc is None or not cost_doc or cost_doc[0].get("total_qty", 0) == 0)
         recommendation = None
-        if revenue > 0:
+        if no_cost_data and revenue > 0:
+            recommendation = "📝 لا توجد بيانات تكلفة مُسجَّلة لهذا المنتج. سجِّل عملية شراء من مورد خارجي ليعرض النظام الربح الحقيقي بدلاً من 100%."
+        elif revenue > 0:
             if margin_pct < 10:
                 recommendation = "📉 الهامش منخفض جداً — فكِّر برفع سعر البيع أو التفاوض على سعر شراء أقل."
             elif margin_pct < 20:
                 recommendation = "💡 الهامش متوسط — رفع السعر بنسبة 5-10% قد يكون آمناً."
             elif margin_pct > 40:
                 recommendation = "🏆 هامش ممتاز — ركِّز جهد المبيعات على هذا المنتج!"
+        elif total_stock > 0 and sold == 0:
+            recommendation = "📦 لديك مخزون من هذا المنتج لكن لم يُبَع شيء بعد — قد يكون التسعير عالياً أو المنتج غير مطلوب."
 
         return {
             "catalog_id":   catalog_id,
@@ -459,6 +464,7 @@ def build_financial_router() -> APIRouter:
             "cost_of_sold": cost_of_sold,
             "gross_profit": gross_profit,
             "margin_pct":   margin_pct,
+            "has_cost_data": not no_cost_data,
             "best_tenant":  best_tenant,
             "recommendation": recommendation,
         }

@@ -1155,13 +1155,22 @@ function ProductProfitabilityCard() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <KpiCard icon={<Package className="h-4 w-4" />} label="إجمالي المخزون" value={report.inventory.total} suffix="" sub={`متاح ${report.inventory.available} · مُباع ${report.inventory.sold}`} color="indigo" testId="prof-kpi-inventory" />
               <KpiCard icon={<TrendingUp className="h-4 w-4" />} label="الإيرادات" value={fmt(report.revenue)} suffix="دج" sub="من المبيعات" color="emerald" testId="prof-kpi-revenue" />
-              <KpiCard icon={<TrendingDown className="h-4 w-4" />} label="تكلفة المُباع" value={fmt(report.cost_of_sold)} suffix="دج" sub={`متوسط ${fmt(report.avg_unit_cost)} لكل وحدة`} color="rose" testId="prof-kpi-cost" />
+              <KpiCard
+                icon={<TrendingDown className="h-4 w-4" />}
+                label="تكلفة المُباع"
+                value={report.has_cost_data ? fmt(report.cost_of_sold) : "—"}
+                suffix={report.has_cost_data ? "دج" : ""}
+                sub={report.has_cost_data ? `متوسط ${fmt(report.avg_unit_cost)} لكل وحدة` : "لا توجد مشتريات مُسجَّلة"}
+                color={report.has_cost_data ? "rose" : "amber"}
+                testId="prof-kpi-cost"
+              />
               <KpiCard
                 icon={<Wallet className="h-4 w-4" />}
                 label="الربح الإجمالي"
-                value={fmt(report.gross_profit)} suffix="دج"
-                sub={`هامش ${report.margin_pct}%`}
-                color={report.gross_profit >= 0 ? "emerald" : "rose"}
+                value={report.has_cost_data ? fmt(report.gross_profit) : "—"}
+                suffix={report.has_cost_data ? "دج" : ""}
+                sub={report.has_cost_data ? `هامش ${report.margin_pct}%` : "سجِّل عملية شراء أولاً"}
+                color={report.has_cost_data ? (report.gross_profit >= 0 ? "emerald" : "rose") : "amber"}
                 testId="prof-kpi-profit"
               />
             </div>
@@ -1188,6 +1197,7 @@ function ProductProfitabilityCard() {
 
             {report.recommendation && (
               <div className={`rounded-lg p-3 border-2 ${
+                !report.has_cost_data ? "bg-amber-50 border-amber-300 text-amber-900" :
                 report.margin_pct < 10 ? "bg-rose-50 border-rose-300 text-rose-900" :
                 report.margin_pct < 20 ? "bg-amber-50 border-amber-300 text-amber-900" :
                 "bg-emerald-50 border-emerald-300 text-emerald-900"
