@@ -278,7 +278,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
     ):
         """Download empty template for import"""
         if collection not in EXPORTABLE_COLLECTIONS:
-            raise HTTPException(status_code=400, detail=f"Invalid collection")
+            raise HTTPException(status_code=400, detail="Invalid collection")
 
         fields = EXPORTABLE_COLLECTIONS[collection]["fields"]
 

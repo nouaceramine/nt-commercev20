@@ -151,7 +151,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         try:
             await send_email_with_sendgrid(user_record["email"], "اختبار SendGrid - NT Commerce", test_html, settings)
             return {"success": True, "message": f"تم إرسال بريد اختباري إلى {user_record['email']}"}
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.post("/notifications/send")
@@ -176,7 +176,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
             await send_email_with_sendgrid(request.recipient_email, subject, html_content, settings)
             await db.notification_logs.insert_one({"id": str(uuid.uuid4()), "type": request.notification_type, "recipient": request.recipient_email, "subject": subject, "status": "sent", "sent_at": datetime.now(timezone.utc).isoformat(), "sent_by": user["id"]})
             return {"success": True, "message": "تم إرسال الإشعار بنجاح"}
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.post("/notifications/check-low-stock")
@@ -195,7 +195,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         try:
             await send_email_with_sendgrid(recipient, "تنبيه انخفاض المخزون - NT Commerce", html_content, settings)
             return {"success": True, "message": f"تم إرسال تنبيه بـ {len(products_list)} منتج منخفض المخزون"}
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.post("/notifications/send-daily-report")
@@ -225,7 +225,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         try:
             await send_email_with_sendgrid(recipient, f"التقرير اليومي - {today.strftime('%Y-%m-%d')}", html_content, settings)
             return {"success": True, "message": "تم إرسال التقرير اليومي"}
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     # ── Email Settings (Resend) ──
@@ -277,7 +277,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
             params = {"from": settings.get("sender_email", "onboarding@resend.dev"), "to": [user_record["email"]], "subject": "اختبار إعدادات البريد - NT POS", "html": '<div dir="rtl" style="font-family:Arial;padding:20px;background:#f3f4f6;"><div style="max-width:400px;margin:0 auto;background:white;border-radius:8px;padding:30px;text-align:center;"><h2 style="color:#22c55e;">إعدادات البريد تعمل بنجاح!</h2></div></div>'}
             await asyncio.to_thread(resend.Emails.send, params)
             return {"success": True, "message": f"تم إرسال بريد اختباري إلى {user_record['email']}"}
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.post("/email/send-session-report")

@@ -247,9 +247,9 @@ async def reset_database() -> dict:
     print("\n" + "=" * 50)
     print("✅ قاعدة البيانات جاهزة!")
     print("=" * 50)
-    print(f"\n🔑 بيانات الدخول:")
-    print(f"   سوبر أدمين: admin@ntcommerce.com / Admin@2024")
-    print(f"   مدير المستأجر: ncr@ntcommerce.com / Test@123")
+    print("\n🔑 بيانات الدخول:")
+    print("   سوبر أدمين: admin@ntcommerce.com / Admin@2024")
+    print("   مدير المستأجر: ncr@ntcommerce.com / Test@123")
     print(f"\n📊 قاعدة البيانات: {DB_NAME}")
     print(f"   قاعدة المستأجر: tenant_{tid}")
 

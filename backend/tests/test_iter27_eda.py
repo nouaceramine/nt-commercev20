@@ -201,7 +201,6 @@ def _fresh_clients():
 
 async def _publish_raw(redis_client, event_type: str, payload: dict, tenant_id: str = "platform") -> str:
     """Publish directly to the live stream without using the singleton bus."""
-    from services.event_bus import STREAM_KEY
     e = Event(event_type=event_type, tenant_id=tenant_id, payload=payload, metadata=EventMetadata(source="pytest"))
     await redis_client.xadd(STREAM_KEY, e.to_wire(), maxlen=100_000, approximate=True)
     return e.event_id

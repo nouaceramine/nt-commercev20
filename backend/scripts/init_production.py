@@ -156,7 +156,7 @@ async def init_production() -> dict:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }}
         )
-        print(f"   ✓ تم تحديث حساب المدير الأعلى")
+        print("   ✓ تم تحديث حساب المدير الأعلى")
     else:
         # Create new admin
         admin_doc = {
@@ -169,10 +169,10 @@ async def init_production() -> dict:
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         await db.users.insert_one(admin_doc)
-        print(f"   ✓ تم إنشاء حساب المدير الأعلى")
+        print("   ✓ تم إنشاء حساب المدير الأعلى")
     
     print(f"     - البريد: {admin_email}")
-    print(f"     - كلمة المرور: ******* (راجع متغيرات البيئة)")
+    print("     - كلمة المرور: ******* (راجع متغيرات البيئة)")
     
     # 3. Create indexes
     print("\n3. إنشاء الفهارس...")
@@ -191,7 +191,7 @@ async def init_production() -> dict:
     print("=" * 50)
     print("\nبيانات الدخول للمدير الأعلى:")
     print(f"  البريد: {admin_email}")
-    print(f"  كلمة المرور: ******* (محجوبة لأسباب أمنية — راجع متغيرات البيئة)")
+    print("  كلمة المرور: ******* (محجوبة لأسباب أمنية — راجع متغيرات البيئة)")
     print("\n⚠️  مهم: قم بتغيير كلمة المرور بعد أول تسجيل دخول!")
     print("\nالخطط المتاحة:")
     for plan in plans:

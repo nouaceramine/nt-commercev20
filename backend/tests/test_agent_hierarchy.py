@@ -30,7 +30,7 @@ class TestSuperAdminLogin:
         assert "access_token" in data, "No access_token in response"
         # Store token for other tests
         pytest.super_admin_token = data["access_token"]
-        print(f"✓ Super Admin login successful")
+        print("✓ Super Admin login successful")
 
 
 class TestAgentsAPI:

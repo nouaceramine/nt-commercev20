@@ -82,7 +82,7 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(requir
 
         # Return URL (relative to static)
         return {"url": f"/api/static/uploads/{unique_filename}", "filename": unique_filename}
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # ============ PERMISSIONS SYSTEM ============

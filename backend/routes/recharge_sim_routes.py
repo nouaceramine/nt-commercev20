@@ -1134,7 +1134,7 @@ def create_recharge_sim_routes(db, main_db, require_tenant, get_tenant_admin, RE
             try:
                 await credit_wallet(
                     main_db, entity_id, body.denomination, "idoom_refund", txn_id,
-                    f"استرجاع بيع كود Idoom فاشل", user.get("name", ""),
+                    "استرجاع بيع كود Idoom فاشل", user.get("name", ""),
                 )
             except Exception:
                 logger.exception("Failed to compensate idoom sell for txn %s", txn_id)

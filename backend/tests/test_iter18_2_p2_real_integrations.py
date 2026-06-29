@@ -105,7 +105,8 @@ async def test_shopify_webhook_hmac_verification():
         integration_id = integration["id"]
 
         # 3) Build a minimal Shopify order payload (random ID to avoid cross-run pollution)
-        import random, time
+        import random
+        import time
         unique_id = int(time.time() * 1000) + random.randint(0, 999)
         payload = {
             "id": unique_id,

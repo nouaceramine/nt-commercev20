@@ -167,7 +167,7 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.post("/webhook")

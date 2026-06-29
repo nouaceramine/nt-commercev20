@@ -702,7 +702,7 @@ class TestTenantSaleDebit:
         for entity_id, balance in snapshot.items():
             assert balance >= 0, f"Negative balance detected for {entity_id}: {balance}"
 
-        print(f"✓ No negative balances in chain")
+        print("✓ No negative balances in chain")
 
     def test_purchase_insufficient_balance_rejected(self, base, admin_headers, chain_tenant, test_service):
         """Purchasing a service priced higher than the tenant's balance returns 400."""

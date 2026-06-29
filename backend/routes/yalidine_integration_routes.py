@@ -110,7 +110,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
                 if resp.status_code == 200:
                     return resp.json()
                 return {"error": resp.text}
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.get("/communes/{wilaya_id}")
@@ -126,7 +126,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.get("/delivery-fees")
@@ -142,7 +142,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.post("/parcels")
@@ -187,7 +187,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.get("/parcels/{tracking_id}")
@@ -206,7 +206,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="Internal server error")
 
     @router.get("/parcels")

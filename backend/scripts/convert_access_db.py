@@ -328,7 +328,7 @@ if __name__ == "__main__":
         os.makedirs("/app/exports", exist_ok=True)
     
     result = convert_database(db_file, output_file)
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Categories: {len(result['categories'])}")
     print(f"  Products: {len(result['products'])}")
     print(f"  Customers: {len(result['customers'])}")
