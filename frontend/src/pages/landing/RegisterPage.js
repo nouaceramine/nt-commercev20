@@ -18,6 +18,7 @@ import {
   ChevronRight, Check, Sparkles, Building, Mail, Phone, 
   Lock, User, ArrowRight, Eye, EyeOff
 } from 'lucide-react';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -38,6 +39,13 @@ export default function RegisterPage() {
     company_name: '',
     password: '',
     confirm_password: ''
+  });
+
+  useDocumentMeta({
+    title: "اشترك مجاناً — NT Commerce | تجربة 14 يوم",
+    description: "ابدأ تجربتك المجّانية في NT Commerce اليوم — 14 يوم بدون بطاقة. اختر خطّتك وأطلق نقطة بيعك السحابية مع متجر إلكتروني متكامل.",
+    keywords: "تسجيل, اشتراك, NT Commerce, نقاط بيع, POS الجزائر, تجربة مجانية",
+    canonical: "https://nt-v16-staging.emergent.host/register",
   });
 
   useEffect(() => {

@@ -10,6 +10,7 @@ import {
   Building2, Eye, EyeOff, LogIn, Users, Truck, Store, 
   Shield, ArrowLeft, Loader2, CheckCircle
 } from 'lucide-react';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 
 export default function UnifiedLoginPage() {
   const navigate = useNavigate();
@@ -20,6 +21,12 @@ export default function UnifiedLoginPage() {
     password: ''
   });
   const [loginSuccess, setLoginSuccess] = useState(null);
+
+  useDocumentMeta({
+    title: "تسجيل الدخول — NT Commerce",
+    description: "ادخل إلى حسابك في NT Commerce — منصّة نقاط البيع والتجارة الإلكترونية الذكية للسوق الجزائري.",
+    canonical: "https://nt-v16-staging.emergent.host/portal",
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

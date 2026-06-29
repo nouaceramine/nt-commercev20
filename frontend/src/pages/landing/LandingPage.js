@@ -4,6 +4,7 @@ import apiClient from '../../lib/apiClient';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
+import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 import { 
   Check, Star, Zap, Shield, BarChart3, Users, Package, 
   ShoppingCart, Globe, Clock, Headphones, ChevronRight,
@@ -21,6 +22,14 @@ export default function LandingPage() {
   const [openFaq, setOpenFaq] = useState(null);
   const [contact, setContact] = useState({ name: '', phone: '', message: '' });
   const [contactSent, setContactSent] = useState(false);
+
+  // ── SEO meta (per-page, no library) ──────────────────────────────────
+  useDocumentMeta({
+    title: "NT Commerce — منصّة محاسبة ذكية + متجر إلكتروني للسوق الجزائري 🇩🇿",
+    description: "نظام نقاط بيع (POS) سحابي متكامل: محاسبة، مخزون، فواتير، متجر إلكتروني، تكامل Shopify + Yalidine، وإدارة كروت Idoom/SIM. تجربة مجّانية 14 يوم.",
+    keywords: "نقاط بيع, POS الجزائر, نظام محاسبة, متجر إلكتروني, Yalidine, Shopify, إدارة مخزون, محل تجاري, NT Commerce, SaaS الجزائر",
+    canonical: "https://nt-v16-staging.emergent.host/",
+  });
 
   useEffect(() => {
     fetchPlans();
