@@ -600,3 +600,37 @@ User intent: تجهيز النظام للبيع التجاري. أنجزنا:
 - **🎨 P3:** Wire real testimonials (replace 3 hardcoded ones with DB-backed `/api/saas/testimonials`).
 - **📊 P2:** Add Google Analytics + Meta Pixel to LandingPage for conversion tracking.
 - **🔍 P2:** SEO meta tags + Open Graph + sitemap.xml for landing page.
+
+---
+
+## Iteration 29 (2026-07-05) — Architecture Sprints 1-4 executed & fully verified
+
+### Sprint 1 verification + real bug fixes
+- **304/304 pytest passing** (was 24 failed + 16 errors before fixes).
+- Rate limiter (slowapi) rewritten: proxy-aware key func (`X-Forwarded-For` first hop) — previously ALL production users behind the ingress shared one IP → collective lockout risk. Loopback traffic (test suites) exempted. Shared singleton in `middleware/rate_limit.py`, imported by `main.py`.
+- **Real bug — case-insensitive email login**: tenant creation lowercases emails but all login lookups were case-sensitive → users registering with mixed-case emails could not log in. Added `email_ci()` helper in `utils/auth.py`, applied to `/api/auth/login`, unified login (users/agents/tenants), `/api/saas/tenant-login`, agent login.
+- **Deployment blocker**: `notifications_routes.py` imported pandas (removed with ML deps) → whole notifications module failed to mount. Rewrote Excel import/export with openpyxl directly.
+- Redis installed locally (supervisor `redis` service now RUNNING); EDA fully live in preview.
+- **EDA consume-loop fix**: `socket_timeout` (5s) < XREADGROUP block (5s) → Timeout error spam every 6s. socket_timeout now BLOCK_MS+5s.
+- Ecom integrations `/test` endpoint: mock-mode integrations now short-circuit to `ok:true` (no live ping); live mode still does a real Shopify/Yalidine ping.
+- Stale tests updated: plan-id auto-resolution in `test_wallet_chain.py`, lowercase email expectation, redis status assertion, integration-test expectations.
+
+### Sprint 2 — Application Service Layer (foundation + exemplar)
+- New `backend/services/application/` package.
+- `recharge_service.py::execute_recharge_saga` — the 230-line recharge compensating saga (wallet debit, cashbox/credit-sale side effects, bridge dispatch, full rollback) extracted from route. `POST /api/recharge` route is now 6 lines.
+
+### Sprint 3 — Oversized file splits (all verified)
+- `models/schemas.py` (1248 lines) → `models/schemas/` package: auth, saas, permissions, catalog, parties, trading, inventory, hr, integrations + star-re-exporting `__init__.py`. Import surface unchanged.
+- `routes/recharge_sim_routes.py` (1158 lines) → `routes/recharge/` package: `core_routes.py`, `delivery_settings_routes.py`, `sim_routes.py`, `bridge_routes.py`, `idoom_routes.py`, `helpers.py` (SSRF guard). Same factory signature `create_recharge_sim_routes`; caller `modules/services.py` updated.
+- `pages/admin/PlatformFinanceTab.js` (1220 lines) → `PlatformFinanceTab/` package: `index.js`, `KpiCard.js`, `format.js`, `SupplierDialogs.js`, `PurchaseDialogs.js`, `CodeTraceCard.js`, `ProductProfitabilityCard.js`. Import path for `SupplierAdminPage.js` unchanged (folder index resolution).
+- Testing agent found+fixed 3 missing imports post-split (useMemo, useEffect, downloadCsv/todayStamp). **Frontend 10/10 scenarios pass, zero console errors** (`/app/test_reports/iteration_22.json`).
+
+### Sprint 4 — Permission checker gap fixed
+- `utils/permissions.py::create_permission_checker` now understands the `DEFAULT_PERMISSIONS` shape (`{"products": {"view": true}}` dicts-of-bools and top-level boolean module flags like `{"pos": true}`). Previously any non-admin employee resolved to ZERO effective permissions → always 403. Module-level flag grants `module.*`.
+
+### Next Action Items (post-iter-29)
+- **🔴 P0 (BLOCKED on platform):** Production 500 errors at nt-v16-staging.emergent.host — env-var injection issue, NOT code (preview 304/304 green). User to redeploy / contact Emergent Support.
+- **🟠 P1:** Custom domain (`ncr-telecom.com` now, or register `nt.dz` via NIC.dz) once production is fixed.
+- **🟡 P2:** Extend service layer to sales/ecom orders (pattern established in `recharge_service.py`).
+- **🟡 P2:** Apply `require_permission(...)` dependencies across remaining tenant routes (checker infra now correct).
+- **🟢 P3:** Landing page: real WhatsApp number, GA/Meta Pixel, real screenshots, DB-backed testimonials.

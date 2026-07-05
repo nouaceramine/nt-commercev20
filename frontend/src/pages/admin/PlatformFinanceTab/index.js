@@ -58,7 +58,7 @@ export function PlatformFinanceTab() {
     }
   };
 
-  useEffect(() => { loadAll(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [days]);
+  useEffect(() => { loadAll(); }, [days]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const kpis = summary?.kpis || {};
   const profitColor = (kpis.gross_profit || 0) >= 0 ? "text-emerald-700" : "text-rose-700";
