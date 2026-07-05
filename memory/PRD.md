@@ -634,3 +634,25 @@ User intent: تجهيز النظام للبيع التجاري. أنجزنا:
 - **🟡 P2:** Extend service layer to sales/ecom orders (pattern established in `recharge_service.py`).
 - **🟡 P2:** Apply `require_permission(...)` dependencies across remaining tenant routes (checker infra now correct).
 - **🟢 P3:** Landing page: real WhatsApp number, GA/Meta Pixel, real screenshots, DB-backed testimonials.
+
+## Iteration 30 (2026-07-05) — Service Layer extension + granular permissions applied
+
+### Sprint 2 extension — Application services (pattern now covers 3 domains)
+- `services/application/sales_service.py`: `create_sale_op` (invoice numbering, stock, customer balance, cashbox, installments scheduling, sale.completed event), `delete_sale_op` (audit-logged), `return_sale_op`. `routes/sales_routes.py` is now a thin HTTP layer.
+- `services/application/ecom_order_service.py`: `change_order_status` (state machine + idempotent inventory sync + WhatsApp notify + ecom_order.* events). `routes/ecom/orders_routes.py` shrank 491→308 lines.
+
+### Sprint 4 applied — granular permission strings across tenant routes
+- sales: add/view/edit/delete/refund (removed inline is_admin on delete — now `sales.delete`)
+- products: fixed wrong string `products.create` → `products.add` (matches DEFAULT_PERMISSIONS)
+- purchases: add/view/edit/delete; debts: add/view/collect/edit; expenses: view/add/edit/delete
+- cashbox: `cash_boxes.edit` (nonexistent module) → `pos` module flag
+- repairs: `get_tenant_admin` → `repairs.add/edit/delete` (staff with repair perms can now work tickets)
+
+### Verification
+- Full pytest suite: **304 passed / 0 failed** after all changes.
+- Admin/tenant-owner behavior unchanged (permission checker bypass); only non-admin employees now get correct granular access.
+
+### Remaining next items
+- 🔴 P0 (blocked on platform): production 500s — user redeploy / Emergent Support.
+- 🟠 P1: custom domain once production fixed.
+- 🟢 P3: landing page — real WhatsApp number, GA/Meta Pixel, real screenshots, testimonials.

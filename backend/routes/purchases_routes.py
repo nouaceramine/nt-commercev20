@@ -30,7 +30,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     # ── Create Purchase ──
     @router.post("", status_code=201)
-    async def create_purchase(purchase: dict, admin: dict = Depends(require_permission("purchases.edit"))):
+    async def create_purchase(purchase: dict, admin: dict = Depends(require_permission("purchases.add"))):
         from models.schemas import PurchaseCreate
         p = PurchaseCreate(**purchase)
         purchase_id = str(uuid.uuid4())
@@ -106,7 +106,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     # ── Get Purchases ──
     @router.get("")
-    async def get_purchases(supplier_id: Optional[str] = None, admin: dict = Depends(require_permission("purchases.edit"))):
+    async def get_purchases(supplier_id: Optional[str] = None, admin: dict = Depends(require_permission("purchases.view"))):
         query = {"supplier_id": supplier_id} if supplier_id else {}
         return await db.purchases.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
@@ -116,7 +116,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         supplier_id: Optional[str] = None,
         start_date: Optional[str] = None, end_date: Optional[str] = None,
         page: int = 1, page_size: int = 20,
-        admin: dict = Depends(require_permission("purchases.edit"))
+        admin: dict = Depends(require_permission("purchases.view"))
     ):
         from utils.pagination import paginate
         query = {}
@@ -148,7 +148,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     # ── Get Single Purchase ──
     @router.get("/{purchase_id}")
-    async def get_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
+    async def get_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.view"))):
         purchase = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
         if not purchase:
             raise HTTPException(status_code=404, detail="Purchase not found")
@@ -199,7 +199,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     # ── Delete Purchase ──
     @router.delete("/{purchase_id}")
-    async def delete_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
+    async def delete_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.delete"))):
         purchase = await db.purchases.find_one({"id": purchase_id})
         if not purchase:
             raise HTTPException(status_code=404, detail="Purchase not found")

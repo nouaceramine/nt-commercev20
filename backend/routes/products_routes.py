@@ -44,7 +44,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     # ── Create Product ──
     @router.post("", status_code=201)
-    async def create_product(product: dict, admin: dict = Depends(require_permission("products.create"))):
+    async def create_product(product: dict, admin: dict = Depends(require_permission("products.add"))):
         from models.schemas import ProductCreate
         p = ProductCreate(**product)
         product_id = str(uuid.uuid4())

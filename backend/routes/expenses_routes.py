@@ -110,7 +110,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         return reminders
 
     @router.post("")
-    async def create_expense(expense: ExpenseCreate, user: dict = Depends(require_permission("expenses.view"))):
+    async def create_expense(expense: ExpenseCreate, user: dict = Depends(require_permission("expenses.add"))):
         from services.code_generator import generate_code
         data = expense.model_dump()
         data["id"] = str(uuid.uuid4())
@@ -124,7 +124,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         return data
 
     @router.put("/{expense_id}")
-    async def update_expense(expense_id: str, expense: ExpenseUpdate, user: dict = Depends(require_permission("expenses.view"))):
+    async def update_expense(expense_id: str, expense: ExpenseUpdate, user: dict = Depends(require_permission("expenses.edit"))):
         if not await db.expenses.find_one({"id": expense_id}):
             raise HTTPException(status_code=404, detail="التكلفة غير موجودة")
         update_data = {k: v for k, v in expense.model_dump().items() if v is not None}
@@ -133,14 +133,14 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         return await db.expenses.find_one({"id": expense_id}, {"_id": 0})
 
     @router.delete("/{expense_id}")
-    async def delete_expense(expense_id: str, user: dict = Depends(require_permission("expenses.view"))):
+    async def delete_expense(expense_id: str, user: dict = Depends(require_permission("expenses.delete"))):
         result = await db.expenses.delete_one({"id": expense_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="التكلفة غير موجودة")
         return {"message": "تم حذف التكلفة بنجاح"}
 
     @router.post("/{expense_id}/mark-paid")
-    async def mark_paid(expense_id: str, user: dict = Depends(require_permission("expenses.view"))):
+    async def mark_paid(expense_id: str, user: dict = Depends(require_permission("expenses.edit"))):
         if not await db.expenses.find_one({"id": expense_id}):
             raise HTTPException(status_code=404, detail="التكلفة غير موجودة")
         now = datetime.now(timezone.utc).isoformat()

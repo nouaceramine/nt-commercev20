@@ -14,12 +14,12 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
     router = APIRouter(tags=["cash-boxes"])
 
     @router.get("/cash-boxes")
-    async def get_cash_boxes(admin: dict = Depends(require_permission("cash_boxes.edit"))):
+    async def get_cash_boxes(admin: dict = Depends(require_permission("pos"))):
         await init_cash_boxes()
         return await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
 
     @router.post("/cash-boxes/transfer")
-    async def transfer_between_boxes(from_box: str, to_box: str, amount: float, admin: dict = Depends(require_permission("cash_boxes.edit"))):
+    async def transfer_between_boxes(from_box: str, to_box: str, amount: float, admin: dict = Depends(require_permission("pos"))):
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
         from_cash_box = await db.cash_boxes.find_one({"id": from_box})
@@ -36,7 +36,7 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         return {"message": "Transfer completed successfully"}
 
     @router.put("/cash-boxes/{box_id}/adjust")
-    async def adjust_cash_box(box_id: str, new_balance: float, reason: str = "تعديل يدوي", admin: dict = Depends(require_permission("cash_boxes.edit"))):
+    async def adjust_cash_box(box_id: str, new_balance: float, reason: str = "تعديل يدوي", admin: dict = Depends(require_permission("pos"))):
         box = await db.cash_boxes.find_one({"id": box_id})
         if not box:
             raise HTTPException(status_code=404, detail="صندوق غير موجود")
@@ -47,7 +47,7 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         return {"message": "تم تعديل الرصيد بنجاح", "old_balance": old_balance, "new_balance": new_balance, "difference": new_balance - old_balance}
 
     @router.post("/cash-boxes/reset-all")
-    async def reset_all(admin: dict = Depends(require_permission("cash_boxes.edit"))):
+    async def reset_all(admin: dict = Depends(require_permission("pos"))):
         now = datetime.now(timezone.utc).isoformat()
         boxes = await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
         await db.cash_boxes.update_many({}, {"$set": {"balance": 0, "updated_at": now}})
@@ -57,7 +57,7 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         return {"message": "تم إعادة تعيين جميع الصناديق إلى صفر"}
 
     @router.get("/transactions")
-    async def get_transactions(cash_box_id: Optional[str] = None, type: Optional[str] = None, admin: dict = Depends(require_permission("cash_boxes.edit"))):
+    async def get_transactions(cash_box_id: Optional[str] = None, type: Optional[str] = None, admin: dict = Depends(require_permission("pos"))):
         query = {}
         if cash_box_id:
             query["cash_box_id"] = cash_box_id
@@ -74,7 +74,7 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
     async def get_transactions_paginated(
         cash_box_id: Optional[str] = None, type: Optional[str] = None,
         page: int = 1, page_size: int = 20,
-        admin: dict = Depends(require_permission("cash_boxes.edit"))
+        admin: dict = Depends(require_permission("pos"))
     ):
         from utils.pagination import paginate
         query = {}

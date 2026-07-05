@@ -11,6 +11,8 @@ import uuid
 
 
 def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
+    from utils.permissions import create_permission_checker
+    require_permission = create_permission_checker(db, get_current_user)
     router = APIRouter(prefix="/repairs", tags=["repairs"])
 
     # ── Models ──
@@ -96,7 +98,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ── Repair Tickets ──
     @router.post("/tickets")
-    async def create_ticket(data: RepairTicketCreate, admin: dict = Depends(get_tenant_admin)):
+    async def create_ticket(data: RepairTicketCreate, admin: dict = Depends(require_permission("repairs.add"))):
         from services.code_generator import generate_code
         ticket = {
             "id": str(uuid.uuid4()),
@@ -203,7 +205,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
         return ticket
 
     @router.put("/tickets/{ticket_id}")
-    async def update_ticket(ticket_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+    async def update_ticket(ticket_id: str, data: dict, admin: dict = Depends(require_permission("repairs.edit"))):
         ticket = await db.repair_tickets.find_one({"id": ticket_id}, {"_id": 0})
         if not ticket:
             raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
@@ -233,7 +235,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
         return updated
 
     @router.delete("/tickets/{ticket_id}")
-    async def delete_ticket(ticket_id: str, admin: dict = Depends(get_tenant_admin)):
+    async def delete_ticket(ticket_id: str, admin: dict = Depends(require_permission("repairs.delete"))):
         await db.repair_tickets.delete_one({"id": ticket_id})
         await db.repair_history.delete_many({"repair_ticket_id": ticket_id})
         await db.part_usage.delete_many({"repair_ticket_id": ticket_id})
@@ -257,7 +259,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ── Spare Parts ──
     @router.post("/parts")
-    async def create_part(data: SparePartCreate, admin: dict = Depends(get_tenant_admin)):
+    async def create_part(data: SparePartCreate, admin: dict = Depends(require_permission("repairs.add"))):
         part = {"id": str(uuid.uuid4()), **data.dict(), "created_at": datetime.now(timezone.utc).isoformat()}
         await db.spare_parts.insert_one(part)
         part.pop("_id", None)
@@ -274,7 +276,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
         return await db.spare_parts.find(query, {"_id": 0}).to_list(500)
 
     @router.post("/tickets/{ticket_id}/use-part")
-    async def use_part(ticket_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+    async def use_part(ticket_id: str, data: dict, admin: dict = Depends(require_permission("repairs.edit"))):
         part_id = data.get("part_id")
         qty = data.get("quantity", 1)
         part = await db.spare_parts.find_one({"id": part_id}, {"_id": 0})
@@ -299,7 +301,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ── Technicians ──
     @router.post("/technicians")
-    async def create_technician(data: TechnicianCreate, admin: dict = Depends(get_tenant_admin)):
+    async def create_technician(data: TechnicianCreate, admin: dict = Depends(require_permission("repairs.add"))):
         tech = {"id": str(uuid.uuid4()), **data.dict(), "is_active": True, "created_at": datetime.now(timezone.utc).isoformat()}
         await db.technicians.insert_one(tech)
         tech.pop("_id", None)
