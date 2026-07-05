@@ -16,6 +16,8 @@ import base64
 import bcrypt
 import jwt
 
+from utils.auth import email_ci
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
     @router.post("/auth/login", response_model=TokenResponse)
     @limiter.limit("20/minute")
     async def login(request: Request, credentials: UserLogin):
-        user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
+        user = await db.users.find_one({"email": email_ci(credentials.email)}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -138,7 +140,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         _check_brute_force(email)
 
         # 1. Check Admin/Employee users first
-        user = await db.users.find_one({"email": email}, {"_id": 0})
+        user = await db.users.find_one({"email": email_ci(email)}, {"_id": 0})
         if user:
             stored_password = user.get("hashed_password") or user.get("password")
             if stored_password and verify_password(password, stored_password):
@@ -158,7 +160,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                 }
 
         # 2. Check Agents
-        agent = await db.saas_agents.find_one({"email": email}, {"_id": 0})
+        agent = await db.saas_agents.find_one({"email": email_ci(email)}, {"_id": 0})
         if agent:
             stored_password = agent.get("password", "")
             try:
@@ -191,7 +193,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                 pass
 
         # 3. Check Tenants
-        tenant = await db.saas_tenants.find_one({"email": email}, {"_id": 0})
+        tenant = await db.saas_tenants.find_one({"email": email_ci(email)}, {"_id": 0})
         if tenant:
             stored_password = tenant.get("password", "")
             try:

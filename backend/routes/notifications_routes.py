@@ -11,7 +11,7 @@ import uuid
 import os
 import io
 import logging
-import pandas as pd
+from openpyxl import Workbook, load_workbook
 
 
 logger = logging.getLogger(__name__)
@@ -226,11 +226,16 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                 "رابط الصورة": p.get("image_url", "")
             })
 
-        df = pd.DataFrame(data)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'المنتجات'
+        headers = list(data[0].keys()) if data else ["الباركود", "الاسم (عربي)", "الاسم (إنجليزي)"]
+        ws.append(headers)
+        for row in data:
+            ws.append([row.get(h, "") for h in headers])
 
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='المنتجات')
+        wb.save(output)
         output.seek(0)
 
         return StreamingResponse(
@@ -247,18 +252,25 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             raise HTTPException(status_code=400, detail="File must be Excel format (.xlsx or .xls)")
 
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        wb = load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        header = [str(h).strip() if h is not None else "" for h in next(rows_iter, [])]
+        excel_rows = [
+            {header[i]: cell for i, cell in enumerate(r) if i < len(header)}
+            for r in rows_iter
+        ]
 
         now = datetime.now(timezone.utc).isoformat()
         imported = 0
         updated = 0
         errors = []
 
-        for index, row in df.iterrows():
+        for index, row in enumerate(excel_rows):
             try:
-                barcode = str(row.get("الباركود", "")).strip()
-                name_ar = str(row.get("الاسم (عربي)", "")).strip()
-                name_en = str(row.get("الاسم (إنجليزي)", "")).strip()
+                barcode = str(row.get("الباركود", "") or "").strip()
+                name_ar = str(row.get("الاسم (عربي)") or "").strip()
+                name_en = str(row.get("الاسم (إنجليزي)") or "").strip()
 
                 if not name_ar and not name_en:
                     continue
@@ -267,15 +279,15 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                     "barcode": barcode,
                     "name_ar": name_ar or name_en,
                     "name_en": name_en or name_ar,
-                    "description_ar": str(row.get("الوصف (عربي)", "")),
-                    "description_en": str(row.get("الوصف (إنجليزي)", "")),
+                    "description_ar": str(row.get("الوصف (عربي)") or ""),
+                    "description_en": str(row.get("الوصف (إنجليزي)") or ""),
                     "purchase_price": float(row.get("سعر الشراء", 0) or 0),
                     "wholesale_price": float(row.get("سعر الجملة", 0) or 0),
                     "retail_price": float(row.get("سعر التجزئة", 0) or 0),
                     "quantity": int(row.get("الكمية", 0) or 0),
                     "low_stock_threshold": int(row.get("حد المخزون المنخفض", 10) or 10),
-                    "compatible_models": [m.strip() for m in str(row.get("الموديلات المتوافقة", "")).split(",") if m.strip()],
-                    "image_url": str(row.get("رابط الصورة", "")),
+                    "compatible_models": [m.strip() for m in str(row.get("الموديلات المتوافقة") or "").split(",") if m.strip()],
+                    "image_url": str(row.get("رابط الصورة") or ""),
                     "updated_at": now
                 }
 

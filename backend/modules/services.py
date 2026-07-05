@@ -7,7 +7,7 @@ COMPONENT = "services"
 
 def register(app, ctx):
     log = get_module_logger(COMPONENT)
-    from routes.recharge_sim_routes import create_recharge_sim_routes
+    from routes.recharge import create_recharge_sim_routes
     from routes.shipping_loyalty_routes import create_shipping_loyalty_routes
     from routes.pos_settings_routes import create_pos_settings_routes
     from utils.feature_guard import make_require_feature

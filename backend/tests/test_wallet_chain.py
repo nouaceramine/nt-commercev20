@@ -25,6 +25,15 @@ PLAN_ID = os.environ.get("TEST_PLAN_ID", "4b32cab1-1ff6-443a-8be8-b2314dc2d185")
 PLAN_MONTHLY_PRICE = 2000.0
 
 
+def resolve_plan_id(base, headers):
+    """Return PLAN_ID if it exists in the DB, else fall back to the first seeded plan."""
+    r = requests.get(f"{base}/api/saas/plans", headers=headers, timeout=15)
+    plans = r.json() if r.status_code == 200 else []
+    if any(p.get("id") == PLAN_ID for p in plans):
+        return PLAN_ID
+    return plans[0]["id"] if plans else PLAN_ID
+
+
 def get_base_url():
     url = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
     if not url:
@@ -259,7 +268,7 @@ class TestAdminToAgentTopUp:
             "email": email,
             "password": "Tenant@test123",
             "phone": "0666000000",
-            "plan_id": PLAN_ID,
+            "plan_id": resolve_plan_id(base, admin_headers),
             "agent_id": agent_info["id"],
             "subscription_type": "monthly",
         })
@@ -583,7 +592,7 @@ class TestTenantSaleDebit:
             "email": email,
             "password": "Sale@tenant123",
             "phone": "0666001001",
-            "plan_id": PLAN_ID,
+            "plan_id": resolve_plan_id(base, admin_headers),
             "agent_id": chain_agent["id"],
             "subscription_type": "monthly",
         })

@@ -16,6 +16,11 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 security = HTTPBearer()
 
+def email_ci(email: str) -> dict:
+    """Case-insensitive exact-match Mongo query value for an email field."""
+    import re as _re
+    return {"$regex": f"^{_re.escape((email or '').strip())}$", "$options": "i"}
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 

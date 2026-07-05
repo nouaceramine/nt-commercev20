@@ -5,6 +5,7 @@ import uuid
 import bcrypt
 
 from config.database import db
+from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import get_current_agent, create_access_token
 from services.wallet_service import get_or_create_wallet, transfer_balance, DEFAULT_LOW_BALANCE, enrich_transfers
@@ -160,7 +161,7 @@ async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_cu
 
 @router.post("/saas/agent-login")
 async def agent_login(login_data: AgentLoginRequest):
-    agent = await db.saas_agents.find_one({"email": login_data.email})
+    agent = await db.saas_agents.find_one({"email": email_ci(login_data.email)})
     if not agent:
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
 

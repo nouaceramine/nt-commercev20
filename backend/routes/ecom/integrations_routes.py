@@ -138,6 +138,15 @@ async def test_integration(integration_id: str, user: dict = Depends(require_ten
     channel = existing.get("channel", "")
     mode = existing.get("mode", "mock")
 
+    # ── Mock mode — simulated integration, no live ping ──────────────
+    if mode == "mock":
+        return {
+            "ok": True,
+            "mode": "mock",
+            "channel": channel,
+            "message": "وضع المحاكاة — الاتصال محاكى ولا يتم فحص المزود الحقيقي.",
+        }
+
     # ── Shopify ──────────────────────────────────────────────────────
     if channel == "shopify":
         from services.ecom.shopify_service import ping as shopify_ping, ShopifyAPIError

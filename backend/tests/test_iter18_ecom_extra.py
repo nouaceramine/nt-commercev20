@@ -74,9 +74,13 @@ async def test_credential_redaction_and_test_endpoint():
             data = r.json()
             assert secret not in str(data), f"secret leaked in {ch} response"
             created_ids.append(data["id"])
-            # test endpoint always ok
+            # test endpoint always returns 200 with an ok flag; live-ping channels
+            # (shopify) report ok=False for fake creds, others stay ok=True
             t = await c.post(f"{BASE_URL}/ecom/integrations/{data['id']}/test", headers=TH)
-            assert t.status_code == 200 and t.json()["ok"] is True
+            body = t.json()
+            assert t.status_code == 200 and "ok" in body
+            if ch != "shopify":
+                assert body["ok"] is True
         # cleanup
         for iid in created_ids:
             await c.delete(f"{BASE_URL}/ecom/integrations/{iid}", headers=TH)

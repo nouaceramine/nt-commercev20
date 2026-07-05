@@ -24,8 +24,7 @@ import requests as http_requests
 import asyncio
 import shutil
 import base64
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 # Load environment variables from .env file
@@ -76,9 +75,8 @@ from config.database import (
 
 # init_tenant_database is imported from config.database (canonical single source).
 
-# JWT Settings
-SECRET_KEY = os.environ['JWT_SECRET_KEY']
-ALGORITHM = "HS256"
+# JWT Settings — central validated config (Sprint 1: fail-fast, no fallback)
+from utils.jwt_config import SECRET_KEY, ALGORITHM  # noqa: E402
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 # Currency
@@ -87,18 +85,35 @@ CURRENCY = "دج"  # Algerian Dinar
 # Create the main app
 app = FastAPI(title="NT API")
 
-# Initialize rate limiter (slowapi)
-limiter = Limiter(key_func=get_remote_address)
+# ── Sprint 1: Request Context Middleware ─────────────────────────────────
+# Adds request_id + correlation_id to every request and exposes via headers.
+from middleware.request_context import RequestContextMiddleware  # noqa: E402
+app.add_middleware(RequestContextMiddleware)
+
+# ── Sprint 1: Structured logging with tenant/request context ─────────────
+from utils.logging_setup import setup_logging  # noqa: E402
+setup_logging(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    force_json=(os.environ.get("LOG_FORMAT", "text").lower() == "json"),
+)
+
+# Initialize rate limiter (slowapi) — shared singleton with proxy-aware key func
+from middleware.rate_limit import limiter  # noqa: E402
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Sprint 1: Standardized error handlers ────────────────────────────────
+from utils.errors import AppException, app_exception_handler, general_exception_handler  # noqa: E402
+app.add_exception_handler(AppException, app_exception_handler)
+# NOTE: keep FastAPI's default handler for HTTPException; only wire our generic
+# handler for uncaught Exceptions so we still see structured 500s.
+app.add_exception_handler(Exception, general_exception_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
 security = HTTPBearer()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Create static directory for uploads
@@ -216,6 +231,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user_type = payload.get("type")  # admin, agent, tenant
         role = payload.get("role")
         tenant_id = payload.get("tenant_id")
+
+        # Sprint 1: propagate tenant/user into request context for logging
+        try:
+            from middleware.request_context import set_tenant_context
+            set_tenant_context(tenant_id=tenant_id, user_id=user_id)
+        except Exception:
+            pass
 
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -673,6 +695,10 @@ app.include_router(build_financial_router(), prefix="/api")
 # ============ EVENT BUS OBSERVABILITY (Phase 4 dashboard backend) ============
 from routes.saas.event_bus_routes import router as event_bus_router
 app.include_router(event_bus_router, prefix="/api")
+
+# ============ SPRINT 1: HEALTH CHECKS ============
+from routes.health_routes import router as health_router
+app.include_router(health_router, prefix="/api")
 
 # ============ SYSTEM LOGS ============
 from routes.system_logs_routes import router as system_logs_router, log_backend_exception

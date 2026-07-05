@@ -1,0 +1,39 @@
+{
+  "summary": "Frontend regression testing of PlatformFinanceTab split (10 scenarios). Code review + ESLint uncovered 3 missing-import bugs from the refactor that would have crashed 3 finance sub-features. Fixed all 3 (trivial import additions, same pattern as the earlier 'Select is not defined' fix). Re-ran full Playwright flow end-to-end — 10/10 scenarios pass with ZERO console errors, zero page errors, zero error boundaries triggered.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/frontend/src/pages/admin/PlatformFinanceTab/PurchaseDialogs.js",
+    "/app/frontend/src/pages/admin/PlatformFinanceTab/ProductProfitabilityCard.js",
+    "/app/frontend/src/pages/admin/PlatformFinanceTab/CodeTraceCard.js"
+  ],
+  "action_items": [
+    "Verify the 3 import fixes in PlatformFinanceTab package (useMemo in PurchaseDialogs, useEffect in ProductProfitabilityCard, downloadCsv/todayStamp in CodeTraceCard). These are the ONLY changes made; behavior/logic untouched.",
+    "(Optional cleanup) Remove the now-orphan `/* eslint-disable-next-line react-hooks/exhaustive-deps */` comment on line 61 of PlatformFinanceTab/index.js — ESLint reports it as an unused-disable directive.",
+    "(Optional) Bulk-mode CSV export in CodeTraceCard is now wired to downloadCsv/todayStamp but was not exercised end-to-end in this run (single-code trace flow was tested). Manual smoke of bulk CSV export recommended when convenient."
+  ],
+  "critical_code_review_comments": [
+    "REGRESSION RISK CONFIRMED: The main-agent-driven split of PlatformFinanceTab.js (1220 lines → package of 7 files) left 3 hook/util references without their imports. ESLint no-undef caught them all in <1s. Recommend adding a pre-commit ESLint check (or CI gate) — the earlier 'Select is not defined' + these 3 are the same class of bug and will keep recurring after refactors.",
+    "PurchaseDialogs.js used `useMemo` (line 30) but only imported `useState, useEffect` → PurchaseFormDialog would ReferenceError-crash the whole page the moment the user clicked 'تسجيل عملية شراء'. Fixed.",
+    "ProductProfitabilityCard.js used `useEffect` (line 21) but only imported `useState` → the entire 'ربحية المنتج' sub-tab would crash on mount (useEffect fires on first render). Fixed.",
+    "CodeTraceCard.js used `downloadCsv` and `todayStamp` in bulkExport (line 73) with no imports → bulk-CSV-export path would ReferenceError. Fixed by importing from ../../../lib/csvExport.",
+    "Positive: KpiCard, format.js, SupplierDialogs.js, and index.js have complete imports. The Recharts LineChart, Select components, and all data-testid attributes are intact. Backend contract calls (/admin/supplier/*) all reach the API and return data.",
+    "Positive: Event Bus dashboard is healthy — Redis Streams length=111, DLQ=4, 24h success=85, status 'متّصل' (connected). Top-processed events (ecom_order.cancelled, purchase.deleted/created, purchase.codes_uploaded, ecom_order.confirmed) confirm the EDA pipeline from iter-21 is still flowing."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/admin/PlatformFinanceTab/PurchaseDialogs.js (added useMemo to react import)",
+    "/app/frontend/src/pages/admin/PlatformFinanceTab/ProductProfitabilityCard.js (added useEffect to react import)",
+    "/app/frontend/src/pages/admin/PlatformFinanceTab/CodeTraceCard.js (added downloadCsv, todayStamp imports from lib/csvExport)"
+  ],
+  "success_rate": {"backend": "N/A (skipped per request — 304/304 already passing from prior iters)", "frontend": "100% (10/10 scenarios pass after 3 import fixes)"},
+  "test_credentials": "Super admin admin@ntcommerce.com / Admin@2024 → OK, redirects to /saas-admin. Tenant TEST_tenant_0e54f6b5@example.com / TenantPass@2024 → OK, lands on tenant dashboard '/'.",
+  "seed_data_creation": "None. Used existing tenants and existing suppliers (TEST_iter24_iccid, TEST_iter25_3dee19, TEST_iter25_sold, kj) already present in DB.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "PlatformFinanceTab split is now stable. All 5 sub-tabs (لوحة المعلومات، الموردون، المشتريات، ربحية المنتج، تتبع كود) render without crash; SupplierFormDialog and PurchaseFormDialog open/close cleanly. Landing page, /login, /saas-admin, /saas-admin/supplier, /saas-admin/event-bus, and tenant dashboard shell all load without error boundaries. Console + pageerror channels were empty across the full flow. Note the ESLint 'no-undef' rule caught these 3 bugs — running `npx eslint src/pages/admin/PlatformFinanceTab` after any future split/refactor of this area is a fast safety net.",
+  "rca of the issue": "Root cause: When the main agent split monolithic PlatformFinanceTab.js into 6+ sub-files, they moved code blocks but the import lines in each new sub-file were reconstructed by hand (not automatically derived from usage). The hand-authored import lists in PurchaseDialogs.js, ProductProfitabilityCard.js, and CodeTraceCard.js omitted `useMemo`, `useEffect`, `downloadCsv`, and `todayStamp` respectively. Reproduction: (a) log in as super admin, (b) go to /saas-admin/supplier → إدارة المال → any of the three affected sub-features. Mitigation applied: added the missing imports (4 identifiers across 3 files, no logic change). Recommendation: add ESLint no-undef to CI/pre-commit so this class of refactor regression is caught before deploy."
+}

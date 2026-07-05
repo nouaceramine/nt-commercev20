@@ -81,7 +81,7 @@ class RedisEventBus:
             self._client = redis_async.from_url(
                 self._url,
                 decode_responses=True,
-                socket_timeout=5.0,
+                socket_timeout=(BLOCK_MS / 1000) + 5.0,
                 socket_connect_timeout=2.0,
             )
             await self._client.ping()

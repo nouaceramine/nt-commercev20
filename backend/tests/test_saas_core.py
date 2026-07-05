@@ -170,7 +170,7 @@ class TestTenantsCRUD:
         r = admin_client.post(f"{BASE_URL}/api/saas/tenants", json=payload, timeout=30)
         assert r.status_code == 200, f"Create tenant failed: {r.status_code} {r.text[:300]}"
         data = r.json()
-        assert data["email"] == email
+        assert data["email"] == email.lower()
         assert data["name"] == payload["name"]
         assert "id" in data
         TestTenantsCRUD.created_tenant = {

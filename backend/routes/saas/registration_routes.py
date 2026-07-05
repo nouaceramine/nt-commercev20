@@ -1,13 +1,17 @@
 """SaaS Registration Routes - Public registration + tenant login"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 import os
 import uuid
 import bcrypt
 
 from config.database import db, init_tenant_database
+from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import create_access_token
+
+# ── Sprint 1: Rate limiting on public endpoints (login, register) ─────────
+from middleware.rate_limit import rate_limit as _rate_limited  # noqa: E402
 
 router = APIRouter(tags=["SaaS Registration"])
 
@@ -113,8 +117,9 @@ async def register_tenant(tenant: TenantCreate):
 
 
 @router.post("/saas/tenant-login")
-async def tenant_login(login_data: AgentLoginRequest):
-    tenant = await db.saas_tenants.find_one({"email": login_data.email})
+@_rate_limited(os.environ.get("RATE_LIMIT_LOGIN", "10/minute"))
+async def tenant_login(request: Request, login_data: AgentLoginRequest):
+    tenant = await db.saas_tenants.find_one({"email": email_ci(login_data.email)})
     if not tenant:
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
 

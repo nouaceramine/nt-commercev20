@@ -70,6 +70,14 @@ def create_permission_checker(db, get_current_user) -> Callable:
                     if isinstance(perms, list):
                         for p in perms:
                             effective_perms.add(f"{module}.{p}")
+                    elif isinstance(perms, dict):
+                        # DEFAULT_PERMISSIONS shape: {"products": {"view": True, "add": False}}
+                        for p, allowed in perms.items():
+                            if allowed:
+                                effective_perms.add(f"{module}.{p}")
+                    elif isinstance(perms, bool) and perms:
+                        # Top-level boolean module flag: {"pos": True} → grants pos.*
+                        effective_perms.add(module)
             elif isinstance(user_perms, list):
                 effective_perms.update(user_perms)
             
@@ -82,8 +90,11 @@ def create_permission_checker(db, get_current_user) -> Callable:
                     if isinstance(role_perms, list):
                         effective_perms.update(role_perms)
             
-            # Check all required permissions
-            missing = [p for p in permissions if p not in effective_perms]
+            # Check all required permissions (module bool flag grants module.*)
+            missing = [
+                p for p in permissions
+                if p not in effective_perms and p.split(".")[0] not in effective_perms
+            ]
             if missing:
                 raise HTTPException(
                     status_code=403,
