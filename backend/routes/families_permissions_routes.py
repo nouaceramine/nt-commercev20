@@ -106,6 +106,9 @@ async def get_user_permissions(user_id: str, admin: dict = Depends(get_tenant_ad
 @router.put("/users/{user_id}/permissions")
 async def update_user_permissions(user_id: str, permissions: dict, admin: dict = Depends(get_tenant_admin)):
     """Update permissions for a specific user"""
+    # Frontend sends {"permissions": {...}} — unwrap to store the raw permissions map
+    if set(permissions.keys()) == {"permissions"} and isinstance(permissions["permissions"], dict):
+        permissions = permissions["permissions"]
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

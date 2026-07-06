@@ -656,3 +656,29 @@ User intent: تجهيز النظام للبيع التجاري. أنجزنا:
 - 🔴 P0 (blocked on platform): production 500s — user redeploy / Emergent Support.
 - 🟠 P1: custom domain once production fixed.
 - 🟢 P3: landing page — real WhatsApp number, GA/Meta Pixel, real screenshots, testimonials.
+
+## Iteration 31 (2026-07-06) — Employee login + working permission toggles (E2E verified)
+
+### New capability: tenant employees can now actually log in
+- **Architecture gap fixed**: unified-login only knew main-db users, agents and tenant owners — employee accounts inside per-tenant DBs had NO login path at all.
+- Added `tenant_user_directory` collection in main db (email → {tenant_id, user_id, role}); unique index on email. Written on employee-account create, removed on delete. Backfill script executed (1 account migrated).
+- unified-login step 2.5: directory hit → verify bcrypt password against tenant-db user → issue standard tenant-shaped JWT {sub: user_id, type: tenant, tenant_id} so both get_current_user implementations work untouched. Checks tenant active + subscription expiry. (integration_expert playbook consulted.)
+- Employee-account creation now enforces platform-wide email uniqueness (directory + saas_tenants + main users + agents) and stores email lowercase.
+
+### Real bug fixed: PUT /users/{id}/permissions silently broken
+- Frontend PermissionsPage sends `{"permissions": {...}}`; endpoint stored the whole wrapper as the permissions map → toggles never took effect. Endpoint now unwraps the envelope.
+
+### E2E verification (curl)
+- seller login via /api/auth/unified-login ✅; GET /sales 200, GET /expenses 403, GET /purchases 403, DELETE /sales 403 (role defaults enforced) ✅
+- Owner grants expenses.view via PUT permissions → seller GET /expenses 200, purchases still 403 ✅
+- UI: employee logs in at /login → tenant dashboard renders, blocked resources show "ليس لديك صلاحية" toast ✅
+- Full pytest: 304 passed (fixed non-idempotent EDA test leaving stale saas_tenants doc).
+
+### ⚠️ Environment note
+- Local redis-server is apt-installed and DISAPPEARS on container rebuild → supervisor `redis` goes FATAL and ~21 redis-dependent tests fail. Remedy: `apt-get install -y redis-server && sudo supervisorctl restart redis backend`. Production uses Upstash (REDIS_URL env).
+
+### Remaining next items
+- 🔴 P0 (blocked on platform): production 500s — user redeploy / Emergent Support.
+- 🟠 P1: custom domain once production fixed.
+- 🟡 P2: PermissionsPage UX pass (employee list may need to include tenant-db users; hide dashboard cards employee can't access instead of error toast).
+- 🟢 P3: landing page — real WhatsApp number, GA/Meta Pixel, screenshots, testimonials.

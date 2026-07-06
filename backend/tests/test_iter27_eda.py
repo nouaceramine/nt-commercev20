@@ -314,6 +314,7 @@ async def test_tenant_subscription_expired_disables_tenant():
     mongo, main_db, r = _fresh_clients()
     try:
         tid = "exptest_" + uuid.uuid4().hex[:6]
+        await main_db.saas_tenants.delete_many({"email": "noreply@example.com"})
         await main_db.saas_tenants.insert_one({
             "id": tid, "name": "Test Co", "email": "noreply@example.com",
             "subscription_status": "active", "is_active": True,

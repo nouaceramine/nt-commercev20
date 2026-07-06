@@ -134,20 +134,36 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Account Management ──
     @router.post("/{employee_id}/create-account")
     async def create_employee_account(employee_id: str, account: EmployeeAccountCreate, admin: dict = Depends(require_permission("employees.edit"))):
+        from config.database import main_db
+        from utils.auth import email_ci
+        email_lower = account.email.strip().lower()
         emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
-        if await db.users.find_one({"email": account.email}):
+        if await db.users.find_one({"email": email_ci(account.email)}):
             raise HTTPException(status_code=400, detail="Email already registered")
+        # Email must also be globally unique across the platform (owners, agents, other tenants' staff)
+        if (await main_db.tenant_user_directory.find_one({"email": email_lower})
+                or await main_db.saas_tenants.find_one({"email": email_ci(account.email)})
+                or await main_db.users.find_one({"email": email_ci(account.email)})
+                or await main_db.saas_agents.find_one({"email": email_ci(account.email)})):
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم مسبقاً في المنصة")
         if emp.get("user_id"):
             raise HTTPException(status_code=400, detail="Employee already has an account")
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         hashed = bcrypt.hashpw(account.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        user_doc = {"id": user_id, "email": account.email, "password": hashed, "name": emp["name"], "role": account.role, "employee_id": employee_id, "permissions": DEFAULT_PERMISSIONS.get(account.role, {}), "created_at": now}
+        user_doc = {"id": user_id, "email": email_lower, "password": hashed, "name": emp["name"], "role": account.role, "employee_id": employee_id, "permissions": DEFAULT_PERMISSIONS.get(account.role, {}), "created_at": now}
         await db.users.insert_one(user_doc)
-        await db.employees.update_one({"id": employee_id}, {"$set": {"user_id": user_id, "user_email": account.email}})
-        return {"success": True, "user_id": user_id, "email": account.email, "role": account.role}
+        await db.employees.update_one({"id": employee_id}, {"$set": {"user_id": user_id, "user_email": email_lower}})
+        # Directory entry so unified-login can route this email to the right tenant DB
+        if admin.get("tenant_id"):
+            await main_db.tenant_user_directory.update_one(
+                {"email": email_lower},
+                {"$set": {"email": email_lower, "tenant_id": admin["tenant_id"], "user_id": user_id, "employee_id": employee_id, "role": account.role, "created_at": now}},
+                upsert=True,
+            )
+        return {"success": True, "user_id": user_id, "email": email_lower, "role": account.role}
 
     @router.delete("/{employee_id}/delete-account")
     async def delete_employee_account(employee_id: str, admin: dict = Depends(require_permission("employees.edit"))):
@@ -156,7 +172,9 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
             raise HTTPException(status_code=404, detail="Employee not found")
         if not emp.get("user_id"):
             raise HTTPException(status_code=400, detail="Employee has no linked account")
+        from config.database import main_db
         await db.users.delete_one({"id": emp["user_id"]})
+        await main_db.tenant_user_directory.delete_one({"user_id": emp["user_id"]})
         await db.employees.update_one({"id": employee_id}, {"$unset": {"user_id": "", "user_email": ""}})
         return {"success": True}
 

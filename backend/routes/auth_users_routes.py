@@ -192,6 +192,48 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             except Exception:
                 pass
 
+        # 2.5 Check tenant employees (main_db directory maps email → tenant)
+        directory = await main_db.tenant_user_directory.find_one({"email": email.strip().lower()}, {"_id": 0})
+        if directory:
+            tenant = await main_db.saas_tenants.find_one({"id": directory["tenant_id"]}, {"_id": 0})
+            if tenant:
+                if not tenant.get("is_active", True):
+                    raise HTTPException(status_code=403, detail="حساب المتجر معطل")
+                if tenant.get("subscription_ends_at"):
+                    end_date = datetime.fromisoformat(tenant["subscription_ends_at"].replace("Z", "+00:00"))
+                    if end_date < datetime.now(timezone.utc) and not tenant.get("is_trial"):
+                        raise HTTPException(status_code=403, detail="انتهت صلاحية اشتراك المتجر")
+                tenant_db_conn = get_tenant_db(directory["tenant_id"])
+                emp_user = await tenant_db_conn.users.find_one({"id": directory["user_id"]}, {"_id": 0})
+                if emp_user:
+                    stored = emp_user.get("hashed_password") or emp_user.get("password")
+                    if stored and verify_password(password, stored):
+                        if emp_user.get("is_active", True) is False:
+                            raise HTTPException(status_code=403, detail="الحساب معطل")
+                        _clear_failed_login(email)
+                        token_data = {
+                            "sub": emp_user["id"],
+                            "email": emp_user["email"],
+                            "role": emp_user.get("role", "seller"),
+                            "type": "tenant",
+                            "tenant_id": directory["tenant_id"],
+                        }
+                        access_token = create_access_token(token_data)
+                        return {
+                            "access_token": access_token,
+                            "user_type": "tenant",
+                            "redirect_to": "/tenant/dashboard",
+                            "user": {
+                                "id": emp_user["id"],
+                                "email": emp_user["email"],
+                                "name": emp_user.get("name", ""),
+                                "role": emp_user.get("role", "seller"),
+                                "company_name": tenant.get("company_name", ""),
+                                "permissions": emp_user.get("permissions", {}),
+                                "is_employee": True,
+                            },
+                        }
+
         # 3. Check Tenants
         tenant = await db.saas_tenants.find_one({"email": email_ci(email)}, {"_id": 0})
         if tenant:
