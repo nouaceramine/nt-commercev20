@@ -26,15 +26,17 @@ def super_headers(super_token):
 def tenant_with_debt(super_headers):
     """Ensure at least one tenant wallet has credit_debt > 0 by topping up via credit."""
     tid = "b4fde9b7-d1f2-46ec-b62a-f0971ca3deba"
-    # Login to wallet API context via impersonation token; we'll just call the platform wallet endpoint
-    # Best path: use the impersonation endpoint or add-funds endpoint with super-admin context if available.
-    # Try /api/saas/tenants/{id}/wallet/add-funds (super admin endpoint)
-    payload = {"amount": 250, "payment_method": "credit", "notes": "TEST iter11 credit debt"}
-    r = requests.post(f"{BASE_URL}/api/saas/tenants/{tid}/wallet/add-funds", json=payload, headers=super_headers, timeout=30)
-    # Fallback: maybe the unified endpoint is /api/wallet/add-funds with tenant_id in body
-    if r.status_code == 404:
-        payload2 = {"tenant_id": tid, "amount": 250, "payment_method": "credit", "notes": "TEST iter11"}
-        r = requests.post(f"{BASE_URL}/api/wallet/add-funds", json=payload2, headers=super_headers, timeout=30)
+    payload = {"entity_id": tid, "amount": 250, "payment_method": "credit", "notes": "TEST iter11 credit debt"}
+    r = requests.post(f"{BASE_URL}/api/wallet/add-funds", json=payload, headers=super_headers, timeout=30)
+    if r.status_code != 200:
+        # Fallback: hardcoded tenant/wallet missing — try any tenant that has a wallet
+        tl = requests.get(f"{BASE_URL}/api/saas/tenants", headers=super_headers, timeout=30).json()
+        items = tl if isinstance(tl, list) else tl.get("items", [])
+        for t in items:
+            payload["entity_id"] = t["id"]
+            r = requests.post(f"{BASE_URL}/api/wallet/add-funds", json=payload, headers=super_headers, timeout=30)
+            if r.status_code == 200:
+                return t["id"]
     return tid
 
 

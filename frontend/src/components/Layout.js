@@ -72,7 +72,8 @@ import {
   CircuitBoard,
   Tv,
   Boxes,
-  Calendar
+  Calendar,
+  Activity
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -464,6 +465,7 @@ export const Layout = ({ children }) => {
       items: [
         ...(isAdmin ? [
           { path: '/employees', icon: Users, label: language === 'ar' ? 'الموظفين' : 'Employés' },
+          { path: '/employee-activity', icon: Activity, label: language === 'ar' ? 'سجل النشاط' : 'Activité' },
           { path: '/employee-alerts', icon: Bell, label: language === 'ar' ? 'تنبيهات الحدود' : 'Alertes' },
           { path: '/task-management', icon: CheckSquare, label: language === 'ar' ? 'المهام' : 'Tâches' },
         ] : [])

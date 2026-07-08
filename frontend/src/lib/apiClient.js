@@ -50,8 +50,10 @@ apiClient.interceptors.response.use(
         window.location.href = '/portal';
       }
     } else if (status === 403) {
-      if (!onPublic) {
-        toast.error('ليس لديك صلاحية للوصول');
+      // Dedupe: parallel dashboard fetches can 403 together for limited-permission employees
+      if (!onPublic && Date.now() - (apiClient._last403At || 0) > 5000) {
+        apiClient._last403At = Date.now();
+        toast.error('ليس لديك صلاحية للوصول', { id: 'forbidden-toast' });
       }
     } else if (status === 429) {
       toast.error('طلبات كثيرة. حاول لاحقاً');

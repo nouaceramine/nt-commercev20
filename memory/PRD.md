@@ -682,3 +682,23 @@ User intent: تجهيز النظام للبيع التجاري. أنجزنا:
 - 🟠 P1: custom domain once production fixed.
 - 🟡 P2: PermissionsPage UX pass (employee list may need to include tenant-db users; hide dashboard cards employee can't access instead of error toast).
 - 🟢 P3: landing page — real WhatsApp number, GA/Meta Pixel, screenshots, testimonials.
+
+## Iteration 32 (2026-07-08) — Employee Activity Log (new feature) + UX fixes
+
+### New feature: سجل نشاط الموظفين (/employee-activity)
+- Backend: `routes/activity_routes.py` → GET /api/activity/employees (gated by `employees.view`). Read-only aggregation over sales (created_by), cashbox transactions, audit_log, attendance. Filters: employee, event_type, start/end date, limit≤300. Returns {total, by_type, events[]}.
+- Mounted in `modules/employees.py` (2 routers now).
+- Frontend: `pages/EmployeeActivityPage.js` at /employee-activity (adminOnly), sidebar link "سجل النشاط" under الموظفون. Type badges (بيع/صندوق/حذف-تدقيق/حضور), count chips, filters, RTL table. data-testids: employee-activity-page, activity-table, activity-{employee,type}-filter, activity-{start,end}-date, activity-refresh-btn, activity-count-{type}.
+- E2E verified: seller created a real sale via API (also proving the extracted sales_service works) → both sale + cashbox income appeared in the owner's activity log UI. Seller gets 403 on the endpoint (no employees.view).
+
+### UX fix
+- apiClient 403 toast now deduped (sonner id + 5s window) — employee dashboards no longer spam "ليس لديك صلاحية" toasts from parallel blocked fetches.
+
+### Test fixes
+- `test_iter11_features.py::tenant_with_debt` fixture used a nonexistent endpoint + wrong body key (`tenant_id` vs `entity_id`) and silently produced no debt → remind test failed 400. Fixed to call POST /api/wallet/add-funds with `entity_id` + fallback scan over tenants. 12/12 passing; full suite green.
+
+### ⚠️ Recurring env issue
+- redis-server (apt) vanished twice after container rebuilds. Remedy each time: `apt-get install -y redis-server && sudo supervisorctl restart redis backend`.
+
+### Remaining
+- 🔴 P0: production 500s (user redeploy / Emergent Support). 🟠 domain. 🟢 landing page (WhatsApp number, GA/Pixel, screenshots, testimonials).

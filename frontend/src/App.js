@@ -41,6 +41,7 @@ import CashManagementPage from "./pages/CashManagementPage";
 import SalesHistoryPage from "./pages/SalesHistoryPage";
 import InstallmentsPage from "./pages/InstallmentsPage";
 import EmployeesPage from "./pages/EmployeesPage";
+import EmployeeActivityPage from "./pages/EmployeeActivityPage";
 import DebtsPage from "./pages/DebtsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
@@ -676,6 +677,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute adminOnly>
             <EmployeesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/employee-activity"
+        element={
+          <ProtectedRoute adminOnly>
+            <EmployeeActivityPage />
           </ProtectedRoute>
         }
       />
