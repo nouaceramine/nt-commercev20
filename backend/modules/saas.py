@@ -15,6 +15,8 @@ def register(app, ctx):
 
     app.include_router(saas_router, prefix="/api")
     app.include_router(create_agent_hierarchy_routes(ctx.main_db, ctx.get_super_admin), prefix="/api")
+    from routes.testimonials_routes import create_testimonials_routes
+    app.include_router(create_testimonials_routes(ctx.main_db, ctx.get_super_admin), prefix="/api")
 
     system_errors_routes.init_routes(ctx.main_db, ctx.get_super_admin)
     app.include_router(system_errors_routes.router, prefix="/api")

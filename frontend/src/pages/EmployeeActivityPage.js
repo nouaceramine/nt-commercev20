@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { toast } from 'sonner';
-import { Activity, RefreshCw, ShoppingCart, Banknote, Trash2, CalendarCheck, Loader2 } from 'lucide-react';
+import { Activity, RefreshCw, ShoppingCart, Banknote, Trash2, CalendarCheck, Loader2, Trophy } from 'lucide-react';
 
 const TYPE_META = {
   sale:        { label: 'بيع',     icon: ShoppingCart,  cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -34,6 +34,24 @@ export default function EmployeeActivityPage() {
   const [eventType, setEventType] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [perf, setPerf] = useState({ employees: [], totals: {} });
+
+  const loadPerf = useCallback(async () => {
+    try {
+      const params = {};
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+      const res = await apiClient.get('/activity/performance', { params });
+      setPerf(res.data);
+    } catch { /* gated or empty */ }
+  }, [startDate, endDate]);
+
+  const setPreset = (days) => {
+    const end = new Date();
+    const start = new Date(Date.now() - days * 86400000);
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,6 +75,7 @@ export default function EmployeeActivityPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadPerf(); }, [loadPerf]);
 
   return (
     <Layout>
@@ -110,6 +129,55 @@ export default function EmployeeActivityPage() {
             </Select>
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} data-testid="activity-start-date" />
             <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="activity-end-date" />
+          </CardContent>
+        </Card>
+
+        {/* Performance report */}
+        <Card data-testid="performance-card">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-500" />
+              تقرير أداء الموظفين
+            </CardTitle>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPreset(7)} data-testid="perf-week-btn">هذا الأسبوع</Button>
+              <Button variant="outline" size="sm" onClick={() => setPreset(30)} data-testid="perf-month-btn">هذا الشهر</Button>
+              <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate(''); }}>الكل</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {perf.employees.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">لا توجد مبيعات في هذه الفترة</div>
+            ) : (
+              <Table data-testid="performance-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-right">#</TableHead>
+                    <TableHead className="text-right">الموظف</TableHead>
+                    <TableHead className="text-right">إجمالي المبيعات</TableHead>
+                    <TableHead className="text-right">عدد الفواتير</TableHead>
+                    <TableHead className="text-right">متوسط الفاتورة</TableHead>
+                    <TableHead className="text-right">فواتير محذوفة</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {perf.employees.map((e, i) => (
+                    <TableRow key={e.name} className={i === 0 ? 'bg-amber-50/50' : ''}>
+                      <TableCell>{i === 0 ? '🏆' : i + 1}</TableCell>
+                      <TableCell className="font-medium">{e.name}</TableCell>
+                      <TableCell className="font-semibold text-emerald-700">{fmtDZ(e.total_sales)} دج</TableCell>
+                      <TableCell>{e.invoices}</TableCell>
+                      <TableCell>{fmtDZ(e.avg_invoice)} دج</TableCell>
+                      <TableCell>
+                        {e.deleted_sales > 0
+                          ? <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">{e.deleted_sales}</Badge>
+                          : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
 

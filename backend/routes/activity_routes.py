@@ -115,4 +115,60 @@ def create_activity_routes(db, get_current_user) -> dict:
 
         return {"total": len(events), "by_type": by_type, "events": events}
 
+    @router.get("/performance")
+    async def employee_performance(
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        user: dict = Depends(require_permission("employees.view")),
+    ):
+        """Per-employee sales performance: totals, invoice count, avg basket."""
+        match = {}
+        date_q = {}
+        if start_date:
+            date_q["$gte"] = start_date
+        if end_date:
+            date_q["$lte"] = end_date + ("T23:59:59" if len(end_date) == 10 else "")
+        if date_q:
+            match["created_at"] = date_q
+
+        pipeline = [
+            {"$match": match},
+            {"$group": {
+                "_id": "$created_by",
+                "total_sales": {"$sum": "$total"},
+                "total_paid": {"$sum": "$paid_amount"},
+                "invoices": {"$sum": 1},
+                "avg_invoice": {"$avg": "$total"},
+                "last_sale_at": {"$max": "$created_at"},
+            }},
+            {"$sort": {"total_sales": -1}},
+        ]
+        rows = await db.sales.aggregate(pipeline).to_list(100)
+
+        # deletions per employee (accountability)
+        del_pipeline = [
+            {"$match": {**({"created_at": date_q} if date_q else {}), "action": "delete_sale"}},
+            {"$group": {"_id": "$performed_by", "deleted": {"$sum": 1}}},
+        ]
+        deletions = {d["_id"]: d["deleted"] for d in await db.audit_log.aggregate(del_pipeline).to_list(100)}
+
+        employees = [{
+            "name": r["_id"] or "—",
+            "total_sales": round(r.get("total_sales", 0) or 0, 2),
+            "total_paid": round(r.get("total_paid", 0) or 0, 2),
+            "invoices": r.get("invoices", 0),
+            "avg_invoice": round(r.get("avg_invoice", 0) or 0, 2),
+            "deleted_sales": deletions.get(r["_id"], 0),
+            "last_sale_at": r.get("last_sale_at", ""),
+        } for r in rows]
+
+        return {
+            "period": {"start": start_date, "end": end_date},
+            "employees": employees,
+            "totals": {
+                "sales": round(sum(e["total_sales"] for e in employees), 2),
+                "invoices": sum(e["invoices"] for e in employees),
+            },
+        }
+
     return router

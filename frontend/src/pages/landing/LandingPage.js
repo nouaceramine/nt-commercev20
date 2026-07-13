@@ -79,11 +79,19 @@ export default function LandingPage() {
     { icon: Cloud, title: 'سحابي 100%', desc: 'وصول من أي مكان في أي وقت' },
   ];
 
-  const testimonials = [
+  const DEFAULT_TESTIMONIALS = [
     { name: 'أحمد محمد', role: 'صاحب محل إلكترونيات', text: 'برنامج ممتاز غير طريقة إدارة محلي بالكامل!' },
     { name: 'فاطمة علي', role: 'مديرة سوبر ماركت', text: 'التقارير الذكية ساعدتني في زيادة المبيعات 30%' },
     { name: 'يوسف أمين', role: 'تاجر جملة', text: 'أفضل استثمار قمت به لتطوير عملي' },
   ];
+  const [testimonials, setTestimonials] = useState(DEFAULT_TESTIMONIALS);
+
+  useEffect(() => {
+    apiClient.get('/public/testimonials')
+      .then((r) => { if (r.data?.items?.length) setTestimonials(r.data.items); })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const painPoints = [
     {
@@ -124,24 +132,28 @@ export default function LandingPage() {
       title: 'لوحة قيادة شاملة',
       desc: 'كل أرقام محلِّك في شاشة واحدة: المبيعات، الأرباح، أفضل المنتجات، المخزون المنخفض',
       bullets: ['تحديث فوري', 'مقارنة شهرية', 'تنبيهات ذكية'],
+      img: '/landing/dashboard.png',
     },
     {
       icon: ShoppingCart,
       title: 'نقطة بيع POS فائقة السرعة',
       desc: 'واجهة لمسية تعمل على أي جهاز — تابلت، هاتف، حاسوب — حتى بدون إنترنت',
       bullets: ['Barcode scanner', 'طباعة حرارية', 'دفع متعدّد'],
+      img: '/landing/pos.png',
     },
     {
       icon: Truck,
       title: 'متجر إلكتروني + Yalidine',
       desc: 'استقبل طلبات Shopify/Instagram، طبع وصل، ادفع، خصم تلقائي من المخزون',
       bullets: ['Yalidine API', 'Shopify Sync', 'WhatsApp إشعارات'],
+      img: '/landing/ecom.png',
     },
     {
       icon: CreditCard,
       title: 'كروت تعبئة و Idoom و SIM',
       desc: 'مورد مركزي للأكواد، تتبُّع ICCID، ربحية لكل فئة بدقّة',
       bullets: ['موبيليس/جيزي/أوريدو', 'Idoom 4G/Fibre', 'تقارير شهرية PDF'],
+      img: '/landing/cards.png',
     },
   ];
 
@@ -364,13 +376,24 @@ export default function LandingPage() {
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-3">{s.title}</h3>
                   <p className="text-gray-600 mb-4 leading-relaxed">{s.desc}</p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mb-5">
                     {s.bullets.map((b, j) => (
                       <span key={j} className="px-3 py-1 bg-white border border-slate-200 rounded-full text-xs text-slate-600 shadow-sm">
                         ✓ {b}
                       </span>
                     ))}
                   </div>
+                  {s.img && (
+                    <div className="rounded-xl overflow-hidden border border-slate-200 shadow-md group-hover:shadow-xl transition-shadow" dir="ltr">
+                      <img
+                        src={s.img}
+                        alt={s.title}
+                        loading="lazy"
+                        className="w-full h-48 object-cover object-top"
+                        onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
