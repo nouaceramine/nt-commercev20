@@ -1,18 +1,28 @@
+/**
+ * SettingsPage - System Settings (Refactored)
+ * Before: Fetched data for all tabs (Feature Envy) | After: Pure Tabs wrapper
+ * Refactoring: Extract Hook, Feature Envy -> Move Method
+ * Following Martin Fowler's Refactoring patterns
+ * 
+ * Each tab is now self-contained and responsible for its own data fetching.
+ * To add a new tab, simply add an entry in hooks/useSettingsTabs.js
+ */
 import { lazy, Suspense, useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
 import { LoadingState } from '../components/LoadingState';
 import { useLanguage } from '../contexts/LanguageContext';
-import { BackupSystem } from '../components/BackupSystem';
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from '../components/ui/tabs';
-import {
-  Shield, Database, MessageCircle, Printer, Usb, Mail, Volume2, Settings, Image, Wifi
-} from 'lucide-react';
 
+// === Extracted Hook (Refactoring: Extract Hook) ===
+import { useSettingsTabs } from '../hooks/useSettingsTabs';
 
-// Lazy-loaded tab components
+// BackupSystem is eagerly loaded (heavy component)
+import { BackupSystem } from '../components/BackupSystem';
+
+// Lazy-loaded tab components (code-splitting)
 const PermissionsTab = lazy(() => import('./settings/PermissionsTab'));
 const WhatsAppTab = lazy(() => import('./settings/WhatsAppTab'));
 const PrinterTab = lazy(() => import('./settings/PrinterTab'));
@@ -25,49 +35,44 @@ const BridgeTab = lazy(() => import('./settings/BridgeTab'));
 
 const TabLoader = () => <LoadingState className="h-32" />;
 
+// Tab component registry (maps tab IDs to components)
+const TAB_COMPONENTS = {
+  permissions: PermissionsTab,
+  branding: BrandingTab,
+  backup: BackupSystem,
+  whatsapp: WhatsAppTab,
+  printer: PrinterTab,
+  usb: UsbTab,
+  email: EmailTab,
+  sound: SoundTab,
+  system: SystemTab,
+  bridge: BridgeTab,
+};
+
 export default function SettingsPage() {
   const { t, language } = useLanguage();
+  const { getVisibleTabs, getGridCols, checkSelfBridge } = useSettingsTabs();
 
-  // Pre-fetch settings for tabs that need initial data
-  const [initialData, setInitialData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Self-bridge detection (Primitive Obsession -> isolated concern)
   const [isSelfBridge, setIsSelfBridge] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchInitialData = async () => {
-      try {
-        const [whatsappRes, emailRes, receiptRes, bridgeRes] = await Promise.all([
-          apiClient.get(`/whatsapp/settings`).catch(() => ({ data: null })),
-          apiClient.get(`/email/settings`).catch(() => ({ data: null })),
-          apiClient.get(`/settings/receipt`).catch(() => ({ data: null })),
-          apiClient.get(`/settings/bridge-config`).catch(() => ({ data: null })),
-        ]);
-        setInitialData({
-          whatsapp: whatsappRes.data ? {
-            enabled: whatsappRes.data.enabled || false,
-            phone_number_id: whatsappRes.data.phone_number_id || '',
-            access_token: '',
-            business_account_id: whatsappRes.data.business_account_id || ''
-          } : null,
-          email: emailRes.data ? {
-            enabled: emailRes.data.enabled || false,
-            resend_api_key: emailRes.data.resend_api_key || '',
-            sender_email: emailRes.data.sender_email || 'onboarding@resend.dev',
-            sender_name: emailRes.data.sender_name || 'NT POS System'
-          } : null,
-          receipt: receiptRes.data || null,
-        });
-        if (bridgeRes.data?.recharge_mode === 'self_bridge') {
-          setIsSelfBridge(true);
-        }
-      } catch (error) {
-        console.error('Error fetching settings:', error);
-      } finally {
+    let mounted = true;
+    const detectBridge = async () => {
+      const enabled = await checkSelfBridge(apiClient);
+      if (mounted) {
+        setIsSelfBridge(enabled);
         setLoading(false);
       }
     };
-    fetchInitialData();
+    detectBridge();
+    return () => { mounted = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Get visible tabs based on conditions
+  const visibleTabs = getVisibleTabs(isSelfBridge, language, t);
+  const gridCols = getGridCols(visibleTabs.length);
 
   if (loading) {
     return (
@@ -80,100 +85,53 @@ export default function SettingsPage() {
   return (
     <Layout>
       <div className="space-y-6" data-testid="settings-page">
+        {/* Header */}
         <div>
           <h1 className="text-2xl font-bold">{t.systemSettings}</h1>
           <p className="text-muted-foreground">
-            {language === 'ar' ? 'إدارة صلاحيات المستخدمين وإعدادات النظام' : 'Manage user permissions and system settings'}
+            {language === 'ar' 
+              ? 'إدارة صلاحيات المستخدمين وإعدادات النظام' 
+              : 'Manage user permissions and system settings'}
           </p>
         </div>
 
+        {/* Tabs - Dynamic based on visibleTabs configuration */}
         <Tabs defaultValue="permissions" className="space-y-6">
-          <TabsList className={`grid w-full max-w-5xl ${isSelfBridge ? 'grid-cols-10' : 'grid-cols-9'}`} data-testid="settings-tabs">
-            <TabsTrigger value="permissions" className="gap-2" data-testid="tab-permissions">
-              <Shield className="h-4 w-4" />
-              {t.permissions}
-            </TabsTrigger>
-            <TabsTrigger value="branding" className="gap-2" data-testid="tab-branding">
-              <Image className="h-4 w-4" />
-              {language === 'ar' ? 'العلامة' : 'Marque'}
-            </TabsTrigger>
-            <TabsTrigger value="backup" className="gap-2" data-testid="tab-backup">
-              <Database className="h-4 w-4" />
-              {language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegarde'}
-            </TabsTrigger>
-            <TabsTrigger value="whatsapp" className="gap-2" data-testid="tab-whatsapp">
-              <MessageCircle className="h-4 w-4" />
-              WhatsApp
-            </TabsTrigger>
-            <TabsTrigger value="printer" className="gap-2" data-testid="tab-printer">
-              <Printer className="h-4 w-4" />
-              {language === 'ar' ? 'الطابعة' : 'Imprimante'}
-            </TabsTrigger>
-            <TabsTrigger value="usb" className="gap-2" data-testid="tab-usb">
-              <Usb className="h-4 w-4" />
-              {language === 'ar' ? 'شرائح USB' : 'SIM USB'}
-            </TabsTrigger>
-            <TabsTrigger value="email" className="gap-2" data-testid="tab-email">
-              <Mail className="h-4 w-4" />
-              {language === 'ar' ? 'البريد' : 'Email'}
-            </TabsTrigger>
-            <TabsTrigger value="sound" className="gap-2" data-testid="tab-sound">
-              <Volume2 className="h-4 w-4" />
-              {language === 'ar' ? 'الصوت' : 'Sound'}
-            </TabsTrigger>
-            <TabsTrigger value="system" className="gap-2" data-testid="tab-system">
-              <Settings className="h-4 w-4" />
-              {language === 'ar' ? 'النظام' : 'Système'}
-            </TabsTrigger>
-            {isSelfBridge && (
-              <TabsTrigger value="bridge" className="gap-2" data-testid="tab-bridge">
-                <Wifi className="h-4 w-4" />
-                {language === 'ar' ? 'الجسر' : 'Bridge'}
-              </TabsTrigger>
-            )}
+          {/* Tab Triggers - Generated dynamically */}
+          <TabsList className={`grid w-full max-w-5xl ${gridCols}`} data-testid="settings-tabs">
+            {visibleTabs.map(tab => {
+              const Icon = tab.icon;
+              return (
+                <TabsTrigger 
+                  key={tab.id} 
+                  value={tab.id} 
+                  className="gap-2" 
+                  data-testid={`tab-${tab.id}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {tab.label}
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
 
-          <TabsContent value="permissions" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><PermissionsTab /></Suspense>
-          </TabsContent>
+          {/* Tab Contents - Generated dynamically */}
+          {visibleTabs.map(tab => {
+            const TabComponent = TAB_COMPONENTS[tab.id];
+            if (!TabComponent) return null;
 
-          <TabsContent value="branding" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><BrandingTab /></Suspense>
-          </TabsContent>
-
-          <TabsContent value="backup" className="space-y-6">
-            <BackupSystem />
-          </TabsContent>
-
-          <TabsContent value="whatsapp" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><WhatsAppTab initialSettings={initialData?.whatsapp} /></Suspense>
-          </TabsContent>
-
-          <TabsContent value="printer" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><PrinterTab initialReceiptSettings={initialData?.receipt} /></Suspense>
-          </TabsContent>
-
-          <TabsContent value="usb" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><UsbTab /></Suspense>
-          </TabsContent>
-
-          <TabsContent value="email" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><EmailTab initialSettings={initialData?.email} /></Suspense>
-          </TabsContent>
-
-          <TabsContent value="sound" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><SoundTab /></Suspense>
-          </TabsContent>
-
-          <TabsContent value="system" className="space-y-6">
-            <Suspense fallback={<TabLoader />}><SystemTab /></Suspense>
-          </TabsContent>
-
-          {isSelfBridge && (
-            <TabsContent value="bridge" className="space-y-6">
-              <Suspense fallback={<TabLoader />}><BridgeTab /></Suspense>
-            </TabsContent>
-          )}
+            return (
+              <TabsContent key={tab.id} value={tab.id} className="space-y-6">
+                {tab.needsSuspense ? (
+                  <Suspense fallback={<TabLoader />}>
+                    <TabComponent />
+                  </Suspense>
+                ) : (
+                  <TabComponent />
+                )}
+              </TabsContent>
+            );
+          })}
         </Tabs>
       </div>
     </Layout>
