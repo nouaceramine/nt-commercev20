@@ -567,6 +567,26 @@ _app_context = AppContext(
 )
 mount_all(app, _app_context)
 
+# ============ ENHANCED MODULES (v16): Sections 1-2 ============
+# Section 1: Products (32 endpoints) + Section 2: Orders (36 endpoints).
+# Mounted under /api/v2. The factories receive the SAME tenant-aware db proxy
+# and auth dependencies as the legacy routes, so tenant isolation is preserved.
+from routes.ecom.enhanced_products_routes import create_enhanced_products_routes  # noqa: E402
+from routes.ecom.enhanced_orders_routes import create_enhanced_orders_routes  # noqa: E402
+
+app.include_router(
+    create_enhanced_products_routes(
+        db=db, get_current_user=get_current_user, require_permission=require_permission
+    ),
+    prefix="/api/v2",
+)
+app.include_router(
+    create_enhanced_orders_routes(
+        db=db, get_current_user=get_current_user, require_permission=require_permission
+    ),
+    prefix="/api/v2",
+)
+
 # Internal main.py router (empty placeholder kept for backward compatibility)
 app.include_router(api_router)
 
@@ -933,6 +953,14 @@ async def startup():
         # ecom_external_products (mirror of Shopify/TikTok inventory — iter 18.3)
         await db.ecom_external_products.create_index([("channel", 1), ("integration_id", 1), ("external_id", 1)], unique=True)
         await db.ecom_external_products.create_index("updated_at")
+
+        # ── Enhanced Modules indexes (v16 Sections 1-2: products/orders v2) ──
+        try:
+            from utils.enhanced_indexes import create_all_enhanced_indexes
+            await create_all_enhanced_indexes(db)
+            print("✅ Enhanced modules (products/orders v2) indexes created")
+        except Exception as enh_err:
+            print(f"⚠️ Enhanced modules indexes warning: {enh_err}")
 
         print("✅ Database indexes created successfully (including accounting & AI)")
     except Exception as e:
