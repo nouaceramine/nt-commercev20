@@ -2,7 +2,7 @@
 NT Commerce v16 - Create enhanced modules indexes on ALL databases.
 
 Creates Section 1 (Products) + Section 2 (Orders) indexes on:
-  - the main database (DB_NAME)
+  - the main database
   - every tenant database (tenant_<id>) found in main_db.saas_tenants
 
 Usage (inside the backend container):
@@ -23,8 +23,17 @@ from utils.enhanced_orders_indexes import create_enhanced_orders_indexes  # noqa
 
 
 async def run() -> None:
-    mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-    db_name = os.environ.get("DB_NAME", "nt_commerce")
+    # Accept both env naming conventions (MONGO_URL/DB_NAME and MONGODB_URL/MONGODB_DB_NAME)
+    mongo_url = (
+        os.environ.get("MONGO_URL")
+        or os.environ.get("MONGODB_URL")
+        or "mongodb://localhost:27017"
+    )
+    db_name = (
+        os.environ.get("DB_NAME")
+        or os.environ.get("MONGODB_DB_NAME")
+        or "ntcommerce"
+    )
     client = AsyncIOMotorClient(mongo_url)
 
     main_db = client[db_name]
