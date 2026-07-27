@@ -119,3 +119,29 @@ async def require_ecom_feature(current_user: dict) -> dict:
             detail="مركز التجارة الإلكترونية غير مُفعّل لهذا الحساب. تواصل مع الإدارة لتفعيله.",
         )
     return current_user
+
+
+# ─── v2 enhanced order status constants (Section 2) ─────────────────────────
+# Aligned with the existing workflow where statuses match 1:1 (new/confirmed/
+# packed/shipped/delivered/cancelled) and extended with delivery sub-states
+# used by the v2 orders API (on_the_way / in_transit / delivery_exception).
+ECOM_NEW = "new"
+ECOM_CONFIRMED = "confirmed"
+ECOM_PREPARING = "packed"
+ECOM_SHIPPED = "shipped"
+ECOM_ON_THE_WAY = "on_the_way"
+ECOM_IN_TRANSIT = "in_transit"
+ECOM_DELIVERED = "delivered"
+ECOM_CANCELLED = "cancelled"
+ECOM_DELIVERY_EXCEPTION = "delivery_exception"
+
+# Register the extended delivery sub-states so labels + v1 transitions stay valid.
+ORDER_STATUSES.setdefault("on_the_way", {"label_ar": "في الطريق", "label_en": "On the way", "color": "#0ea5e9"})
+ORDER_STATUSES.setdefault("in_transit", {"label_ar": "قيد النقل", "label_en": "In transit", "color": "#6366f1"})
+ORDER_STATUSES.setdefault("delivery_exception", {"label_ar": "مشكلة في التسليم", "label_en": "Delivery exception", "color": "#f43f5e"})
+ORDER_STATUS_KEYS = set(ORDER_STATUSES.keys())
+
+STATUS_TRANSITIONS.setdefault("on_the_way", {"delivered", "delivery_exception", "refunded"})
+STATUS_TRANSITIONS.setdefault("in_transit", {"delivered", "delivery_exception", "refunded"})
+STATUS_TRANSITIONS.setdefault("delivery_exception", {"shipped", "on_the_way", "cancelled"})
+STATUS_TRANSITIONS["shipped"] = STATUS_TRANSITIONS.get("shipped", set()) | {"on_the_way", "in_transit", "delivery_exception"}
