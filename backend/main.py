@@ -61,9 +61,6 @@ if RESEND_AVAILABLE:
     resend.api_key = os.environ.get('RESEND_API_KEY', '')
 
 # MongoDB connection — canonical definitions live in config/database.py.
-# main.py imports them so there is a SINGLE tenant-context ContextVar + db proxy
-# shared across the legacy in-file routes AND the modular routers. This prevents
-# tenant-isolation drift (two separate ContextVars used to coexist here).
 from config.database import (
     client,
     main_db,
@@ -74,10 +71,8 @@ from config.database import (
     init_tenant_database,
 )
 
-# init_tenant_database is imported from config.database (canonical single source).
-
-# JWT Settings — central validated config (Sprint 1: fail-fast, no fallback)
-from utils.jwt_config import SECRET_KEY, ALGORITHM  # noqa: E402
+# JWT Settings
+from utils.jwt_config import SECRET_KEY, ALGORITHM
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 # Currency
@@ -86,44 +81,38 @@ CURRENCY = "دج"  # Algerian Dinar
 # Create the main app
 app = FastAPI(title="NT API")
 
-# ── Sprint 1: Request Context Middleware ─────────────────────────────────
-# Adds request_id + correlation_id to every request and exposes via headers.
-from middleware.request_context import RequestContextMiddleware  # noqa: E402
+# Request Context Middleware
+from middleware.request_context import RequestContextMiddleware
 app.add_middleware(RequestContextMiddleware)
 
-# ── Sprint 1: Structured logging with tenant/request context ─────────────
-from utils.logging_setup import setup_logging  # noqa: E402
+# Structured logging
+from utils.logging_setup import setup_logging
 setup_logging(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     force_json=(os.environ.get("LOG_FORMAT", "text").lower() == "json"),
 )
 
-# Initialize rate limiter (slowapi) — shared singleton with proxy-aware key func
-from middleware.rate_limit import limiter  # noqa: E402
-# SECURITY: Hardened middleware imports
+# Rate limiter
+from middleware.rate_limit import limiter
 from middleware.security_headers import SecurityHeadersMiddleware
 from middleware.monitoring import MonitoringMiddleware
-from services.tenant_throttle import tenant_throttle  # noqa: E402
-from middleware.input_sanitization import InputSanitizationMiddleware  # noqa: E402
-from audit.middleware import AuditMiddleware  # noqa: E402
+from services.tenant_throttle import tenant_throttle
+from middleware.input_sanitization import InputSanitizationMiddleware
+from audit.middleware import AuditMiddleware
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ── Sprint 1: Standardized error handlers ────────────────────────────────
-from utils.errors import AppException, app_exception_handler, general_exception_handler  # noqa: E402
+# Error handlers
+from utils.errors import AppException, app_exception_handler, general_exception_handler
 app.add_exception_handler(AppException, app_exception_handler)
-# NOTE: keep FastAPI's default handler for HTTPException; only wire our generic
-# handler for uncaught Exceptions so we still see structured 500s.
 app.add_exception_handler(Exception, general_exception_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
 security = HTTPBearer()
-
 logger = logging.getLogger(__name__)
 
-# Create static directory for uploads
 UPLOAD_DIR = ROOT_DIR / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -144,9 +133,6 @@ from routes.saas_routes import get_super_admin
 from routes.audit_routes import router as audit_router
 from routes.monitoring_routes import router as monitoring_router
 from routes.alert_routes import router as alert_router
-# Route handlers are mounted as independent components through the motherboard
-# module layer (see `mount_all` below and backend/modules/<key>.py). Each component
-# imports its own routers, so main.py only imports symbols it references directly.
 from routes.performance_routes import record_request_time
 from utils.permissions import create_permission_checker, create_cashier_block
 
@@ -200,11 +186,10 @@ from models.ai.schemas import (
 )
 
 # ============ INITIALIZE SERVICES & ROBOT MANAGER ============
-notification_service = NotificationService(main_db)  # Original service
+notification_service = NotificationService(main_db)
 sms_service = SMSService(main_db)
 email_service = EmailService()
 robot_manager = RobotManager(main_db, client, notification_service, sms_service, email_service)
-
 
 # ============ IMPORT EXTRA MODELS ============
 from models.extra_schemas import (
@@ -227,6 +212,7 @@ from routes.ecom.enhanced_leads_routes import create_enhanced_leads_routes
 from routes.ecom.enhanced_promotions_routes import create_enhanced_promotions_routes
 from routes.ecom.enhanced_content_routes import create_enhanced_content_routes
 from routes.ecom.enhanced_notifications_routes import create_enhanced_notifications_routes
+from routes.ecom.enhanced_reviews_routes import create_enhanced_reviews_routes
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
 # ============ HELPER FUNCTIONS ============
@@ -250,11 +236,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
-        user_type = payload.get("type")  # admin, agent, tenant
+        user_type = payload.get("type")
         role = payload.get("role")
         tenant_id = payload.get("tenant_id")
 
-        # Sprint 1: propagate tenant/user into request context for logging
         try:
             from middleware.request_context import set_tenant_context
             set_tenant_context(tenant_id=tenant_id, user_id=user_id)
@@ -264,16 +249,12 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        # For tenant users, get from tenant database
         if user_type == "tenant" and tenant_id:
             tenant_db = get_tenant_db(tenant_id)
             user = await tenant_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
-
-            # Get tenant info from main_db to get plan features
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
 
             if user is None:
-                # Check main tenant record (always in main_db)
                 if tenant:
                     user = {
                         "id": tenant["id"],
@@ -293,13 +274,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 if not user.get("created_at"):
                     user["created_at"] = datetime.now(timezone.utc).isoformat()
 
-            # Add plan features and limits for tenant users
             if tenant:
                 plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
                 if plan:
                     features_map = {**plan.get("features", {}), **tenant.get("features_override", {})}
-                    # ── Opt-in features: explicit `false` default when neither plan nor tenant set them ──
-                    # `ecommerce_hub` is OFF unless super-admin manually toggles it on per tenant.
                     OPT_IN_FEATURES = ("ecommerce_hub",)
                     for opt_key in OPT_IN_FEATURES:
                         if opt_key not in features_map:
@@ -309,7 +287,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 user["company_name"] = tenant.get("company_name", "")
             return user
 
-        # Agent users -> live in main_db.saas_agents (different collection)
         if user_type == "agent" or role == "agent":
             agent = await main_db.saas_agents.find_one(
                 {"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0}
@@ -320,7 +297,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             agent["role"] = "agent"
             return agent
 
-        # Admin / super-admin -> main_db.users (super_admins as fallback)
         user = await main_db.users.find_one(
             {"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0}
         )
@@ -340,42 +316,27 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Get current user and their tenant database"""
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
         user_type = payload.get("type")
         tenant_id = payload.get("tenant_id")
-        
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
-        # Get the appropriate database
         if user_type == "tenant" and tenant_id:
             tenant_db = get_tenant_db(tenant_id)
         else:
-            tenant_db = main_db  # Use main database for admin users
+            tenant_db = main_db
             tenant_id = None
-        
-        # Get user info
         user = await tenant_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
         if user is None and tenant_id:
-            # For tenant owner, create entry from saas_tenants
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
             if tenant:
-                user = {
-                    "id": tenant["id"],
-                    "email": tenant["email"],
-                    "name": tenant["name"],
-                    "role": "admin"
-                }
-        
+                user = {"id": tenant["id"], "email": tenant["email"], "name": tenant["name"], "role": "admin"}
         if user is None:
             user = await main_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
-        
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
-        
         return {"user": user, "db": tenant_db, "tenant_id": tenant_id}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -392,8 +353,6 @@ async def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict
     return current_user
 
 async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    """Require tenant context - rejects super_admin users without tenant_id.
-    Use this for tenant-specific data routes (products, customers, sales, etc.)."""
     if not current_user.get("tenant_id"):
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
     if current_user.get("role") not in ["admin", "manager", "user", "tenant_admin"]:
@@ -401,7 +360,6 @@ async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> di
     return current_user
 
 async def require_tenant(current_user: dict = Depends(get_current_user)) -> dict:
-    """Require tenant context for read operations - any authenticated tenant user."""
     if not current_user.get("tenant_id"):
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
     return current_user
@@ -417,7 +375,6 @@ async def generate_invoice_number(prefix: str) -> str:
     return f"{prefix}-{today}-{count['seq']:04d}"
 
 async def init_cash_boxes() -> dict:
-    """Initialize default cash boxes if they don't exist, or update existing ones with name_fr"""
     boxes = [
         {"id": "cash", "name": "الصندوق النقدي", "name_fr": "Caisse", "type": "cash", "balance": 0},
         {"id": "bank", "name": "الحساب البنكي", "name_fr": "Compte bancaire", "type": "bank", "balance": 0},
@@ -432,17 +389,10 @@ async def init_cash_boxes() -> dict:
             box["updated_at"] = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.insert_one(box)
         elif not existing.get("name_fr"):
-            # Update existing box with name_fr if missing
-            await db.cash_boxes.update_one(
-                {"id": box["id"]},
-                {"$set": {"name_fr": box["name_fr"]}}
-            )
+            await db.cash_boxes.update_one({"id": box["id"]}, {"$set": {"name_fr": box["name_fr"]}})
 
 async def init_default_data(tenant_db) -> dict:
-    """Initialize default data for a tenant (customers, suppliers, families, products)"""
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Default Customer Family
     default_customer_family_id = "default-customer-family"
     existing_cf = await tenant_db.customer_families.find_one({"id": default_customer_family_id})
     if not existing_cf:
@@ -455,8 +405,6 @@ async def init_default_data(tenant_db) -> dict:
             "created_at": now,
             "updated_at": now
         })
-    
-    # Default Customer
     default_customer_id = "default-customer"
     existing_c = await tenant_db.customers.find_one({"id": default_customer_id})
     if not existing_c:
@@ -475,8 +423,6 @@ async def init_default_data(tenant_db) -> dict:
             "created_at": now,
             "updated_at": now
         })
-    
-    # Default Supplier Family
     default_supplier_family_id = "default-supplier-family"
     existing_sf = await tenant_db.supplier_families.find_one({"id": default_supplier_family_id})
     if not existing_sf:
@@ -488,8 +434,6 @@ async def init_default_data(tenant_db) -> dict:
             "created_at": now,
             "updated_at": now
         })
-    
-    # Default Supplier
     default_supplier_id = "default-supplier"
     existing_s = await tenant_db.suppliers.find_one({"id": default_supplier_id})
     if not existing_s:
@@ -508,8 +452,6 @@ async def init_default_data(tenant_db) -> dict:
             "created_at": now,
             "updated_at": now
         })
-    
-    # Default Product Family
     default_product_family_id = "default-product-family"
     existing_pf = await tenant_db.product_families.find_one({"id": default_product_family_id})
     if not existing_pf:
@@ -528,8 +470,6 @@ async def init_default_data(tenant_db) -> dict:
             "created_at": now,
             "updated_at": now
         })
-    
-    # Default Product
     default_product_id = "default-product"
     existing_p = await tenant_db.products.find_one({"id": default_product_id})
     if not existing_p:
@@ -555,16 +495,11 @@ async def init_default_data(tenant_db) -> dict:
             "updated_at": now
         })
 
-
 # ============ PERMISSION SYSTEM ============
 require_permission = create_permission_checker(db, get_current_user)
 block_cashier = create_cashier_block(get_current_user)
 
-
 # ============ MOTHERBOARD MODULE MOUNTING ============
-# Every domain is mounted as an independent component via backend/modules/.
-# Components load in isolation: a failure in one is recorded in diagnostics
-# (/api/diagnostics/modules) without preventing the others from loading.
 from modules import AppContext, mount_all
 
 _app_context = AppContext(
@@ -589,7 +524,6 @@ _app_context = AppContext(
 )
 mount_all(app, _app_context)
 
-# Internal main.py router (empty placeholder kept for backward compatibility)
 app.include_router(api_router)
 
 # ============ ROBOT API ENDPOINTS ============
@@ -624,20 +558,12 @@ async def start_all_robots(user: dict = Depends(block_cashier)) -> dict:
     return {"message": "تم بدء تشغيل جميع الروبوتات"}
 
 @robot_router.get("/history")
-async def get_robot_history(
-    robot: str = None,
-    limit: int = 20,
-    user: dict = Depends(block_cashier),
-) -> dict:
+async def get_robot_history(robot: str = None, limit: int = 20, user: dict = Depends(block_cashier)) -> dict:
     runs = await robot_manager.get_history(robot=robot, limit=min(limit, 100))
     return {"runs": runs, "total": len(runs)}
 
 @robot_router.post("/interval/{robot_name}")
-async def set_robot_interval(
-    robot_name: str,
-    body: dict,
-    user: dict = Depends(block_cashier),
-) -> dict:
+async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(block_cashier)) -> dict:
     interval = body.get("interval_seconds")
     if not isinstance(interval, (int, float)) or interval < 60:
         raise HTTPException(status_code=400, detail="interval_seconds يجب أن يكون >= 60")
@@ -646,8 +572,7 @@ async def set_robot_interval(
         raise HTTPException(status_code=404, detail="الروبوت غير موجود")
     return {"message": f"تم تحديث الفترة الزمنية لـ {robot_name} إلى {interval} ثانية"}
 
-
-# ── Platform Feature Flags ──────────────────────────────────────────────────
+# Platform Feature Flags
 @app.get("/api/platform/features")
 async def list_platform_features(admin: dict = Depends(get_super_admin)) -> dict:
     mgr = get_feature_flag_manager()
@@ -687,7 +612,7 @@ async def get_public_features() -> dict:
     enabled_keys = await mgr.get_enabled_keys()
     return {"enabled": enabled_keys}
 
-app.include_router(robot_router, prefix="/api")  # Robot management routes
+app.include_router(robot_router, prefix="/api")
 
 # ============ CACHE API ENDPOINTS ============
 cache_router = APIRouter(prefix="/cache", tags=["cache"])
@@ -706,19 +631,19 @@ async def delete_cache_pattern(pattern: str, admin: dict = Depends(get_super_adm
     cache.delete_pattern(f"{pattern}:*")
     return {"message": f"تم مسح مفاتيح {pattern}"}
 
-app.include_router(cache_router, prefix="/api")  # Cache management routes
+app.include_router(cache_router, prefix="/api")
 
-# ============ PLATFORM SUPPLIER (Super-admin sells cards/idoom to tenants) ============
+# Platform Supplier
 from routes.saas.supplier_routes import build_supplier_router
 app.include_router(build_supplier_router(), prefix="/api")
 from routes.saas.platform_finance_routes import build_financial_router
 app.include_router(build_financial_router(), prefix="/api")
 
-# ============ EVENT BUS OBSERVABILITY (Phase 4 dashboard backend) ============
+# Event Bus
 from routes.saas.event_bus_routes import router as event_bus_router
 app.include_router(event_bus_router, prefix="/api")
 
-# ============ SPRINT 1: HEALTH CHECKS ============
+# Health Checks
 from routes.health_routes import router as health_router
 from routes.monitoring_routes import router as monitoring_router
 from routes.alert_routes import router as alert_router
@@ -746,17 +671,15 @@ app.include_router(export_router, prefix="/api")
 app.include_router(notification_router, prefix="/api")
 app.include_router(activity_router, prefix="/api")
 
-# ============ SYSTEM LOGS ============
+# System Logs
 from routes.system_logs_routes import router as system_logs_router, log_backend_exception
-app.include_router(system_logs_router, prefix="/api")  # System logs
+app.include_router(system_logs_router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
 app.include_router(monitoring_router, prefix="/api")
-app.include_router(alert_router, prefix="/api")  # Audit logging
+app.include_router(alert_router, prefix="/api")
 
 @app.exception_handler(Exception)
 async def _global_exception_logger(request, exc):
-    """Capture any unhandled backend exception into system_logs and return JSON 500.
-    FastAPI's HTTPException is *not* routed here (it has its own handler)."""
     try:
         await log_backend_exception(exc, request)
     except Exception:
@@ -764,13 +687,9 @@ async def _global_exception_logger(request, exc):
     from fastapi.responses import JSONResponse
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-# Tenant context middleware - extracts tenant_id from JWT and sets ContextVar
+# Tenant context middleware
 @app.middleware("http")
 async def tenant_context_middleware(request: Request, call_next):
-    """Sets the tenant database context for each request based on JWT tenant_id.
-    Only tenant users get a tenant DB bound; super_admin (platform) requests stay on
-    main_db. The context token is reset after the request to avoid intra-request
-    ambiguity and any cross-request bleed."""
     auth_header = request.headers.get("authorization", "")
     ctx_token = None
     if auth_header.startswith("Bearer "):
@@ -780,11 +699,10 @@ async def tenant_context_middleware(request: Request, call_next):
             tenant_id = payload.get("tenant_id")
             user_type = payload.get("type")
             role = payload.get("role")
-            # Never bind a tenant DB for super_admin/platform tokens.
             if tenant_id and user_type != "super_admin" and role != "super_admin":
                 ctx_token = _tenant_db_ctx.set(get_tenant_db(tenant_id))
         except Exception:
-            pass  # Invalid/expired token - no tenant context, falls back to main_db
+            pass
     try:
         return await call_next(request)
     finally:
@@ -794,7 +712,6 @@ async def tenant_context_middleware(request: Request, call_next):
 # Performance timing middleware
 @app.middleware("http")
 async def performance_timing_middleware(request: Request, call_next):
-    """Track request timing for performance monitoring"""
     import time as _time
     start = _time.time()
     response = await call_next(request)
@@ -802,17 +719,15 @@ async def performance_timing_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         record_request_time(duration, request.url.path)
     response.headers["X-Response-Time"] = f"{duration*1000:.0f}ms"
-    # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
-# CORS Configuration - secure origins (no wildcard fallback)
+# CORS
 _cors_env = os.environ.get('CORS_ORIGINS', '')
 _cors_origins = [o.strip() for o in _cors_env.split(',') if o.strip()] if _cors_env else []
-# Always allow preview URL in development
 _preview_url = os.environ.get('PREVIEW_URL', '')
 if _preview_url and _preview_url not in _cors_origins:
     _cors_origins.append(_preview_url)
@@ -833,26 +748,23 @@ app.add_middleware(InputSanitizationMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(MonitoringMiddleware)
 
-# Mount static files for uploads
+# Static files
 app.mount("/api/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
 
 @app.on_event("startup")
 async def startup():
     await init_cash_boxes()
-    # Start robots in background
     robot_manager.initialize()
     asyncio.create_task(robot_manager.start_all())
     _set_robot_manager_in_diagnostics(robot_manager)
     logger.info("Robots initialized and starting in background")
 
-    # ── Event-Driven Architecture: start Redis Streams consumer ──────────
     try:
         from services.event_bus import event_bus
         from services.event_consumers import register_handlers
         await event_bus.start(main_db)
         register_handlers(event_bus)
         asyncio.create_task(event_bus.consume_loop())
-        # inventory_movements idempotency index
         try:
             await main_db.inventory_movements.create_index("id", unique=True)
             await main_db.inventory_movements.create_index("tenant_id")
@@ -863,20 +775,19 @@ async def startup():
         logger.info("Event bus consumer started (Redis Streams EDA)")
     except Exception as eda_exc:
         logger.warning("Event bus failed to start (non-fatal): %s", eda_exc)
-    # Feature flag manager
+
     _ffm = FeatureFlagManager(main_db)
     set_feature_flag_manager(_ffm)
     logger.info("Feature flag manager initialized (%d flags)", len(PLATFORM_FEATURES))
-    # SIM-card catalog seed — idempotent, only inserts missing entries
+
     try:
         from services.sim_catalog_seed import seed_sim_catalog
         seed_result = await seed_sim_catalog(main_db)
         logger.info("SIM catalog seed result: %s", seed_result)
     except Exception as exc:
         logger.warning("SIM catalog seed skipped: %s", exc)
-    # Create indexes for better performance
+
     try:
-        # Existing indexes
         await db.products.create_index("id", unique=True)
         await db.products.create_index("family_id")
         await db.products.create_index("barcode")
@@ -894,8 +805,6 @@ async def startup():
         await db.daily_sessions.create_index("status")
         await db.transactions.create_index("created_at")
         await db.transactions.create_index("cash_box_id")
-        
-        # New accounting indexes
         await db.accounts.create_index("id", unique=True)
         await db.accounts.create_index("code", unique=True)
         await db.accounts.create_index("account_type")
@@ -919,8 +828,6 @@ async def startup():
         await db.expenses.create_index("expense_number", unique=True)
         await db.expenses.create_index("category")
         await db.expenses.create_index("expense_date")
-        
-        # AI indexes
         await db.ai_insights.create_index("id", unique=True)
         await db.ai_insights.create_index("insight_type")
         await db.ai_insights.create_index("priority")
@@ -937,67 +844,48 @@ async def startup():
         await db.audit_logs.create_index("entity_type")
         await db.audit_logs.create_index("entity_id")
         await db.audit_logs.create_index("created_at")
-        
-        # WhatsApp indexes
         await db.whatsapp_messages.create_index("id", unique=True)
         await db.whatsapp_messages.create_index("from_number")
         await db.whatsapp_messages.create_index("processed")
         await db.whatsapp_messages.create_index("tenant_id")
         await db.whatsapp_config.create_index("tenant_id", unique=True)
-        
-        # Tax indexes
         await db.tax_rates.create_index("id", unique=True)
         await db.tax_rates.create_index("type")
         await db.tax_declarations.create_index("id", unique=True)
         await db.tax_declarations.create_index("year")
-        
-        # Push notification indexes
         await db.push_notifications.create_index("id", unique=True)
         await db.push_notifications.create_index("tenant_id")
         await db.push_notifications.create_index("created_at")
         await db.notification_preferences.create_index("user_id", unique=True)
-        
-        # Currency indexes
         await db.currencies.create_index("code", unique=True)
         await db.currency_settings.create_index("tenant_id")
         await db.currency_rate_history.create_index("code")
-
-        # ── E-Commerce Hub indexes (iter 18.2) ────────────────────────────
-        # Critical: orders are queried by channel + status + date-range + customer.phone search.
-        # ecom_orders
         await db.ecom_orders.create_index("id", unique=True)
         await db.ecom_orders.create_index("order_code", unique=True)
         await db.ecom_orders.create_index("created_at")
-        await db.ecom_orders.create_index([("channel", 1), ("status", 1)])  # most common filter combo
+        await db.ecom_orders.create_index([("channel", 1), ("status", 1)])
         await db.ecom_orders.create_index("customer.phone")
         await db.ecom_orders.create_index("integration_id")
-        # ecom_integrations
         await db.ecom_integrations.create_index("id", unique=True)
         await db.ecom_integrations.create_index("channel")
-        # ecom_leads
         await db.ecom_leads.create_index("id", unique=True)
         await db.ecom_leads.create_index("created_at")
         await db.ecom_leads.create_index([("channel", 1), ("status", 1)])
         await db.ecom_leads.create_index("ai_category")
         await db.ecom_leads.create_index([("channel", 1), ("external_id", 1)], unique=True, sparse=True)
-        # ecom_shipping_labels
         await db.ecom_shipping_labels.create_index("id", unique=True)
         await db.ecom_shipping_labels.create_index("order_id")
         await db.ecom_shipping_labels.create_index("tracking_number", unique=True, sparse=True)
-        # ecom_external_products (mirror of Shopify/TikTok inventory — iter 18.3)
         await db.ecom_external_products.create_index([("channel", 1), ("integration_id", 1), ("external_id", 1)], unique=True)
         await db.ecom_external_products.create_index("updated_at")
-
-                # -- Enhanced Modules indexes (v16 Sections 1-2: products/orders v2) --
         try:
-            print("✅ Enhanced modules (products/orders v2) indexes created")
+            print("Enhanced modules indexes created")
         except Exception as enh_err:
-            print(f"⚠️ Enhanced modules indexes warning: {enh_err}")
-        print("✅ Database indexes created successfully (including accounting & AI)")
+            print(f"Enhanced modules indexes warning: {enh_err}")
+        print("Database indexes created successfully")
     except Exception as e:
-        print(f"⚠️ Index creation warning: {e}")
+        print(f"Index creation warning: {e}")
 
-    # Idempotent backfill: commission records predating the status field → 'available'
     try:
         from routes.saas.commission_routes import backfill_legacy_commissions
         backfilled = await backfill_legacy_commissions()
@@ -1016,14 +904,11 @@ async def shutdown_db_client():
         pass
     client.close()
 
-# ============ MOTHERBOARD CORE ============
-# Modular self-diagnostics + per-component logging + central error handling.
-# See backend/core/ — each domain is an independent component with its own log file.
+# Motherboard Core
 from core import install_motherboard
 install_motherboard(app, get_super_admin)
 
-
-# ============ NEW PHASE 20-30 ROUTES ============
+# Phase 20-30 Routes
 try:
     from routes.health_routes import router as health_router
     app.include_router(health_router, prefix="/api", tags=["Health"])
@@ -1102,11 +987,7 @@ try:
 except ImportError:
     pass
 
-
-
-# ========== FIXES FOR MISSING ROUTES ==========
-
-# Fix 1: Backup routes (prefix /backup -> mapped to /api/backup)
+# Fixes for missing routes
 try:
     from routes.backup_routes import router as backup_router
     app.include_router(backup_router, prefix="/api/backups", tags=["Backup"])
@@ -1114,7 +995,6 @@ try:
 except ImportError:
     pass
 
-# Fix 2: Config endpoint
 try:
     from fastapi import APIRouter
     config_router = APIRouter(prefix="/config", tags=["Config"])
@@ -1126,18 +1006,9 @@ try:
             "environment": os.getenv("ENVIRONMENT", "production"),
             "version": "16.0.0",
             "features": {
-                "saas": True,
-                "multi_tenant": True,
-                "recharge": True,
-                "ai_agents": True,
-                "analytics": True,
-                "2fa": True,
-                "rbac": True,
-                "audit_log": True,
-                "backup": True,
-                "export": True,
-                "search": True,
-                "webhooks": True,
+                "saas": True, "multi_tenant": True, "recharge": True, "ai_agents": True,
+                "analytics": True, "2fa": True, "rbac": True, "audit_log": True,
+                "backup": True, "export": True, "search": True, "webhooks": True,
             },
             "currencies": ["DZD"],
             "languages": ["ar", "fr", "en"],
@@ -1149,21 +1020,17 @@ try:
 except Exception as e:
     print(f"[INIT] Config route error: {e}")
 
-# Fix 3: Subscribers alias (redirects to tenants)
 try:
     from fastapi import Request
     from fastapi.responses import RedirectResponse
 
     @app.get("/api/saas/subscribers", tags=["SaaS"])
     async def subscribers_alias(request: Request):
-        """Alias for /api/saas/tenants"""
         return RedirectResponse(url="/api/saas/tenants", status_code=307)
-
-    print("[INIT] Subscribers alias registered at /api/saas/subscribers")
+    print("[INIT] Subscribers alias registered")
 except Exception as e:
     print(f"[INIT] Subscribers alias error: {e}")
 
-# Fix 4: Recharge fallback routes (when bridge is not configured)
 try:
     from fastapi import APIRouter
     recharge_fallback = APIRouter(prefix="/recharge", tags=["Recharge"])
@@ -1182,14 +1049,13 @@ try:
 
     @recharge_fallback.get("/bridge/status")
     async def bridge_status():
-        return {"connected": False, "status": "Bridge not configured. Please set up the recharge bridge device."}
+        return {"connected": False, "status": "Bridge not configured"}
 
     app.include_router(recharge_fallback, prefix="/api", tags=["Recharge"])
     print("[INIT] Recharge fallback routes registered")
 except Exception as e:
     print(f"[INIT] Recharge fallback error: {e}")
 
-# Fix 5: Payments gateways (public access)
 try:
     from fastapi import APIRouter
     gateways_router = APIRouter(prefix="/payments/gateways", tags=["Payments"])
@@ -1205,116 +1071,95 @@ try:
         }
 
     app.include_router(gateways_router, prefix="/api", tags=["Payments"])
-    print("[INIT] Payment gateways registered at /api/payments/gateways")
+    print("[INIT] Payment gateways registered")
 except Exception as e:
     print(f"[INIT] Payment gateways error: {e}")
 
-# Fix 6: Search with default parameters
 try:
     from routes.search_routes import router as search_router
-    # Re-register with /api/search prefix
     app.include_router(search_router, prefix="/api", tags=["Search"])
-    print("[INIT] Search routes registered at /api/search")
+    print("[INIT] Search routes registered")
 except ImportError:
     pass
 
 print("[INIT] All fixes applied successfully")
 
-
-
-# Direct subscribers endpoint (no redirect)
 @app.get("/api/saas/subscribers-list", tags=["SaaS"])
 async def subscribers_list(request):
-    """Direct list of subscribers/tenants"""
     return {"subscribers": [], "note": "Use /api/saas/tenants for full list"}
 
-
-
-# Subscribers direct endpoint
 @app.get("/api/saas/subscribers", tags=["SaaS"])
 async def get_subscribers():
-    """List all subscribers (alias for tenants)"""
     return {"subscribers": [{"id": "7ab8244e-9b34-4100-bf76-d8100c0fad3f", "name": "amine nouacer", "email": "amine@amine.com", "plan_id": "starter"}], "total": 1}
 
 # ============ ENHANCED ROUTES ============
 try:
-    enhanced_products_router = create_enhanced_products_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_products_router = create_enhanced_products_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_products_router, prefix="/api/v2")
     print("[INIT] Products v2 registered")
 except Exception as _e:
     print(f"[INIT] Products v2: {_e}")
 
 try:
-    enhanced_orders_router = create_enhanced_orders_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_orders_router = create_enhanced_orders_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_orders_router, prefix="/api/v2")
     print("[INIT] Orders v2 registered")
 except Exception as _e:
     print(f"[INIT] Orders v2: {_e}")
 
 try:
-    enhanced_customers_router = create_enhanced_customers_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_customers_router = create_enhanced_customers_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_customers_router, prefix="/api/v2")
     print("[INIT] Customers v2 registered")
 except Exception as _e:
     print(f"[INIT] Customers v2: {_e}")
 
 try:
-    enhanced_shipping_router = create_enhanced_shipping_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_shipping_router = create_enhanced_shipping_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_shipping_router, prefix="/api/v2")
     print("[INIT] Shipping v2 registered")
 except Exception as _e:
     print(f"[INIT] Shipping v2: {_e}")
 
 try:
-    enhanced_channels_router = create_enhanced_channels_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_channels_router = create_enhanced_channels_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_channels_router, prefix="/api/v2")
     print("[INIT] Channels v2 registered")
 except Exception as _e:
     print(f"[INIT] Channels v2: {_e}")
 
 try:
-    enhanced_leads_router = create_enhanced_leads_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_leads_router = create_enhanced_leads_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_leads_router, prefix="/api/v2")
     print("[INIT] Leads v2 registered")
 except Exception as _e:
     print(f"[INIT] Leads v2: {_e}")
 
 try:
-    enhanced_promotions_router = create_enhanced_promotions_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_promotions_router = create_enhanced_promotions_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_promotions_router, prefix="/api/v2")
     print("[INIT] Promotions v2 registered")
 except Exception as _e:
     print(f"[INIT] Promotions v2: {_e}")
 
 try:
-    enhanced_content_router = create_enhanced_content_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_content_router = create_enhanced_content_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_content_router, prefix="/api/v2")
     print("[INIT] Content v2 registered")
 except Exception as _e:
     print(f"[INIT] Content v2: {_e}")
 
 try:
-    enhanced_notifications_router = create_enhanced_notifications_routes(
-        db=db, get_current_user=get_current_user, require_permission=require_permission
-    )
+    enhanced_notifications_router = create_enhanced_notifications_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
     app.include_router(enhanced_notifications_router, prefix="/api/v2")
     print("[INIT] Notifications v2 registered")
 except Exception as _e:
     print(f"[INIT] Notifications v2: {_e}")
+
+try:
+    enhanced_reviews_router = create_enhanced_reviews_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_reviews_router, prefix="/api/v2")
+    print("[INIT] Reviews v2 registered")
+except Exception as _e:
+    print(f"[INIT] Reviews v2: {_e}")
 # ============ END ENHANCED ============
