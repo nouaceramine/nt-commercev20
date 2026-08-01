@@ -1,5 +1,4 @@
 
-
 """
 NT Commerce 12.0 - Legendary Build
 Main application entry point with modular architecture
@@ -227,6 +226,7 @@ from routes.ecom.enhanced_channels_routes import create_enhanced_channels_routes
 from routes.ecom.enhanced_leads_routes import create_enhanced_leads_routes
 from routes.ecom.enhanced_promotions_routes import create_enhanced_promotions_routes
 from routes.ecom.enhanced_content_routes import create_enhanced_content_routes
+from routes.ecom.enhanced_notifications_routes import create_enhanced_notifications_routes
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
 # ============ HELPER FUNCTIONS ============
@@ -1308,4 +1308,13 @@ try:
     print("[INIT] Content v2 registered")
 except Exception as _e:
     print(f"[INIT] Content v2: {_e}")
+
+try:
+    enhanced_notifications_router = create_enhanced_notifications_routes(
+        db=db, get_current_user=get_current_user, require_permission=require_permission
+    )
+    app.include_router(enhanced_notifications_router, prefix="/api/v2")
+    print("[INIT] Notifications v2 registered")
+except Exception as _e:
+    print(f"[INIT] Notifications v2: {_e}")
 # ============ END ENHANCED ============
