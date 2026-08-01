@@ -224,6 +224,7 @@ from routes.ecom.enhanced_orders_routes import create_enhanced_orders_routes
 from routes.ecom.enhanced_customers_routes import create_enhanced_customers_routes
 from routes.ecom.enhanced_shipping_routes import create_enhanced_shipping_routes
 from routes.ecom.enhanced_channels_routes import create_enhanced_channels_routes
+from routes.ecom.enhanced_leads_routes import create_enhanced_leads_routes
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
 # ============ HELPER FUNCTIONS ============
@@ -1278,4 +1279,13 @@ try:
     print("[INIT] Channels v2 registered")
 except Exception as _e:
     print(f"[INIT] Channels v2: {_e}")
+
+try:
+    enhanced_leads_router = create_enhanced_leads_routes(
+        db=db, get_current_user=get_current_user, require_permission=require_permission
+    )
+    app.include_router(enhanced_leads_router, prefix="/api/v2")
+    print("[INIT] Leads v2 registered")
+except Exception as _e:
+    print(f"[INIT] Leads v2: {_e}")
 # ============ END ENHANCED ============
