@@ -8,6 +8,7 @@ from utils.enhanced_shipping_indexes import create_enhanced_shipping_indexes
 from utils.enhanced_channels_indexes import create_enhanced_channels_indexes
 from utils.enhanced_leads_indexes import create_enhanced_leads_indexes
 from utils.enhanced_promotions_indexes import create_enhanced_promotions_indexes
+from utils.enhanced_content_indexes import create_enhanced_content_indexes
 from utils.enhanced_customers_indexes import create_enhanced_customers_indexes
 
 
@@ -19,5 +20,6 @@ async def create_all_enhanced_indexes(db):
     channels_results = await create_enhanced_channels_indexes(db)
     leads_results = await create_enhanced_leads_indexes(db)
     promotions_results = await create_enhanced_promotions_indexes(db)
+    content_results = await create_enhanced_content_indexes(db)
     customers_results = await create_enhanced_customers_indexes(db)
-    return {"products": products_results, "orders": orders_results, "customers": customers_results, "shipping": shipping_results, "channels": channels_results, "leads": leads_results, "promotions": promotions_results}
+    return {"products": products_results, "orders": orders_results, "customers": customers_results, "shipping": shipping_results, "channels": channels_results, "leads": leads_results, "promotions": promotions_results, "content": content_results}
