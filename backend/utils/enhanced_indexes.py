@@ -1,6 +1,6 @@
 """
 NT Commerce v16 - Enhanced Modules Indexes
-Creates ALL indexes for Sections 1 (Products), 2 (Orders), and 3 (Customers)
+Creates ALL indexes for Sections 1-9 (Products, Orders, Customers, Shipping, Channels, Leads, Promotions, Content, Notifications)
 """
 from utils.enhanced_products_indexes import create_enhanced_products_indexes
 from utils.enhanced_orders_indexes import create_enhanced_orders_indexes
@@ -10,6 +10,7 @@ from utils.enhanced_leads_indexes import create_enhanced_leads_indexes
 from utils.enhanced_promotions_indexes import create_enhanced_promotions_indexes
 from utils.enhanced_content_indexes import create_enhanced_content_indexes
 from utils.enhanced_customers_indexes import create_enhanced_customers_indexes
+from utils.enhanced_notifications_indexes import create_enhanced_notifications_indexes
 
 
 async def create_all_enhanced_indexes(db):
@@ -22,4 +23,11 @@ async def create_all_enhanced_indexes(db):
     promotions_results = await create_enhanced_promotions_indexes(db)
     content_results = await create_enhanced_content_indexes(db)
     customers_results = await create_enhanced_customers_indexes(db)
-    return {"products": products_results, "orders": orders_results, "customers": customers_results, "shipping": shipping_results, "channels": channels_results, "leads": leads_results, "promotions": promotions_results, "content": content_results}
+    notifications_results = await create_enhanced_notifications_indexes(db)
+    return {
+        "products": products_results, "orders": orders_results,
+        "customers": customers_results, "shipping": shipping_results,
+        "channels": channels_results, "leads": leads_results,
+        "promotions": promotions_results, "content": content_results,
+        "notifications": notifications_results,
+    }
