@@ -225,6 +225,7 @@ from routes.ecom.enhanced_customers_routes import create_enhanced_customers_rout
 from routes.ecom.enhanced_shipping_routes import create_enhanced_shipping_routes
 from routes.ecom.enhanced_channels_routes import create_enhanced_channels_routes
 from routes.ecom.enhanced_leads_routes import create_enhanced_leads_routes
+from routes.ecom.enhanced_promotions_routes import create_enhanced_promotions_routes
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
 # ============ HELPER FUNCTIONS ============
@@ -1288,4 +1289,13 @@ try:
     print("[INIT] Leads v2 registered")
 except Exception as _e:
     print(f"[INIT] Leads v2: {_e}")
+
+try:
+    enhanced_promotions_router = create_enhanced_promotions_routes(
+        db=db, get_current_user=get_current_user, require_permission=require_permission
+    )
+    app.include_router(enhanced_promotions_router, prefix="/api/v2")
+    print("[INIT] Promotions v2 registered")
+except Exception as _e:
+    print(f"[INIT] Promotions v2: {_e}")
 # ============ END ENHANCED ============
