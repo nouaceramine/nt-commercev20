@@ -213,6 +213,7 @@ from routes.ecom.enhanced_content_routes import create_enhanced_content_routes
 from routes.ecom.enhanced_notifications_routes import create_enhanced_notifications_routes
 from routes.ecom.enhanced_reviews_routes import create_enhanced_reviews_routes
 from routes.ecom.enhanced_inventory_routes import create_enhanced_inventory_routes
+from routes.ecom.enhanced_financial_routes import create_enhanced_financial_routes
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
 # ============ HELPER FUNCTIONS ============
@@ -834,4 +835,11 @@ try:
     print("[INIT] Inventory v2 registered")
 except Exception as _e:
     print(f"[INIT] Inventory v2: {_e}")
+
+try:
+    enhanced_financial_router = create_enhanced_financial_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_financial_router, prefix="/api/v2")
+    print("[INIT] Financial v2 registered")
+except Exception as _e:
+    print(f"[INIT] Financial v2: {_e}")
 # ============ END ENHANCED ============
