@@ -1,6 +1,6 @@
 """
 NT Commerce v16 - Enhanced Modules Indexes
-Creates ALL indexes for Sections 1-12 (Products, Orders, Customers, Shipping, Channels, Leads, Promotions, Content, Notifications, Reviews, Inventory, Financial)
+Creates ALL indexes for Sections 1-30
 """
 from utils.enhanced_products_indexes import create_enhanced_products_indexes
 from utils.enhanced_orders_indexes import create_enhanced_orders_indexes
@@ -14,6 +14,7 @@ from utils.enhanced_notifications_indexes import create_enhanced_notifications_i
 from utils.enhanced_reviews_indexes import create_enhanced_reviews_indexes
 from utils.enhanced_inventory_indexes import create_enhanced_inventory_indexes
 from utils.enhanced_financial_indexes import create_financial_indexes
+from utils.enhanced_remaining_indexes import create_enhanced_remaining_indexes
 
 
 async def create_all_enhanced_indexes(db):
@@ -30,6 +31,7 @@ async def create_all_enhanced_indexes(db):
     reviews_results = await create_enhanced_reviews_indexes(db)
     inventory_results = await create_enhanced_inventory_indexes(db)
     financial_results = await create_financial_indexes(db)
+    remaining_results = await create_enhanced_remaining_indexes(db)
     return {
         "products": products_results, "orders": orders_results,
         "customers": customers_results, "shipping": shipping_results,
@@ -37,4 +39,5 @@ async def create_all_enhanced_indexes(db):
         "promotions": promotions_results, "content": content_results,
         "notifications": notifications_results, "reviews": reviews_results,
         "inventory": inventory_results, "financial": financial_results,
+        "remaining": remaining_results,
     }
