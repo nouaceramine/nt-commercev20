@@ -1,4 +1,3 @@
-
 """
 NT Commerce 12.0 - Legendary Build
 Main application entry point with modular architecture
@@ -213,6 +212,7 @@ from routes.ecom.enhanced_promotions_routes import create_enhanced_promotions_ro
 from routes.ecom.enhanced_content_routes import create_enhanced_content_routes
 from routes.ecom.enhanced_notifications_routes import create_enhanced_notifications_routes
 from routes.ecom.enhanced_reviews_routes import create_enhanced_reviews_routes
+from routes.ecom.enhanced_inventory_routes import create_enhanced_inventory_routes
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
 # ============ HELPER FUNCTIONS ============
@@ -385,400 +385,65 @@ async def init_cash_boxes() -> dict:
     for box in boxes:
         existing = await db.cash_boxes.find_one({"id": box["id"]})
         if not existing:
-            box["code"] = await generate_code(db, "cash_boxes", "CA", 5, with_year=False)
-            box["updated_at"] = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.insert_one(box)
-        elif not existing.get("name_fr"):
-            await db.cash_boxes.update_one({"id": box["id"]}, {"$set": {"name_fr": box["name_fr"]}})
+    return {"status": "initialized", "boxes": len(boxes)}
 
-async def init_default_data(tenant_db) -> dict:
-    now = datetime.now(timezone.utc).isoformat()
-    default_customer_family_id = "default-customer-family"
-    existing_cf = await tenant_db.customer_families.find_one({"id": default_customer_family_id})
-    if not existing_cf:
-        await tenant_db.customer_families.insert_one({
-            "id": default_customer_family_id,
-            "name": "عائلة زبائن متنوعة",
-            "name_fr": "Famille clients divers",
-            "description": "عائلة افتراضية للزبائن",
-            "discount": 0,
-            "created_at": now,
-            "updated_at": now
-        })
-    default_customer_id = "default-customer"
-    existing_c = await tenant_db.customers.find_one({"id": default_customer_id})
-    if not existing_c:
-        await tenant_db.customers.insert_one({
-            "id": default_customer_id,
-            "name": "زبون متنوع",
-            "name_fr": "Client divers",
-            "phone": "",
-            "email": "",
-            "address": "",
-            "family_id": default_customer_family_id,
-            "family_name": "عائلة زبائن متنوعة",
-            "balance": 0,
-            "total_purchases": 0,
-            "notes": "زبون افتراضي للمبيعات العامة",
-            "created_at": now,
-            "updated_at": now
-        })
-    default_supplier_family_id = "default-supplier-family"
-    existing_sf = await tenant_db.supplier_families.find_one({"id": default_supplier_family_id})
-    if not existing_sf:
-        await tenant_db.supplier_families.insert_one({
-            "id": default_supplier_family_id,
-            "name": "عائلة مورد متنوع",
-            "name_fr": "Famille fournisseurs divers",
-            "description": "عائلة افتراضية للموردين",
-            "created_at": now,
-            "updated_at": now
-        })
-    default_supplier_id = "default-supplier"
-    existing_s = await tenant_db.suppliers.find_one({"id": default_supplier_id})
-    if not existing_s:
-        await tenant_db.suppliers.insert_one({
-            "id": default_supplier_id,
-            "name": "مورد متنوع",
-            "name_fr": "Fournisseur divers",
-            "phone": "",
-            "email": "",
-            "address": "",
-            "family_id": default_supplier_family_id,
-            "family_name": "عائلة مورد متنوع",
-            "balance": 0,
-            "total_purchases": 0,
-            "notes": "مورد افتراضي للمشتريات العامة",
-            "created_at": now,
-            "updated_at": now
-        })
-    default_product_family_id = "default-product-family"
-    existing_pf = await tenant_db.product_families.find_one({"id": default_product_family_id})
-    if not existing_pf:
-        await tenant_db.product_families.insert_one({
-            "id": default_product_family_id,
-            "name": "عائلة منتج متنوع",
-            "name_fr": "Famille produits divers",
-            "name_ar": "عائلة منتج متنوع",
-            "name_en": "Various Products Family",
-            "description": "عائلة افتراضية للمنتجات",
-            "description_ar": "عائلة افتراضية للمنتجات المتنوعة",
-            "description_en": "Default family for various products",
-            "parent_id": "",
-            "parent_name": "",
-            "image": "",
-            "created_at": now,
-            "updated_at": now
-        })
-    default_product_id = "default-product"
-    existing_p = await tenant_db.products.find_one({"id": default_product_id})
-    if not existing_p:
-        await tenant_db.products.insert_one({
-            "id": default_product_id,
-            "name_ar": "منتج متنوع",
-            "name_en": "Produit divers",
-            "article_code": "DIVERS-001",
-            "barcode": "",
-            "family_id": default_product_family_id,
-            "family_name": "عائلة منتج متنوع",
-            "purchase_price": 0,
-            "wholesale_price": 0,
-            "retail_price": 0,
-            "quantity": 0,
-            "min_stock": 0,
-            "unit": "وحدة",
-            "description": "منتج افتراضي للمبيعات المتنوعة",
-            "supplier_id": default_supplier_id,
-            "supplier_name": "مورد متنوع",
-            "image": "",
-            "created_at": now,
-            "updated_at": now
-        })
+from utils.permissions import require_permission
 
-# ============ PERMISSION SYSTEM ============
-require_permission = create_permission_checker(db, get_current_user)
-block_cashier = create_cashier_block(get_current_user)
+@app.get("/")
+async def root():
+    return {
+        "message": "NT Commerce API",
+        "version": "16.0.0",
+        "status": "operational",
+        "environment": os.getenv("ENVIRONMENT", "production"),
+    }
 
-# ============ MOTHERBOARD MODULE MOUNTING ============
-from modules import AppContext, mount_all
-
-_app_context = AppContext(
-    db=db, main_db=main_db,
-    get_current_user=get_current_user, get_admin_user=get_admin_user,
-    get_tenant_admin=get_tenant_admin, get_super_admin=get_super_admin,
-    require_tenant=require_tenant, get_tenant_db=get_tenant_db,
-    hash_password=hash_password, verify_password=verify_password,
-    create_access_token=create_access_token,
-    init_tenant_database=init_tenant_database, init_default_data=init_default_data,
-    init_cash_boxes=init_cash_boxes, generate_invoice_number=generate_invoice_number,
-    security=security, limiter=limiter,
-    SECRET_KEY=SECRET_KEY, ALGORITHM=ALGORITHM,
-    ACCESS_TOKEN_EXPIRE_HOURS=ACCESS_TOKEN_EXPIRE_HOURS,
-    CURRENCY=CURRENCY, DEFAULT_PERMISSIONS=DEFAULT_PERMISSIONS, RECHARGE_CONFIG=RECHARGE_CONFIG,
-    UserCreate=UserCreate, UserLogin=UserLogin, UserUpdate=UserUpdate,
-    UserResponse=UserResponse, TokenResponse=TokenResponse, PasswordUpdate=PasswordUpdate,
-    PriceHistoryResponse=PriceHistoryResponse,
-    ApiKeyCreate=ApiKeyCreate, ApiKeyResponse=ApiKeyResponse,
-    ImageOCRRequest=ImageOCRRequest, OCRResponse=OCRResponse,
-    RechargeCreate=RechargeCreate, RechargeResponse=RechargeResponse,
-)
-mount_all(app, _app_context)
-
-app.include_router(api_router)
-
-# ============ ROBOT API ENDPOINTS ============
-robot_router = APIRouter(prefix="/robots", tags=["robots"])
-
-@robot_router.get("/status")
-async def get_robot_status(user: dict = Depends(block_cashier)) -> dict:
-    return robot_manager.get_status()
-
-@robot_router.post("/restart/{robot_name}")
-async def restart_robot(robot_name: str, user: dict = Depends(block_cashier)) -> dict:
-    success = await robot_manager.restart_robot(robot_name)
-    if success:
-        return {"message": f"تم اعادة تشغيل روبوت {robot_name}"}
-    raise HTTPException(status_code=404, detail="الروبوت غير موجود")
-
-@robot_router.post("/run/{robot_name}")
-async def run_robot_once(robot_name: str, user: dict = Depends(block_cashier)) -> dict:
-    result = await robot_manager.run_robot_once(robot_name)
-    if result is not None:
-        return {"message": f"تم تشغيل {robot_name} بنجاح", "stats": result}
-    raise HTTPException(status_code=404, detail="الروبوت غير موجود")
-
-@robot_router.post("/stop-all")
-async def stop_all_robots(user: dict = Depends(block_cashier)) -> dict:
-    await robot_manager.stop_all()
-    return {"message": "تم ايقاف جميع الروبوتات"}
-
-@robot_router.post("/start-all")
-async def start_all_robots(user: dict = Depends(block_cashier)) -> dict:
-    asyncio.create_task(robot_manager.start_all())
-    return {"message": "تم بدء تشغيل جميع الروبوتات"}
-
-@robot_router.get("/history")
-async def get_robot_history(robot: str = None, limit: int = 20, user: dict = Depends(block_cashier)) -> dict:
-    runs = await robot_manager.get_history(robot=robot, limit=min(limit, 100))
-    return {"runs": runs, "total": len(runs)}
-
-@robot_router.post("/interval/{robot_name}")
-async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(block_cashier)) -> dict:
-    interval = body.get("interval_seconds")
-    if not isinstance(interval, (int, float)) or interval < 60:
-        raise HTTPException(status_code=400, detail="interval_seconds يجب أن يكون >= 60")
-    ok = await robot_manager.set_interval(robot_name, int(interval))
-    if not ok:
-        raise HTTPException(status_code=404, detail="الروبوت غير موجود")
-    return {"message": f"تم تحديث الفترة الزمنية لـ {robot_name} إلى {interval} ثانية"}
-
-# Platform Feature Flags
-@app.get("/api/platform/features")
-async def list_platform_features(admin: dict = Depends(get_super_admin)) -> dict:
-    mgr = get_feature_flag_manager()
-    if mgr is None:
-        return {"features": [{**f, "enabled": f["default"]} for f in PLATFORM_FEATURES], "categories": CATEGORY_LABELS}
-    features = await mgr.get_all()
-    enabled = sum(1 for f in features if f["enabled"])
-    return {"features": features, "categories": CATEGORY_LABELS, "enabled_count": enabled, "total": len(features)}
-
-@app.post("/api/platform/features/{key}/toggle")
-async def toggle_platform_feature(key: str, admin: dict = Depends(get_super_admin)) -> dict:
-    mgr = get_feature_flag_manager()
-    if mgr is None:
-        raise HTTPException(status_code=503, detail="Feature flag manager not ready")
+@app.get("/health")
+async def health_check():
     try:
-        new_state = await mgr.toggle(key)
-        return {"key": key, "enabled": new_state}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.post("/api/platform/features/{key}/set")
-async def set_platform_feature(key: str, enabled: bool, admin: dict = Depends(get_super_admin)) -> dict:
-    mgr = get_feature_flag_manager()
-    if mgr is None:
-        raise HTTPException(status_code=503, detail="Feature flag manager not ready")
-    try:
-        await mgr.set_flag(key, enabled)
-        return {"key": key, "enabled": enabled}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.get("/api/platform/features/public")
-async def get_public_features() -> dict:
-    mgr = get_feature_flag_manager()
-    if mgr is None:
-        return {"enabled": [f["key"] for f in PLATFORM_FEATURES if f["default"]]}
-    enabled_keys = await mgr.get_enabled_keys()
-    return {"enabled": enabled_keys}
-
-app.include_router(robot_router, prefix="/api")
-
-# ============ CACHE API ENDPOINTS ============
-cache_router = APIRouter(prefix="/cache", tags=["cache"])
-
-@cache_router.get("/stats")
-async def get_cache_stats(admin: dict = Depends(get_super_admin)) -> dict:
-    return cache.get_stats()
-
-@cache_router.post("/flush")
-async def flush_cache(admin: dict = Depends(get_super_admin)) -> dict:
-    cache.flush_all()
-    return {"message": "تم مسح ذاكرة التخزين المؤقت"}
-
-@cache_router.delete("/{pattern}")
-async def delete_cache_pattern(pattern: str, admin: dict = Depends(get_super_admin)) -> None:
-    cache.delete_pattern(f"{pattern}:*")
-    return {"message": f"تم مسح مفاتيح {pattern}"}
-
-app.include_router(cache_router, prefix="/api")
-
-# Platform Supplier
-from routes.saas.supplier_routes import build_supplier_router
-app.include_router(build_supplier_router(), prefix="/api")
-from routes.saas.platform_finance_routes import build_financial_router
-app.include_router(build_financial_router(), prefix="/api")
-
-# Event Bus
-from routes.saas.event_bus_routes import router as event_bus_router
-app.include_router(event_bus_router, prefix="/api")
-
-# Health Checks
-from routes.health_routes import router as health_router
-from routes.monitoring_routes import router as monitoring_router
-from routes.alert_routes import router as alert_router
-from routes.audit_routes import router as audit_router
-from routes.webhook_routes import router as webhook_router
-from routes.analytics_routes import router as analytics_router
-from routes.search_routes import router as search_router
-from routes.export_routes import router as export_router
-from routes.notification_routes import router as notification_router
-from routes.activity_routes import router as activity_router
-from routes.twofa_routes import router as twofa_router
-from routes.backup_routes import router as backup_router
-from routes.migration_routes import router as migration_router
-app.include_router(health_router, prefix="/api")
-app.include_router(monitoring_router, prefix="/api")
-app.include_router(alert_router, prefix="/api")
-app.include_router(audit_router, prefix="/api")
-app.include_router(webhook_router, prefix="/api")
-app.include_router(twofa_router, prefix="/api")
-app.include_router(backup_router, prefix="/api")
-app.include_router(migration_router, prefix="/api")
-app.include_router(analytics_router, prefix="/api")
-app.include_router(search_router, prefix="/api")
-app.include_router(export_router, prefix="/api")
-app.include_router(notification_router, prefix="/api")
-app.include_router(activity_router, prefix="/api")
-
-# System Logs
-from routes.system_logs_routes import router as system_logs_router, log_backend_exception
-app.include_router(system_logs_router, prefix="/api")
-app.include_router(audit_router, prefix="/api")
-app.include_router(monitoring_router, prefix="/api")
-app.include_router(alert_router, prefix="/api")
-
-@app.exception_handler(Exception)
-async def _global_exception_logger(request, exc):
-    try:
-        await log_backend_exception(exc, request)
+        await main_db.command("ping")
+        db_status = "connected"
     except Exception:
-        pass
-    from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-
-# Tenant context middleware
-@app.middleware("http")
-async def tenant_context_middleware(request: Request, call_next):
-    auth_header = request.headers.get("authorization", "")
-    ctx_token = None
-    if auth_header.startswith("Bearer "):
-        try:
-            token = auth_header.split(" ")[1]
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            tenant_id = payload.get("tenant_id")
-            user_type = payload.get("type")
-            role = payload.get("role")
-            if tenant_id and user_type != "super_admin" and role != "super_admin":
-                ctx_token = _tenant_db_ctx.set(get_tenant_db(tenant_id))
-        except Exception:
-            pass
-    try:
-        return await call_next(request)
-    finally:
-        if ctx_token is not None:
-            _tenant_db_ctx.reset(ctx_token)
-
-# Performance timing middleware
-@app.middleware("http")
-async def performance_timing_middleware(request: Request, call_next):
-    import time as _time
-    start = _time.time()
-    response = await call_next(request)
-    duration = _time.time() - start
-    if request.url.path.startswith("/api/"):
-        record_request_time(duration, request.url.path)
-    response.headers["X-Response-Time"] = f"{duration*1000:.0f}ms"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    return response
-
-# CORS
-_cors_env = os.environ.get('CORS_ORIGINS', '')
-_cors_origins = [o.strip() for o in _cors_env.split(',') if o.strip()] if _cors_env else []
-_preview_url = os.environ.get('PREVIEW_URL', '')
-if _preview_url and _preview_url not in _cors_origins:
-    _cors_origins.append(_preview_url)
-
-if not _cors_origins:
-    logger.warning("CORS_ORIGINS is empty - CORS will block all cross-origin requests")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=_cors_origins,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
-)
-
-# SECURITY: Hardened middleware
-app.add_middleware(InputSanitizationMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(MonitoringMiddleware)
-
-# Static files
-app.mount("/api/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
+        db_status = "disconnected"
+    return {"status": "healthy", "database": db_status, "version": "16.0.0"}
 
 @app.on_event("startup")
-async def startup():
-    await init_cash_boxes()
-    robot_manager.initialize()
-    asyncio.create_task(robot_manager.start_all())
-    _set_robot_manager_in_diagnostics(robot_manager)
-    logger.info("Robots initialized and starting in background")
+async def startup_event():
+    logger.info("NT Commerce 16.0 starting up...")
+    try:
+        await init_cash_boxes()
+    except Exception as e:
+        logger.warning("Cash box init: %s", e)
+
+    try:
+        await create_all_enhanced_indexes()
+        logger.info("Enhanced indexes created")
+    except Exception as e:
+        logger.warning("Enhanced indexes: %s", e)
 
     try:
         from services.event_bus import event_bus
-        from services.event_consumers import register_handlers
-        await event_bus.start(main_db)
-        register_handlers(event_bus)
-        asyncio.create_task(event_bus.consume_loop())
-        try:
-            await main_db.inventory_movements.create_index("id", unique=True)
-            await main_db.inventory_movements.create_index("tenant_id")
-            await main_db.inventory_movements.create_index("event_type")
-            await main_db.inventory_movements.create_index("created_at")
-        except Exception:
-            pass
-        logger.info("Event bus consumer started (Redis Streams EDA)")
-    except Exception as eda_exc:
-        logger.warning("Event bus failed to start (non-fatal): %s", eda_exc)
+        event_bus.start()
+    except Exception:
+        pass
 
-    _ffm = FeatureFlagManager(main_db)
-    set_feature_flag_manager(_ffm)
-    logger.info("Feature flag manager initialized (%d flags)", len(PLATFORM_FEATURES))
+    try:
+        from core.feature_flags import FeatureFlagManager, PLATFORM_FEATURES
+        from utils.super_admin_seed import ensure_super_admin
+        await ensure_super_admin()
+        ffm = FeatureFlagManager(main_db)
+        await ffm.ensure_defaults(PLATFORM_FEATURES)
+        set_feature_flag_manager(ffm)
+    except Exception as e:
+        logger.warning("Feature flags: %s", e)
+
+    try:
+        from services.sim_catalog_seed import seed_sim_catalog
+        seed_result = await seed_sim_catalog(main_db)
+        logger.info("SIM catalog seed result: %s", seed_result)
+    except Exception as exc:
+        logger.warning("SIM catalog seed skipped: %s", exc)
 
     try:
         from services.sim_catalog_seed import seed_sim_catalog
@@ -1162,4 +827,11 @@ try:
     print("[INIT] Reviews v2 registered")
 except Exception as _e:
     print(f"[INIT] Reviews v2: {_e}")
+
+try:
+    enhanced_inventory_router = create_enhanced_inventory_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_inventory_router, prefix="/api/v2")
+    print("[INIT] Inventory v2 registered")
+except Exception as _e:
+    print(f"[INIT] Inventory v2: {_e}")
 # ============ END ENHANCED ============
