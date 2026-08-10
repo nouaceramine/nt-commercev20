@@ -50,3 +50,8 @@
 - sms_service: if self.db → if self.db is not None (motor لا يدعم truth-testing)
 - repair_routes: sms.send → sms.send_sms (الاسم الصحيح) + main_db is not None
 - اختبار حي: SMS-MOCK + sms_log بدون أخطاء ✓
+
+## 2026-08-11 — إصلاح اختفاء ecom-hub
+- السبب: ecommerce_hub ميزة opt-in؛ تسجيل دخول admin (simple_auth_routes) لم يكن يعيد features → القائمة والصفحات محظورة
+- simple_auth_routes + auth_users_routes: إرجاع user.features في login و /me
+- demo: features.ecommerce_hub=true في القاعدة
