@@ -30,7 +30,7 @@ def create_auth_routes(db, get_current_user):
         if not user:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         token = auth_service.create_access_token({"sub": user["id"], "email": user["email"], "role": user.get("role", "user")})
-        return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user")}}
+        return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}}
 
     @router.post("/register")
     @limiter.limit("5/minute")
@@ -40,10 +40,10 @@ def create_auth_routes(db, get_current_user):
             raise HTTPException(status_code=400, detail="Email already registered")
         user = await auth_service.create_user(body.email, body.password, body.full_name, role="admin")
         token = auth_service.create_access_token({"sub": user["id"], "email": user["email"], "role": user.get("role", "user")})
-        return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user")}}
+        return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}}
 
     @router.get("/me")
     async def me(user=Depends(get_current_user)):
-        return {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user")}
+        return {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}
 
     return router

@@ -155,7 +155,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "email": user["email"],
                         "name": user["name"],
                         "role": user["role"],
-                        "permissions": user.get("permissions", {})
+                        "permissions": user.get("permissions", {}),
+                        "features": user.get("features")
                     }
                 }
 

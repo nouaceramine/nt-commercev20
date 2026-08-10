@@ -45,3 +45,8 @@
 - main.py: قيد فريد wallets (entity_type, entity_id)
 - واجهة: شارة مخاطر COD في قائمة الطلبات + لوحة تفاصيلها؛ بطاقة AI + بطاقة واتساب للأعمال في /ecom-hub/channels؛ بطاقات أرباح + ملاحظة DIRECT_TOPUP في /digital-admin
 - build: main.d54b53c1.js — اختبار حي: إشعار digital_order + ربح 100 (1000-900) ✓
+
+## 2026-08-11 — إصلاحات SMS
+- sms_service: if self.db → if self.db is not None (motor لا يدعم truth-testing)
+- repair_routes: sms.send → sms.send_sms (الاسم الصحيح) + main_db is not None
+- اختبار حي: SMS-MOCK + sms_log بدون أخطاء ✓

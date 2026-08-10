@@ -141,13 +141,57 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0})
         if not settings or not settings.get("enabled"):
             raise HTTPException(status_code=404, detail="Store not available")
+
         store_products = await tenant_db_inst.store_products.find({"is_active": True}, {"_id": 0}).to_list(1000)
         product_ids = [sp["product_id"] for sp in store_products]
+
         products = await tenant_db_inst.products.find(
             {"id": {"$in": product_ids}, "quantity": {"$gt": 0}},
-            {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "image_url": 1, "description_ar": 1, "description_en": 1, "quantity": 1}
+            {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, 
+             "purchase_price": 1, "image_url": 1, "description_ar": 1, 
+             "description_en": 1, "quantity": 1, "family_id": 1, "barcode": 1}
         ).to_list(1000)
-        return {"settings": settings, "products": products, "tenant_id": tenant_id}
+
+        family_ids = list(set(p.get("family_id") for p in products if p.get("family_id")))
+        families = []
+        if family_ids:
+            families = await tenant_db_inst.product_families.find(
+                {"id": {"$in": family_ids}}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "image_url": 1}
+            ).to_list(100)
+
+        products_by_family = {}
+        for family in families:
+            family_products = [p for p in products if p.get("family_id") == family["id"]]
+            if family_products:
+                products_by_family[family["id"]] = {
+                    "family": family,
+                    "products": family_products
+                }
+
+        uncategorized = [p for p in products if not p.get("family_id")]
+        total_products = len(products)
+        low_stock = len([p for p in products if p.get("quantity", 0) < 5])
+
+        return {
+            "success": True,
+            "settings": settings,
+            "products": products,
+            "families": families,
+            "products_by_family": products_by_family,
+            "uncategorized": uncategorized,
+            "stats": {"total_products": total_products, "low_stock": low_stock},
+            "tenant_id": tenant_id
+        }
+
+    @router.get("/shop/{store_slug}/families")
+    async def get_store_families(store_slug: str):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+        families = await tenant_db_inst.product_families.find({}, {"_id": 0}).to_list(100)
+        return {"success": True, "families": families}
 
     @router.post("/shop/{store_slug}/order")
     async def create_public_order(store_slug: str, order: StoreOrder):
