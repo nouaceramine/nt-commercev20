@@ -325,6 +325,27 @@ export default function StoreManagementPage() {
                             className="font-mono"
                             data-testid="store-slug-input"
                           />
+                          <button
+                            onClick={async () => {
+                              if (!storeSettings.store_slug || storeSettings.store_slug.length < 3) {
+                                toast.error('Slug يجب أن يكون 3 أحرف على الأقل');
+                                return;
+                              }
+                              try {
+                                const res = await apiClient.get(`/store/check-slug?slug=${storeSettings.store_slug}`);
+                                if (res.data.available) {
+                                  toast.success('الرابط متاح!');
+                                } else {
+                                  toast.error('الرابط مستخدم، جرب اسماً آخر');
+                                }
+                              } catch (e) {
+                                toast.error('فشل التحقق');
+                              }
+                            }}
+                            className="px-3 py-2 border rounded-md text-sm hover:bg-gray-50 mt-2"
+                          >
+                            التحقق من التوفر
+                          </button>
                         </div>
                       </div>
                     </div>

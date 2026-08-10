@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { toast, Toaster } from 'sonner';
 import {
@@ -1018,6 +1018,7 @@ const WILAYAS = [
 
 export default function PublicStorePage() {
   const { slug } = useParams();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [store, setStore] = useState(null);
   const [products, setProducts] = useState([]);
@@ -1372,11 +1373,11 @@ export default function PublicStorePage() {
                     </div>
                     <button
                       className="nc-add-cart-btn"
-                      onClick={() => addToCart(product)}
+                      onClick={() => navigate(`/shop/${slug}/product/${product.id}`)}
                       disabled={product.quantity <= 0}
                     >
                       {product.quantity > 0 ? (
-                        <><ShoppingCart size={16} /> أضف للسلة</>
+                        <><ShoppingCart size={16} /> اطلب الآن</>
                       ) : (
                         'نفذت الكمية'
                       )}

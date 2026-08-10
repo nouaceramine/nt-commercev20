@@ -55,3 +55,8 @@
 - السبب: ecommerce_hub ميزة opt-in؛ تسجيل دخول admin (simple_auth_routes) لم يكن يعيد features → القائمة والصفحات محظورة
 - simple_auth_routes + auth_users_routes: إرجاع user.features في login و /me
 - demo: features.ecommerce_hub=true في القاعدة
+
+## 2026-08-11 — تفعيل ecom-hub لكل الحسابات
+- saas_plans: features.ecommerce_hub=true للخطط الثلاث (كانت فارغة → المستأجرون لا يرون القائمة)
+- online_store_routes: إصلاح 500 عند حفظ إعدادات المتجر (upsert يصطدم بقيد store_slug الفريد) + رسالة واضحة عند تضارب الرابط
+- التحقق: PUT /store/settings ✓، /shop/demo-shop ✓، login + /me يعيدان features ✓
