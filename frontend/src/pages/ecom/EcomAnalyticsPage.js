@@ -35,15 +35,18 @@ export default function EcomAnalyticsPage() {
   const [revenue, setRevenue] = useState(null);
   const [funnel, setFunnel] = useState(null);
   const [topProducts, setTopProducts] = useState([]);
+  const [digital, setDigital] = useState(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rev, fun, top] = await Promise.all([
+      const [rev, fun, top, dig] = await Promise.all([
         apiClient.get(`/ecom/analytics/revenue?days=${days}`),
         apiClient.get(`/ecom/analytics/funnel?days=${days}`),
         apiClient.get(`/ecom/analytics/top-products?days=${days}&limit=10`),
+        apiClient.get('/digital/stats').catch(() => ({ data: null })),
       ]);
+      setDigital(dig.data);
       setRevenue(rev.data);
       setFunnel(fun.data);
       setTopProducts(top.data?.items || []);
@@ -170,6 +173,33 @@ export default function EcomAnalyticsPage() {
               </div>
             </CardContent></Card>
           </div>
+        )}
+
+        {/* Digital services profit */}
+        {digital && digital.completed_orders > 0 && (
+          <Card className="border-indigo-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">أرباح الخدمات الرقمية</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div><div className="text-xs text-muted-foreground">طلبات مكتملة</div><div className="text-xl font-bold">{digital.completed_orders}</div></div>
+                <div><div className="text-xs text-muted-foreground">الإيرادات</div><div className="text-xl font-bold text-blue-700">{digital.revenue.toLocaleString()} دج</div></div>
+                <div><div className="text-xs text-muted-foreground">التكلفة</div><div className="text-xl font-bold">{digital.cost.toLocaleString()} دج</div></div>
+                <div><div className="text-xs text-muted-foreground">صافي الربح</div><div className="text-xl font-bold text-emerald-700">{digital.profit.toLocaleString()} دج</div></div>
+              </div>
+              {digital.by_product?.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {digital.by_product.slice(0, 5).map(bp => (
+                    <div key={bp.product} className="flex justify-between text-sm border-b pb-1">
+                      <span>{bp.product} ({bp.orders})</span>
+                      <span className="font-semibold text-emerald-700">+{bp.profit.toLocaleString()} دج</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {/* AI Co-pilot (iter 18.4) */}

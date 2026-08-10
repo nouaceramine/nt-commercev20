@@ -30,8 +30,13 @@ def _verify_phone(phone: str) -> bool:
     return False
 
 
-def calculate_risk_score(order: dict, customer_history_count: int = 0, high_risk_wilayas: list = None) -> dict:
-    """Compute cancellation risk score (0-100) and the recommended action."""
+def calculate_risk_score(order: dict, customer_history_count: int = 0, high_risk_wilayas: list = None,
+                         customer_stats: dict = None) -> dict:
+    """Compute cancellation risk score (0-100) and the recommended action.
+
+    customer_stats (اختياري): {"delivered": n, "cancelled": n, "returned": n}
+    — يجعل المحرك يتعلّم من سجل الإلغاءات الفعلي للزبون بدل قواعد ثابتة فقط.
+    """
     wilayas = high_risk_wilayas if high_risk_wilayas is not None else DEFAULT_HIGH_RISK_WILAYAS
     score = 0
     reasons = []
@@ -50,6 +55,24 @@ def calculate_risk_score(order: dict, customer_history_count: int = 0, high_risk
         score += 25
         reasons.append("زبون جديد بدون سجل شراء")
 
+    # ── التعلّم من السجل الفعلي للزبون ──
+    if customer_stats:
+        delivered = int(customer_stats.get("delivered", 0) or 0)
+        cancelled = int(customer_stats.get("cancelled", 0) or 0)
+        returned = int(customer_stats.get("returned", 0) or 0)
+        total_closed = delivered + cancelled + returned
+        if total_closed >= 2:
+            cancel_rate = (cancelled + returned) / total_closed
+            if cancel_rate >= 0.5:
+                score += 35
+                reasons.append(f"زبون ألغى/أرجع {cancelled + returned} من آخر {total_closed} طلبات")
+            elif cancel_rate >= 0.25:
+                score += 20
+                reasons.append("سجل إلغاءات متوسط لدى هذا الزبون")
+            elif delivered >= 3 and cancel_rate < 0.1:
+                score -= 15
+                reasons.append("زبون موثوق بسجل استلام ممتاز")
+
     created_at = order.get("created_at") or datetime.utcnow().isoformat()
     if _is_night_order(created_at):
         score += 15
@@ -60,7 +83,7 @@ def calculate_risk_score(order: dict, customer_history_count: int = 0, high_risk
         score += 10
         reasons.append("رقم هاتف غير مؤكد")
 
-    score = min(score, 100)
+    score = max(0, min(score, 100))
 
     if score <= 30:
         action, action_ar = "ship", "شحن عادي"

@@ -238,6 +238,19 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         "created_by": user.get("id"),
     }
     # COD risk scoring (anti-cancellation engine)
+    async def _customer_stats(phone: str) -> dict:
+        """سجل الزبون الفعلي: مستلَم/ملغي/مرجع — لتغذية محرك المخاطر."""
+        if not phone:
+            return {}
+        stats = {"delivered": 0, "cancelled": 0, "returned": 0}
+        stats["delivered"] = await db.ecom_orders.count_documents(
+            {"customer.phone": phone, "status": {"$in": ["delivered", "shipped", "confirmed"]}})
+        stats["cancelled"] = await db.ecom_orders.count_documents(
+            {"customer.phone": phone, "status": "cancelled"})
+        stats["returned"] = await db.ecom_orders.count_documents(
+            {"customer.phone": phone, "status": "returned"})
+        return stats
+
     payment_method = (body.get("payment_method") or ("cod" if doc["payment_status"] == "unpaid" else "prepaid")).strip().lower()
     doc["payment_method"] = payment_method
     if payment_method == "cod":
@@ -248,7 +261,8 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
             history_count = await db.ecom_orders.count_documents(
                 {"customer.phone": phone, "status": {"$in": ["delivered", "shipped", "confirmed"]}}
             )
-        risk = calculate_risk_score(doc, customer_history_count=history_count)
+        risk = calculate_risk_score(doc, customer_history_count=history_count,
+                                    customer_stats=await _customer_stats(phone))
         doc["cod_risk"] = risk
         if risk["action"] == "manual_review":
             doc["status"] = "needs_review"
@@ -285,7 +299,10 @@ async def get_order_risk(order_id: str, user: dict = Depends(require_tenant)):
         history_count = await db.ecom_orders.count_documents(
             {"customer.phone": phone, "status": {"$in": ["delivered", "shipped", "confirmed"]}, "id": {"$ne": order_id}}
         )
-    risk = calculate_risk_score(order, customer_history_count=history_count)
+    cancelled = await db.ecom_orders.count_documents({"customer.phone": phone, "status": "cancelled"})
+    returned = await db.ecom_orders.count_documents({"customer.phone": phone, "status": "returned"})
+    risk = calculate_risk_score(order, customer_history_count=history_count,
+                                customer_stats={"delivered": history_count, "cancelled": cancelled, "returned": returned})
     await db.ecom_orders.update_one({"id": order_id}, {"$set": {"cod_risk": risk}})
     return risk
 

@@ -59,11 +59,13 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         family_name = ""
         if p.family_id:
             family = await db.product_families.find_one({"id": p.family_id}, {"_id": 0, "name_ar": 1})
-            if family:
-                family_name = family["name_ar"]
+            if not family:
+                raise HTTPException(status_code=400, detail="عائلة المنتجات المحددة غير موجودة")
+            family_name = family["name_ar"]
 
         product_doc = {
             "id": product_id,
+            "name": p.name_ar or p.name_en,
             "name_en": p.name_en, "name_ar": p.name_ar,
             "description_en": p.description_en or "",
             "description_ar": p.description_ar or "",
@@ -373,9 +375,14 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
 
         update_data = {k: v for k, v in updates.items() if v is not None and k not in ["id"]}
-        if "family_id" in update_data and update_data["family_id"]:
-            family = await db.product_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1})
-            update_data["family_name"] = family["name_ar"] if family else ""
+        if "family_id" in update_data:
+            if update_data["family_id"]:
+                family = await db.product_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1})
+                if not family:
+                    raise HTTPException(status_code=400, detail="عائلة المنتجات المحددة غير موجودة")
+                update_data["family_name"] = family["name_ar"]
+            else:
+                update_data["family_name"] = ""
 
         old_price = product.get("retail_price", 0)
         new_price = update_data.get("retail_price", old_price)

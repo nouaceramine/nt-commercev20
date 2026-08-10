@@ -9,6 +9,12 @@ from datetime import datetime, timezone
 import uuid
 import re
 
+from services.conversions_api_service import conversions_service
+from services.whatsapp_service import whatsapp_service
+from services.coupon_service import coupon_service
+from services.loyalty_service import loyalty_service
+from services.shipping_tracker import shipping_tracker
+
 
 def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_tenant_db) -> dict:
     router = APIRouter(tags=["online-store"])
@@ -371,5 +377,211 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             "related_products": related_products,
             "settings": settings
         }
+
+    # ── NEW: Coupon Management ──
+
+    @router.get("/store/coupons")
+    async def get_coupons(admin: dict = Depends(get_tenant_admin)):
+        coupons = await coupon_service.get_coupons(db, active_only=True)
+        return {"success": True, "coupons": coupons}
+
+    @router.post("/store/coupons")
+    async def create_coupon(data: dict, admin: dict = Depends(get_tenant_admin)):
+        coupon = await coupon_service.create_coupon(db, data)
+        return {"success": True, "coupon": coupon}
+
+    @router.delete("/store/coupons/{coupon_id}")
+    async def delete_coupon(coupon_id: str, admin: dict = Depends(get_tenant_admin)):
+        result = await coupon_service.delete_coupon(db, coupon_id)
+        return {"success": result, "message": "تم حذف الكوبون" if result else "فشل الحذف"}
+
+    @router.post("/shop/{store_slug}/validate-coupon")
+    async def validate_public_coupon(store_slug: str, data: dict):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+
+        result = await coupon_service.validate_coupon(
+            tenant_db_inst,
+            data.get("code", ""),
+            data.get("subtotal", 0),
+            data.get("customer_phone", ""),
+            data.get("product_ids", [])
+        )
+        return result
+
+    # ── NEW: Loyalty Points ──
+
+    @router.get("/store/loyalty/customer/{phone}")
+    async def get_customer_loyalty(phone: str, admin: dict = Depends(get_tenant_admin)):
+        result = await loyalty_service.get_customer_points(db, phone)
+        return {"success": True, "data": result}
+
+    @router.get("/store/loyalty/transactions/{phone}")
+    async def get_loyalty_transactions(phone: str, admin: dict = Depends(get_tenant_admin)):
+        transactions = await loyalty_service.get_transactions(db, phone)
+        return {"success": True, "transactions": transactions}
+
+    @router.post("/shop/{store_slug}/loyalty/redeem")
+    async def redeem_loyalty_points(store_slug: str, data: dict):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+
+        result = await loyalty_service.redeem_points(
+            tenant_db_inst,
+            data.get("phone", ""),
+            data.get("points", 0),
+            data.get("order_id", "")
+        )
+        return result
+
+    # ── NEW: Shipping Tracking ──
+
+    @router.post("/store/orders/{order_id}/shipping")
+    async def create_shipping_tracking(
+        order_id: str,
+        data: dict,
+        admin: dict = Depends(get_tenant_admin)
+    ):
+        tracking = await shipping_tracker.create_tracking(
+            db, order_id, data.get("carrier", "manual"),
+            data.get("tracking_number", ""),
+            data.get("status", "pending")
+        )
+        return {"success": True, "tracking": tracking}
+
+    @router.put("/store/orders/{order_id}/shipping/status")
+    async def update_shipping_status(
+        order_id: str,
+        data: dict,
+        admin: dict = Depends(get_tenant_admin)
+    ):
+        result = await shipping_tracker.update_status(
+            db, order_id, data.get("status", ""),
+            data.get("location", ""),
+            data.get("note", "")
+        )
+
+        # Send WhatsApp notification if status changed
+        if result:
+            order = await db.store_orders.find_one({"id": order_id}, {"_id": 0})
+            if order and order.get("customer_phone"):
+                await whatsapp_service.send_shipping_update(
+                    order["customer_phone"],
+                    order_id,
+                    data.get("status", ""),
+                    data.get("tracking_url", "")
+                )
+
+        return {"success": result}
+
+    @router.get("/store/orders/{order_id}/shipping")
+    async def get_shipping_tracking(order_id: str, admin: dict = Depends(get_tenant_admin)):
+        tracking = await shipping_tracker.get_tracking(db, order_id)
+        if tracking:
+            tracking["status_display"] = shipping_tracker.get_status_display(tracking.get("status", ""))
+        return {"success": True, "tracking": tracking}
+
+    @router.get("/shop/{store_slug}/track/{order_id}")
+    async def public_track_order(store_slug: str, order_id: str):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+
+        tracking = await shipping_tracker.get_tracking(tenant_db_inst, order_id)
+        order = await tenant_db_inst.store_orders.find_one({"id": order_id}, {"_id": 0})
+
+        if not tracking and not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        return {
+            "success": True,
+            "order": order,
+            "tracking": tracking,
+            "status_display": shipping_tracker.get_status_display(tracking.get("status", "pending")) if tracking else None
+        }
+
+    # ── NEW: Webhook Events (Conversions API) ──
+
+    @router.post("/shop/{store_slug}/events/pageview")
+    async def track_page_view(store_slug: str, data: dict):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            return {"tracked": False}
+
+        await conversions_service.send_page_view(
+            data.get("url", ""),
+            {
+                "email": data.get("email", ""),
+                "phone": data.get("phone", "")
+            },
+            slug_mapping.get("tenant_id", "")
+        )
+        return {"tracked": True}
+
+    @router.post("/shop/{store_slug}/events/view-content")
+    async def track_view_content(store_slug: str, data: dict):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            return {"tracked": False}
+
+        await conversions_service.send_view_content(
+            data.get("product_id", ""),
+            data.get("product_name", ""),
+            data.get("price", 0),
+            data.get("url", ""),
+            {
+                "email": data.get("email", ""),
+                "phone": data.get("phone", "")
+            },
+            slug_mapping.get("tenant_id", "")
+        )
+        return {"tracked": True}
+
+    @router.post("/shop/{store_slug}/events/add-to-cart")
+    async def track_add_to_cart(store_slug: str, data: dict):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            return {"tracked": False}
+
+        await conversions_service.send_add_to_cart(
+            data.get("product_id", ""),
+            data.get("product_name", ""),
+            data.get("price", 0),
+            data.get("quantity", 1),
+            data.get("url", ""),
+            {
+                "email": data.get("email", ""),
+                "phone": data.get("phone", "")
+            },
+            slug_mapping.get("tenant_id", "")
+        )
+        return {"tracked": True}
+
+    @router.post("/shop/{store_slug}/events/purchase")
+    async def track_purchase_event(store_slug: str, data: dict):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            return {"tracked": False}
+
+        await conversions_service.send_purchase(
+            data.get("order_id", ""),
+            data.get("items", []),
+            data.get("total", 0),
+            data.get("url", ""),
+            {
+                "email": data.get("email", ""),
+                "phone": data.get("phone", "")
+            },
+            slug_mapping.get("tenant_id", "")
+        )
+        return {"tracked": True}
 
     return router
