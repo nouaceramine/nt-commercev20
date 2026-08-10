@@ -315,6 +315,17 @@ export default function EcomHubPage() {
                               <span className={`w-1.5 h-1.5 rounded-full ${stMeta.dot} ml-1`} />
                               {stMeta.labelAr}
                             </Badge>
+                            {o.cod_risk && (
+                              <div className="mt-1">
+                                <Badge className={
+                                  o.cod_risk.risk_score >= 61 ? 'bg-red-100 text-red-700' :
+                                  o.cod_risk.risk_score >= 31 ? 'bg-amber-100 text-amber-700' :
+                                  'bg-green-100 text-green-700'
+                                }>
+                                  مخاطر {o.cod_risk.risk_score} — {o.cod_risk.action_ar}
+                                </Badge>
+                              </div>
+                            )}
                           </td>
                           <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">
                             {new Date(o.created_at).toLocaleDateString('ar-DZ')}

@@ -30,15 +30,34 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
         data: Optional[dict] = None
 
     def _llm():
-        """Return (LlmChat, UserMessage, key) if a real LLM provider is usable, else None."""
-        key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
+        """Return an AsyncOpenAI client if an OpenAI-compatible provider is configured, else None.
+
+        Security: never import `emergentintegrations` here -- that PyPI package
+        is confirmed malware (MAL-2026-2702, credential stealer).
+        """
+        key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if not key:
             return None
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage
-            return LlmChat, UserMessage, key
+            from openai import AsyncOpenAI
+            base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL") or None
+            return AsyncOpenAI(api_key=key, base_url=base_url)
         except Exception:
             return None
+
+    async def _llm_answer(system_message: str, prompt: str) -> str:
+        client = _llm()
+        if not client:
+            return ""
+        model = os.environ.get("AI_INTEGRATIONS_OPENAI_MODEL", "gpt-4o-mini")
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        return resp.choices[0].message.content or ""
 
     # ── Local data helpers ──
     async def _store_snapshot():
@@ -126,20 +145,15 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
     @router.post("/chat", response_model=AIChatResponse)
     async def ai_chat(request: AIChatRequest, user: dict = Depends(get_current_user)):
         session_id = f"{user['id']}_{request.session_id}" if request.session_id else f"{user['id']}_default"
-        llm = _llm()
-        if llm:
-            LlmChat, UserMessage, key = llm
-            try:
-                chat = LlmChat(
-                    api_key=key, session_id=session_id,
-                    system_message="أنت مساعد ذكي لنظام نقاط بيع. أجب بالعربية باختصار وفائدة.",
-                ).with_model("openai", "gpt-4o")
-                response = await chat.send_message(UserMessage(text=request.message))
-                answer = response if isinstance(response, str) else getattr(response, "content", str(response))
-            except Exception as exc:
-                logger.warning("LLM chat failed, falling back to local: %s", exc)
-                answer = await _local_answer(request.message)
-        else:
+        answer = ""
+        try:
+            answer = await _llm_answer(
+                "أنت مساعد ذكي لنظام نقاط بيع. أجب بالعربية باختصار وفائدة.",
+                request.message,
+            )
+        except Exception as exc:
+            logger.warning("LLM chat failed, falling back to local: %s", exc)
+        if not answer:
             answer = await _local_answer(request.message)
         try:
             await db.ai_chat_history.update_one(
@@ -167,25 +181,21 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
 
     @router.post("/analyze")
     async def ai_analyze(request: AIAnalysisRequest, user: dict = Depends(require_tenant)):
-        llm = _llm()
-        if llm:
-            LlmChat, UserMessage, key = llm
+        if request.analysis_type == "sales_forecast":
             try:
-                chat = LlmChat(
-                    api_key=key,
-                    session_id=f"analysis_{user['id']}_{datetime.now(timezone.utc).timestamp()}",
-                    system_message="أنت محلل بيانات ذكي لنظام نقاط البيع. قدم تحليلات مختصرة ومفيدة باللغة العربية.",
-                ).with_model("openai", "gpt-4o")
-                if request.analysis_type == "sales_forecast":
-                    sales = await db.sales.find({}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
-                    daily_sales = {}
-                    for sale in sales:
-                        date = sale.get("created_at", "")[:10]
-                        if date:
-                            daily_sales[date] = daily_sales.get(date, 0) + sale.get("total", 0)
-                    prompt = f"بناءً على بيانات المبيعات التالية، قدم توقعاً مختصراً للمبيعات:\n{dict(list(daily_sales.items())[:14])}"
-                    response = await chat.send_message(UserMessage(text=prompt))
-                    return {"analysis": response, "type": "sales_forecast"}
+                sales = await db.sales.find({}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
+                daily_sales = {}
+                for sale in sales:
+                    date = sale.get("created_at", "")[:10]
+                    if date:
+                        daily_sales[date] = daily_sales.get(date, 0) + sale.get("total", 0)
+                prompt = "بناءً على بيانات المبيعات التالية، قدم توقعاً مختصراً للمبيعات:\n" + str(dict(list(daily_sales.items())[:14]))
+                analysis = await _llm_answer(
+                    "أنت محلل بيانات ذكي لنظام نقاط البيع. قدم تحليلات مختصرة ومفيدة باللغة العربية.",
+                    prompt,
+                )
+                if analysis:
+                    return {"analysis": analysis, "type": "sales_forecast", "mode": "llm"}
             except Exception as exc:
                 logger.warning("LLM analyze failed, falling back to local: %s", exc)
 
@@ -223,5 +233,16 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
                 "type": "customer_insights",
             }
         return {"analysis": "نوع التحليل غير معروف.", "type": request.analysis_type}
+
+    @router.get("/status")
+    async def ai_status(user: dict = Depends(get_current_user)):
+        key_set = bool(os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+        return {
+            "llm_configured": key_set,
+            "base_url_set": bool(os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")),
+            "model": os.environ.get("AI_INTEGRATIONS_OPENAI_MODEL", "gpt-4o-mini"),
+            "mode": "llm" if key_set else "local",
+            "note": "" if key_set else "يعمل المساعد بإجابات محلية مبنية على بياناتك. لتفعيل نموذج لغوي كامل أضف AI_INTEGRATIONS_OPENAI_API_KEY و AI_INTEGRATIONS_OPENAI_BASE_URL في backend/.env",
+        }
 
     return router

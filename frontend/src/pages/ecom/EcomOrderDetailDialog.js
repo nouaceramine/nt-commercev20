@@ -125,6 +125,23 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
 
         {/* Items */}
         <div>
+          {order.cod_risk && (
+            <div className={`p-3 rounded-lg border text-sm ${
+              order.cod_risk.risk_score >= 61 ? 'bg-red-50 border-red-200' :
+              order.cod_risk.risk_score >= 31 ? 'bg-amber-50 border-amber-200' :
+              'bg-green-50 border-green-200'
+            }`}>
+              <div className="font-semibold mb-1">
+                تقييم مخاطر الدفع عند الاستلام: {order.cod_risk.risk_score}/100 — {order.cod_risk.action_ar}
+              </div>
+              {order.cod_risk.reasons?.length > 0 && (
+                <ul className="list-disc pr-5 text-xs text-muted-foreground space-y-0.5">
+                  {order.cod_risk.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div className="text-xs font-semibold text-muted-foreground mb-2">المنتجات ({order.items?.length || 0})</div>
           <table className="w-full text-sm border rounded-lg overflow-hidden">
             <thead className="bg-muted/40">

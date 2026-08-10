@@ -36,6 +36,57 @@ const CREDENTIAL_SCHEMA = {
   maystro:   [['api_key', 'Maystro API Key']],
 };
 
+function AiStatusCard() {
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    apiClient.get('/ai-assistant/status').then(r => setStatus(r.data)).catch(() => {});
+  }, []);
+  if (!status) return null;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Zap className="w-4 h-4" /> الذكاء الاصطناعي (المساعد والتحليل)
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="flex items-center gap-2">
+          <Badge className={status.llm_configured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}>
+            {status.llm_configured ? `نموذج لغوي مُفعّل (${status.model})` : 'وضع محلي — إجابات مبنية على بياناتك'}
+          </Badge>
+        </div>
+        {status.note && <p className="text-xs text-muted-foreground">{status.note}</p>}
+        {!status.llm_configured && (
+          <div className="text-xs bg-muted p-2 rounded" dir="ltr">
+            <code>AI_INTEGRATIONS_OPENAI_API_KEY=...</code><br />
+            <code>AI_INTEGRATIONS_OPENAI_BASE_URL=...</code>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WhatsAppBusinessCard() {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">واتساب للأعمال (WhatsApp Business API)</CardTitle>
+      </CardHeader>
+      <CardContent className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          إعداد الربط، إرسال الرسائل، وسجل المحادثات والإحصائيات
+        </p>
+        <Link to="/whatsapp">
+          <Button variant="outline" size="sm" className="gap-1">
+            فتح الصفحة <ArrowRight className="w-3 h-3" />
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
 function LeadWebhooksCard() {
   const [leads, setLeads] = useState([]);
   const [config, setConfig] = useState(null);
@@ -351,6 +402,10 @@ export default function EcomChannelsPage() {
       </div>
 
       {/* Create/Edit dialog */}
+      <AiStatusCard />
+
+      <WhatsAppBusinessCard />
+
       <LeadWebhooksCard />
 
       <WhatsAppTemplatesCard />

@@ -39,13 +39,15 @@ const DigitalAdminPage = () => {
   const [csvText, setCsvText] = useState('');
   const [editing, setEditing] = useState(null);
 
+  const [stats, setStats] = useState(null);
+  const loadStats = async () => { const r = await apiClient.get('/digital/stats'); setStats(r.data); };
   const loadProducts = async () => { const r = await apiClient.get('/digital/products/all'); setProducts(r.data || []); };
   const loadOrders = async () => {
     const params = statusFilter !== 'all' ? { status: statusFilter } : {};
     const r = await apiClient.get('/digital/orders', { params });
     setOrders(r.data || []);
   };
-  useEffect(() => { loadProducts().catch(() => {}); }, []);
+  useEffect(() => { loadProducts().catch(() => {}); loadStats().catch(() => {}); }, []);
   useEffect(() => { loadOrders().catch(() => {}); }, [statusFilter]);
 
   const saveProduct = async () => {
@@ -70,7 +72,7 @@ const DigitalAdminPage = () => {
   const deliverManual = async (orderId) => {
     try {
       const r = await apiClient.post(`/digital/orders/${orderId}/deliver`);
-      toast.success(r.data.message || 'تم التسليم'); loadOrders();
+      toast.success(r.data.message || 'تم التسليم'); loadOrders(); loadStats().catch(() => {});
     } catch (e) { toast.error(e.response?.data?.detail || 'فشل'); }
   };
 
@@ -83,6 +85,27 @@ const DigitalAdminPage = () => {
     <Layout>
       <div className="p-6 space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
         <h1 className="text-3xl font-bold">إدارة الخدمات الرقمية</h1>
+
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="p-4 text-center">
+              <p className="text-2xl font-bold">{stats.completed_orders}</p>
+              <p className="text-xs text-muted-foreground">طلبات مكتملة ({stats.pending_orders} معلّق)</p>
+            </Card>
+            <Card className="p-4 text-center">
+              <p className="text-2xl font-bold">{stats.revenue?.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">الإيرادات (دج)</p>
+            </Card>
+            <Card className="p-4 text-center">
+              <p className="text-2xl font-bold">{stats.cost?.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">التكلفة (دج)</p>
+            </Card>
+            <Card className="p-4 text-center">
+              <p className="text-2xl font-bold text-emerald-600">{stats.profit?.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">صافي الربح (دج)</p>
+            </Card>
+          </div>
+        )}
 
         <Tabs defaultValue="products" className="w-full">
           <TabsList className="grid w-full grid-cols-2 max-w-md">
@@ -228,6 +251,11 @@ const DigitalAdminPage = () => {
                 <div><Label>سعر البيع (دج)</Label><Input type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} /></div>
                 <div><Label>سعر التكلفة (دج)</Label><Input type="number" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} /></div>
               </div>
+              {form.delivery_method === 'DIRECT_TOPUP' && (
+                <p className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-800">
+                  الشحن المباشر يُعالج يدوياً حالياً من تبويب الطلبات — الربط الآلي بواجهات موبيليس/جيزي/أوريدو قيد التطوير.
+                </p>
+              )}
               <div><Label>نوع التسليم</Label>
                 <Select value={form.delivery_method} onValueChange={v => setForm({ ...form, delivery_method: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>

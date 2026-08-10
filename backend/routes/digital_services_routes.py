@@ -184,6 +184,27 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return codes
 
     # ── Orders ──
+    async def _notify_order_completed(order: dict):
+        """إشعار تلقائي (إشعار داخلي + SMS إن كان مضبوطاً) عند اكتمال الطلب."""
+        try:
+            from services.smart_notifications import notify
+            await notify(
+                db, "digital_order",
+                "اكتمل طلب رقمي",
+                f"الطلب {order.get('order_number')} — {order.get('product_name')} بقيمة {order.get('amount')} دج",
+                user_id=order.get("user_id"), link="/digital-services",
+            )
+        except Exception as exc:
+            logger.warning("digital order notify failed: %s", exc)
+        phone = order.get("target_phone")
+        if phone:
+            try:
+                from services.sms_service import SMSService
+                sms = SMSService(main_db or db)
+                await sms.send_sms(phone, f"تم تسليم طلبك {order.get('order_number')}: {order.get('product_name')}. شكراً لثقتك.")
+            except Exception as exc:
+                logger.warning("digital order sms failed: %s", exc)
+
     async def _assign_codes(product_id: str, order_id: str, quantity: int) -> list:
         codes = await db.digital_codes.find(
             {"product_id": product_id, "is_used": False}
@@ -246,6 +267,8 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                               f"شراء {product['name']}", order["id"])
             await db.digital_orders.insert_one(dict(order))
             order.pop("_id", None)
+            if order["status"] == "COMPLETED":
+                await _notify_order_completed(order)
             return order
 
         # CCP / D17 — manual confirmation by admin
@@ -301,6 +324,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             {"id": order_id},
             {"$set": {"status": "COMPLETED", "code_ids": order["code_ids"], "delivered_by": admin.get("name", ""), "delivered_at": _now()}}
         )
+        await _notify_order_completed(order)
         return {"message": "تم التسليم", "status": "COMPLETED", "codes_assigned": len(order["code_ids"])}
 
     # ── Wallet ──
@@ -363,6 +387,33 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             {"$set": {"status": status, "code_ids": code_ids, "payment_method": "wallet"}}
         )
         return {"status": status, "balance": before - amount}
+
+    # ── Stats / profit report (admin) ──
+    @router.get("/stats")
+    async def digital_stats(admin: dict = Depends(get_tenant_admin)):
+        orders = await db.digital_orders.find({"status": "COMPLETED"}, {"_id": 0}).to_list(5000)
+        product_cost = {}
+        async for p in db.digital_products.find({}, {"_id": 0, "id": 1, "cost_price": 1}):
+            product_cost[p["id"]] = p.get("cost_price", 0) or 0
+        revenue = sum(o.get("amount", 0) for o in orders)
+        cost = sum(product_cost.get(o.get("product_id"), 0) * o.get("quantity", 1) for o in orders)
+        by_product = {}
+        for o in orders:
+            bp = by_product.setdefault(o.get("product_name", ""), {"orders": 0, "revenue": 0, "cost": 0})
+            bp["orders"] += o.get("quantity", 1)
+            bp["revenue"] += o.get("amount", 0)
+            bp["cost"] += product_cost.get(o.get("product_id"), 0) * o.get("quantity", 1)
+        for v in by_product.values():
+            v["profit"] = v["revenue"] - v["cost"]
+        pending = await db.digital_orders.count_documents({"status": "PENDING"})
+        return {
+            "completed_orders": len(orders),
+            "pending_orders": pending,
+            "revenue": revenue,
+            "cost": cost,
+            "profit": revenue - cost,
+            "by_product": [{"product": k, **v} for k, v in sorted(by_product.items(), key=lambda x: -x[1]["profit"])],
+        }
 
     # ── Affiliate ──
     def _affiliate_code(user_id: str) -> str:

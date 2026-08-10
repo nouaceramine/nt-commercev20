@@ -483,6 +483,14 @@ async def startup_event():
 
     # Seed default data (customers/products/suppliers/employees/plans) on first run
     try:
+        # قيد فريد على المحافظ لمنع تكرار (entity_type, entity_id)
+        try:
+            await main_db.wallets.create_index(
+                [("entity_type", 1), ("entity_id", 1)], unique=True, sparse=True
+            )
+        except Exception as wal_exc:
+            logger.warning("wallets unique index: %s", wal_exc)
+
         from seed_defaults import seed_default_data, seed_whatsapp_templates
         seeded = await seed_default_data(main_db)
         tpl_seeded = await seed_whatsapp_templates(main_db)
