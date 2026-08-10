@@ -174,7 +174,7 @@ async def download_logs(admin: dict = Depends(get_super_admin)) -> StreamingResp
 async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
     """Send the last 100 error logs to Emergent LLM, get an Arabic summary +
     suggested fixes. Does NOT apply any fix. Read-only AI assist."""
-    api_key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
+    from services.ai.openai_llm import llm_chat, llm_configured
     cursor = main_db.system_logs.find({"level": "error"}, {"_id": 0}).sort("created_at", -1).limit(100)
     items = await cursor.to_list(length=100)
     if not items:
@@ -188,11 +188,7 @@ async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
         )
     report = "\n".join(lines)
 
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        _llm_available = bool(api_key)
-    except Exception:
-        _llm_available = False
+    _llm_available = llm_configured()
 
     if not _llm_available:
         # ── تحليل محلي بديل عند غياب مزوّد الذكاء الاصطناعي ──
@@ -221,20 +217,12 @@ async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
         }
 
     try:
-        chat = (
-            LlmChat(
-                api_key=api_key,
-                session_id=f"sysloganalysis-{uuid.uuid4()}",
-                system_message=(
-                    "أنت مهندس برمجيات يساعد في تحليل سجل أخطاء تطبيق ويب (FastAPI + React). "
-                    "لخّص الأخطاء الأكثر تكراراً، صنّفها حسب الخطورة، واقترح إصلاحات مبدئية. "
-                    "أجب بالعربية بصيغة JSON: {\"summary\": \"...\", \"suggestions\": [{\"title\":\"...\",\"action\":\"...\",\"file\":\"...\"}]}"
-                ),
-            )
-            .with_model("openai", "gpt-4o-mini")
+        text = await llm_chat(
+            "أنت مهندس برمجيات يساعد في تحليل سجل أخطاء تطبيق ويب (FastAPI + React). "
+            "لخّص الأخطاء الأكثر تكراراً، صنّفها حسب الخطورة، واقترح إصلاحات مبدئية. "
+            "أجب بالعربية بصيغة JSON: {\"summary\": \"...\", \"suggestions\": [{\"title\":\"...\",\"action\":\"...\",\"file\":\"...\"}]}",
+            f"حلّل سجل الأخطاء التالي:\n{report}",
         )
-        ai = await chat.send_message(UserMessage(text=f"حلّل سجل الأخطاء التالي:\n{report}"))
-        text = ai if isinstance(ai, str) else getattr(ai, "content", str(ai))
         # Try to parse JSON from the AI response
         parsed = None
         try:

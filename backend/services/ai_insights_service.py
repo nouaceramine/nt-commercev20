@@ -124,29 +124,16 @@ async def generate_ai_insights() -> dict:
     """Generate AI-powered insights. Falls back to heuristic when LLM unavailable."""
     metrics = await _gather_platform_metrics()
 
-    # Try Emergent LLM key first
-    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not key:
+    from services.ai.openai_llm import llm_chat, llm_configured
+    if not llm_configured():
         return {**_heuristic_fallback(metrics), "metrics": metrics}
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage as EmUserMessage
-        import uuid as _uuid
-
-        chat = (
-            LlmChat(
-                api_key=key,
-                session_id=f"ntc-insights-{_uuid.uuid4()}",
-                system_message=SYSTEM_PROMPT_AR,
-            )
-            .with_model("openai", "gpt-4o-mini")
-        )
         user_prompt = (
             "حلّل المقاييس التالية وأعِد JSON كما طُلب منك:\n"
             + json.dumps(metrics, ensure_ascii=False, indent=2)
         )
-        resp = await chat.send_message(EmUserMessage(text=user_prompt))
-        text = resp if isinstance(resp, str) else getattr(resp, "content", str(resp))
+        text = await llm_chat(SYSTEM_PROMPT_AR, user_prompt)
         # Trim accidental markdown fencing
         text = text.strip()
         if text.startswith("```"):

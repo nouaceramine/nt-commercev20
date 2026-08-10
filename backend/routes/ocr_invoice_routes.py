@@ -23,30 +23,21 @@ def create_ocr_invoice_routes(db, require_tenant, get_tenant_admin, CURRENCY, Ap
 
     @router.post("/ocr/extract-models", response_model=OCRResponse)
     async def extract_models_from_image(request: ImageOCRRequest, admin: dict = Depends(get_tenant_admin)):
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+        from services.ai.openai_llm import llm_vision, llm_configured
 
-        api_key = os.environ.get('EMERGENT_LLM_KEY')
-        if not api_key:
-            raise HTTPException(status_code=500, detail="OCR service not configured")
+        if not llm_configured():
+            raise HTTPException(status_code=503, detail="خدمة OCR غير مفعّلة — يلزم ضبط مفتاح الذكاء الاصطناعي أولاً")
 
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"ocr-{uuid.uuid4()}",
+            response = await llm_vision(
                 system_message="""You are an OCR assistant specialized in extracting phone model names from images.
                 Extract all phone model names you can see in the image.
                 Return ONLY the model names, one per line, without any additional text or explanation.
-                Examples of model names: iPhone 15 Pro, Samsung Galaxy S24, Huawei P60 Pro, etc."""
-            ).with_model("gemini", "gemini-2.5-flash")
-
-            image_content = ImageContent(image_base64=request.image_base64)
-            user_message = UserMessage(
-                text="Extract all phone model names from this image. Return only the model names, one per line.",
-                file_contents=[image_content]
+                Examples of model names: iPhone 15 Pro, Samsung Galaxy S24, Huawei P60 Pro, etc.""",
+                user_prompt="Extract all phone model names from this image. Return only the model names, one per line.",
+                image_base64=request.image_base64,
             )
-
-            response = await chat.send_message(user_message)
-            raw_text = response.strip()
+            raw_text = (response or "").strip()
             models = [m.strip() for m in raw_text.split('\n') if m.strip()]
 
             return OCRResponse(extracted_models=models, raw_text=raw_text)

@@ -110,8 +110,8 @@ async def answer_copilot_question(question: str, session_id: str = None, days: i
     history = _SESSIONS.get(session_id, [])
     context = await _gather_analytics_context(days)
 
-    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not key:
+    from services.ai.openai_llm import llm_chat, llm_configured
+    if not llm_configured():
         # Heuristic fallback
         if context["channels"]:
             top = context["channels"][0]
@@ -127,18 +127,12 @@ async def answer_copilot_question(question: str, session_id: str = None, days: i
         return {"answer": ans, "session_id": session_id, "source": "heuristic"}
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage as EmUserMessage
-        chat = (
-            LlmChat(api_key=key, session_id=session_id, system_message=_COPILOT_SYSTEM)
-            .with_model("openai", "gpt-4o-mini")
-        )
         user_prompt = (
             "بيانات الأداء الحالية:\n"
             + json.dumps(context, ensure_ascii=False, indent=2)
             + f"\n\nالسؤال: {question}"
         )
-        resp = await chat.send_message(EmUserMessage(text=user_prompt))
-        answer = resp if isinstance(resp, str) else getattr(resp, "content", str(resp))
+        answer = await llm_chat(_COPILOT_SYSTEM, user_prompt)
 
         # Track session history (trim to last N exchanges)
         history.append({"role": "user", "content": question})
@@ -175,8 +169,8 @@ async def categorize_lead_with_context(lead: dict, tenant_db) -> dict:
     channel_conv_rate = round((channel_converted / channel_history) * 100, 1) if channel_history else 0
     prior_from_same_phone = await tenant_db.ecom_leads.count_documents({"phone": phone}) if phone else 0
 
-    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not key:
+    from services.ai.openai_llm import llm_chat, llm_configured
+    if not llm_configured():
         return {"category": "other", "score": 50, "reason_ar": "بدون LLM (افتراضي)", "source": "heuristic"}
 
     sys = (
@@ -196,13 +190,7 @@ async def categorize_lead_with_context(lead: dict, tenant_db) -> dict:
         f"- عدد الرسائل السابقة من هذا الرقم: {prior_from_same_phone}"
     )
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage as EmUserMessage
-        chat = (
-            LlmChat(api_key=key, session_id=f"lead-{uuid.uuid4()}", system_message=sys)
-            .with_model("openai", "gpt-4o-mini")
-        )
-        resp = await chat.send_message(EmUserMessage(text=enriched))
-        text = resp if isinstance(resp, str) else getattr(resp, "content", str(resp))
+        text = await llm_chat(sys, enriched)
         text = text.strip()
         if text.startswith("```"):
             text = text.strip("`").lstrip("json").strip()
