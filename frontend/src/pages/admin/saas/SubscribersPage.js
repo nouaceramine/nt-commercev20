@@ -12,6 +12,7 @@
  * Each handler fetches/refreshes its own data. The page is self-contained —
  * no shared state with SaasAdminPage.
  */
+import { errText } from '../../../lib/errorText';
 import { useEffect, useMemo, useState } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { toast } from 'sonner';
@@ -183,7 +184,7 @@ export default function SubscribersPage() {
       setTenantDialogOpen(false);
       await fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(error) ||  'حدث خطأ');
     }
   };
 
@@ -261,7 +262,7 @@ export default function SubscribersPage() {
       }
       window.location.href = '/';
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل الدخول لحساب المشترك');
+      toast.error(errText(error) ||  'فشل الدخول لحساب المشترك');
       setImpersonateLoading(false);
     }
   };
@@ -300,7 +301,7 @@ export default function SubscribersPage() {
       setWalletChargeDialogOpen(false);
       setWalletChargeForm({ amount: '', notes: '', payment_method: 'cash' });
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ أثناء شحن المحفظة');
+      toast.error(errText(err) ||  'حدث خطأ أثناء شحن المحفظة');
     } finally {
       setWalletChargeLoading(false);
     }
@@ -336,7 +337,7 @@ export default function SubscribersPage() {
       setFeatureFlagsDialogOpen(false);
       await fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ في الحفظ');
+      toast.error(errText(error) ||  'حدث خطأ في الحفظ');
     } finally {
       setSavingFlags(false);
     }
@@ -362,7 +363,7 @@ export default function SubscribersPage() {
       setBridgeDialogOpen(false);
       await fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في الحفظ');
+      toast.error(errText(err) ||  'خطأ في الحفظ');
     } finally {
       setBridgeSaving(false);
     }

@@ -38,6 +38,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
         product_list: str = ""
         price: float = 0
         do_insurance: bool = False
+        order_id: Optional[str] = None
 
     class TrackParcelRequest(BaseModel):
         tracking_id: str
@@ -183,6 +184,11 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
                     "created_at": datetime.now(timezone.utc).isoformat()
                 })
                 if resp.status_code in (200, 201):
+                    if parcel.order_id and tracking_id:
+                        await db.orders.update_one(
+                            {"id": parcel.order_id},
+                            {"$set": {"yalidine_tracking_id": tracking_id, "shipping_status": "shipped"}}
+                        )
                     return {"success": True, "tracking_id": tracking_id, "data": data}
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
         except HTTPException:

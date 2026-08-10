@@ -207,6 +207,44 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
     async def get_schedules(user: dict = Depends(get_current_user)):
         return await main_db.backup_schedules.find({}, {"_id": 0}).to_list(50)
 
+    # ── Auto-backup settings (singleton per tenant) ──
+    @router.get("/auto-settings")
+    async def get_auto_settings(user: dict = Depends(get_current_user)):
+        entity_id = user.get("tenant_id", user.get("id", ""))
+        doc = await main_db.backup_auto_settings.find_one({"entity_id": entity_id}, {"_id": 0})
+        if not doc:
+            doc = {
+                "entity_id": entity_id,
+                "enabled": False,
+                "frequency": "daily",
+                "time": "03:00",
+                "keep_count": 7,
+                "include_uploads": True,
+            }
+        return doc
+
+    @router.post("/auto-settings")
+    async def save_auto_settings(data: dict, user: dict = Depends(get_current_user)):
+        entity_id = user.get("tenant_id", user.get("id", ""))
+        doc = dict(data)
+        doc["entity_id"] = entity_id
+        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await main_db.backup_auto_settings.update_one(
+            {"entity_id": entity_id}, {"$set": doc}, upsert=True
+        )
+        doc.pop("_id", None)
+        return {"message": "تم حفظ إعدادات النسخ التلقائي", "settings": doc}
+
+    @router.post("/run-auto")
+    async def run_auto_backup(user: dict = Depends(get_tenant_admin)):
+        """Run an automatic-style backup right now (full tenant backup)."""
+        return await create_backup({"backup_type": "auto"}, user)
+
+    @router.post("/save-to-server")
+    async def save_backup_to_server(user: dict = Depends(get_tenant_admin)):
+        """Create a full backup and keep it on the server disk."""
+        return await create_backup({"backup_type": "full"}, user)
+
     @router.get("/{backup_id}")
     async def get_backup(backup_id: str, user: dict = Depends(get_current_user)):
         b = await main_db.backups.find_one({"id": backup_id}, {"_id": 0})
@@ -460,6 +498,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
     # Restore from Upload — disaster recovery
     # ────────────────────────────────────────────────
 
+    @router.post("/restore")
     @router.post("/restore-upload")
     async def restore_from_upload(
         admin: dict = Depends(get_tenant_admin),

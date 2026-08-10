@@ -246,4 +246,39 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         stats["is_active"] = config.get("is_active", False) if config else False
         return stats
 
+    # ── Message templates (قوالب الرسائل) ──
+    class TemplateBody(BaseModel):
+        name: str
+        category: str = "general"
+        body: str
+        variables: List[str] = []
+        is_active: bool = True
+
+    @router.get("/templates")
+    async def list_templates(current_user: dict = Depends(get_current_user)):
+        return await db.whatsapp_templates.find({}, {"_id": 0}).to_list(200)
+
+    @router.post("/templates", status_code=201)
+    async def create_template(tpl: TemplateBody, current_user: dict = Depends(get_current_user)):
+        if await db.whatsapp_templates.find_one({"name": tpl.name}):
+            raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
+        doc = {"id": str(uuid.uuid4()), **tpl.model_dump(),
+               "created_at": datetime.now(timezone.utc).isoformat()}
+        await db.whatsapp_templates.insert_one(dict(doc))
+        doc.pop("_id", None)
+        return doc
+
+    @router.put("/templates/{template_id}")
+    async def update_template(template_id: str, tpl: TemplateBody, current_user: dict = Depends(get_current_user)):
+        res = await db.whatsapp_templates.update_one({"id": template_id}, {"$set": tpl.model_dump()})
+        if res.matched_count == 0:
+            raise HTTPException(status_code=404, detail="القالب غير موجود")
+        return await db.whatsapp_templates.find_one({"id": template_id}, {"_id": 0})
+
+    @router.delete("/templates/{template_id}")
+    async def delete_template(template_id: str, current_user: dict = Depends(get_current_user)):
+        await db.whatsapp_templates.delete_one({"id": template_id})
+        return {"message": "تم حذف القالب"}
+
     return router
+

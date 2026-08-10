@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -86,7 +87,7 @@ export default function WooCommercePage() {
       toast.success(language === 'ar' ? 'تم الاتصال بنجاح' : 'Connexion réussie');
     } catch (error) {
       setConnectionStatus({ success: false, message: error.response?.data?.detail });
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setTesting(false);
     }

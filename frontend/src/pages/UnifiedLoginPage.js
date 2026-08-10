@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
@@ -33,46 +34,45 @@ export default function UnifiedLoginPage() {
     setLoading(true);
     setLoginSuccess(null);
     
-    try {
-      const response = await apiClient.post(`/auth/unified-login`, formData);
-      const { access_token, user_type, redirect_to, user } = response.data;
-      
-      // Store token based on user type
-      if (user_type === 'admin') {
-        localStorage.setItem('token', access_token);
-        localStorage.setItem('user', JSON.stringify({ ...user, user_type: 'admin' }));
-        setLoginSuccess({ type: 'admin', name: user.name, redirect: '/saas-admin' });
-      } else if (user_type === 'agent') {
-        localStorage.setItem('agentToken', access_token);
-        localStorage.setItem('agentData', JSON.stringify(user));
-        // Also set token for Layout compatibility
-        localStorage.setItem('token', access_token);
-        localStorage.setItem('user', JSON.stringify({ ...user, role: 'agent', user_type: 'agent' }));
-        setLoginSuccess({ type: 'agent', name: user.name, redirect: '/agent/dashboard' });
-      } else if (user_type === 'tenant') {
-        localStorage.setItem('tenantToken', access_token);
-        localStorage.setItem('tenantData', JSON.stringify(user));
-        // Also set token for Layout compatibility
-        localStorage.setItem('token', access_token);
-        localStorage.setItem('user', JSON.stringify({ ...user, role: 'admin', user_type: 'tenant' }));
-        setLoginSuccess({ type: 'tenant', name: user.name, redirect: '/dashboard' });
+    var emailEl = document.getElementById('login-email');
+    var passEl = document.getElementById('login-password');
+    var data = {
+      email: emailEl ? emailEl.value : '',
+      password: passEl ? passEl.value : ''
+    };
+    
+    fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(result) {
+      if (result.access_token) {
+        localStorage.setItem('token', result.access_token);
+        localStorage.setItem('user', JSON.stringify(result.user));
+        toast.success('تم تسجيل الدخول بنجاح!');
+        var role = (result.user && result.user.role) || 'admin';
+        var target = '/dashboard';
+        if (role === 'super_admin') {
+          target = '/saas-admin';
+        } else if (role === 'agent') {
+          target = '/agent/dashboard';
+        } else if (role === 'tenant' || role === 'tenant_admin') {
+          target = '/tenant/dashboard';
+        }
+        setTimeout(function() {
+          window.location.href = target;
+        }, 500);
+      } else {
+        toast.error(errText(result) ||  'بيانات الدخول غير صحيحة');
+        setLoading(false);
       }
-      
-      toast.success(`مرحباً ${user.name}!`);
-      
-      // Redirect after short delay
-      setTimeout(() => {
-        // Use window.location for full page reload to update AuthContext
-        const redirectPath = user_type === 'admin' ? '/saas-admin' : 
-                            user_type === 'agent' ? '/agent/dashboard' : '/dashboard';
-        window.location.href = redirectPath;
-      }, 1500);
-      
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'بيانات الدخول غير صحيحة');
-    } finally {
+    })
+    .catch(function(err) {
+      toast.error('خطأ في الاتصال: ' + err.message);
       setLoading(false);
-    }
+    });
   };
 
   const getUserTypeInfo = (type) => {
@@ -127,14 +127,12 @@ export default function UnifiedLoginPage() {
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>البريد الإلكتروني</Label>
                   <Input
-                    type="email"
+                    type="email" name="email" id="login-email" defaultValue=""
                     placeholder="name@example.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({...formData, email: e.target.value})}
                     required
                     className="h-11 text-black bg-white font-medium"
                     data-testid="unified-email-input"
@@ -145,10 +143,9 @@ export default function UnifiedLoginPage() {
                   <Label>كلمة المرور</Label>
                   <div className="relative">
                     <Input
-                      type={showPassword ? 'text' : 'password'}
+                      type={showPassword ? 'text' : 'password'} name="password" id='login-password' defaultValue=""
                       placeholder="••••••••"
-                      value={formData.password}
-                      onChange={(e) => setFormData({...formData, password: e.target.value})}
+                      onKeyDown={function(e) { if (e.key === 'Enter') handleSubmit(e); }}
                       required
                       className="h-11 pe-10 text-black bg-white font-medium"
                       data-testid="unified-password-input"
@@ -164,7 +161,8 @@ export default function UnifiedLoginPage() {
                 </div>
 
                 <Button 
-                  type="submit" 
+                  type="button"
+                  onClick={handleSubmit}
                   className="w-full h-11 text-base gap-2" 
                   disabled={loading}
                   data-testid="unified-login-btn"
@@ -181,7 +179,7 @@ export default function UnifiedLoginPage() {
                     </>
                   )}
                 </Button>
-              </form>
+              </div>
             )}
 
             {/* User Types Info */}

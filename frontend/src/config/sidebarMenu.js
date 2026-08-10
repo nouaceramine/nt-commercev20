@@ -180,7 +180,7 @@ export const defaultMenuSections = [
       { id: 'repairs', path: '/repairs', icon: 'Wrench', labelAr: 'الصيانة', labelFr: 'Réparations', visible: true },
       { id: 'repairs-new', path: '/repairs/new', icon: 'Smartphone', labelAr: 'استقبال جهاز', labelFr: 'Réception', visible: true },
       { id: 'defective-goods', path: '/defective-goods', icon: 'Package', labelAr: 'بضائع معيبة', labelFr: 'Défectueux', visible: true },
-      { id: 'whatsapp', path: '/whatsapp', icon: 'Smartphone', labelAr: 'واتساب', labelFr: 'WhatsApp', visible: true },
+      { id: 'whatsapp', path: '/ecom-hub/channels', icon: 'Smartphone', labelAr: 'واتساب', labelFr: 'WhatsApp', visible: true },
     ]
   },
   {
@@ -192,6 +192,8 @@ export const defaultMenuSections = [
     isCustom: false,
     items: [
       { id: 'store', path: '/store', icon: 'Store', labelAr: 'المتجر', labelFr: 'Boutique', visible: true },
+      { id: 'digital-services', path: '/digital-services', icon: 'Smartphone', labelAr: 'الخدمات الرقمية', labelFr: 'Services digitaux', visible: true },
+      { id: 'digital-admin', path: '/digital-admin', icon: 'Settings', labelAr: 'إدارة الخدمات الرقمية', labelFr: 'Admin services digitaux', visible: true },
       { id: 'loyalty', path: '/loyalty', icon: 'Award', labelAr: 'الولاء', labelFr: 'Fidélité', visible: true },
       { id: 'woocommerce', path: '/woocommerce', icon: 'Store', labelAr: 'WooCommerce', labelFr: 'WooCommerce', visible: true },
       { id: 'integrations-status', path: '/integrations/status', icon: 'Settings', labelAr: 'حالة التكاملات', labelFr: 'Intégrations', visible: true },

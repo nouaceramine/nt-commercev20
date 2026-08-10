@@ -14,6 +14,7 @@ import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
 import { EcomManualOrderDialog } from './EcomManualOrderDialog';
 import { EcomOrderDetailDialog } from './EcomOrderDetailDialog';
 import { useEcomOrderNotifications, requestNotificationPermission } from '../../hooks/useEcomOrderNotifications';
+import { EcomHubTabs } from '../../components/ecom/EcomHubTabs';
 
 export default function EcomHubPage() {
   const [orders, setOrders] = useState([]);
@@ -108,6 +109,7 @@ export default function EcomHubPage() {
   return (
     <Layout>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-hub-page">
+        <EcomHubTabs />
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>

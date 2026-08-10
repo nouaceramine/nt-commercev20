@@ -58,7 +58,7 @@ def create_tax_routes(db, get_current_user) -> dict:
             ]
             for r in default_rates:
                 r["created_at"] = datetime.now(timezone.utc).isoformat()
-            await db.tax_rates.insert_many(default_rates)
+            await db.tax_rates.insert_many([dict(r) for r in default_rates])
             rates = default_rates
         return rates
 

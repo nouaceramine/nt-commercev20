@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -61,7 +62,7 @@ export default function DebtsPage() {
       setPayDialogOpen(false);
       setPaymentData({ amount: '', payment_method: 'cash', notes: '' });
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || t.somethingWentWrong); }
+    } catch (e) { toast.error(errText(e) ||  t.somethingWentWrong); }
   };
 
   const filteredDebts = debts.filter(d => d.type === activeTab);

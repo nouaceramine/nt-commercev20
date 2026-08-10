@@ -237,7 +237,30 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         "updated_at": now,
         "created_by": user.get("id"),
     }
+    # COD risk scoring (anti-cancellation engine)
+    payment_method = (body.get("payment_method") or ("cod" if doc["payment_status"] == "unpaid" else "prepaid")).strip().lower()
+    doc["payment_method"] = payment_method
+    if payment_method == "cod":
+        from services.cod_risk import calculate_risk_score
+        phone = doc["customer"]["phone"]
+        history_count = 0
+        if phone:
+            history_count = await db.ecom_orders.count_documents(
+                {"customer.phone": phone, "status": {"$in": ["delivered", "shipped", "confirmed"]}}
+            )
+        risk = calculate_risk_score(doc, customer_history_count=history_count)
+        doc["cod_risk"] = risk
+        if risk["action"] == "manual_review":
+            doc["status"] = "needs_review"
+        elif risk["action"] == "confirm_first":
+            doc["status"] = "awaiting_confirmation"
+
     await db.ecom_orders.insert_one(doc)
+    try:
+        from services.smart_notifications import notify_new_order
+        await notify_new_order(db, doc)
+    except Exception:
+        pass
     # Bump integration stat counter if linked.
     if doc["integration_id"]:
         await db.ecom_integrations.update_one(
@@ -246,6 +269,25 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         )
     doc.pop("_id", None)
     return doc
+
+
+@router.get("/ecom/orders/{order_id}/risk")
+async def get_order_risk(order_id: str, user: dict = Depends(require_tenant)):
+    # (Re)compute and return the COD risk score for an order.
+    await require_ecom_feature(user)
+    order = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    from services.cod_risk import calculate_risk_score
+    phone = (order.get("customer") or {}).get("phone", "")
+    history_count = 0
+    if phone:
+        history_count = await db.ecom_orders.count_documents(
+            {"customer.phone": phone, "status": {"$in": ["delivered", "shipped", "confirmed"]}, "id": {"$ne": order_id}}
+        )
+    risk = calculate_risk_score(order, customer_history_count=history_count)
+    await db.ecom_orders.update_one({"id": order_id}, {"$set": {"cod_risk": risk}})
+    return risk
 
 
 @router.put("/ecom/orders/{order_id}/status")

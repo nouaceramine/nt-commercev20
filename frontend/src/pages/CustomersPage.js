@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -124,7 +125,7 @@ export default function CustomersPage() {
     let comparison = 0;
     switch (sortBy) {
       case 'name':
-        comparison = a.name.localeCompare(b.name);
+        comparison = (a.name || '').localeCompare(b.name || '');
         break;
       case 'balance':
         comparison = (a.balance || 0) - (b.balance || 0);
@@ -171,7 +172,7 @@ export default function CustomersPage() {
       fetchBlacklist();
       fetchCustomers();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
     }
   };
 
@@ -186,7 +187,7 @@ export default function CustomersPage() {
       fetchBlacklist();
       fetchCustomers();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
     }
   };
 

@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
@@ -188,7 +189,7 @@ export default function SaasAdminPage() {
       toast.success('تمت الموافقة على طلب السحب');
       fetchWithdrawals();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل تنفيذ العملية');
+      toast.error(errText(error) ||  'فشل تنفيذ العملية');
     } finally { setWithdrawalsBusy(false); }
   };
 
@@ -207,7 +208,7 @@ export default function SaasAdminPage() {
       setRejectWithdrawalDialogOpen(false);
       fetchWithdrawals();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل تنفيذ العملية');
+      toast.error(errText(error) ||  'فشل تنفيذ العملية');
     } finally { setWithdrawalsBusy(false); }
   };
 
@@ -223,7 +224,7 @@ export default function SaasAdminPage() {
       setImpersonationLogs(res.data?.items || []);
       setImpersonationActiveCount(res.data?.total_active || 0);
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل سجل الانتحال');
+      toast.error(errText(e) ||  'فشل تحميل سجل الانتحال');
     } finally {
       setImpersonationLogsLoading(false);
     }
@@ -243,7 +244,7 @@ export default function SaasAdminPage() {
       setDefaultShortcuts(padded);
       setDefaultShortcutsMeta({ updated_at: res.data?.updated_at, updated_by: res.data?.updated_by });
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل اختصارات POS الافتراضية');
+      toast.error(errText(e) ||  'فشل تحميل اختصارات POS الافتراضية');
     } finally {
       setDefaultShortcutsLoading(false);
     }
@@ -258,7 +259,7 @@ export default function SaasAdminPage() {
       toast.success(`تم حفظ ${cleaned.length} اختصار افتراضي`);
       await loadDefaultShortcuts();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل الحفظ');
+      toast.error(errText(e) ||  'فشل الحفظ');
     } finally {
       setDefaultShortcutsSaving(false);
     }
@@ -330,7 +331,7 @@ export default function SaasAdminPage() {
       setPlatformCatalogDialogOpen(false);
       loadPlatformCatalog();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(err) ||  'حدث خطأ');
     } finally {
       setPlatformCatalogSaving(false);
     }
@@ -343,7 +344,7 @@ export default function SaasAdminPage() {
       toast.success('تم حذف الباقة');
       loadPlatformCatalog();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(err) ||  'حدث خطأ');
     }
   };
 
@@ -399,7 +400,7 @@ export default function SaasAdminPage() {
       setRechargeEditDialogOpen(false);
       loadRechargeConfig();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ أثناء الحفظ');
+      toast.error(errText(err) ||  'حدث خطأ أثناء الحفظ');
     } finally {
       setRechargeEditSaving(false);
     }

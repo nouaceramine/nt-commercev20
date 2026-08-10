@@ -88,6 +88,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     "company_name": tenant.get("company_name", ""),
                 }
 
+        # Fallback: platform-level users (admin/demo/staff) whose tokens carry
+        # no tenant_id and no super_admin role — they live in main_db.users.
+        # Without this, /api/auth/me returned 401 "User not found" right after
+        # a successful login, causing the frontend to log the user out and
+        # bounce them back to the landing page.
+        user = await main_db.users.find_one({"id": user_id})
+        if user:
+            user["user_type"] = role if role in ("admin", "cashier", "agent") else (user_type or "admin")
+            return user
+
         raise HTTPException(status_code=401, detail="User not found")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -125,6 +135,16 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
                 user["user_type"] = "tenant"
                 return user
         
+        # Fallback: platform-level users (admin/demo/staff) whose tokens carry
+        # no tenant_id and no super_admin role — they live in main_db.users.
+        # Without this, /api/auth/me returned 401 "User not found" right after
+        # a successful login, causing the frontend to log the user out and
+        # bounce them back to the landing page.
+        user = await main_db.users.find_one({"id": user_id})
+        if user:
+            user["user_type"] = role if role in ("admin", "cashier", "agent") else (user_type or "admin")
+            return user
+
         raise HTTPException(status_code=401, detail="User not found")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -146,7 +166,8 @@ async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> di
 
 async def require_tenant(current_user: dict = Depends(get_current_user)) -> dict:
     """Require valid tenant context"""
-    if not current_user.get("tenant_id") and current_user.get("user_type") != "super_admin":
+    # Platform-level users (admin/cashier/agent in main_db) operate on the main DB
+    if not current_user.get("tenant_id") and current_user.get("user_type") not in ("super_admin", "admin", "cashier", "agent"):
         raise HTTPException(status_code=403, detail="Tenant access required")
     return current_user
 

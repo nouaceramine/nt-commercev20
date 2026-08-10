@@ -31,6 +31,7 @@ import {
   FileSpreadsheet,
   Zap,
   Trash2,
+  Pencil,
   CheckSquare,
   Square,
   AlertTriangle
@@ -189,7 +190,7 @@ export default function ProductsPage() {
       case 'name': {
         const nameA = language === 'ar' ? (a.name_ar || a.name_en) : (a.name_en || a.name_ar);
         const nameB = language === 'ar' ? (b.name_ar || b.name_en) : (b.name_en || b.name_ar);
-        comparison = nameA.localeCompare(nameB);
+        comparison = (nameA || '').localeCompare(nameB || '');
         break;
       }
       case 'price':
@@ -583,14 +584,16 @@ export default function ProductsPage() {
           /* List View - Table style with all info */
           <div className="border rounded-lg overflow-hidden">
             {/* Table Header */}
-            <div className={`grid gap-2 p-3 bg-muted/50 text-xs font-medium border-b ${selectMode ? 'grid-cols-8' : 'grid-cols-7'}`}>
+            <div className={`grid gap-2 p-3 bg-muted/50 text-xs font-medium border-b ${selectMode ? 'grid-cols-10' : 'grid-cols-9'}`}>
               {selectMode && <div className="w-8"></div>}
               <div>{language === 'ar' ? 'كود المنتج' : 'Code Article'}</div>
               <div>{language === 'ar' ? 'اسم المنتج' : 'Nom d\'article'}</div>
               <div>{language === 'ar' ? 'العائلة' : 'Famille'}</div>
-              <div className="text-center">{language === 'ar' ? 'المخزون' : 'Stock'}</div>
-              <div className="text-center">{language === 'ar' ? 'السعر' : 'Prix'}</div>
+              <div className="text-center">{language === 'ar' ? 'الكمية المتوفرة' : 'Quantité'}</div>
+              <div className="text-center">{language === 'ar' ? 'سعر الشراء' : 'Prix achat'}</div>
+              <div className="text-center">{language === 'ar' ? 'سعر البيع' : 'Prix vente'}</div>
               <div className="text-center">{language === 'ar' ? 'آخر شراء' : 'Dernier Achat'}</div>
+              <div className="text-center">{language === 'ar' ? 'تعديل' : 'Modifier'}</div>
               <div className="text-center">{language === 'ar' ? 'طباعة' : 'Imprimer'}</div>
             </div>
             {/* Table Body */}
@@ -601,7 +604,7 @@ export default function ProductsPage() {
                   className={`block hover:bg-muted/30 transition-colors ${selectedProducts.has(product.id) ? 'bg-primary/5' : ''}`}
                   data-testid={`product-item-${product.id}`}
                 >
-                  <div className={`grid gap-2 p-3 items-center text-sm ${selectMode ? 'grid-cols-8' : 'grid-cols-7'}`}>
+                  <div className={`grid gap-2 p-3 items-center text-sm ${selectMode ? 'grid-cols-10' : 'grid-cols-9'}`}>
                     {/* Selection Checkbox */}
                     {selectMode && (
                       <div className="flex items-center justify-center">
@@ -635,15 +638,29 @@ export default function ProductsPage() {
                     <div className="text-center">
                       {getStockBadge(product.quantity)}
                     </div>
-                    {/* Prix */}
+                    {/* سعر الشراء */}
+                    <div className="text-center text-sm">
+                      {(product.purchase_price ?? 0).toFixed(2)} <span className="text-xs font-normal">{t.currency}</span>
+                    </div>
+                    {/* سعر البيع */}
                     <div className="text-center font-bold">
-                      {product.retail_price?.toFixed(2)} <span className="text-xs font-normal">{t.currency}</span>
+                      {(product.selling_price ?? product.retail_price ?? 0).toFixed(2)} <span className="text-xs font-normal">{t.currency}</span>
                     </div>
                     {/* Dernier Achat */}
                     <div className="text-center text-xs text-muted-foreground">
                       {product.last_purchase_date 
                         ? new Date(product.last_purchase_date).toLocaleDateString(language === 'ar' ? 'ar-DZ' : 'fr-FR')
                         : '-'}
+                    </div>
+                    {/* تعديل */}
+                    <div className="flex justify-center">
+                      {isAdmin && (
+                        <Link to={`/products/${product.id}/edit`} onClick={(e) => e.stopPropagation()} data-testid={`edit-product-${product.id}`}>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </Link>
+                      )}
                     </div>
                     {/* Print */}
                     <div className="flex justify-center">
@@ -715,6 +732,16 @@ export default function ProductsPage() {
                       <div className={`absolute top-3 ${isRTL ? 'left-3' : 'right-3'}`}>
                         {getStockBadge(product.quantity)}
                       </div>
+                      {isAdmin && (
+                        <Link
+                          to={`/products/${product.id}/edit`}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = `/products/${product.id}/edit`; }}
+                          className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} bg-white/90 hover:bg-white rounded-full p-1.5 shadow`}
+                          data-testid={`edit-product-card-${product.id}`}
+                        >
+                          <Pencil className="h-4 w-4 text-slate-700" />
+                        </Link>
+                      )}
                     </div>
                     <div className="p-5 flex-1 flex flex-col">
                       <h3 className="font-semibold text-lg line-clamp-1">
@@ -729,6 +756,9 @@ export default function ProductsPage() {
                         </p>
                         <p className="text-sm text-muted-foreground mt-1">
                           {t.quantity}: {product.quantity ?? 0}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {language === 'ar' ? 'سعر الشراء' : 'Prix achat'}: {(product.purchase_price ?? 0).toFixed(2)} {t.currency}
                         </p>
                       </div>
                       {product.compatible_models && product.compatible_models.length > 0 && (

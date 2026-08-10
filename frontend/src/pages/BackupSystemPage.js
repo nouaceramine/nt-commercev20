@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -103,7 +104,7 @@ export default function BackupSystemPage() {
       );
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (isAr ? 'خطأ في إنشاء النسخة' : 'Erreur backup'));
+      toast.error(errText(e) ||  (isAr ? 'خطأ في إنشاء النسخة' : 'Erreur backup'));
     }
     setCreating(false);
   };
@@ -119,7 +120,7 @@ export default function BackupSystemPage() {
       );
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Error global backup');
+      toast.error(errText(e) ||  'Error global backup');
     }
     setGlobalBacking(false);
   };
@@ -163,7 +164,7 @@ export default function BackupSystemPage() {
       setShowRestore(null);
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (isAr ? 'فشلت الاستعادة' : 'Échec restauration'));
+      toast.error(errText(e) ||  (isAr ? 'فشلت الاستعادة' : 'Échec restauration'));
     }
     setRestoring(false);
   };
@@ -193,7 +194,7 @@ export default function BackupSystemPage() {
       );
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (isAr ? 'خطأ في قراءة الملف' : 'Erreur lecture fichier'));
+      toast.error(errText(e) ||  (isAr ? 'خطأ في قراءة الملف' : 'Erreur lecture fichier'));
     }
     setUploading(false);
     e.target.value = '';

@@ -3,10 +3,11 @@ import { Button } from '../../components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../../components/ui/table';
-import { ShoppingBag, Eye, Pencil, Trash2, FileText } from 'lucide-react';
+import { ShoppingBag, Eye, Pencil, Trash2, FileText, Undo2, CheckSquare } from 'lucide-react';
+import { Badge } from '../../components/ui/badge';
 import PrintButton from '../../components/print/PrintButton';
 
-export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, viewPurchaseDetails, openEditPurchaseDialog, confirmDeletePurchase, t, language }) {
+export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, viewPurchaseDetails, openEditPurchaseDialog, confirmDeletePurchase, confirmStockPurchase, reopenPurchase, t, language }) {
   return (
     <Card>
       <CardHeader>
@@ -34,6 +35,7 @@ export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, view
                   <TableHead>{language === 'ar' ? 'المدفوع' : 'Payé'}</TableHead>
                   <TableHead>{language === 'ar' ? 'المتبقي' : 'Restant'}</TableHead>
                   <TableHead>{language === 'ar' ? 'الحالة' : 'Statut'}</TableHead>
+                  <TableHead>{language === 'ar' ? 'المخزون' : 'Stock'}</TableHead>
                   <TableHead className="text-center">{language === 'ar' ? 'الإجراءات' : 'Actions'}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -55,6 +57,11 @@ export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, view
                     </TableCell>
                     <TableCell>{getStatusBadge(purchase.status)}</TableCell>
                     <TableCell>
+                      {purchase.stock_status === 'draft'
+                        ? <Badge variant="outline" className="text-amber-600 border-amber-300">{language === 'ar' ? 'مسودة' : 'Brouillon'}</Badge>
+                        : <Badge className="bg-emerald-100 text-emerald-700">{language === 'ar' ? 'مؤكد' : 'Confirmé'}</Badge>}
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center justify-center gap-1">
                         <PrintButton docType="purchase" record={purchase} className="h-8 w-8" />
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:bg-blue-50"
@@ -69,6 +76,21 @@ export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, view
                           data-testid={`edit-purchase-${purchase.id}`}>
                           <Pencil className="h-4 w-4" />
                         </Button>
+                        {purchase.stock_status === 'draft' ? (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                            onClick={() => confirmStockPurchase(purchase)}
+                            title={language === 'ar' ? 'تأكيد المخزون' : 'Confirmer stock'}
+                            data-testid={`confirm-stock-${purchase.id}`}>
+                            <CheckSquare className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:bg-slate-100"
+                            onClick={() => reopenPurchase(purchase)}
+                            title={language === 'ar' ? 'إعادة فتح' : 'Rouvrir'}
+                            data-testid={`reopen-purchase-${purchase.id}`}>
+                            <Undo2 className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:bg-red-50"
                           onClick={() => confirmDeletePurchase(purchase)}
                           title={language === 'ar' ? 'حذف' : 'Supprimer'}

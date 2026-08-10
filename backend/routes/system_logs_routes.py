@@ -175,8 +175,6 @@ async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
     """Send the last 100 error logs to Emergent LLM, get an Arabic summary +
     suggested fixes. Does NOT apply any fix. Read-only AI assist."""
     api_key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="LLM key not configured")
     cursor = main_db.system_logs.find({"level": "error"}, {"_id": 0}).sort("created_at", -1).limit(100)
     items = await cursor.to_list(length=100)
     if not items:
@@ -192,6 +190,37 @@ async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
 
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
+        _llm_available = bool(api_key)
+    except Exception:
+        _llm_available = False
+
+    if not _llm_available:
+        # ── تحليل محلي بديل عند غياب مزوّد الذكاء الاصطناعي ──
+        from collections import Counter
+        groups = Counter()
+        samples = {}
+        for it in items:
+            key = f"{it.get('type') or 'error'} | {it.get('url') or it.get('source') or '—'}"
+            groups[key] += 1
+            samples.setdefault(key, (it.get("message") or "")[:200])
+        suggestions = []
+        for key, cnt in groups.most_common(10):
+            suggestions.append({
+                "title": f"{key} (×{cnt})",
+                "action": samples[key],
+                "file": "",
+            })
+        top = groups.most_common(3)
+        summary = "أكثر الأخطاء تكراراً: " + "؛ ".join(f"{k} ({c} مرة)" for k, c in top) if top else "لا توجد أخطاء"
+        return {
+            "summary": summary,
+            "suggestions": suggestions,
+            "count": len(items),
+            "ai": False,
+            "note": "مزوّد الذكاء الاصطناعي غير مهيأ — هذا تحليل محلي مبسّط (تجميع حسب النوع والمسار).",
+        }
+
+    try:
         chat = (
             LlmChat(
                 api_key=api_key,
@@ -222,7 +251,12 @@ async def analyze_logs(admin: dict = Depends(get_super_admin)) -> dict:
         return parsed
     except Exception as exc:
         logger.error("analyze_logs error: %s", exc)
-        raise HTTPException(status_code=500, detail=f"AI analysis failed: {exc}")
+        return {
+            "summary": f"تعذّر تحليل الذكاء الاصطناعي: {exc}",
+            "suggestions": [],
+            "count": len(items),
+            "ai": False,
+        }
 
 
 @router.delete("")

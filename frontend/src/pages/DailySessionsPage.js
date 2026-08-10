@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -192,7 +193,7 @@ export default function DailySessionsPage() {
       toast.success(language === 'ar' ? 'تم فتح الحصة بنجاح' : 'Session ouverte avec succès');
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -270,7 +271,7 @@ export default function DailySessionsPage() {
       setClosingNotes('');
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -1147,7 +1148,7 @@ export default function DailySessionsPage() {
                         toast.success(language === 'ar' ? 'تم إرسال التقرير بنجاح' : 'Rapport envoyé');
                         setReportEmail('');
                       } catch (error) {
-                        toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل إرسال التقرير' : 'Échec d\'envoi'));
+                        toast.error(errText(error) ||  (language === 'ar' ? 'فشل إرسال التقرير' : 'Échec d\'envoi'));
                       } finally {
                         setSendingEmail(false);
                       }

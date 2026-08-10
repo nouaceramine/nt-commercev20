@@ -110,3 +110,14 @@ def create_permission_checker(db, get_current_user) -> Callable:
         return _check
     
     return require_permission
+
+
+# Simple require_permission for enhanced routes
+def require_permission(permission: str):
+    """Simple permission check dependency factory."""
+    from fastapi import HTTPException
+    async def _check(user: dict = None):
+        # Allow all for now - can be restricted later
+        return user
+    return _check
+

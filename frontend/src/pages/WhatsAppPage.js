@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -76,7 +77,7 @@ export default function WhatsAppPage() {
       setSendForm({ to: '', message: '' });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'خطأ في الإرسال');
+      toast.error(errText(error) ||  'خطأ في الإرسال');
     }
   };
 

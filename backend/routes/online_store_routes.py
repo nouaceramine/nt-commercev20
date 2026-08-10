@@ -65,9 +65,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.put("/store/settings")
     async def update_store_settings(settings: StoreSettings, admin: dict = Depends(get_tenant_admin)):
-        tenant_id = admin.get("tenant_id")
+        tenant_id = admin.get("tenant_id") or "platform"
         await db.store_settings.update_one({}, {"$set": settings.model_dump()}, upsert=True)
-        if settings.store_slug and tenant_id:
+        if settings.store_slug:
             await main_db.store_slugs.update_one(
                 {"tenant_id": tenant_id},
                 {"$set": {
@@ -137,7 +137,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tenant_id = slug_mapping.get("tenant_id")
         if not tenant_id:
             raise HTTPException(status_code=404, detail="Store not configured")
-        tenant_db_inst = get_tenant_db(tenant_id)
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
         settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0})
         if not settings or not settings.get("enabled"):
             raise HTTPException(status_code=404, detail="Store not available")
@@ -157,7 +157,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tenant_id = slug_mapping.get("tenant_id")
         if not tenant_id:
             raise HTTPException(status_code=404, detail="Store not configured")
-        tenant_db_inst = get_tenant_db(tenant_id)
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
         settings = await tenant_db_inst.store_settings.find_one({"enabled": True})
         if not settings:
             raise HTTPException(status_code=404, detail="Store not available")

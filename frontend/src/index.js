@@ -25,10 +25,13 @@ window.addEventListener("unhandledrejection", (e) => {
   }
 });
 
-// Register Service Worker for PWA
+// Service workers caused stale-bundle blank pages after redeploys.
+// Unregister any previously registered worker instead of registering one.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    navigator.serviceWorker.getRegistrations()
+      .then((regs) => regs.forEach((r) => r.unregister()))
+      .catch(() => {});
   });
 }
 

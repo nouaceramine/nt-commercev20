@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
@@ -152,7 +153,7 @@ export default function ProductDetailPage() {
       const productRes = await apiClient.get(`/products/${id}`);
       setProduct(productRes.data);
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'خطأ في النشر' : 'Erreur de publication'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'خطأ في النشر' : 'Erreur de publication'));
     } finally {
       setPublishing(false);
     }
@@ -167,7 +168,7 @@ export default function ProductDetailPage() {
       const productRes = await apiClient.get(`/products/${id}`);
       setProduct(productRes.data);
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'خطأ في الإلغاء' : 'Erreur de retrait'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'خطأ في الإلغاء' : 'Erreur de retrait'));
     } finally {
       setUnpublishing(false);
     }

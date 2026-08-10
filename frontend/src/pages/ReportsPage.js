@@ -92,7 +92,7 @@ export default function ReportsPage() {
         purchasesByDate[date].total += p.total;
         purchasesByDate[date].count += 1;
       });
-      setPurchasesData(Object.values(purchasesByDate).sort((a, b) => a.date.localeCompare(b.date)).slice(-parseInt(period)));
+      setPurchasesData(Object.values(purchasesByDate).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-parseInt(period)));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

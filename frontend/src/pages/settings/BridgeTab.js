@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
@@ -41,7 +42,7 @@ export default function BridgeTab() {
       toast.success('تم حفظ إعدادات الجسر');
       setTestResult(null);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في الحفظ');
+      toast.error(errText(err) ||  'خطأ في الحفظ');
     } finally {
       setSaving(false);
     }

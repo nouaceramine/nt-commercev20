@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import * as XLSX from 'xlsx';
@@ -171,7 +172,7 @@ export default function InventoryCountPage() {
       // Focus barcode input
       setTimeout(() => barcodeInputRef.current?.focus(), 100);
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -284,7 +285,7 @@ export default function InventoryCountPage() {
       setShowFinishDialog(false);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -299,7 +300,7 @@ export default function InventoryCountPage() {
       toast.success(language === 'ar' ? 'تم إلغاء الجرد' : 'Inventaire annulé');
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -530,7 +531,7 @@ export default function InventoryCountPage() {
       let comparison = 0;
       switch (sortBy) {
         case 'name':
-          comparison = (language === 'ar' ? a.name_ar : a.name_en).localeCompare(language === 'ar' ? b.name_ar : b.name_en);
+          comparison = ((language === 'ar' ? a.name_ar : a.name_en) || '').localeCompare((language === 'ar' ? b.name_ar : b.name_en) || '');
           break;
         case 'barcode':
           comparison = (a.barcode || '').localeCompare(b.barcode || '');

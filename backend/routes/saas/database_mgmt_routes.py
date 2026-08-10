@@ -151,3 +151,42 @@ async def schedule_database_task(db_id: str, task: dict = Body(...), admin: dict
     if not tenant:
         raise HTTPException(status_code=404, detail="Database not found")
     return {"message": "Task scheduled", "task": task}
+
+@router.post("/saas/databases/{db_id}/clear")
+async def clear_database(db_id: str, admin: dict = Depends(get_super_admin)):
+    """Clear all data collections of a tenant database (keeps the database itself)."""
+    tenant = await db.saas_tenants.find_one({"id": db_id})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Database not found")
+    db_name = f"tenant_{db_id.replace('-', '_')}"
+    tenant_db = client[db_name]
+    collections = await tenant_db.list_collection_names()
+    cleared = {}
+    for coll in collections:
+        result = await tenant_db[coll].delete_many({})
+        cleared[coll] = result.deleted_count
+    return {"message": "Database cleared successfully", "database": db_name, "cleared": cleared}
+
+
+@router.post("/saas/databases/{db_id}/restore")
+async def restore_database(db_id: str, data: dict = Body(...), admin: dict = Depends(get_super_admin)):
+    """Restore a tenant database from a previously created backup."""
+    tenant = await db.saas_tenants.find_one({"id": db_id})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Database not found")
+    backup_id = data.get("backup_id")
+    if not backup_id:
+        raise HTTPException(status_code=400, detail="backup_id is required")
+    backup = await db.database_backups.find_one({"id": backup_id, "tenant_id": db_id}, {"_id": 0})
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    db_name = f"tenant_{db_id.replace('-', '_')}"
+    tenant_db = client[db_name]
+    restored = {}
+    for coll, docs in (backup.get("data") or {}).items():
+        await tenant_db[coll].delete_many({})
+        if docs:
+            await tenant_db[coll].insert_many(docs)
+        restored[coll] = len(docs)
+    return {"message": "Database restored successfully", "database": db_name, "restored": restored}
+

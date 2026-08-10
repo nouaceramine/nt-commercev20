@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -33,7 +34,7 @@ export default function EmailTab({ initialSettings }) {
       
       const response = await apiClient.post(`/email/test`, {});
       toast.success(response.data.message || (language === 'ar' ? 'تم إرسال البريد الاختباري' : 'Email test envoyé'));
-    } catch (error) { toast.error(error.response?.data?.detail || 'Error'); }
+    } catch (error) { toast.error(errText(error) ||  'Error'); }
     finally { setTesting(false); }
   };
 

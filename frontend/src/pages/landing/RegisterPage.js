@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
@@ -103,7 +104,7 @@ export default function RegisterPage() {
       // Redirect to dashboard
       navigate('/');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ أثناء التسجيل');
+      toast.error(errText(error) ||  'حدث خطأ أثناء التسجيل');
     } finally {
       setLoading(false);
     }

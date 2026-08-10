@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
 import { EcomCopilotChat } from './EcomCopilotChat';
 import { downloadCsv, todayStamp } from '../../lib/csvExport';
+import { EcomHubTabs } from '../../components/ecom/EcomHubTabs';
 
 const CHANNEL_HEX = {
   pos: '#10b981', shopify: '#96bf48', facebook: '#1877f2', instagram: '#e4405f',
@@ -112,6 +113,7 @@ export default function EcomAnalyticsPage() {
   return (
     <Layout>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-analytics-page">
+        <EcomHubTabs />
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <Link to="/ecom-hub" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">

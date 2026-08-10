@@ -1,3 +1,4 @@
+import { errText } from '../../../lib/errorText';
 import { useEffect, useState } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { Layout } from '../../../components/Layout';
@@ -21,7 +22,7 @@ export default function PaymentsPage() {
         const res = await apiClient.get('/saas/payments');
         setPayments(res.data || []);
       } catch (e) {
-        toast.error(e.response?.data?.detail || 'فشل تحميل المدفوعات');
+        toast.error(errText(e) ||  'فشل تحميل المدفوعات');
       } finally {
         setLoading(false);
       }

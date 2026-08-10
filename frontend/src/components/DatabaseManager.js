@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { formatDateTime } from '../utils/globalDateFormatter';
@@ -404,7 +405,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       fetchAvailableExports();
     } catch (error) {
       console.error('Conversion error:', error);
-      toast.error(error.response?.data?.detail || 'حدث خطأ أثناء تحويل قاعدة البيانات');
+      toast.error(errText(error) ||  'حدث خطأ أثناء تحويل قاعدة البيانات');
     } finally {
       setConvertingFile(false);
     }
@@ -497,7 +498,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       
     } catch (error) {
       console.error('Import error:', error);
-      toast.error(error.response?.data?.detail || 'حدث خطأ أثناء الاستيراد');
+      toast.error(errText(error) ||  'حدث خطأ أثناء الاستيراد');
     } finally {
       setImportingData(false);
     }

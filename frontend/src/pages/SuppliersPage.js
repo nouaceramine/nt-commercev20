@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -78,7 +79,7 @@ export default function SuppliersPage() {
     let comparison = 0;
     switch (sortBy) {
       case 'name':
-        comparison = a.name.localeCompare(b.name);
+        comparison = (a.name || '').localeCompare(b.name || '');
         break;
       case 'balance':
         comparison = (a.balance || 0) - (b.balance || 0);
@@ -113,7 +114,7 @@ export default function SuppliersPage() {
     try {
       const params = searchQuery ? `?search=${encodeURIComponent(searchQuery)}` : '';
       const response = await apiClient.get(`/suppliers${params}`);
-      setSuppliers(response.data);
+      setSuppliers(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error fetching suppliers:', error);
     } finally {
@@ -163,7 +164,7 @@ export default function SuppliersPage() {
       setAdvancePaymentData({ supplier_id: '', amount: '', payment_method: 'cash', notes: '' });
       fetchSuppliers();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
     }
   };
 
@@ -258,7 +259,7 @@ export default function SuppliersPage() {
           </div>
           <div className="flex gap-2 items-center">
             <ExportPrintButtons
-              data={sortedSuppliers.map(s => ({
+              data={Array.isArray(sortedSuppliers) ? sortedSuppliers.map(s => ({
                 code: s.code || '-',
                 name: s.name,
                 phone: s.phone || '-',
@@ -266,7 +267,7 @@ export default function SuppliersPage() {
                 total_purchases: (s.total_purchases || 0).toLocaleString(),
                 balance: (s.balance || 0).toLocaleString(),
                 advance_balance: (s.advance_balance || 0).toLocaleString()
-              }))}
+              })) : []}
               columns={[
                 { key: 'code', label: language === 'ar' ? 'الكود' : 'Code' },
                 { key: 'name', label: language === 'ar' ? 'الاسم' : 'Nom' },
@@ -389,7 +390,7 @@ export default function SuppliersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedSuppliers.map(supplier => (
+                  {Array.isArray(sortedSuppliers) && sortedSuppliers.map(supplier => (
                     <TableRow key={supplier.id} data-testid={`supplier-row-${supplier.id}`}>
                       <TableCell>
                         <span className="font-mono text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">
@@ -445,7 +446,7 @@ export default function SuppliersPage() {
         ) : (
           /* Grid View - Cards */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedSuppliers.map(supplier => (
+            {Array.isArray(sortedSuppliers) && sortedSuppliers.map(supplier => (
               <Card key={supplier.id} className="hover:shadow-md transition-shadow" data-testid={`supplier-card-${supplier.id}`}>
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
@@ -667,3 +668,4 @@ export default function SuppliersPage() {
     </Layout>
   );
 }
+

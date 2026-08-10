@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -153,7 +154,7 @@ export function DefectiveProducts() {
       });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
     } finally {
       setSaving(false);
     }

@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -149,7 +150,7 @@ export default function RechargePage() {
       fetchData();
       startPolling(data.id);
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'خطأ في الشحن' : 'Erreur'));
+      toast.error(errText(err) ||  (ar ? 'خطأ في الشحن' : 'Erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -234,7 +235,7 @@ export default function RechargePage() {
     try {
       await apiClient.post('/recharge/bridge/check-balances');
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل إرسال الطلب' : 'Échec de la requête'));
+      toast.error(errText(err) ||  (ar ? 'فشل إرسال الطلب' : 'Échec de la requête'));
       setCheckingBalance(false);
       return;
     }
@@ -277,7 +278,7 @@ export default function RechargePage() {
       setBridgeSecret(secretInput);
       toast.success(ar ? 'تم حفظ الـ secret' : 'Secret sauvegardé');
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل الحفظ' : 'Échec'));
+      toast.error(errText(err) ||  (ar ? 'فشل الحفظ' : 'Échec'));
     } finally {
       setSavingSecret(false);
     }
@@ -938,3 +939,4 @@ export default function RechargePage() {
     </Layout>
   );
 }
+

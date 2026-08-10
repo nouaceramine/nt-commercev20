@@ -206,9 +206,17 @@ export default function PurchaseDialogs({
                 )}
                 <div><Label>{t.notes}</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={language === 'ar' ? 'ملاحظات...' : 'Notes...'} className="mt-1" rows={2} /></div>
               </div>
-              <Button onClick={completePurchase} disabled={loading || cart.length === 0 || !selectedSupplier} className={`w-full h-12 text-lg ${paymentType === 'credit' ? 'bg-red-600 hover:bg-red-700' : ''}`}>
-                {loading ? t.loading : (paymentType === 'credit' ? (language === 'ar' ? 'تسجيل شراء بالدين' : 'Enregistrer achat à crédit') : t.completeSale)}
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => completePurchase(true)} disabled={loading || cart.length === 0 || !selectedSupplier} className="flex-1 h-12"
+                  title={language === 'ar' ? 'تسجيل بدون تعديل المخزون' : 'Sans modifier le stock'}
+                  data-testid="save-draft-btn">
+                  💾 {language === 'ar' ? 'حفظ الفاتورة فقط' : 'Enregistrer seulement'}
+                </Button>
+                <Button onClick={() => completePurchase(false)} disabled={loading || cart.length === 0 || !selectedSupplier} className={`flex-1 h-12 text-lg ${paymentType === 'credit' ? 'bg-red-600 hover:bg-red-700' : ''}`}
+                  data-testid="confirm-purchase-btn">
+                  {loading ? t.loading : ('✅ ' + (paymentType === 'credit' ? (language === 'ar' ? 'تسجيل شراء بالدين' : 'Enregistrer achat à crédit') : (language === 'ar' ? 'تأكيد المخزون' : 'Confirmer le stock')))}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

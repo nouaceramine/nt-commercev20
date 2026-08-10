@@ -1,6 +1,7 @@
 /**
  * AgentPermissionsDialog - Granular permission management for agents
  */
+import { errText } from '../../../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
@@ -97,7 +98,7 @@ export function AgentPermissionsDialog({ open, onOpenChange, agent, onSaved }) {
       onSaved?.();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ أثناء حفظ الصلاحيات');
+      toast.error(errText(err) ||  'حدث خطأ أثناء حفظ الصلاحيات');
     }
     setSaving(false);
   };

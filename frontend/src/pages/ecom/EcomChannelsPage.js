@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckCircle2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
+import { EcomHubTabs } from '../../components/ecom/EcomHubTabs';
 
 const SUPPORTED_CHANNELS = ['shopify', 'facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram', 'viber', 'yalidine', 'zr', 'maystro'];
 
@@ -34,6 +35,112 @@ const CREDENTIAL_SCHEMA = {
   zr:        [['token', 'ZR Express API Token'], ['client_key', 'Client Key']],
   maystro:   [['api_key', 'Maystro API Key']],
 };
+
+function LeadWebhooksCard() {
+  const [leads, setLeads] = useState([]);
+  const [config, setConfig] = useState(null);
+  const [copied, setCopied] = useState('');
+  const origin = window.location.origin;
+  const hooks = [
+    { key: 'facebook', label: 'فيسبوك Lead Ads', url: `${origin}/api/webhooks/facebook-leads`, color: 'bg-blue-100 text-blue-700' },
+    { key: 'tiktok', label: 'تيك توك Lead Generation', url: `${origin}/api/webhooks/tiktok-leads`, color: 'bg-pink-100 text-pink-700' },
+  ];
+  const copy = (text, key) => {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 1500);
+  };
+  useEffect(() => {
+    apiClient.get('/webhooks/config').then(r => setConfig(r.data)).catch(() => {});
+    apiClient.get('/webhooks/leads?limit=10').then(r => setLeads(r.data || [])).catch(() => {});
+  }, []);
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Webhooks العملاء المحتملون (فيسبوك / تيك توك)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {hooks.map(h => (
+          <div key={h.key} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge className={h.color}>{h.label}</Badge>
+              {h.key === 'facebook' && config && (
+                <Badge variant="outline">{config.facebook_app_secret_set ? 'HMAC مُفعّل' : 'HMAC غير مضبوط (وضع التطوير)'}</Badge>
+              )}
+              {h.key === 'tiktok' && config && (
+                <Badge variant="outline">{config.tiktok_app_secret_set ? 'HMAC مُفعّل' : 'HMAC غير مضبوط (وضع التطوير)'}</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-muted p-2 rounded" dir="ltr">{h.url}</code>
+              <Button variant="ghost" size="icon" onClick={() => copy(h.url, h.key)}>
+                {copied === h.key ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+              </Button>
+            </div>
+          </div>
+        ))}
+        {config && (
+          <div className="text-xs text-muted-foreground space-y-1 border-t pt-3">
+            <p>رمز التحقق (Verify Token) لفيسبوك: <code dir="ltr">{config.facebook_verify_token || 'غير مضبوط — عيّن FB_VERIFY_TOKEN'}</code></p>
+            <p>{config.hmac_note} — المتغيرات: <code dir="ltr">FB_APP_SECRET</code> / <code dir="ltr">TIKTOK_APP_SECRET</code></p>
+          </div>
+        )}
+        {leads.length > 0 && (
+          <div className="border-t pt-3">
+            <p className="text-sm font-semibold mb-2">آخر العملاء المحتملين ({leads.length})</p>
+            <div className="space-y-1">
+              {leads.map(l => (
+                <div key={l.id} className="flex items-center justify-between text-sm p-2 rounded border bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <Badge className={l.source === 'facebook' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}>{l.source}</Badge>
+                    <span>{l.name || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <span dir="ltr">{l.phone}</span>
+                    <span>{(l.created_at || '').slice(0, 10)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WhatsAppTemplatesCard() {
+  const [templates, setTemplates] = useState([]);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => {
+    apiClient.get('/whatsapp/templates').then(r => setTemplates(r.data || [])).catch(() => {});
+  }, []);
+  if (!templates.length) return null;
+  const shown = showAll ? templates : templates.slice(0, 3);
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">قوالب رسائل واتساب ({templates.length})</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {shown.map(t => (
+          <div key={t.id} className="p-3 rounded-lg border bg-muted/30">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-semibold text-sm">{t.name}</span>
+              {t.category && <Badge variant="outline">{t.category}</Badge>}
+            </div>
+            <p className="text-sm text-muted-foreground whitespace-pre-line">{t.body}</p>
+          </div>
+        ))}
+        {templates.length > 3 && (
+          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)}>
+            {showAll ? 'عرض أقل' : `عرض الكل (${templates.length})`}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function EcomChannelsPage() {
   const { user } = useAuth();
@@ -125,6 +232,7 @@ export default function EcomChannelsPage() {
   return (
     <Layout>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-channels-page">
+        <EcomHubTabs />
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <Link to="/ecom-hub" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
@@ -243,6 +351,10 @@ export default function EcomChannelsPage() {
       </div>
 
       {/* Create/Edit dialog */}
+      <LeadWebhooksCard />
+
+      <WhatsAppTemplatesCard />
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent dir="rtl" className="max-w-md">
           <DialogHeader>

@@ -51,7 +51,7 @@ export const AuthProvider = ({ children }) => {
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
   
   const login = async (email, password) => {
-    const response = await apiClient.post(`/auth/unified-login`, { email, password });
+    const response = await apiClient.post(`/auth/login`, { email, password });
     const { access_token, user: userData, user_type, redirect_to } = response.data;
     
     localStorage.setItem('token', access_token);
@@ -145,7 +145,7 @@ export const AuthProvider = ({ children }) => {
   // Admin includes both 'admin' and 'super_admin' roles
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
-  const isTenant = user?.user_type === 'tenant' || user?.role === 'tenant_admin';
+  const isTenant = user?.user_type === 'tenant' || user?.role === 'tenant' || user?.role === 'tenant_admin';
   const isAgent = user?.user_type === 'agent' || user?.role === 'agent';
   const isCashier = user?.role === 'cashier';
   // Super-admin impersonating a tenant: we require BOTH the preserved super-admin token

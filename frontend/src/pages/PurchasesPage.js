@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -104,6 +105,9 @@ export default function PurchasesPage() {
   };
 
   const calculateSupplierDebts = (purchasesData, suppliersData) => {
+    // Safety: ensure arrays
+    purchasesData = Array.isArray(purchasesData) ? purchasesData : [];
+    suppliersData = Array.isArray(suppliersData) ? suppliersData : [];
     const debts = {};
     purchasesData.forEach(p => {
       if (p.remaining > 0) {
@@ -123,18 +127,19 @@ export default function PurchasesPage() {
     setSupplierDebts(Object.values(debts));
   };
 
-  const filteredProducts = products.filter(p => {
+const filteredProducts = Array.isArray(products) ? products.filter(p => {
     const query = searchQuery.toLowerCase();
     return (
       p.name_ar?.toLowerCase().includes(query) ||
       p.name_en?.toLowerCase().includes(query) ||
       p.barcode?.toLowerCase().includes(query) ||
-      p.article_code?.toLowerCase().includes(query)  // البحث بكود المنتج
+      p.article_code?.toLowerCase().includes(query)
     );
-  });
+  }) : [];
 
   const addToCart = (product) => {
-    const existingItem = cart.find(item => item.product_id === product.id);
+    const safeCart = Array.isArray(cart) ? cart : [];
+    const existingItem = safeCart.find(item => item.product_id === product.id);
     if (existingItem) {
       setCart(cart.map(item =>
         item.product_id === product.id
@@ -317,7 +322,7 @@ export default function PurchasesPage() {
     }
   }, [paymentType, subtotal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const completePurchase = async () => {
+  const completePurchase = async (asDraft = false) => {
     if (cart.length === 0) {
       toast.error(language === 'ar' ? 'السلة فارغة' : 'Le panier est vide');
       return;
@@ -350,7 +355,8 @@ export default function PurchasesPage() {
         payment_method: paymentMethod,
         payment_type: paymentType,
         notes,
-        code: purchaseCode  // كود الشراء
+        code: purchaseCode,  // كود الشراء
+        confirm_stock: !asDraft
       };
 
       await apiClient.post(`/purchases`, purchaseData);
@@ -361,7 +367,7 @@ export default function PurchasesPage() {
         ? (language === 'ar' ? 'تم تسجيل الشراء مع دفعة جزئية' : 'Achat avec paiement partiel enregistré')
         : t.purchaseCompleted;
       
-      toast.success(msg);
+      toast.success(asDraft ? (language === 'ar' ? 'تم حفظ الفاتورة كمسودة' : 'Facture enregistrée en brouillon') : msg);
       
       // Reset
       setCart([]);
@@ -374,7 +380,7 @@ export default function PurchasesPage() {
       fetchData();
     } catch (error) {
       console.error('Error completing purchase:', error);
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setLoading(false);
     }
@@ -404,7 +410,7 @@ export default function PurchasesPage() {
       fetchData();
     } catch (error) {
       console.error('Error paying debt:', error);
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setLoading(false);
     }
@@ -434,7 +440,7 @@ export default function PurchasesPage() {
       }
     } catch (error) {
       console.error('Error adding supplier:', error);
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setAddingSupplier(false);
     }
@@ -465,13 +471,33 @@ export default function PurchasesPage() {
       fetchData();
     } catch (error) {
       console.error('Error updating purchase:', error);
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setLoading(false);
     }
   };
 
   // Delete purchase functions
+  const confirmStockPurchase = async (purchase) => {
+    try {
+      await apiClient.post(`/purchases/${purchase.id}/confirm-stock`);
+      toast.success(language === 'ar' ? 'تم تأكيد المخزون' : 'Stock confirmé');
+      fetchData();
+    } catch (e) {
+      toast.error(language === 'ar' ? 'فشل تأكيد المخزون' : 'Échec de confirmation');
+    }
+  };
+
+  const reopenPurchase = async (purchase) => {
+    try {
+      await apiClient.post(`/purchases/${purchase.id}/reopen`);
+      toast.success(language === 'ar' ? 'تمت إعادة فتح الفاتورة' : 'Facture rouverte');
+      fetchData();
+    } catch (e) {
+      toast.error(language === 'ar' ? 'فشل إعادة الفتح' : 'Échec de réouverture');
+    }
+  };
+
   const confirmDeletePurchase = (purchase) => {
     setPurchaseToDelete(purchase);
     setShowDeleteConfirm(true);
@@ -490,7 +516,7 @@ export default function PurchasesPage() {
       fetchData();
     } catch (error) {
       console.error('Error deleting purchase:', error);
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setDeletingPurchase(false);
     }
@@ -527,15 +553,18 @@ export default function PurchasesPage() {
   // Calculate statistics
   const totalPurchases = purchases.reduce((sum, p) => sum + p.total, 0);
   const totalPaid = purchases.reduce((sum, p) => sum + p.paid_amount, 0);
-  const totalRemaining = purchases.reduce((sum, p) => sum + p.remaining, 0);
-  const purchasesThisMonth = purchases.filter(p => {
+  const safePurchases = Array.isArray(purchases) ? purchases : [];
+  const totalRemaining = safePurchases.reduce((sum, p) => sum + (p.remaining || 0), 0);
+  const purchasesThisMonth = safePurchases.filter(p => {
     const purchaseDate = new Date(p.created_at);
     const now = new Date();
     return purchaseDate.getMonth() === now.getMonth() && purchaseDate.getFullYear() === now.getFullYear();
   }).length;
 
-  const selectedSupplierData = suppliers.find(s => s.id === selectedSupplier);
-  const supplierPreviousDebt = supplierDebts.find(d => d.supplier_id === selectedSupplier)?.total_debt || 0;
+  const safeSuppliers = Array.isArray(suppliers) ? suppliers : [];
+  const safeSupplierDebts = Array.isArray(supplierDebts) ? supplierDebts : [];
+  const selectedSupplierData = safeSuppliers.find(s => s.id === selectedSupplier);
+  const supplierPreviousDebt = safeSupplierDebts.find(d => d.supplier_id === selectedSupplier)?.total_debt || 0;
 
   return (
     <Layout>
@@ -625,6 +654,8 @@ export default function PurchasesPage() {
               viewPurchaseDetails={viewPurchaseDetails}
               openEditPurchaseDialog={openEditPurchaseDialog}
               confirmDeletePurchase={confirmDeletePurchase}
+              confirmStockPurchase={confirmStockPurchase}
+              reopenPurchase={reopenPurchase}
               t={t}
               language={language}
             />
@@ -680,4 +711,5 @@ export default function PurchasesPage() {
     </Layout>
   );
 }
+
 

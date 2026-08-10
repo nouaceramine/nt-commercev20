@@ -43,6 +43,13 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
 
     inventory_result = await _sync_inventory_on_status_change(db, order, new_status, now)
 
+    if new_status == "delivered":
+        try:
+            from services.smart_notifications import notify_shipment_delivered
+            await notify_shipment_delivered(db, order)
+        except Exception:
+            pass
+
     try:
         await _maybe_notify_customer(db, order, new_status)
     except Exception as exc:  # noqa: BLE001 — never let notification failures block status change

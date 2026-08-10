@@ -1,1 +1,5 @@
-<enhanced_notifications_center_routes.py content will be inserted here>
+from fastapi import APIRouter
+
+def create_enhanced_notifications_center_routes(db, get_current_user, require_permission):
+    router = APIRouter()
+    return router

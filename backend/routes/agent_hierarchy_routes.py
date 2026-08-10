@@ -81,7 +81,7 @@ def create_agent_hierarchy_routes(db, get_super_admin) -> dict:
                                  "max_sub_agents": 0, "max_tenants": 50},
                  "created_at": datetime.now(timezone.utc).isoformat()},
             ]
-            await db.agent_levels.insert_many(defaults)
+            await db.agent_levels.insert_many([dict(d) for d in defaults])
             levels = defaults
         return levels
 

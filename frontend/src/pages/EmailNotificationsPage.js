@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -65,7 +66,7 @@ export default function EmailNotificationsPage() {
       await apiClient.put(`/notifications/sendgrid/settings`, settings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات بنجاح' : 'Settings saved successfully');
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الحفظ' : 'Failed to save'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الحفظ' : 'Failed to save'));
     } finally {
       setSaving(false);
     }
@@ -78,7 +79,7 @@ export default function EmailNotificationsPage() {
       const response = await apiClient.post(`/notifications/sendgrid/test`, {});
       toast.success(response.data.message);
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الاختبار' : 'Test failed'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الاختبار' : 'Test failed'));
     } finally {
       setTesting(false);
     }
@@ -91,7 +92,7 @@ export default function EmailNotificationsPage() {
       const response = await apiClient.post(`/notifications/send-daily-report`, {});
       toast.success(response.data.message);
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الإرسال' : 'Failed to send'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الإرسال' : 'Failed to send'));
     } finally {
       setSendingReport(false);
     }
@@ -103,7 +104,7 @@ export default function EmailNotificationsPage() {
       const response = await apiClient.post(`/notifications/check-low-stock`, {});
       toast.success(response.data.message);
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الفحص' : 'Check failed'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الفحص' : 'Check failed'));
     } finally {
       setCheckingStock(false);
     }

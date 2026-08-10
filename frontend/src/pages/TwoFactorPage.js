@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -41,7 +42,7 @@ export default function TwoFactorPage() {
       const res = await apiClient.post(`/2fa/setup`, {}, { headers });
       setSetupData(res.data);
       setStep('setup');
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) { toast.error(errText(e) ||  'Error'); }
   };
 
   const verifySetup = async () => {
@@ -51,7 +52,7 @@ export default function TwoFactorPage() {
       toast.success(isAr ? 'تم تفعيل المصادقة الثنائية' : '2FA activé avec succès');
       setStep('enabled');
       checkStatus();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'الكود غير صحيح' : 'Code incorrect')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'الكود غير صحيح' : 'Code incorrect')); }
   };
 
   const disable2FA = async () => {
@@ -62,7 +63,7 @@ export default function TwoFactorPage() {
       setStep('check');
       setStatus({ is_enabled: false });
       setDisableCode('');
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) { toast.error(errText(e) ||  'Error'); }
   };
 
   const copyToClipboard = (text) => {

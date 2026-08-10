@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -160,7 +161,7 @@ export default function SimManagementPage() {
       setDetectedOperator(null);
       fetchSlots(); // Refresh balances
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setRecharging(false);
     }

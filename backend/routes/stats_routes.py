@@ -269,7 +269,9 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     @router.get("/analytics/restock-suggestions")
     async def get_restock_suggestions(admin: dict = Depends(get_tenant_admin)):
         low_stock_products = await db.products.find(
-            {"$expr": {"$lte": ["$quantity", "$low_stock_threshold"]}}, {"_id": 0}
+            {"stock": {"$type": "number"},
+             "$expr": {"$lte": ["$stock", {"$ifNull": ["$min_stock", 5]}]}},
+            {"_id": 0}
         ).to_list(100)
         now = datetime.now(timezone.utc)
         start_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -285,13 +287,14 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             sales_result = await db.sales.aggregate(pipeline).to_list(1)
             monthly_sales = sales_result[0]["total_sold"] if sales_result else 0
             daily_velocity = monthly_sales / 30
-            days_until_stockout = product["quantity"] / daily_velocity if daily_velocity > 0 else 999
+            current_stock = product.get("stock", 0)
+            days_until_stockout = current_stock / daily_velocity if daily_velocity > 0 else 999
             suggested_quantity = max(int(daily_velocity * 60), product.get("low_stock_threshold", 10) * 2)
             urgency = "critical" if days_until_stockout <= 3 else ("high" if days_until_stockout <= 7 else ("medium" if days_until_stockout <= 14 else "low"))
             suggestions.append({
                 "product_id": product["id"],
                 "product_name": product.get("name_en", ""),
-                "current_stock": product["quantity"],
+                "current_stock": current_stock,
                 "monthly_sales": monthly_sales,
                 "daily_velocity": round(daily_velocity, 2),
                 "days_until_stockout": round(days_until_stockout, 1),

@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -119,7 +120,7 @@ export default function EmployeesPage() {
       setAccountData({ email: '', password: '', role: 'seller' });
       fetchEmployees();
     } catch (e) {
-      toast.error(e.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(e) ||  t.somethingWentWrong);
     } finally {
       setCreatingAccount(false);
     }
@@ -132,7 +133,7 @@ export default function EmployeesPage() {
       toast.success(language === 'ar' ? 'تم حذف الحساب' : 'Compte supprimé');
       fetchEmployees();
     } catch (e) {
-      toast.error(e.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(e) ||  t.somethingWentWrong);
     }
   };
 

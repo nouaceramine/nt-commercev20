@@ -86,6 +86,10 @@ async def require_ecom_feature(current_user: dict) -> dict:
     if current_user.get("user_type") == "super_admin" or current_user.get("role") == "super_admin":
         return current_user
 
+    # Platform-level admins (no tenant) operate on main_db — full access
+    if not current_user.get("tenant_id") and current_user.get("role") in ("admin", "super_admin"):
+        return current_user
+
     # Fast path: features may already be on the user (only when login/impersonate ran)
     features = current_user.get("features")
     if not features:

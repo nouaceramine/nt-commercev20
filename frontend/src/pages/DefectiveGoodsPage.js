@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -50,7 +51,7 @@ export default function DefectiveGoodsPage() {
       setShowCreate(false);
       setForm({ product_name: '', defect_type: 'manufacturing', defect_severity: 'medium', description: '', quantity: 1, unit_cost: 0 });
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) { toast.error(errText(e) ||  'Error'); }
   };
 
   const createInspection = async (itemId, confirmed) => {

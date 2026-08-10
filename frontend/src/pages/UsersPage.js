@@ -72,7 +72,10 @@ export default function UsersPage() {
   const fetchUsers = async () => {
     try {
       const response = await apiClient.get(`/users`);
-      setUsers(response.data);
+      const filteredUsers = Array.isArray(response.data) 
+        ? response.data.filter(u => u.role !== 'super_admin' && u.role !== 'saas_admin')
+        : [];
+      setUsers(filteredUsers);
     } catch (error) {
       console.error('Error fetching users:', error);
       toast.error(t.somethingWentWrong);
@@ -398,3 +401,4 @@ export default function UsersPage() {
     </Layout>
   );
 }
+

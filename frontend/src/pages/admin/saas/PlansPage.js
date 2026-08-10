@@ -1,3 +1,4 @@
+import { errText } from '../../../lib/errorText';
 import { useEffect, useState } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { Layout } from '../../../components/Layout';
@@ -47,7 +48,7 @@ export default function PlansPage() {
       const res = await apiClient.get('/saas/plans?include_inactive=true');
       setPlans(res.data || []);
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل الخطط');
+      toast.error(errText(e) ||  'فشل تحميل الخطط');
     } finally {
       setLoading(false);
     }
@@ -85,7 +86,7 @@ export default function PlansPage() {
       setDialogOpen(false);
       await load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(e) ||  'حدث خطأ');
     }
   };
 
@@ -96,7 +97,7 @@ export default function PlansPage() {
       toast.success('تم حذف الخطة');
       await load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(e) ||  'حدث خطأ');
     }
   };
 

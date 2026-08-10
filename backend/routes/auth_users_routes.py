@@ -456,7 +456,11 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
 
     @router.get("/users", response_model=List[UserResponse])
     async def get_all_users(admin: dict = Depends(get_admin_user)):
-        users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+        # Hide super_admin users from everyone except super_admin itself
+        query = {"role": {"$ne": "super_admin"}, "user_type": {"$ne": "super_admin"}}
+        if admin.get("role") == "super_admin" or admin.get("user_type") == "super_admin":
+            query = {}
+        users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
         return [UserResponse(**u) for u in users]
 
     class UserCreateLocal(BaseModel):
@@ -564,3 +568,4 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
 
 
     return router
+

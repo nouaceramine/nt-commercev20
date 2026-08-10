@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
@@ -99,7 +100,7 @@ export default function SaleDetailDialog({
       toast.success(ar ? 'تم التحديث بنجاح' : 'Mis à jour avec succès');
       onUpdated?.();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (ar ? 'خطأ في التحديث' : 'Erreur'));
+      toast.error(errText(e) ||  (ar ? 'خطأ في التحديث' : 'Erreur'));
     } finally {
       setSaving(false);
     }
@@ -115,7 +116,7 @@ export default function SaleDetailDialog({
       onOpenChange(false);
       onUpdated?.();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (ar ? 'خطأ في الحذف' : 'Erreur de suppression'));
+      toast.error(errText(e) ||  (ar ? 'خطأ في الحذف' : 'Erreur de suppression'));
     } finally {
       setDeleting(false);
     }

@@ -3,6 +3,7 @@
  * Extracted from POSPage.js (Refactoring: Extract Hook)
  * Addresses: Large Class, Temporary Fields, Data Clumps
  */
+import { errText } from '../lib/errorText';
 import { useState, useCallback } from 'react';
 
 export function usePOSSession({ language, toast, apiClient }) {
@@ -104,7 +105,7 @@ export function usePOSSession({ language, toast, apiClient }) {
       setSessionStats({ cashSales: 0, creditSales: 0, totalSales: 0, salesCount: 0, todaySales: [] });
       toast.success(language === 'ar' ? 'تم فتح الحصة بنجاح' : 'Session ouverte avec succes');
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur s\'est produite'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur s\'est produite'));
     }
   }, [apiClient, openingCash, language, toast]);
 
@@ -125,7 +126,7 @@ export function usePOSSession({ language, toast, apiClient }) {
       setClosingNotes('');
       toast.success(language === 'ar' ? 'تم غلق الحصة بنجاح' : 'Session fermee avec succes');
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur s\'est produite'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur s\'est produite'));
     }
   }, [apiClient, currentSession, closingCash, closingNotes, language, toast]);
 

@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -81,7 +82,7 @@ export default function WalletPage() {
       setShowReqDialog(false); setReqAmount(''); setReqNote('');
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (isAr ? 'فشل إرسال الطلب' : 'Request failed'));
+      toast.error(errText(e) ||  (isAr ? 'فشل إرسال الطلب' : 'Request failed'));
     } finally { setBusy(false); }
   };
 
@@ -91,7 +92,7 @@ export default function WalletPage() {
       await apiClient.post(`/wallet/requests/${id}/approve`);
       toast.success(isAr ? 'تمت الموافقة' : 'Approved');
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'فشل' : 'Failed')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'فشل' : 'Failed')); }
     finally { setBusy(false); }
   };
 
@@ -101,7 +102,7 @@ export default function WalletPage() {
       await apiClient.post(`/wallet/requests/${id}/reject`, {});
       toast.success(isAr ? 'تم الرفض' : 'Rejected');
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'فشل' : 'Failed')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'فشل' : 'Failed')); }
     finally { setBusy(false); }
   };
 
@@ -111,7 +112,7 @@ export default function WalletPage() {
       const res = await apiClient.post('/wallet/pay-subscription');
       toast.success(`${isAr ? 'تم دفع الاشتراك' : 'Subscription paid'} (${res.data.amount?.toLocaleString()} DA)`);
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'فشل الدفع' : 'Payment failed')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'فشل الدفع' : 'Payment failed')); }
     finally { setBusy(false); }
   };
 
@@ -142,7 +143,7 @@ export default function WalletPage() {
       const res = await apiClient.post(`/wallet/services/${svc.id}/purchase`);
       toast.success(`${isAr ? 'تم شراء الخدمة' : 'Service purchased'} — ${isAr ? 'الرصيد' : 'Balance'}: ${(res.data.new_balance ?? 0).toLocaleString()} DA`);
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'فشل الشراء' : 'Purchase failed')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'فشل الشراء' : 'Purchase failed')); }
     finally { setBusy(false); }
   };
 
@@ -170,7 +171,7 @@ export default function WalletPage() {
       toast.success(isAr ? 'تم الحفظ' : 'Saved');
       setShowServiceDialog(false);
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'فشل الحفظ' : 'Save failed')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'فشل الحفظ' : 'Save failed')); }
     finally { setBusy(false); }
   };
 
@@ -181,7 +182,7 @@ export default function WalletPage() {
       await apiClient.delete(`/wallet/services/${svc.id}`);
       toast.success(isAr ? 'تم الحذف' : 'Deleted');
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || (isAr ? 'فشل الحذف' : 'Delete failed')); }
+    } catch (e) { toast.error(errText(e) ||  (isAr ? 'فشل الحذف' : 'Delete failed')); }
     finally { setBusy(false); }
   };
 

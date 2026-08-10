@@ -55,7 +55,7 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
                 {"id": str(uuid.uuid4()), "code": "EXP", "name_ar": "منتهي الصلاحية", "name_fr": "Expiré", "severity": "high"},
                 {"id": str(uuid.uuid4()), "code": "PKG", "name_ar": "عيب في التغليف", "name_fr": "Défaut d'emballage", "severity": "low"},
             ]
-            await db.defect_categories.insert_many(defaults)
+            await db.defect_categories.insert_many([dict(d) for d in defaults])
             return defaults
         return cats
 
@@ -91,8 +91,37 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
             "created_by": admin.get("name", admin.get("email", "")),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        # Auto-fill from product & deduct stock (المرحلة 8.2)
+        if data.product_id:
+            product = await db.products.find_one({"id": data.product_id}, {"_id": 0})
+            if product:
+                if not item.get("product_name"):
+                    item["product_name"] = product.get("name_ar") or product.get("name_en") or product.get("name", "")
+                if not data.unit_cost:
+                    item["unit_cost"] = product.get("purchase_price", 0)
+                    item["total_cost"] = data.quantity * item["unit_cost"]
+                stock_field = "quantity" if "quantity" in product else "stock"
+                await db.products.update_one({"id": data.product_id}, {"$inc": {stock_field: -data.quantity}})
+
         await db.defective_goods.insert_one(item)
         item.pop("_id", None)
+
+        # Record the loss as an expense
+        if item.get("total_cost", 0) > 0:
+            try:
+                await db.expenses.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "type": "defective_goods",
+                    "category": "منتجات معيبة",
+                    "amount": item["total_cost"],
+                    "description": f"خسارة منتج معيب: {item.get('product_name', '')} × {data.quantity}",
+                    "reference_type": "defective_goods",
+                    "reference_id": item["id"],
+                    "created_by": admin.get("name", ""),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
         return item
 
     @router.get("/goods")

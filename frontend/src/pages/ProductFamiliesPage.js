@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -103,7 +104,7 @@ export default function ProductFamiliesPage() {
       fetchFamilies();
     } catch (error) {
       console.error('Error saving family:', error);
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     }
   };
 

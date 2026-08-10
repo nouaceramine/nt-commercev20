@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -111,7 +112,7 @@ export default function DigitalServicesCatalogPage() {
       setDialogOpen(false);
       load();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل الحفظ' : 'Échec'));
+      toast.error(errText(err) ||  (ar ? 'فشل الحفظ' : 'Échec'));
     } finally {
       setSaving(false);
     }
@@ -125,7 +126,7 @@ export default function DigitalServicesCatalogPage() {
       setDeleteTarget(null);
       load();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل الحذف' : 'Échec'));
+      toast.error(errText(err) ||  (ar ? 'فشل الحذف' : 'Échec'));
     }
   };
 
@@ -137,7 +138,7 @@ export default function DigitalServicesCatalogPage() {
       load();
       loadPlatformCatalog();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'فشل شراء الباقة');
+      toast.error(errText(err) ||  'فشل شراء الباقة');
     } finally {
       setPurchasingId(null);
       setConfirmPurchase(null);

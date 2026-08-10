@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
@@ -239,7 +240,7 @@ export default function EditProductPage() {
       setNewFamily({ name: '' });
       toast.success(t.familyAdded);
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setAddingFamily(false);
     }
@@ -306,7 +307,7 @@ export default function EditProductPage() {
       setShowAddLotDialog(false);
       toast.success(language === 'ar' ? 'تمت إضافة الدُفعة' : 'Lot ajouté');
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setSavingLot(false);
     }
@@ -337,7 +338,7 @@ export default function EditProductPage() {
       setShowAddSupplierDialog(false);
       toast.success(language === 'ar' ? 'تم ربط المورد' : 'Fournisseur ajouté');
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setSavingSupplier(false);
     }
@@ -396,7 +397,7 @@ export default function EditProductPage() {
       toast.success(t.productUpdated);
       navigate(`/products/${id}`);
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setLoading(false);
     }

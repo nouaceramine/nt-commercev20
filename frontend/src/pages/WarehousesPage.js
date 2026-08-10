@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -130,7 +131,7 @@ export default function WarehousesPage() {
       setNewWarehouse({ name: '', address: '', phone: '', manager: '', notes: '', is_main: false });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -144,7 +145,7 @@ export default function WarehousesPage() {
       setEditingWarehouse(null);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -157,7 +158,7 @@ export default function WarehousesPage() {
       toast.success(language === 'ar' ? 'تم حذف المخزن' : 'Entrepôt supprimé');
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -179,7 +180,7 @@ export default function WarehousesPage() {
       setTransfer({ from_warehouse: '', to_warehouse: '', product_id: '', quantity: 1 });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 

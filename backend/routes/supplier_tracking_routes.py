@@ -84,8 +84,12 @@ def create_supplier_tracking_routes(db, get_current_user, get_tenant_admin) -> d
             "status": "pending",
             "total_amount": total,
             "created_by": admin.get("name", admin.get("email", "")),
+            "status_history": [{"status": "pending", "at": datetime.now(timezone.utc).isoformat(), "by": admin.get("name", "")}],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        supplier = await db.suppliers.find_one({"id": data.supplier_id}, {"_id": 0, "name": 1})
+        if supplier:
+            order["supplier_name"] = supplier.get("name", "")
         await db.supplier_goods_orders.insert_one(order)
         order.pop("_id", None)
         return order
@@ -103,11 +107,36 @@ def create_supplier_tracking_routes(db, get_current_user, get_tenant_admin) -> d
             query["supplier_id"] = supplier_id
         return await db.supplier_goods_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
+    ORDER_FLOW = ["pending", "confirmed", "shipped", "received", "cancelled"]
+
     @router.put("/orders/{order_id}")
     async def update_order(order_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
         data.pop("id", None)
         data.pop("order_number", None)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
+        data["updated_at"] = now
+        current = await db.supplier_goods_orders.find_one({"id": order_id}, {"_id": 0})
+        if not current:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        new_status = data.get("status")
+        if new_status and new_status != current.get("status"):
+            if new_status not in ORDER_FLOW:
+                raise HTTPException(status_code=400, detail="حالة غير صالحة")
+            data["status_history"] = (current.get("status_history") or []) + [
+                {"status": new_status, "at": now, "by": admin.get("name", "")}
+            ]
+            # عند الاستلام: إضافة الكميات إلى المخزون (المرحلة 9.2)
+            if new_status == "received" and current.get("status") != "received":
+                for it in current.get("items", []):
+                    pid, qty = it.get("product_id"), it.get("quantity", 0)
+                    if pid and qty:
+                        product = await db.products.find_one({"id": pid}, {"_id": 0})
+                        if product:
+                            field = "quantity" if "quantity" in product else "stock"
+                            upd = {"$inc": {field: qty}}
+                            if it.get("unit_price"):
+                                upd["$set"] = {"purchase_price": float(it["unit_price"])}
+                            await db.products.update_one({"id": pid}, upd)
         await db.supplier_goods_orders.update_one({"id": order_id}, {"$set": data})
         return await db.supplier_goods_orders.find_one({"id": order_id}, {"_id": 0})
 

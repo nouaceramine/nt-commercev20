@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -82,7 +83,7 @@ export default function SmartReportsPage() {
       await apiClient.put(`/smart-reports/settings`, reportSettings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue'));
     } finally {
       setSaving(false);
     }
@@ -96,7 +97,7 @@ export default function SmartReportsPage() {
       toast.success(language === 'ar' ? 'تم إرسال التقرير بنجاح' : 'Rapport envoyé avec succès');
       fetchSettings();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل إرسال التقرير' : 'Échec de l\'envoi du rapport'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل إرسال التقرير' : 'Échec de l\'envoi du rapport'));
     } finally {
       setSending(false);
     }

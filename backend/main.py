@@ -83,6 +83,15 @@ app = FastAPI(title="NT API")
 # Request Context Middleware
 from middleware.request_context import RequestContextMiddleware
 app.add_middleware(RequestContextMiddleware)
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://168.231.81.154", "http://168.231.81.154:8001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Structured logging
 from utils.logging_setup import setup_logging
@@ -129,6 +138,7 @@ from core.feature_flags import (
 
 # ============ IMPORT REFACTORED ROUTES ============
 from routes.saas_routes import get_super_admin
+from routes.auth_routes import router as auth_router
 from routes.audit_routes import router as audit_router
 from routes.monitoring_routes import router as monitoring_router
 from routes.alert_routes import router as alert_router
@@ -189,6 +199,7 @@ notification_service = NotificationService(main_db)
 sms_service = SMSService(main_db)
 email_service = EmailService()
 robot_manager = RobotManager(main_db, client, notification_service, sms_service, email_service)
+_set_robot_manager_in_diagnostics(robot_manager)
 
 # ============ IMPORT EXTRA MODELS ============
 from models.extra_schemas import (
@@ -375,14 +386,16 @@ async def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict
     return current_user
 
 async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    if not current_user.get("tenant_id"):
+    # Platform-level admins (main_db users) act on the main DB
+    if not current_user.get("tenant_id") and current_user.get("role") not in ["admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
-    if current_user.get("role") not in ["admin", "manager", "user", "tenant_admin"]:
+    if current_user.get("role") not in ["admin", "manager", "user", "tenant_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="صلاحيات غير كافية")
     return current_user
 
 async def require_tenant(current_user: dict = Depends(get_current_user)) -> dict:
-    if not current_user.get("tenant_id"):
+    # Platform-level users (admin/cashier/agent in main_db) operate on the main DB
+    if not current_user.get("tenant_id") and current_user.get("user_type") not in ("super_admin", "admin", "cashier", "agent"):
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
     return current_user
 
@@ -450,6 +463,14 @@ async def startup_event():
     except Exception:
         pass
 
+    # Start background robots (restored — removed during the Sections refactor)
+    try:
+        robot_manager.initialize()
+        asyncio.create_task(robot_manager.start_all())
+        logger.info("Robots initialized and starting")
+    except Exception as e:
+        logger.warning("Robots start: %s", e)
+
     try:
         from core.feature_flags import FeatureFlagManager, PLATFORM_FEATURES
         from utils.super_admin_seed import ensure_super_admin
@@ -459,6 +480,15 @@ async def startup_event():
         set_feature_flag_manager(ffm)
     except Exception as e:
         logger.warning("Feature flags: %s", e)
+
+    # Seed default data (customers/products/suppliers/employees/plans) on first run
+    try:
+        from seed_defaults import seed_default_data, seed_whatsapp_templates
+        seeded = await seed_default_data(main_db)
+        tpl_seeded = await seed_whatsapp_templates(main_db)
+        logger.info("Default data seed result: %s records, %s templates", seeded, tpl_seeded)
+    except Exception as exc:
+        logger.warning("Default data seed skipped: %s", exc)
 
     try:
         from services.sim_catalog_seed import seed_sim_catalog
@@ -599,6 +629,7 @@ install_motherboard(app, get_super_admin)
 try:
     from routes.health_routes import router as health_router
     app.include_router(health_router, prefix="/api", tags=["Health"])
+    app.include_router(auth_router, prefix="/api", tags=["Auth"])
 except ImportError:
     pass
 
@@ -718,30 +749,8 @@ try:
 except Exception as e:
     print(f"[INIT] Subscribers alias error: {e}")
 
-try:
-    from fastapi import APIRouter
-    recharge_fallback = APIRouter(prefix="/recharge", tags=["Recharge"])
+# recharge_fallback removed: it shadowed the real auto-registered GET /recharge list
 
-    @recharge_fallback.get("")
-    async def recharge_root():
-        return {"status": "available", "message": "Recharge service", "bridge_connected": False}
-
-    @recharge_fallback.get("/config")
-    async def recharge_config():
-        return {"enabled": True, "providers": ["djezzy", "ooredoo", "mobilis"], "bridge_status": "not_configured"}
-
-    @recharge_fallback.get("/stats")
-    async def recharge_stats():
-        return {"total_transactions": 0, "total_amount": 0, "status": "waiting_for_bridge"}
-
-    @recharge_fallback.get("/bridge/status")
-    async def bridge_status():
-        return {"connected": False, "status": "Bridge not configured"}
-
-    app.include_router(recharge_fallback, prefix="/api", tags=["Recharge"])
-    print("[INIT] Recharge fallback routes registered")
-except Exception as e:
-    print(f"[INIT] Recharge fallback error: {e}")
 
 try:
     from fastapi import APIRouter
@@ -991,3 +1000,635 @@ try:
 except Exception as _e:
     print(f"[INIT] Developer/Webhooks v2: {_e}")
 # ============ END ENHANCED ============
+# ============ LEGACY / SAAS ADMIN ROUTES (restored 2026-08-07) ============
+# These route modules existed in the codebase but were never registered after
+# the Sections refactor — causing 404s across the super-admin panel.
+try:
+    from routes.saas_routes import router as saas_admin_router
+    app.include_router(saas_admin_router, prefix="/api", tags=["SaaS Admin"])
+    print("[INIT] SaaS admin routes registered")
+except Exception as _e:
+    print(f"[INIT] SaaS admin routes: {_e}")
+
+try:
+    from routes.saas.commission_routes import router as saas_commission_router
+    app.include_router(saas_commission_router, prefix="/api", tags=["SaaS Commissions"])
+    print("[INIT] SaaS commission routes registered")
+except Exception as _e:
+    print(f"[INIT] SaaS commission routes: {_e}")
+
+try:
+    from routes.system_logs_routes import router as system_logs_router
+    app.include_router(system_logs_router, prefix="/api", tags=["System Logs"])
+    print("[INIT] System logs routes registered")
+except Exception as _e:
+    print(f"[INIT] System logs routes: {_e}")
+
+try:
+    from routes.system_sync_routes import router as system_sync_router
+    app.include_router(system_sync_router, prefix="/api", tags=["System Sync"])
+    print("[INIT] System sync routes registered (tenant-branding, system-updates)")
+except Exception as _e:
+    print(f"[INIT] System sync routes: {_e}")
+
+try:
+    from routes.families_permissions_routes import router as families_router
+    app.include_router(families_router, prefix="/api", tags=["Families"])
+    print("[INIT] Families routes registered")
+except Exception as _e:
+    print(f"[INIT] Families routes: {_e}")
+
+try:
+    from routes.products_routes import create_products_routes
+    legacy_products_router = create_products_routes(db, get_current_user, get_tenant_admin, require_tenant)
+    app.include_router(legacy_products_router, prefix="/api", tags=["Products"])
+    print("[INIT] Legacy products routes registered")
+except Exception as _e:
+    print(f"[INIT] Legacy products routes: {_e}")
+
+# Platform feature flags (restored from pre-Section-11 main.py)
+@app.get("/api/platform/features")
+async def list_platform_features(admin: dict = Depends(get_super_admin)) -> dict:
+    mgr = get_feature_flag_manager()
+    if mgr is None:
+        return {"features": [{**f, "enabled": f["default"]} for f in PLATFORM_FEATURES], "categories": CATEGORY_LABELS}
+    features = await mgr.get_all()
+    enabled = sum(1 for f in features if f["enabled"])
+    return {"features": features, "categories": CATEGORY_LABELS, "enabled_count": enabled, "total": len(features)}
+
+@app.post("/api/platform/features/{key}/toggle")
+async def toggle_platform_feature(key: str, admin: dict = Depends(get_super_admin)) -> dict:
+    mgr = get_feature_flag_manager()
+    if mgr is None:
+        raise HTTPException(status_code=503, detail="Feature flag manager not ready")
+    try:
+        new_state = await mgr.toggle(key)
+        return {"key": key, "enabled": new_state}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.post("/api/platform/features/{key}/set")
+async def set_platform_feature(key: str, enabled: bool, admin: dict = Depends(get_super_admin)) -> dict:
+    mgr = get_feature_flag_manager()
+    if mgr is None:
+        raise HTTPException(status_code=503, detail="Feature flag manager not ready")
+    try:
+        await mgr.set_flag(key, enabled)
+        return {"key": key, "enabled": enabled}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.get("/api/platform/features/public")
+async def get_public_features() -> dict:
+    mgr = get_feature_flag_manager()
+    if mgr is None:
+        return {"enabled": [f["key"] for f in PLATFORM_FEATURES if f["default"]]}
+    enabled_keys = await mgr.get_enabled_keys()
+    return {"enabled": enabled_keys}
+
+
+# ============ LEGACY ROUTES — round 2 (dashboard & wallet & POS settings) ============
+try:
+    from routes.pos_settings_routes import create_pos_settings_routes
+    pos_settings_router = create_pos_settings_routes(db, main_db, get_current_user, get_super_admin)
+    app.include_router(pos_settings_router, prefix="/api", tags=["POS Settings"])
+    print("[INIT] POS settings routes registered")
+except Exception as _e:
+    print(f"[INIT] POS settings routes: {_e}")
+
+try:
+    from routes.stats_routes import create_stats_routes
+    stats_router = create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, init_cash_boxes)
+    app.include_router(stats_router, prefix="/api", tags=["Stats"])
+    print("[INIT] Stats routes registered")
+except Exception as _e:
+    print(f"[INIT] Stats routes: {_e}")
+
+try:
+    from utils.permissions import create_cashier_block
+    from routes.wallet import (
+        create_wallet_core_routes, create_wallet_transactions_routes,
+        create_wallet_requests_routes, create_wallet_services_routes,
+    )
+    block_cashier = create_cashier_block(get_current_user)
+    app.include_router(create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_cashier), prefix="/api", tags=["Wallet"])
+    app.include_router(create_wallet_transactions_routes(main_db, get_current_user, get_super_admin, block_cashier), prefix="/api", tags=["Wallet"])
+    app.include_router(create_wallet_requests_routes(main_db, get_current_user, get_super_admin, block_cashier), prefix="/api", tags=["Wallet"])
+    app.include_router(create_wallet_services_routes(main_db, get_current_user, block_cashier), prefix="/api", tags=["Wallet"])
+    print("[INIT] Wallet routes registered")
+except Exception as _e:
+    print(f"[INIT] Wallet routes: {_e}")
+
+try:
+    from routes.notifications_routes import create_notifications_routes
+    notifications_router = create_notifications_routes(db, require_tenant, get_tenant_admin, get_current_user, DEFAULT_PERMISSIONS)
+    app.include_router(notifications_router, prefix="/api", tags=["Notifications"])
+    print("[INIT] Legacy notifications routes registered")
+except Exception as _e:
+    print(f"[INIT] Legacy notifications routes: {_e}")
+
+# Database import/export routes — frontend expects them under /api/saas/database/*
+try:
+    from routes.database_routes import router as database_io_router
+    app.include_router(database_io_router, prefix="/api/saas", tags=["Database IO"])
+    print("[INIT] Database IO routes registered at /api/saas/database")
+except Exception as _e:
+    print(f"[INIT] Database IO routes: {_e}")
+
+
+# init_default_data restored from git history (removed in Section-11 refactor)
+# Needed by routes.auth_users_routes factory.
+async def init_default_data(tenant_db) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    default_customer_family_id = "default-customer-family"
+    existing_cf = await tenant_db.customer_families.find_one({"id": default_customer_family_id})
+    if not existing_cf:
+        await tenant_db.customer_families.insert_one({
+            "id": default_customer_family_id,
+            "name": "عائلة زبائن متنوعة",
+            "name_fr": "Famille clients divers",
+            "description": "عائلة افتراضية للزبائن",
+            "discount": 0,
+            "created_at": now,
+            "updated_at": now
+        })
+    default_customer_id = "default-customer"
+    existing_c = await tenant_db.customers.find_one({"id": default_customer_id})
+    if not existing_c:
+        await tenant_db.customers.insert_one({
+            "id": default_customer_id,
+            "name": "زبون متنوع",
+            "name_fr": "Client divers",
+            "phone": "",
+            "email": "",
+            "address": "",
+            "family_id": default_customer_family_id,
+            "family_name": "عائلة زبائن متنوعة",
+            "balance": 0,
+            "total_purchases": 0,
+            "notes": "زبون افتراضي للمبيعات العامة",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_supplier_family_id = "default-supplier-family"
+    existing_sf = await tenant_db.supplier_families.find_one({"id": default_supplier_family_id})
+    if not existing_sf:
+        await tenant_db.supplier_families.insert_one({
+            "id": default_supplier_family_id,
+            "name": "عائلة مورد متنوع",
+            "name_fr": "Famille fournisseurs divers",
+            "description": "عائلة افتراضية للموردين",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_supplier_id = "default-supplier"
+    existing_s = await tenant_db.suppliers.find_one({"id": default_supplier_id})
+    if not existing_s:
+        await tenant_db.suppliers.insert_one({
+            "id": default_supplier_id,
+            "name": "مورد متنوع",
+            "name_fr": "Fournisseur divers",
+            "phone": "",
+            "email": "",
+            "address": "",
+            "family_id": default_supplier_family_id,
+            "family_name": "عائلة مورد متنوع",
+            "balance": 0,
+            "total_purchases": 0,
+            "notes": "مورد افتراضي للمشتريات العامة",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_product_family_id = "default-product-family"
+    existing_pf = await tenant_db.product_families.find_one({"id": default_product_family_id})
+    if not existing_pf:
+        await tenant_db.product_families.insert_one({
+            "id": default_product_family_id,
+            "name": "عائلة منتج متنوع",
+            "name_fr": "Famille produits divers",
+            "name_ar": "عائلة منتج متنوع",
+            "name_en": "Various Products Family",
+            "description": "عائلة افتراضية للمنتجات",
+            "description_ar": "عائلة افتراضية للمنتجات المتنوعة",
+            "description_en": "Default family for various products",
+            "parent_id": "",
+            "parent_name": "",
+            "image": "",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_product_id = "default-product"
+    existing_p = await tenant_db.products.find_one({"id": default_product_id})
+    if not existing_p:
+        await tenant_db.products.insert_one({
+            "id": default_product_id,
+            "name_ar": "منتج متنوع",
+            "name_en": "Produit divers",
+            "article_code": "DIVERS-001",
+            "barcode": "",
+            "family_id": default_product_family_id,
+            "family_name": "عائلة منتج متنوع",
+            "purchase_price": 0,
+            "wholesale_price": 0,
+            "retail_price": 0,
+            "quantity": 0,
+            "min_stock": 0,
+            "unit": "وحدة",
+            "description": "منتج افتراضي للمبيعات المتنوعة",
+            "supplier_id": default_supplier_id,
+            "supplier_name": "مورد متنوع",
+            "image": "",
+            "created_at": now,
+            "updated_at": now
+        })
+
+
+# ============ AUTO-REGISTER ALL REMAINING LEGACY ROUTE MODULES ============
+# The Sections refactor left most legacy route modules unregistered, causing
+# widespread 404s across the app. This block discovers each module's router
+# (module-level `router`, `create_*_routes(...)` or `build_*_router(...)`
+# factory) and registers it, matching factory parameters by name. Every
+# registration is isolated in try/except so one bad module can't break startup.
+import importlib as _importlib
+import inspect as _inspect
+
+try:
+    from utils.permissions import create_cashier_block as _mk_cashier_block
+    _auto_block_cashier = _mk_cashier_block(get_current_user)
+except Exception:
+    _auto_block_cashier = None
+
+_AUTO_REG_CTX = {
+    'app': app, 'db': db, 'main_db': main_db, 'client': client,
+    'get_current_user': get_current_user, 'get_admin_user': get_admin_user,
+    'get_tenant_admin': get_tenant_admin, 'require_tenant': require_tenant,
+    'get_super_admin': get_super_admin, 'require_permission': require_permission,
+    'init_cash_boxes': init_cash_boxes, 'DEFAULT_PERMISSIONS': DEFAULT_PERMISSIONS,
+    'block_cashier': _auto_block_cashier, 'CURRENCY': CURRENCY,
+    'RECHARGE_CONFIG': RECHARGE_CONFIG, 'RechargeCreate': RechargeCreate,
+    'RechargeResponse': RechargeResponse, 'get_tenant_db': get_tenant_db,
+    'robot_manager': robot_manager,
+    # extra deps for auth_users / ocr_invoice / utility factories
+    'hash_password': hash_password, 'verify_password': verify_password,
+    'create_access_token': create_access_token,
+    'init_tenant_database': init_tenant_database,
+    'init_default_data': init_default_data,
+    'SECRET_KEY': SECRET_KEY, 'ALGORITHM': ALGORITHM,
+    'ACCESS_TOKEN_EXPIRE_HOURS': ACCESS_TOKEN_EXPIRE_HOURS, 'security': security,
+    'UserCreate': UserCreate, 'UserLogin': UserLogin, 'UserUpdate': UserUpdate,
+    'UserResponse': UserResponse, 'TokenResponse': TokenResponse,
+    'PasswordUpdate': PasswordUpdate,
+    'ApiKeyCreate': ApiKeyCreate, 'ApiKeyResponse': ApiKeyResponse,
+    'ImageOCRRequest': ImageOCRRequest, 'OCRResponse': OCRResponse,
+    'generate_invoice_number': generate_invoice_number,
+    'PriceHistoryResponse': PriceHistoryResponse, 'limiter': limiter,
+}
+
+_AUTO_REG_MODULES = [
+    # ── module-level routers ──
+    'routes.accounting.accounting_routes',
+    'routes.ai.chat_routes',
+    'routes.banking_routes',
+    'routes.currency_routes',
+    'routes.settings_routes',
+    'routes.tax_routes',
+    'routes.whatsapp_routes',
+    'routes.performance_routes',
+    'routes.ecom_routes',
+    'routes.ecom.analytics_routes',
+    'routes.ecom.integrations_routes',
+    'routes.ecom.leads_routes',
+    'routes.ecom.orders_routes',
+    'routes.ecom.shipping_routes',
+    'routes.ecom.webhooks_routes',
+    # ── factory modules ──
+    'routes.advanced_sales_routes',
+    'routes.agent_hierarchy_routes',
+    'routes.ai_assistant_routes',
+    'routes.auth_users_routes',
+    'routes.cashbox_routes',
+    'routes.customer_debts_routes',
+    'routes.customers_routes',
+    'routes.daily_sessions_routes',
+    'routes.debts_routes',
+    'routes.defective_routes',
+    'routes.digital_panel_routes',
+    'routes.employees_routes',
+    'routes.expenses_routes',
+    'routes.import_export_routes',
+    'routes.installments_routes',
+    'routes.ocr_invoice_routes',
+    'routes.online_store_routes',
+    'routes.orders_routes',
+    'routes.permissions_routes',
+    'routes.printing_routes',
+    'routes.promotions_routes',
+    'routes.purchases_routes',
+    'routes.push_notification_routes',
+    'routes.repair_routes',
+    'routes.sales_routes',
+    'routes.security_routes',
+    'routes.sendgrid_email_routes',
+    'routes.sendgrid_integration_routes',
+    'routes.shipping_loyalty_routes',
+    'routes.smart_notifications_routes',
+    'routes.sms_marketing_routes',
+    'routes.stripe_routes',
+    'routes.supplier_tracking_routes',
+    'routes.suppliers_routes',
+    'routes.task_chat_routes',
+    'routes.utility_routes',
+    'routes.warehouse_core_routes',
+    'routes.whatsapp_integration_routes',
+    'routes.yalidine_integration_routes',
+    # ── recharge package (build_*_router factories) ──
+    'routes.recharge.bridge_routes',
+    'routes.recharge.core_routes',
+    'routes.recharge.delivery_settings_routes',
+    'routes.recharge.idoom_routes',
+    'routes.recharge.sim_routes',
+    # ── saas extras not covered by the aggregate router ──
+    'routes.saas.event_bus_routes',
+    'routes.saas.supplier_routes',
+    'routes.saas.platform_finance_routes',
+    # ── round 4: previously unregistered modules ──
+    'routes.backup_routes',
+    'routes.ad_webhooks_routes',
+    'routes.digital_services_routes',
+    'routes.activity_routes',
+    'routes.testimonials_routes',
+    'routes.twofa_routes',
+    'routes.suppliers_core_routes',
+    'routes.system_errors',
+    'routes.wallet.wallet_billing_routes',
+]
+
+for _mod_path in _AUTO_REG_MODULES:
+    try:
+        _m = _importlib.import_module(_mod_path)
+        if _mod_path == 'routes.system_errors' and hasattr(_m, 'init_routes'):
+            _m.init_routes(main_db)
+        _router = getattr(_m, 'router', None)
+        if _router is not None and len(getattr(_router, 'routes', [])) == 0:
+            _router = None  # empty module-level placeholder — use the factory instead
+        if _router is None:
+            _factory = None
+            for _n in dir(_m):
+                if (_n.startswith('create_') and _n.endswith('_routes')) or (_n.startswith('build_') and _n.endswith('_router')):
+                    _factory = getattr(_m, _n)
+                    break
+            _factories = []
+            for _n in dir(_m):
+                if (_n.startswith('create_') and _n.endswith('_routes')) or (_n.startswith('build_') and _n.endswith('_router')):
+                    _factories.append(getattr(_m, _n))
+            if not _factories:
+                raise RuntimeError('no router or factory found')
+            _router = []
+            for _factory in _factories:
+                _sig = _inspect.signature(_factory)
+                _kwargs = {}
+                _missing = []
+                for _pn, _pp in _sig.parameters.items():
+                    if _pn in _AUTO_REG_CTX and _AUTO_REG_CTX[_pn] is not None:
+                        _kwargs[_pn] = _AUTO_REG_CTX[_pn]
+                    elif _pp.default is _pp.empty:
+                        _missing.append(_pn)
+                if _missing:
+                    print(f'[INIT] factory skip {_mod_path}.{_factory.__name__}: missing {_missing}')
+                    continue
+                _router.append(_factory(**_kwargs))
+            if not _router:
+                raise RuntimeError('all factories skipped')
+        if isinstance(_router, dict):
+            for _sub in _router.values():
+                app.include_router(_sub, prefix='/api')
+        elif isinstance(_router, list):
+            for _sub in _router:
+                if isinstance(_sub, dict):
+                    for _sub2 in _sub.values():
+                        app.include_router(_sub2, prefix='/api')
+                else:
+                    app.include_router(_sub, prefix='/api')
+        else:
+            app.include_router(_router, prefix='/api')
+        print(f'[INIT] auto-registered {_mod_path}')
+    except Exception as _e:
+        print(f'[INIT] AUTO-SKIP {_mod_path}: {_e}')
+
+
+# ============ ROUND 4: RESTORED & MISSING ENDPOINTS ============
+try:
+    block_cashier
+except NameError:
+    block_cashier = create_cashier_block(get_current_user)
+
+# ── Robot API (restored from git history e825d32) ──
+robot_router = APIRouter(prefix="/robots", tags=["robots"])
+
+@robot_router.get("/status")
+async def get_robot_status(user: dict = Depends(block_cashier)) -> dict:
+    return robot_manager.get_status()
+
+@robot_router.post("/restart/{robot_name}")
+async def restart_robot(robot_name: str, user: dict = Depends(block_cashier)) -> dict:
+    success = await robot_manager.restart_robot(robot_name)
+    if success:
+        return {"message": f"تم اعادة تشغيل روبوت {robot_name}"}
+    raise HTTPException(status_code=404, detail="الروبوت غير موجود")
+
+@robot_router.post("/run/{robot_name}")
+async def run_robot_once(robot_name: str, user: dict = Depends(block_cashier)) -> dict:
+    result = await robot_manager.run_robot_once(robot_name)
+    if result is not None:
+        return {"message": f"تم تشغيل {robot_name} بنجاح", "stats": result}
+    raise HTTPException(status_code=404, detail="الروبوت غير موجود")
+
+@robot_router.post("/stop-all")
+async def stop_all_robots(user: dict = Depends(block_cashier)) -> dict:
+    await robot_manager.stop_all()
+    return {"message": "تم ايقاف جميع الروبوتات"}
+
+@robot_router.post("/start-all")
+async def start_all_robots(user: dict = Depends(block_cashier)) -> dict:
+    asyncio.create_task(robot_manager.start_all())
+    return {"message": "تم بدء تشغيل جميع الروبوتات"}
+
+@robot_router.get("/history")
+async def get_robot_history(robot: str = None, limit: int = 20, user: dict = Depends(block_cashier)) -> dict:
+    runs = await robot_manager.get_history(robot=robot, limit=min(limit, 100))
+    return {"runs": runs, "total": len(runs)}
+
+@robot_router.post("/interval/{robot_name}")
+async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(block_cashier)) -> dict:
+    interval = body.get("interval_seconds")
+    if not isinstance(interval, (int, float)) or interval < 60:
+        raise HTTPException(status_code=400, detail="interval_seconds يجب أن يكون >= 60")
+    ok = await robot_manager.set_interval(robot_name, int(interval))
+    if not ok:
+        raise HTTPException(status_code=404, detail="الروبوت غير موجود")
+    return {"message": f"تم تحديث الفترة الزمنية لـ {robot_name} إلى {interval} ثانية"}
+
+app.include_router(robot_router, prefix="/api")
+
+
+# ── Advanced Dashboard endpoints ──
+@app.get("/api/dashboard/advanced-stats")
+async def dashboard_advanced_stats(user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    week_start = (now - timedelta(days=7)).isoformat()
+    month_start = (now - timedelta(days=30)).isoformat()
+
+    async def _sum_sales(since):
+        agg = await db.sales.aggregate([
+            {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "returned"}}},
+            {"$group": {"_id": None, "total": {"$sum": "$total"}}},
+        ]).to_list(1)
+        return agg[0]["total"] if agg else 0
+
+    low_stock = await db.products.count_documents({"$expr": {"$lte": ["$stock", {"$ifNull": ["$min_stock", 5]}]}})
+    debts_agg = await db.debts.aggregate([
+        {"$match": {"remaining_amount": {"$gt": 0}}},
+        {"$group": {"_id": None, "total": {"$sum": "$remaining_amount"}}},
+    ]).to_list(1)
+    return {
+        "todaySales": await _sum_sales(today_start),
+        "weekSales": await _sum_sales(week_start),
+        "monthSales": await _sum_sales(month_start),
+        "totalProducts": await db.products.count_documents({}),
+        "lowStockCount": low_stock,
+        "pendingDebts": debts_agg[0]["total"] if debts_agg else 0,
+        "activeCustomers": await db.customers.count_documents({}),
+    }
+
+@app.get("/api/dashboard/sales-chart")
+async def dashboard_sales_chart(user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    results = []
+    ar_days = ["أحد", "اثنين", "ثلا", "أرب", "خمي", "جمع", "سبت"]
+    for i in range(6, -1, -1):
+        day = now - timedelta(days=i)
+        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        day_end = (day + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        agg = await db.sales.aggregate([
+            {"$match": {"created_at": {"$gte": day_start, "$lt": day_end}, "status": {"$ne": "returned"}}},
+            {"$group": {"_id": None, "sales": {"$sum": "$total"}, "orders": {"$sum": 1}}},
+        ]).to_list(1)
+        row = agg[0] if agg else {"sales": 0, "orders": 0}
+        results.append({
+            "name": ar_days[(day.weekday() + 1) % 7],
+            "sales": row["sales"],
+            "orders": row["orders"],
+            "expenses": 0,
+        })
+    return results
+
+@app.get("/api/dashboard/alerts")
+async def dashboard_alerts(user: dict = Depends(get_current_user)):
+    alerts = []
+    low_stock = await db.products.find(
+        {"$expr": {"$lte": ["$stock", {"$ifNull": ["$min_stock", 5]}]}},
+        {"_id": 0, "name": 1, "stock": 1},
+    ).limit(10).to_list(10)
+    for p in low_stock:
+        alerts.append({
+            "id": f"stock-{p.get('name', '')}",
+            "type": "low_stock",
+            "message": f"المنتج {p.get('name', '')} منخفض المخزون ({p.get('stock', 0)})",
+            "priority": "high",
+        })
+    overdue = await db.debts.count_documents({"remaining_amount": {"$gt": 0}})
+    if overdue:
+        alerts.append({"id": "debts", "type": "debt", "message": f"{overdue} ديون غير مسددة", "priority": "medium"})
+    return alerts
+
+
+# ── Defective products aliases (frontend uses /defective-products) ──
+@app.get("/api/defective-products")
+async def defective_products_list(user: dict = Depends(get_current_user)):
+    return await db.defective_goods.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+@app.get("/api/defective-products/stats")
+async def defective_products_stats(user: dict = Depends(get_current_user)):
+    total = await db.defective_goods.count_documents({})
+    pending = await db.defective_goods.count_documents({"status": "pending_inspection"})
+    confirmed = await db.defective_goods.count_documents({"status": "confirmed_defective"})
+    returned = await db.supplier_returns.count_documents({})
+    disposed = await db.disposal_records.count_documents({})
+    cost_agg = await db.defective_goods.aggregate([{"$group": {"_id": None, "total": {"$sum": "$total_cost"}}}]).to_list(1)
+    return {
+        "total_defective": total,
+        "pending_inspection": pending,
+        "confirmed_defective": confirmed,
+        "total_returns": returned,
+        "total_disposals": disposed,
+        "total_cost": cost_agg[0]["total"] if cost_agg else 0,
+    }
+
+@app.post("/api/defective-products")
+async def defective_products_create(data: dict, user: dict = Depends(get_current_user)):
+    doc = dict(data)
+    doc.setdefault("id", str(uuid.uuid4()))
+    doc.setdefault("status", "pending_inspection")
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["created_by"] = user.get("name", "")
+    await db.defective_goods.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+@app.put("/api/defective-products/{item_id}")
+async def defective_products_update(item_id: str, data: dict, user: dict = Depends(get_current_user)):
+    updates = {k: v for k, v in data.items() if k not in ("id", "_id")}
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.defective_goods.update_one({"id": item_id}, {"$set": updates})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="العنصر غير موجود")
+    return await db.defective_goods.find_one({"id": item_id}, {"_id": 0})
+
+@app.delete("/api/defective-products/{item_id}")
+async def defective_products_delete(item_id: str, user: dict = Depends(get_current_user)):
+    res = await db.defective_goods.delete_one({"id": item_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="العنصر غير موجود")
+    return {"message": "تم الحذف"}
+
+
+# ── Misc aliases ──
+@app.get("/api/cash/accounts")
+async def cash_accounts_alias(user: dict = Depends(get_current_user)):
+    return await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
+
+@app.get("/api/recharges")
+async def recharges_list_alias(limit: int = 100, user: dict = Depends(get_current_user)):
+    return await db.recharges.find({}, {"_id": 0}).sort("created_at", -1).limit(min(limit, 1000)).to_list(min(limit, 1000))
+
+@app.put("/api/repairs/{repair_id}")
+async def repair_update_alias(repair_id: str, data: dict, user: dict = Depends(get_current_user)):
+    ticket = await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+    old_status = ticket.get("status")
+    new_status = data.get("status", old_status)
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {k: v for k, v in data.items() if k not in ["id", "ticket_number"]}
+    updates["updated_at"] = now
+    if new_status != old_status:
+        if new_status == "diagnosed":
+            updates["diagnosed_at"] = now
+        elif new_status == "repaired":
+            updates["repaired_at"] = now
+        elif new_status == "delivered":
+            updates["delivered_at"] = now
+        await db.repair_history.insert_one({
+            "id": str(uuid.uuid4()),
+            "repair_ticket_id": repair_id,
+            "old_status": old_status,
+            "new_status": new_status,
+            "changed_by": user.get("name", ""),
+            "notes": data.get("notes", ""),
+            "created_at": now,
+        })
+    await db.repair_tickets.update_one({"id": repair_id}, {"$set": updates})
+    return await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
+
+# ============ END ROUND 4 ============

@@ -1,3 +1,4 @@
+import { errText } from '../../../lib/errorText';
 import { useEffect, useState } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { Layout } from '../../../components/Layout';
@@ -35,7 +36,7 @@ export default function TenantDebtsPage() {
       setDebts(res.data?.items || []);
       setSummary(res.data?.summary || { total_tenants_with_debt: 0, total_debt: 0, overdue_subscriptions: 0 });
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل ديون التجار');
+      toast.error(errText(e) ||  'فشل تحميل ديون التجار');
     } finally {
       setLoading(false);
     }
@@ -54,7 +55,7 @@ export default function TenantDebtsPage() {
       }
       await load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل إرسال التذكير');
+      toast.error(errText(e) ||  'فشل إرسال التذكير');
     } finally {
       setRemindingId(null);
     }
@@ -103,7 +104,7 @@ export default function TenantDebtsPage() {
       setSettleTenant(null);
       await load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تسديد الدين');
+      toast.error(errText(e) ||  'فشل تسديد الدين');
     } finally {
       setSettleBusy(false);
     }

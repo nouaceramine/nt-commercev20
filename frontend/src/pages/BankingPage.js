@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -75,7 +76,7 @@ export default function BankingPage() {
       setTxForm({ bank_account_id: '', type: 'deposit', amount: 0, description: '', reference: '', category: '' });
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ');
+      toast.error(errText(err) ||  'خطأ');
     }
   };
 

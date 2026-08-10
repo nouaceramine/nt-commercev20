@@ -1,48 +1,50 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: ntcommerce-backend-1
     ports:
       - "8001:8001"
+    env_file:
+      - .env
     environment:
-      - MONGO_URL=mongodb://mongo:27017
-      - DB_NAME=nt_commerce
-    depends_on:
-      - mongo
-      - redis
+      - MONGO_URL=mongodb://mongodb:27017/ntcommerce
+      - DB_NAME=ntcommerce
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - ./backend:/app
     restart: unless-stopped
+    networks:
+      - ntcommerce
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - REACT_APP_BACKEND_URL=http://localhost:8001
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-  mongo:
-    image: mongo:7
+  mongodb:
+    image: mongo:7.0
+    container_name: ntcommerce-mongodb
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db
+      - mongodb_data:/data/db
     restart: unless-stopped
+    networks:
+      - ntcommerce
 
   redis:
     image: redis:7-alpine
+    container_name: ntcommerce-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
+    networks:
+      - ntcommerce
 
 volumes:
-  mongo_data:
+  mongodb_data:
   redis_data:
+
+networks:
+  ntcommerce:
+    driver: bridge

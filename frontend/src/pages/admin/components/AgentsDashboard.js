@@ -2,6 +2,7 @@
  * AgentsDashboard - Enhanced Agents Management Component
  * Features: Charts, Advanced Filtering, Performance Reports, Commission System, Notifications
  */
+import { errText } from '../../../lib/errorText';
 import { useState, useEffect, useMemo } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { formatShortDate } from '../../../utils/globalDateFormatter';
@@ -259,7 +260,7 @@ export const AgentsDashboard = () => {
       setAgentDialogOpen(false);
       fetchAgents();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(error) ||  'حدث خطأ');
     }
   };
 
@@ -271,7 +272,7 @@ export const AgentsDashboard = () => {
       toast.success('تم حذف الوكيل');
       fetchAgents();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(error) ||  'حدث خطأ');
     }
   };
 
@@ -302,7 +303,7 @@ export const AgentsDashboard = () => {
       setPaymentDialogOpen(false);
       fetchAgents();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(error) ||  'حدث خطأ');
     }
   };
 

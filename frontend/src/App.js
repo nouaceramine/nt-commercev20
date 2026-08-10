@@ -99,6 +99,11 @@ import EcomHubPage from "./pages/ecom/EcomHubPage";
 import EcomChannelsPage from "./pages/ecom/EcomChannelsPage";
 import EcomGuidePage from "./pages/ecom/EcomGuidePage";
 import EcomAnalyticsPage from "./pages/ecom/EcomAnalyticsPage";
+import EcomStoreTab from "./pages/ecom/EcomStoreTab";
+import DigitalServicesPage from "./pages/digital/DigitalServicesPage";
+import DigitalAdminPage from "./pages/digital/DigitalAdminPage";
+import EcomAdsTab from "./pages/ecom/EcomAdsTab";
+import EcomShippingTab from "./pages/ecom/EcomShippingTab";
 
 // AI & Smart Accounting Pages
 import SmartDashboardPage from "./pages/SmartDashboardPage";
@@ -267,6 +272,35 @@ const HomeRouter = () => {
   );
 };
 
+
+// /dashboard route: role-based dashboard entry point.
+// Previously this path did not exist, so post-login redirects to /dashboard
+// fell into the catch-all "*" route and bounced users back to "/".
+const DashboardRouter = () => {
+  const { isAuthenticated, loading, isSuperAdmin, isAgent, isTenant } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/portal" replace />;
+  }
+  if (isSuperAdmin) return <Navigate to="/saas-admin" replace />;
+  if (isAgent) return <Navigate to="/agent/dashboard" replace />;
+  if (isTenant) return <Navigate to="/tenant/dashboard" replace />;
+  // admin / cashier / demo → main dashboard
+  return (
+    <ProtectedRoute>
+      <DashboardPage />
+    </ProtectedRoute>
+  );
+};
+
 function AppRoutes() {
   return (
     <Routes>
@@ -283,6 +317,7 @@ function AppRoutes() {
       <Route path="/agent-login" element={<Navigate to="/portal" replace />} />
       
       {/* Agent Dashboard */}
+      <Route path="/dashboard" element={<DashboardRouter />} />
       <Route path="/agent/dashboard" element={<AgentDashboardPage />} />
 
       {/* Tenant Dashboard */}
@@ -331,6 +366,30 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/ecom-hub/store"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomStoreTab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/ads"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomAdsTab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/shipping"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomShippingTab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/ecom-hub/guide"
         element={
           <ProtectedRoute featureKey="ecommerce_hub">
@@ -343,6 +402,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="ecommerce_hub">
             <EcomAnalyticsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/digital-services"
+        element={
+          <ProtectedRoute>
+            <DigitalServicesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/digital-admin"
+        element={
+          <ProtectedRoute>
+            <DigitalAdminPage />
           </ProtectedRoute>
         }
       />

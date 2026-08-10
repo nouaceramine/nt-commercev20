@@ -726,6 +726,10 @@ async def notify_repair_status_change(repair_id: str, user: dict = Depends(requi
     if not repair:
         repair = await db.repairs.find_one({"ticket_number": repair_id}, {"_id": 0})
     if not repair:
+        repair = await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
+    if not repair:
+        repair = await db.repair_tickets.find_one({"ticket_number": repair_id}, {"_id": 0})
+    if not repair:
         raise HTTPException(status_code=404, detail="طلب الصيانة غير موجود")
 
     settings = await db.whatsapp_settings.find_one({}, {"_id": 0})

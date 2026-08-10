@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -103,7 +104,7 @@ export default function IdoomServicePage() {
       setSelectedDenom(null);
       loadStats();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'لا توجد أكواد متاحة' : 'Aucun code disponible'));
+      toast.error(errText(err) ||  (ar ? 'لا توجد أكواد متاحة' : 'Aucun code disponible'));
     } finally {
       setSelling(false);
     }
@@ -136,7 +137,7 @@ export default function IdoomServicePage() {
       setUploadFile(null);
       loadStats();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل الرفع' : 'Échec import'));
+      toast.error(errText(err) ||  (ar ? 'فشل الرفع' : 'Échec import'));
     } finally {
       setUploading(false);
     }

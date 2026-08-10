@@ -1,6 +1,7 @@
 /**
  * AgentTenantsDialog - Assign tenants to an agent
  */
+import { errText } from '../../../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { Button } from '../../../components/ui/button';
@@ -65,7 +66,7 @@ export function AgentTenantsDialog({ open, onOpenChange, agent, onSaved }) {
       onSaved?.();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(err) ||  'حدث خطأ');
     }
     setSaving(false);
   };

@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -121,7 +122,7 @@ export default function InstallmentsPage() {
       setPayDialog(null);
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Erreur'));
+      toast.error(errText(e) ||  (language === 'ar' ? 'حدث خطأ' : 'Erreur'));
     } finally {
       setPaying(false);
     }

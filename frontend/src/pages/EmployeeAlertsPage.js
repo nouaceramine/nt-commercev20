@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -110,7 +111,7 @@ export default function EmployeeAlertsPage() {
       setEditDialogOpen(false);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Erreur'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'حدث خطأ' : 'Erreur'));
     } finally {
       setSaving(false);
     }

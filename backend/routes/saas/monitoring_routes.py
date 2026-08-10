@@ -256,8 +256,14 @@ async def list_health_alerts(
     """Recent health alerts (most recent first). Lightweight projection."""
     rows = await main_db.platform_alerts.find(
         {"kind": "health_score"},
-        {"_id": 0, "metrics_snapshot": 0},
+        {"metrics_snapshot": 0},
     ).sort("created_at", -1).limit(max(1, min(limit, 200))).to_list(200)
+    # Expose the Mongo _id as a string so the frontend can resolve alerts
+    # (previously _id was projected out and the UI fell back to created_at,
+    # producing POST .../resolve 404s).
+    for _row in rows:
+        if "_id" in _row:
+            _row["id"] = str(_row.pop("_id"))
     open_count = await main_db.platform_alerts.count_documents(
         {"kind": "health_score", "resolved_at": None}
     )

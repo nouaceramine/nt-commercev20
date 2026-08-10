@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -75,7 +76,7 @@ export default function CashManagementPage() {
       setTransferData({ from_box: '', to_box: '', amount: '' });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 

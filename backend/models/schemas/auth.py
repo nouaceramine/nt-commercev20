@@ -35,6 +35,15 @@ class UserResponse(BaseModel):
     features: Optional[dict] = None
     limits: Optional[dict] = None
     created_at: Optional[str] = None
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _coerce_created_at(cls, v):
+        # Some legacy user docs store created_at as a BSON datetime
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return v
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

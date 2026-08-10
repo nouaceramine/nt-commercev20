@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -115,7 +116,7 @@ export default function CustomerFamiliesPage() {
       }
       fetchFamilies();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 
@@ -129,7 +130,7 @@ export default function CustomerFamiliesPage() {
       setDeletingFamily(null);
       fetchFamilies();
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
 

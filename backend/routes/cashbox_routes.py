@@ -5,6 +5,7 @@ Cash box management, transfers, adjustments, transactions
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone
+from pydantic import BaseModel
 import uuid
 
 
@@ -18,8 +19,14 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         await init_cash_boxes()
         return await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
 
+    class TransferBody(BaseModel):
+        from_box: str
+        to_box: str
+        amount: float
+
     @router.post("/cash-boxes/transfer")
-    async def transfer_between_boxes(from_box: str, to_box: str, amount: float, admin: dict = Depends(require_permission("pos"))):
+    async def transfer_between_boxes(body: TransferBody, admin: dict = Depends(require_permission("pos"))):
+        from_box, to_box, amount = body.from_box, body.to_box, body.amount
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
         from_cash_box = await db.cash_boxes.find_one({"id": from_box})

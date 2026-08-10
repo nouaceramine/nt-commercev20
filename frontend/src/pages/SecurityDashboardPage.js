@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -53,7 +54,7 @@ export default function SecurityDashboardPage() {
       setShowBlockIP(false);
       setIpForm({ ip_address: '', reason: '', duration_hours: 24 });
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error'); }
+    } catch (e) { toast.error(errText(e) ||  'Error'); }
   };
 
   const unblockIP = async (id) => {

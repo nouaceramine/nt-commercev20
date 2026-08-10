@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -182,7 +183,7 @@ export default function CustomerDebtsPage() {
       fetchDebtsSummary();
     } catch (error) {
       console.error('Error paying debt:', error);
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setSubmitting(false);
     }
@@ -303,8 +304,8 @@ export default function CustomerDebtsPage() {
     switch (sortBy) {
       case 'debt_desc': return b.total_debt - a.total_debt;
       case 'debt_asc': return a.total_debt - b.total_debt;
-      case 'name_asc': return a.customer_name.localeCompare(b.customer_name);
-      case 'name_desc': return b.customer_name.localeCompare(a.customer_name);
+      case 'name_asc': return (a.customer_name || '').localeCompare(b.customer_name || '');
+      case 'name_desc': return (b.customer_name || '').localeCompare(a.customer_name || '');
       case 'sales_desc': return b.sales_count - a.sales_count;
       default: return 0;
     }

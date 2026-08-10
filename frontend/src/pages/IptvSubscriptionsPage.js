@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -136,7 +137,7 @@ export default function IptvSubscriptionsPage() {
       setDialogOpen(false);
       load();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل الحفظ' : 'Échec'));
+      toast.error(errText(err) ||  (ar ? 'فشل الحفظ' : 'Échec'));
     } finally {
       setSaving(false);
     }
@@ -150,7 +151,7 @@ export default function IptvSubscriptionsPage() {
       setDeleteTarget(null);
       load();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (ar ? 'فشل الحذف' : 'Échec'));
+      toast.error(errText(err) ||  (ar ? 'فشل الحذف' : 'Échec'));
     }
   };
 

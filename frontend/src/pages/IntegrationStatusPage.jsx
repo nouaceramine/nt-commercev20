@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -8,6 +9,8 @@ import { CreditCard, Mail, MessageSquare, Truck, Bell, CheckCircle, AlertCircle 
 const API = process.env.REACT_APP_BACKEND_URL;
 
 export default function IntegrationStatusPage() {
+  const location = useLocation();
+  const isYalidinePage = location.pathname.includes('yalidine');
   const { language } = useLanguage();
   const [statuses, setStatuses] = useState({});
   const [loading, setLoading] = useState(true);
@@ -61,7 +64,7 @@ export default function IntegrationStatusPage() {
     <div className="space-y-6" data-testid="integration-status-page">
       <div>
         <h1 className="text-2xl font-bold" data-testid="integration-status-title">
-          {language === 'ar' ? 'حالة التكاملات' : 'Integration Status'}
+          {isYalidinePage ? (language === 'ar' ? 'تكامل Yalidine' : 'Yalidine Integration') : (language === 'ar' ? 'حالة التكاملات' : 'Integration Status')}
         </h1>
         <p className="text-muted-foreground mt-1">
           {language === 'ar' ? 'إدارة ومراقبة جميع التكاملات الخارجية' : 'Manage and monitor all external integrations'}

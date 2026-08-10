@@ -1,3 +1,4 @@
+import { errText } from '../../../lib/errorText';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { Layout } from '../../../components/Layout';
@@ -29,7 +30,7 @@ export default function AuditTimelinePage() {
       setEvents(res.data?.events || []);
       setSummary(res.data?.summary || { total: 0, by_type: {} });
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'فشل تحميل سجل التدقيق');
+      toast.error(errText(e) ||  'فشل تحميل سجل التدقيق');
     } finally {
       setLoading(false);
     }

@@ -50,6 +50,7 @@ def create_currency_routes(db, get_current_user) -> dict:
     from utils.permissions import create_cashier_block
     block_cashier = create_cashier_block(get_current_user)
 
+    @router.get("")
     @router.get("/")
     async def get_currencies(current_user: dict = Depends(block_cashier)):
         """Get all currencies with exchange rates"""

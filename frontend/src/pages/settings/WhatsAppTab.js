@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -22,7 +23,7 @@ export default function WhatsAppTab({ initialSettings }) {
       
       await apiClient.put(`/whatsapp/settings`, settings);
       toast.success(language === 'ar' ? 'تم حفظ إعدادات WhatsApp' : 'Paramètres WhatsApp enregistrés');
-    } catch (error) { toast.error(error.response?.data?.detail || 'Error'); }
+    } catch (error) { toast.error(errText(error) ||  'Error'); }
     finally { setSaving(false); }
   };
 

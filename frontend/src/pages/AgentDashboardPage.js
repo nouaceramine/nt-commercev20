@@ -2,6 +2,7 @@
  * AgentDashboardPage - Enhanced Agent Portal
  * Features: Performance Charts, Subscriber Management, Transaction History, Notifications
  */
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
@@ -257,7 +258,7 @@ export default function AgentDashboardPage() {
       setWithdrawAmount(''); setWithdrawBankDetails(''); setWithdrawNote('');
       fetchCommissions();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل إرسال الطلب');
+      toast.error(errText(error) ||  'فشل إرسال الطلب');
     } finally { setWithdrawBusy(false); }
   };
 
@@ -271,7 +272,7 @@ export default function AgentDashboardPage() {
       setTopupDialogOpen(false); setTopupAmount(''); setTopupNote('');
       fetchWallet();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل إرسال الطلب');
+      toast.error(errText(error) ||  'فشل إرسال الطلب');
     } finally { setWalletBusy(false); }
   };
 
@@ -282,7 +283,7 @@ export default function AgentDashboardPage() {
       toast.success('تمت الموافقة على الطلب');
       fetchWallet();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل تنفيذ العملية');
+      toast.error(errText(error) ||  'فشل تنفيذ العملية');
     } finally { setWalletBusy(false); }
   };
 
@@ -293,7 +294,7 @@ export default function AgentDashboardPage() {
       toast.success('تم رفض الطلب');
       fetchWallet();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'فشل تنفيذ العملية');
+      toast.error(errText(error) ||  'فشل تنفيذ العملية');
     } finally { setWalletBusy(false); }
   };
 
@@ -340,7 +341,7 @@ export default function AgentDashboardPage() {
       fetchDashboard();
       fetchAllTenants();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'حدث خطأ');
+      toast.error(errText(error) ||  'حدث خطأ');
     }
   };
 

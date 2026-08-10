@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -120,7 +121,7 @@ export default function DataImportExportPage() {
       setImportFile(null);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الاستيراد' : 'Import failed'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الاستيراد' : 'Import failed'));
     } finally {
       setImporting(null);
     }

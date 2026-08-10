@@ -29,6 +29,25 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         notes: Optional[str] = None
 
     # ── Create Purchase ──
+    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True):
+        # sign=+1 confirm stock, sign=-1 reverse
+        for item in items:
+            pid = item.get("product_id")
+            qty = item.get("quantity", 0)
+            if not pid or not qty:
+                continue
+            product = await db.products.find_one({"id": pid})
+            if not product:
+                continue
+            updates = {"$inc": {"quantity": sign * qty}}
+            if sign > 0 and sync_prices:
+                set_fields = {"purchase_price": float(item.get("unit_price", 0) or 0), "updated_at": now}
+                sp = item.get("selling_price")
+                if sp is not None and sp > 0:
+                    set_fields["selling_price"] = float(sp)
+                updates["$set"] = set_fields
+            await db.products.update_one({"id": pid}, updates)
+
     @router.post("", status_code=201)
     async def create_purchase(purchase: dict, admin: dict = Depends(require_permission("purchases.add"))):
         from models.schemas import PurchaseCreate
@@ -54,7 +73,13 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             "status": status, "notes": p.notes or "",
             "created_at": now, "created_by": admin["name"]
         }
+        confirm_stock = purchase.get("confirm_stock", True)
+        purchase_doc["stock_status"] = "confirmed" if confirm_stock else "draft"
         await db.purchases.insert_one(purchase_doc)
+
+        if not confirm_stock:
+            purchase_doc.pop("_id", None)
+            return purchase_doc
 
         for item in p.items:
             product = await db.products.find_one({"id": item.product_id})
@@ -147,6 +172,30 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         return {"code": f"AC{str(next_num).zfill(4)}/{year}"}
 
     # ── Get Single Purchase ──
+    @router.post("/{purchase_id}/confirm-stock")
+    async def confirm_purchase_stock(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
+        purchase_doc = await db.purchases.find_one({"id": purchase_id})
+        if not purchase_doc:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+        if purchase_doc.get("stock_status") == "confirmed":
+            return {"message": "المخزون مؤكد مسبقاً", "stock_status": "confirmed"}
+        now = datetime.now(timezone.utc).isoformat()
+        await _apply_purchase_stock(purchase_doc.get("items", []), +1, now)
+        await db.purchases.update_one({"id": purchase_id}, {"$set": {"stock_status": "confirmed", "updated_at": now}})
+        return {"message": "تم تأكيد المخزون", "stock_status": "confirmed"}
+
+    @router.post("/{purchase_id}/reopen")
+    async def reopen_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
+        purchase_doc = await db.purchases.find_one({"id": purchase_id})
+        if not purchase_doc:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+        if purchase_doc.get("stock_status") != "confirmed":
+            return {"message": "الفاتورة غير مؤكدة", "stock_status": purchase_doc.get("stock_status", "draft")}
+        now = datetime.now(timezone.utc).isoformat()
+        await _apply_purchase_stock(purchase_doc.get("items", []), -1, now, sync_prices=False)
+        await db.purchases.update_one({"id": purchase_id}, {"$set": {"stock_status": "draft", "updated_at": now}})
+        return {"message": "تمت إعادة فتح الفاتورة", "stock_status": "draft"}
+
     @router.get("/{purchase_id}")
     async def get_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.view"))):
         purchase = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
@@ -205,8 +254,10 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             raise HTTPException(status_code=404, detail="Purchase not found")
 
         now = datetime.now(timezone.utc).isoformat()
-        for item in purchase.get("items", []):
-            await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}})
+        # Reverse stock only if it was actually confirmed (avoid double reversal for drafts)
+        if purchase.get("stock_status", "confirmed") == "confirmed":
+            for item in purchase.get("items", []):
+                await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}})
 
         await db.suppliers.update_one(
             {"id": purchase["supplier_id"]},

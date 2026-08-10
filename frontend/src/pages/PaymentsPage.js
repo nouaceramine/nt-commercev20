@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -137,7 +138,7 @@ export default function PaymentsPage() {
       });
       fetchRecords();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الإنشاء' : 'Failed to create'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الإنشاء' : 'Failed to create'));
     } finally {
       setSaving(false);
     }
@@ -159,7 +160,7 @@ export default function PaymentsPage() {
       setShowEditDialog(false);
       fetchRecords();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل التحديث' : 'Failed to update'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل التحديث' : 'Failed to update'));
     } finally {
       setSaving(false);
     }
@@ -176,7 +177,7 @@ export default function PaymentsPage() {
       toast.success(language === 'ar' ? 'تم الحذف' : 'Deleted');
       fetchRecords();
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل الحذف' : 'Failed to delete'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل الحذف' : 'Failed to delete'));
     }
   };
 
@@ -198,7 +199,7 @@ export default function PaymentsPage() {
       toast.success(language === 'ar' ? 'تم فتح صفحة الدفع' : 'Payment page opened');
       setShowCheckoutDialog(false);
     } catch (error) {
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'فشل إنشاء جلسة الدفع' : 'Failed to create checkout'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'فشل إنشاء جلسة الدفع' : 'Failed to create checkout'));
     } finally {
       setSaving(false);
     }

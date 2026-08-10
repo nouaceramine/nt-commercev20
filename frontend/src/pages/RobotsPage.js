@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import apiClient from '../lib/apiClient';
@@ -290,7 +291,7 @@ export default function RobotsPage() {
       toast.success(data.message);
       await fetchStatus();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'فشل تشغيل الروبوت');
+      toast.error(errText(err) ||  'فشل تشغيل الروبوت');
     } finally { setActionLoading(false); }
   };
 
@@ -301,7 +302,7 @@ export default function RobotsPage() {
       toast.success(data.message);
       setTimeout(fetchStatus, 2000);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'فشل إعادة تشغيل الروبوت');
+      toast.error(errText(err) ||  'فشل إعادة تشغيل الروبوت');
     } finally { setActionLoading(false); }
   };
 
@@ -334,7 +335,7 @@ export default function RobotsPage() {
       setIntervalDialog(null);
       await fetchStatus();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'فشل تحديث الفترة');
+      toast.error(errText(err) ||  'فشل تحديث الفترة');
     }
   };
 

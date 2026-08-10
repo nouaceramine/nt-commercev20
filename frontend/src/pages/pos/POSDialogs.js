@@ -1,3 +1,4 @@
+import { errText } from '../../lib/errorText';
 import { useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import apiClient from '../../lib/apiClient';
@@ -355,7 +356,7 @@ export default function POSDialogs({
                   fetchCustomers();
                   setSelectedCustomer(response.data.id);
                   setShowNewCustomerDialog(false);
-                } catch (error) { toast.error(error.response?.data?.detail || 'Error'); }
+                } catch (error) { toast.error(errText(error) ||  'Error'); }
                 finally { setSavingCustomer(false); }
               }} disabled={savingCustomer} className="flex-1">
                 {savingCustomer ? '...' : (language === 'ar' ? 'حفظ' : 'Enregistrer')}

@@ -4,6 +4,7 @@
  * Refactoring: Extract Hook, Replace Data Value with Object, Move Method
  * Following Martin Fowler's Refactoring patterns
  */
+import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -310,8 +311,13 @@ export default function POSPage() {
 
     setLoading(true);
     try {
-      // Build PaymentDetails domain object
-      const payment = PaymentDetails[cart.paymentType]?.(cart) || PaymentDetails.cash(cart.paidAmount || cart.subtotal);
+      // Build PaymentDetails domain object (fix: pass proper args per payment type,
+      // previously the whole cart object was passed as paid_amount -> 500 from API)
+      const payment =
+        cart.paymentType === 'credit' ? PaymentDetails.credit()
+        : cart.paymentType === 'installment' ? PaymentDetails.installment(cart.installmentPlan || { down_payment: cart.paidAmount || 0 })
+        : cart.paymentType === 'mixed' ? PaymentDetails.mixed(Number(cart.mixedCash) || 0, Number(cart.mixedBank) || 0)
+        : PaymentDetails.cash(Number(cart.paidAmount) || cart.subtotal);
 
       const saleData = {
         code: saleCode,
@@ -352,7 +358,7 @@ export default function POSPage() {
       if (session.currentSession) session.fetchSessionStats(session.currentSession.id);
     } catch (error) {
       console.error('Sale error:', error);
-      toast.error(error.response?.data?.detail || (language === 'ar' ? 'خطأ في البيع' : 'Erreur vente'));
+      toast.error(errText(error) ||  (language === 'ar' ? 'خطأ في البيع' : 'Erreur vente'));
     } finally {
       setLoading(false);
     }
@@ -367,7 +373,7 @@ export default function POSPage() {
       toast.success(language === 'ar' ? 'تمت العملية' : 'Operation effectuee');
       setShowCashDialog(false);
       setCashOperation({ type: 'deposit', amount: 0, note: '' });
-    } catch (error) { toast.error(error.response?.data?.detail || 'Error'); }
+    } catch (error) { toast.error(errText(error) ||  'Error'); }
   };
 
   // === Task Menu (Refactored: Replace Switch with lookup) ===

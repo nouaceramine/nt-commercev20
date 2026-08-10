@@ -1,3 +1,4 @@
+import { errText } from '../lib/errorText';
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
@@ -170,7 +171,7 @@ export default function AddProductPage() {
       setNewFamily({ name: '' });
       toast.success(t.familyAdded);
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.error);
+      toast.error(errText(error) ||  t.error);
     } finally {
       setAddingFamily(false);
     }
@@ -323,7 +324,7 @@ export default function AddProductPage() {
         navigate('/products');
       }
     } catch (error) {
-      toast.error(error.response?.data?.detail || t.somethingWentWrong);
+      toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {
       setLoading(false);
       setSaveAndNew(false);

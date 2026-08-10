@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import uuid
 
 
-def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
+def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -> dict:
     from utils.permissions import create_permission_checker
     require_permission = create_permission_checker(db, get_current_user)
     router = APIRouter(prefix="/repairs", tags=["repairs"])
@@ -217,8 +217,10 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
         if new_status != old_status:
             if new_status == "diagnosed":
                 updates["diagnosed_at"] = now
-            elif new_status == "repaired":
+            elif new_status in ("repaired", "ready"):
                 updates["repaired_at"] = now
+            elif new_status == "repairing":
+                updates["repairing_at"] = now
             elif new_status == "delivered":
                 updates["delivered_at"] = now
             await db.repair_history.insert_one({
@@ -232,6 +234,25 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
             })
         await db.repair_tickets.update_one({"id": ticket_id}, {"$set": updates})
         updated = await db.repair_tickets.find_one({"id": ticket_id}, {"_id": 0})
+
+        # Auto-notify customer when the device is ready (SMS/WhatsApp if configured)
+        if new_status in ("ready", "repaired") and old_status not in ("ready", "repaired"):
+            try:
+                from services.smart_notifications import notify
+                await notify(
+                    db, "success",
+                    "صيانة جاهزة",
+                    f"جهاز {ticket.get('ticket_number', ticket_id)} جاهز للاستلام",
+                    link="/repairs",
+                )
+                from services.sms_service import SMSService
+                customer_phone = ticket.get("customer_phone") or ticket.get("phone") or ""
+                if customer_phone:
+                    sms = SMSService(main_db or db)
+                    await sms.send(customer_phone, f"جهازك جاهز للاستلام. رقم التذكرة: {ticket.get('ticket_number', ticket_id)}")
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("repair ready notify: %s", exc)
         return updated
 
     @router.delete("/tickets/{ticket_id}")
@@ -245,7 +266,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
     async def get_repair_stats(user: dict = Depends(get_current_user)):
         total = await db.repair_tickets.count_documents({})
         statuses = {}
-        for s in ["received", "diagnosed", "in_repair", "repaired", "delivered", "cancelled"]:
+        for s in ["received", "diagnosed", "repairing", "in_repair", "ready", "repaired", "delivered", "cancelled"]:
             statuses[s] = await db.repair_tickets.count_documents({"status": s})
         revenue = await db.repair_tickets.aggregate([
             {"$match": {"status": "delivered", "final_cost": {"$gt": 0}}},
@@ -280,9 +301,14 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
         part_id = data.get("part_id")
         qty = data.get("quantity", 1)
         part = await db.spare_parts.find_one({"id": part_id}, {"_id": 0})
+        source_collection = "spare_parts"
+        if not part:
+            part = await db.products.find_one({"id": part_id}, {"_id": 0})
+            source_collection = "products"
         if not part:
             raise HTTPException(status_code=404, detail="القطعة غير موجودة")
-        if part.get("quantity", 0) < qty:
+        available = part.get("quantity", part.get("stock", 0)) or 0
+        if available < qty:
             raise HTTPException(status_code=400, detail="الكمية غير كافية")
         usage = {
             "id": str(uuid.uuid4()),
@@ -295,7 +321,11 @@ def create_repair_routes(db, get_current_user, get_tenant_admin) -> dict:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.part_usage.insert_one(usage)
-        await db.spare_parts.update_one({"id": part_id}, {"$inc": {"quantity": -qty}})
+        if source_collection == "products":
+            inc = {"quantity": -qty} if "quantity" in part else {"stock": -qty}
+            await db.products.update_one({"id": part_id}, {"$inc": inc})
+        else:
+            await db.spare_parts.update_one({"id": part_id}, {"$inc": {"quantity": -qty}})
         usage.pop("_id", None)
         return usage
 
