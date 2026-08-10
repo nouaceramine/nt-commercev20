@@ -200,7 +200,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         if phone:
             try:
                 from services.sms_service import SMSService
-                sms = SMSService(main_db or db)
+                sms = SMSService(main_db if main_db is not None else db)
                 await sms.send_sms(phone, f"تم تسليم طلبك {order.get('order_number')}: {order.get('product_name')}. شكراً لثقتك.")
             except Exception as exc:
                 logger.warning("digital order sms failed: %s", exc)

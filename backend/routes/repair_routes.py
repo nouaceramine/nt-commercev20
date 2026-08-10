@@ -248,7 +248,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
                 from services.sms_service import SMSService
                 customer_phone = ticket.get("customer_phone") or ticket.get("phone") or ""
                 if customer_phone:
-                    sms = SMSService(main_db or db)
+                    sms = SMSService(main_db if main_db is not None else db)
                     await sms.send(customer_phone, f"جهازك جاهز للاستلام. رقم التذكرة: {ticket.get('ticket_number', ticket_id)}")
             except Exception as exc:
                 import logging
