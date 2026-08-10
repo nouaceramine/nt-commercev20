@@ -1341,7 +1341,7 @@ export default function PublicStorePage() {
           ) : (
             <div className="nc-products-grid">
               {filteredProducts.map(product => (
-                <div key={product.id} className="nc-product-card">
+                <Link key={product.id} to={`/shop/${slug}/product/${product.id}`} className="nc-product-card" style={{textDecoration:"none",color:"inherit"}}>
                   <div className="nc-product-image">
                     {product.image_url ? (
                       <img src={product.image_url} alt={product.name_ar} />
@@ -1383,7 +1383,7 @@ export default function PublicStorePage() {
                       )}
                     </button>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}

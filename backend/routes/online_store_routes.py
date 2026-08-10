@@ -69,11 +69,11 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tenant_id = admin.get("tenant_id") or "platform"
         await db.store_settings.update_one({}, {"$set": settings.model_dump()}, upsert=True)
         if settings.store_slug:
-            existing = await main_db.store_slugs.find_one({"store_slug": settings.store_slug})
+            existing = await main_db.store_slugs.find_one({"tenant_id": tenant_id})
             if existing and existing.get("tenant_id") != tenant_id:
                 raise HTTPException(status_code=400, detail="هذا الرابط المختصر مستخدم من متجر آخر — اختر رابطاً مختلفاً")
             await main_db.store_slugs.update_one(
-                {"store_slug": settings.store_slug},
+                {"tenant_id": tenant_id},
                 {"$set": {
                     "tenant_id": tenant_id,
                     "store_slug": settings.store_slug,
