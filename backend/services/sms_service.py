@@ -17,7 +17,7 @@ class SMSService:
         masked_phone = f"****{phone[-4:]}" if len(str(phone)) >= 4 else "****"
         logger.info(f"[SMS-MOCK] To: {masked_phone} | Message: {message[:80]}...")
         self.sent_count += 1
-        if self.db:
+        if self.db is not None:
             try:
                 await self.db.sms_log.insert_one({
                     "phone": phone,
