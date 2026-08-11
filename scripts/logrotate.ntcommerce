@@ -1,0 +1,10 @@
+/var/log/ntcommerce_backup.log /var/log/ntcommerce_monitor.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0644 root root
+}
