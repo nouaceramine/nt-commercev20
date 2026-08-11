@@ -922,6 +922,14 @@ try:
 except Exception as _e:
     print(f"[INIT] Database IO routes: {_e}")
 
+# AI routes (Gemini) — product description / translation / social posts
+try:
+    from routes.ai_routes import router as ai_gemini_router
+    app.include_router(ai_gemini_router, prefix="/api", tags=["AI"])
+    print("[INIT] AI (Gemini) routes registered at /api/ai")
+except Exception as _e:
+    print(f"[INIT] AI routes: {_e}")
+
 
 # init_default_data restored from git history (removed in Section-11 refactor)
 # Needed by routes.auth_users_routes factory.

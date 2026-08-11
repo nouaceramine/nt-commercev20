@@ -345,3 +345,28 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 
 ### الأثر
 - كل الجلسات النشطة (مستخدمون + مستأجرون) سُحبت — إعادة تسجيل دخول مطلوبة
+
+---
+
+## p21 — تفعيل خدمة Gemini AI (2026-08-11)
+
+### قبل
+- المحادثة الموازية أنشأت backend/services/ai_service.py + routes/ai_routes.py + زر AI في TenantDialogs.js — لكن غير مسجلة، وبها خطأ مسار استيراد، وبلا مفتاح، والواجهة غير مبنية
+
+### النسخ الاحتياطي
+- backups/p21_ai_gemini_20260811_230952/ (main.py, ai_routes.py, ai_service.py, TenantDialogs.js)
+
+### الإصلاحات
+- ai_routes.py: حذف sys.path.insert(/opt/ntcommerce/backend/services) (مسار مضيف غير موجود داخل الحاوية /app) ← from services.ai_service import ai_service
+- ai_service.py: النموذج قابل للضبط عبر GEMINI_MODEL، الافتراضي gemini-2.5-flash (1.5 أُحيل للتقاعد)
+- main.py: تسجيل الراوتر في try/except — [INIT] AI (Gemini) routes registered at /api/ai
+- النقاط: POST /api/ai/generate-description, /api/ai/translate, /api/ai/social-post (تحتاج get_tenant_admin)، GET /api/ai/status (عامة)
+
+### التحقق (curl)
+- GET /api/ai/status ← {"configured":false,...} ✔
+- POST بدون توكن ← 403 ✔ (الحماية تعمل)
+- POST بتوكن demo ← رسالة عربية واضحة "أضف GEMINI_API_KEY" ✔ (لا انهيار)
+- الواجهة: بناء + نشر main.23ec415d.js (حذف main.322d2b46.js)، تحقق generate-description + product-name-input في الحزمة ✔
+
+### المتبقي
+- إضافة GEMINI_API_KEY (مجاني من aistudio.google.com) إلى /opt/ntcommerce/.env + إعادة تشغيل backend — لا حاجة لإعادة بناء الواجهة

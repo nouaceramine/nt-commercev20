@@ -2,8 +2,12 @@
  * TenantDialogs - Extracted dialogs from TenantDashboardPage
  * Includes: Product, Customer, Supplier, Employee CRUD dialogs
  */
+import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
+import { Sparkles, Loader2 } from 'lucide-react';
+import apiClient from '../../lib/apiClient';
 import { Label } from '../../components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -28,6 +32,32 @@ export default function TenantDialogs({
   employeeDialogOpen, setEmployeeDialogOpen, editingEmployee,
   employeeForm, setEmployeeForm, saveEmployee,
 }) {
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const generateDescription = async () => {
+    if (!productForm.name) {
+      alert('أدخل اسم المنتج أولاً');
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const response = await apiClient.post('/ai/generate-description', {
+        name: productForm.name,
+        category: productForm.category,
+        features: productForm.description || ''
+      });
+      if (response.data.success) {
+        setProductForm({...productForm, description: response.data.description});
+      } else {
+        alert(response.data.error || 'فشل توليد الوصف');
+      }
+    } catch (error) {
+      alert('فشل الاتصال بـ AI');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <>
       {/* Product Dialog */}
@@ -39,7 +69,33 @@ export default function TenantDialogs({
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>اسم المنتج</Label>
-              <Input value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} data-testid="product-name-input" />
+              <div className="flex gap-2">
+                <Input 
+                  value={productForm.name} 
+                  onChange={e => setProductForm({...productForm, name: e.target.value})} 
+                  data-testid="product-name-input"
+                  className="flex-1"
+                />
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  onClick={generateDescription}
+                  disabled={aiLoading || !productForm.name}
+                  className="whitespace-nowrap"
+                >
+                  {aiLoading ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                  {aiLoading ? 'جاري الكتابة...' : '✨ AI'}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>الوصف</Label>
+              <Textarea 
+                value={productForm.description || ''} 
+                onChange={e => setProductForm({...productForm, description: e.target.value})}
+                placeholder="وصف المنتج..."
+                rows={3}
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
