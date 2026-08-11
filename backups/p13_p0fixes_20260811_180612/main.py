@@ -115,23 +115,6 @@ from utils.errors import AppException, app_exception_handler, general_exception_
 app.add_exception_handler(AppException, app_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
-# Pydantic ValidationError raised manually inside routes (XCreate(**dict) pattern)
-# must become 422 with the Arabic validator messages — not a masked 500.
-from fastapi.responses import JSONResponse as _JSONResponse
-from pydantic import ValidationError as _PydanticValidationError
-
-
-@app.exception_handler(_PydanticValidationError)
-async def pydantic_validation_exception_handler(request, exc):
-    details = []
-    for e in exc.errors():
-        msg = e.get('msg', '')
-        if msg.startswith('Value error, '):
-            msg = msg[len('Value error, '):]
-        loc = '.'.join(str(x) for x in e.get('loc', []) if x is not None)
-        details.append({'field': loc, 'message': msg})
-    return _JSONResponse(status_code=422, content={'detail': details})
-
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 

@@ -176,26 +176,6 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Delete Customer ──
     @router.delete("/{customer_id}")
     async def delete_customer(customer_id: str, admin: dict = Depends(require_permission("customers.edit"))):
-        customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "name": 1, "balance": 1})
-        if not customer:
-            raise HTTPException(status_code=404, detail="Customer not found")
-        # Guard: outstanding debt (open sales) — deleting would orphan the debt
-        # and hide it from every aggregate view (/debts/summary drops unknown customers)
-        open_debt = await db.sales.count_documents({
-            "customer_id": customer_id, "status": {"$ne": "returned"}, "remaining": {"$gt": 0}
-        })
-        if open_debt:
-            raise HTTPException(
-                status_code=400,
-                detail=f"لا يمكن حذف '{customer.get('name', '')}': عليه دين قائم في {open_debt} فاتورة غير مسددة. سوّ الدين أولاً",
-            )
-        # Guard: any sales history — deleting orphans the records (same policy as products)
-        sales_count = await db.sales.count_documents({"customer_id": customer_id})
-        if sales_count:
-            raise HTTPException(
-                status_code=400,
-                detail=f"لا يمكن حذف '{customer.get('name', '')}': زبون حقيقي له {sales_count} حركة بيع مسجلة",
-            )
         result = await db.customers.delete_one({"id": customer_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Customer not found")

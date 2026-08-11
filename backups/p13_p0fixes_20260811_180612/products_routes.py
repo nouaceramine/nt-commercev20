@@ -50,10 +50,9 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         product_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        dup_conditions = [{"name_en": p.name_en}]
-        if p.name_ar:
-            dup_conditions.append({"name_ar": p.name_ar})
-        existing = await db.products.find_one({"$or": dup_conditions})
+        existing = await db.products.find_one({
+            "$or": [{"name_en": p.name_en}, {"name_ar": p.name_ar}]
+        })
         if existing:
             raise HTTPException(status_code=409, detail=f"منتج بنفس الاسم موجود مسبقاً: {existing.get('name_ar') or existing.get('name_en')}")
 
@@ -376,14 +375,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
 
-        # Validate/sanitize covered fields through ProductUpdate (422 on invalid);
-        # extra keys not in the model keep the prior pass-through semantics
-        from models.schemas import ProductUpdate
-        validated = ProductUpdate(**updates)
         update_data = {k: v for k, v in updates.items() if v is not None and k not in ["id"]}
-        for k, v in validated.model_dump(exclude_unset=True).items():
-            if v is not None:
-                update_data[k] = v
         if "family_id" in update_data:
             if update_data["family_id"]:
                 family = await db.product_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1})

@@ -35,34 +35,6 @@ async def create_sale_op(db, s, user: dict) -> dict:
     if s.payment_type in ["credit", "partial"] and not s.customer_id:
         raise HTTPException(status_code=400, detail="Customer required for credit sale")
 
-    # ── Atomic stock claim (all-or-nothing) — BEFORE any side effect ──
-    # Same pattern as services/digital_inventory.claim_codes: conditional
-    # find_one_and_update per product; any shortfall rolls back prior claims
-    # and rejects the sale 400. Non-catalog lines (no product_id) and
-    # is_non_stockable products are exempt, preserving prior semantics.
-    _claim_qty = {}
-    for item in s.items:
-        if item.product_id:
-            _claim_qty[item.product_id] = _claim_qty.get(item.product_id, 0) + item.quantity
-    _claimed = []
-    for pid, qty in _claim_qty.items():
-        product = await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1})
-        if not product or product.get("is_non_stockable"):
-            continue
-        res = await db.products.find_one_and_update(
-            {"id": pid, "quantity": {"$gte": qty}},
-            {"$inc": {"quantity": -qty}},
-        )
-        if res is None:
-            for cid, cqty in _claimed:
-                await db.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
-            pname = product.get("name_ar") or product.get("name_en") or pid
-            raise HTTPException(
-                status_code=400,
-                detail=f"مخزون غير كافٍ للمنتج '{pname}': المتاح {product.get('quantity', 0)} والمطلوب {qty}",
-            )
-        _claimed.append((pid, qty))
-
     delivery_fee = 0
     delivery_info = None
     if s.delivery and s.delivery.enabled:
@@ -148,6 +120,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
             })
 
     for item in s.items:
+        await db.products.update_one({"id": item.product_id}, {"$inc": {"quantity": -item.quantity}})
         product = await db.products.find_one({"id": item.product_id})
         if product:
             threshold = product.get("low_stock_threshold", 10)
@@ -215,20 +188,11 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
             {"id": sale["customer_id"]},
             {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0)}}
         )
-    if sale.get("paid_amount", 0) > 0:
-        cash_box_id = sale.get("cash_box_id") or sale.get("payment_method")
-        if cash_box_id:
-            await db.cash_boxes.update_one(
-                {"id": cash_box_id},
-                {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}}
-            )
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,
-                "type": "expense", "amount": sale["paid_amount"],
-                "description": f"حذف مبيعات - فاتورة {sale.get('invoice_number', '')}",
-                "reference_type": "sale_delete", "reference_id": sale_id,
-                "created_at": now, "created_by": user.get("name", "")
-            })
+    if sale.get("paid_amount", 0) > 0 and sale.get("cash_box_id"):
+        await db.cash_boxes.update_one(
+            {"id": sale["cash_box_id"]},
+            {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}}
+        )
     await db.audit_log.insert_one({
         "id": str(uuid.uuid4()), "action": "delete_sale",
         "entity_type": "sale", "entity_id": sale_id,

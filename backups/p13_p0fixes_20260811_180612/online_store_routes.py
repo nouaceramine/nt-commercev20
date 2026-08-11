@@ -129,31 +129,14 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         orders = await db.store_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
         return orders
 
-    ALLOWED_ORDER_STATUSES = {"pending", "confirmed", "shipped", "delivered", "cancelled", "refunded"}
-    STOCK_RESTORING_STATUSES = {"cancelled", "refunded"}
-
     @router.put("/store/orders/{order_id}/status")
     async def update_store_order_status(order_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
         status = data.get("status")
         if not status:
             raise HTTPException(status_code=400, detail="status required")
-        if status not in ALLOWED_ORDER_STATUSES:
-            raise HTTPException(status_code=400, detail=f"حالة غير صالحة. المسموح: {', '.join(sorted(ALLOWED_ORDER_STATUSES))}")
-        order = await db.store_orders.find_one({"id": order_id})
-        if not order:
-            raise HTTPException(status_code=404, detail="Order not found")
-        now = datetime.now(timezone.utc).isoformat()
-        # Restore stock exactly once when transitioning into cancelled/refunded
-        if status in STOCK_RESTORING_STATUSES and not order.get("stock_restored"):
-            for item in order.get("items", []):
-                pid = item.get("product_id")
-                qty = item.get("quantity", 1)
-                if pid:
-                    await db.products.update_one({"id": pid}, {"$inc": {"quantity": qty}})
-            await db.store_orders.update_one({"id": order_id}, {"$set": {"stock_restored": True}})
         await db.store_orders.update_one(
             {"id": order_id},
-            {"$set": {"status": status, "updated_at": now}}
+            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
         return {"message": "تم تحديث حالة الطلب"}
 
