@@ -145,8 +145,7 @@ export default function SubscribersPage() {
     return tenants.filter(t =>
       t.name?.toLowerCase().includes(q) ||
       t.email?.toLowerCase().includes(q) ||
-      t.company_name?.toLowerCase().includes(q) ||
-      t.short_id?.toLowerCase().includes(q)
+      t.company_name?.toLowerCase().includes(q)
     );
   }, [tenants, searchQuery]);
 
@@ -431,7 +430,7 @@ export default function SubscribersPage() {
                 {filteredTenants.map(tenant => (
                   <TableRow key={tenant.id}>
                     <TableCell>
-                      <EntityCode uuid={tenant.id} shortId={tenant.short_id} type="tenant" testId={`tenant-code-${tenant.id}`} />
+                      <EntityCode uuid={tenant.id} type="tenant" testId={`tenant-code-${tenant.id}`} />
                     </TableCell>
                     <TableCell>
                       <div

@@ -77,15 +77,6 @@ export default function AddProductPage() {
     serial_number_tracking: false,
   });
 
-  // تحذير عند مغادرة الصفحة بتعديلات غير محفوظة
-  const [isDirty, setIsDirty] = useState(false);
-  useEffect(() => {
-    if (!isDirty) return;
-    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [isDirty]);
-
   // Generate article code and barcode on page load
   useEffect(() => {
     const generateCodes = async () => {
@@ -307,7 +298,6 @@ export default function AddProductPage() {
 
       await apiClient.post(`/products`, payload);
       toast.success(t.productAdded);
-      setIsDirty(false);
       
       if (createNew) {
         // Generate new article code for next product
@@ -361,7 +351,7 @@ export default function AddProductPage() {
             <CardTitle className="text-xl flex items-center gap-2"><Package className="h-5 w-5" />{t.addNewProduct}</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} onChange={() => setIsDirty(true)}>
+            <form onSubmit={handleSubmit}>
               <Tabs defaultValue="general" className="w-full">
                 <TabsList className="grid grid-cols-4 mb-4">
                   <TabsTrigger value="general" className="text-xs gap-1"><Package className="h-3 w-3" />{isAr ? 'عام' : 'Général'}</TabsTrigger>

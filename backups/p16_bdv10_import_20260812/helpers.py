@@ -55,16 +55,3 @@ async def get_current_agent(credentials: HTTPAuthorizationCredentials = Depends(
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-
-
-async def next_tenant_short_id() -> str:
-    """Sequential human-memorable tenant ID: NT-0001, NT-0002, ...
-    Atomic via a platform counters collection (upsert + $inc)."""
-    from pymongo import ReturnDocument
-    c = await main_db.saas_counters.find_one_and_update(
-        {"_id": "tenant_short_id"},
-        {"$inc": {"seq": 1}},
-        upsert=True,
-        return_document=ReturnDocument.AFTER,
-    )
-    return f"NT-{c['seq']:04d}"

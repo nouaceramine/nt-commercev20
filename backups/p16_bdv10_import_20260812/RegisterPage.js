@@ -46,7 +46,7 @@ export default function RegisterPage() {
     title: "اشترك مجاناً — NT Commerce | تجربة 14 يوم",
     description: "ابدأ تجربتك المجّانية في NT Commerce اليوم — 14 يوم بدون بطاقة. اختر خطّتك وأطلق نقطة بيعك السحابية مع متجر إلكتروني متكامل.",
     keywords: "تسجيل, اشتراك, NT Commerce, نقاط بيع, POS الجزائر, تجربة مجانية",
-    canonical: "http://168.231.81.154/register",
+    canonical: "https://nt-v16-staging.emergent.host/register",
   });
 
   useEffect(() => {

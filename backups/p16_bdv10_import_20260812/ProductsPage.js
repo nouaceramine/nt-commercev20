@@ -32,7 +32,6 @@ import {
   Zap,
   Trash2,
   Pencil,
-  Copy,
   CheckSquare,
   Square,
   AlertTriangle,
@@ -99,17 +98,8 @@ export default function ProductsPage() {
     }
   };
 
-  const handleClone = async (product) => {
-    try {
-      await apiClient.post(`/products/${product.id}/clone`);
-      toast.success(language === 'ar' ? 'تم استنساخ المنتج' : 'Produit cloné');
-      fetchProducts();
-    } catch (e) {
-      toast.error(language === 'ar' ? 'فشل استنساخ المنتج' : 'Échec du clonage');
-    }
-  };
-
-  const toggleWooProduct = async (product) => {    const published = product.woocommerce_status === 'published';
+  const toggleWooProduct = async (product) => {
+    const published = product.woocommerce_status === 'published';
     try {
       if (published) {
         await apiClient.delete(`/woocommerce/unpublish-product/${product.id}`);
@@ -127,17 +117,7 @@ export default function ProductsPage() {
   };
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [modelFilter, setModelFilter] = useState(searchParams.get('model') || '');
-  const [familyFilter, setFamilyFilter] = useState(searchParams.get('family') || '');
-  const [families, setFamilies] = useState([]);
   const [viewMode, setViewMode] = useState(localStorage.getItem('productsViewMode') || 'grid'); // grid, list, compact
-  // عرض أعمدة العرض القائمي (قابل للسحب) — يُحفظ محلياً
-  const DEFAULT_COL_W = [1.1, 2.4, 1.1, 1.0, 0.9, 0.9, 0.9, 0.7, 0.6];
-  const [colWidths, setColWidths] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('productsListColW'));
-      return Array.isArray(saved) && saved.length === 9 ? saved : DEFAULT_COL_W;
-    } catch { return DEFAULT_COL_W; }
-  });
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   const [useQuickSearch, setUseQuickSearch] = useState(localStorage.getItem('useQuickSearch') === 'true');
@@ -281,7 +261,6 @@ export default function ProductsPage() {
       const params = new URLSearchParams();
       if (searchQuery) params.set('search', searchQuery);
       if (modelFilter) params.set('model', modelFilter);
-      if (familyFilter) params.set('family_id', familyFilter);
       params.set('page', currentPage.toString());
       params.set('page_size', itemsPerPage.toString());
       
@@ -295,7 +274,6 @@ export default function ProductsPage() {
         const params = new URLSearchParams();
         if (searchQuery) params.set('search', searchQuery);
         if (modelFilter) params.set('model', modelFilter);
-        if (familyFilter) params.set('family_id', familyFilter);
         const response = await apiClient.get(`/products?${params.toString()}`);
         setProducts(response.data);
         setTotalItems(response.data.length);
@@ -309,21 +287,11 @@ export default function ProductsPage() {
 
   useEffect(() => {
     fetchProducts();
-  }, [searchQuery, modelFilter, familyFilter, currentPage, itemsPerPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchQuery, modelFilter, currentPage, itemsPerPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchStoreProducts();
   }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiClient.get('/product-families');
-        const list = Array.isArray(res.data) ? res.data : (res.data?.items || []);
-        setFamilies(list.filter(f => f && f.id));
-      } catch { /* العائلات غير متاحة — يبقى الفلتر فارغاً */ }
-    })();
-  }, []);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -336,7 +304,6 @@ export default function ProductsPage() {
   const clearFilters = () => {
     setSearchQuery('');
     setModelFilter('');
-    setFamilyFilter('');
     setCurrentPage(1);
     setSearchParams({});
   };
@@ -349,55 +316,6 @@ export default function ProductsPage() {
     }
     return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">{t.inStock}</Badge>;
   };
-
-  // ── Resizable list columns ──
-  const listGridTemplate = `${selectMode ? '36px ' : ''}${colWidths.map(w => `${w}fr`).join(' ')}`;
-
-  const startColResize = (idx) => (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startW = [...colWidths];
-    const container = e.currentTarget.closest('[data-list-header]');
-    const totalFr = startW.reduce((a, b) => a + b, 0);
-    const selPx = selectMode ? 36 : 0;
-    const pxPerFr = container ? Math.max(1, (container.getBoundingClientRect().width - selPx) / totalFr) : 100;
-    const rtlFactor = document.dir === 'rtl' ? -1 : 1;
-    const onMove = (ev) => {
-      const dfr = ((ev.clientX - startX) * rtlFactor) / pxPerFr;
-      setColWidths(() => {
-        const next = [...startW];
-        next[idx] = Math.max(0.35, Math.round((startW[idx] + dfr) * 100) / 100);
-        return next;
-      });
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      setColWidths(prev => {
-        localStorage.setItem('productsListColW', JSON.stringify(prev));
-        return prev;
-      });
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const ColHeader = ({ idx, className = '', children }) => (
-    <div className={`relative ${className}`}>
-      {children}
-      {idx < 8 && (
-        <span
-          onMouseDown={startColResize(idx)}
-          onDoubleClick={(e) => { e.stopPropagation(); setColWidths(prev => { const n = [...prev]; n[idx] = DEFAULT_COL_W[idx]; localStorage.setItem('productsListColW', JSON.stringify(n)); return n; }); }}
-          className="absolute top-0 bottom-0 w-2 cursor-col-resize select-none hover:bg-primary/30 rounded"
-          style={{ insetInlineEnd: '-4px' }}
-          title={language === 'ar' ? 'اسحب لتغيير عرض العمود — نقرة مزدوجة لإعادة الضبط' : 'Glisser pour redimensionner — double-clic pour réinitialiser'}
-          data-testid={`col-resize-${idx}`}
-        />
-      )}
-    </div>
-  );
 
   // Quick export to Excel function
   const quickExportToExcel = () => {
@@ -678,18 +596,7 @@ export default function ProductsPage() {
                   data-testid="model-filter-input"
                 />
               </div>
-              <Select value={familyFilter || 'all'} onValueChange={(v) => { setFamilyFilter(v === 'all' ? '' : v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-11 flex-1 sm:max-w-[200px]" data-testid="family-filter-select">
-                  <SelectValue placeholder={language === 'ar' ? 'كل العائلات' : 'Toutes les familles'} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{language === 'ar' ? 'كل العائلات' : 'Toutes les familles'}</SelectItem>
-                  {families.map(f => (
-                    <SelectItem key={f.id} value={f.id}>{f.name_ar || f.name || f.name_en}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {(searchQuery || modelFilter || familyFilter) && (
+              {(searchQuery || modelFilter) && (
                 <Button
                   type="button"
                   variant="outline"
@@ -728,17 +635,17 @@ export default function ProductsPage() {
           /* List View - Table style with all info */
           <div className="border rounded-lg overflow-hidden">
             {/* Table Header */}
-            <div className="grid gap-2 p-3 bg-muted/50 text-xs font-medium border-b" style={{ gridTemplateColumns: listGridTemplate }} data-list-header="true">
+            <div className={`grid gap-2 p-3 bg-muted/50 text-xs font-medium border-b ${selectMode ? 'grid-cols-10' : 'grid-cols-9'}`}>
               {selectMode && <div className="w-8"></div>}
-              <ColHeader idx={0}>{language === 'ar' ? 'كود المنتج' : 'Code Article'}</ColHeader>
-              <ColHeader idx={1}>{language === 'ar' ? 'اسم المنتج' : 'Nom d\'article'}</ColHeader>
-              <ColHeader idx={2}>{language === 'ar' ? 'العائلة' : 'Famille'}</ColHeader>
-              <ColHeader idx={3} className="text-center">{language === 'ar' ? 'الكمية المتوفرة' : 'Quantité'}</ColHeader>
-              <ColHeader idx={4} className="text-center">{language === 'ar' ? 'سعر الشراء' : 'Prix achat'}</ColHeader>
-              <ColHeader idx={5} className="text-center">{language === 'ar' ? 'سعر البيع' : 'Prix vente'}</ColHeader>
-              <ColHeader idx={6} className="text-center">{language === 'ar' ? 'آخر شراء' : 'Dernier Achat'}</ColHeader>
-              <ColHeader idx={7} className="text-center">{language === 'ar' ? 'تعديل' : 'Modifier'}</ColHeader>
-              <ColHeader idx={8} className="text-center">{language === 'ar' ? 'طباعة' : 'Imprimer'}</ColHeader>
+              <div>{language === 'ar' ? 'كود المنتج' : 'Code Article'}</div>
+              <div>{language === 'ar' ? 'اسم المنتج' : 'Nom d\'article'}</div>
+              <div>{language === 'ar' ? 'العائلة' : 'Famille'}</div>
+              <div className="text-center">{language === 'ar' ? 'الكمية المتوفرة' : 'Quantité'}</div>
+              <div className="text-center">{language === 'ar' ? 'سعر الشراء' : 'Prix achat'}</div>
+              <div className="text-center">{language === 'ar' ? 'سعر البيع' : 'Prix vente'}</div>
+              <div className="text-center">{language === 'ar' ? 'آخر شراء' : 'Dernier Achat'}</div>
+              <div className="text-center">{language === 'ar' ? 'تعديل' : 'Modifier'}</div>
+              <div className="text-center">{language === 'ar' ? 'طباعة' : 'Imprimer'}</div>
             </div>
             {/* Table Body */}
             <div className="divide-y">
@@ -748,7 +655,7 @@ export default function ProductsPage() {
                   className={`block hover:bg-muted/30 transition-colors ${selectedProducts.has(product.id) ? 'bg-primary/5' : ''}`}
                   data-testid={`product-item-${product.id}`}
                 >
-                  <div className="grid gap-2 p-3 items-center text-sm" style={{ gridTemplateColumns: listGridTemplate }}>
+                  <div className={`grid gap-2 p-3 items-center text-sm ${selectMode ? 'grid-cols-10' : 'grid-cols-9'}`}>
                     {/* Selection Checkbox */}
                     {selectMode && (
                       <div className="flex items-center justify-center">
@@ -780,10 +687,7 @@ export default function ProductsPage() {
                     </div>
                     {/* Stock */}
                     <div className="text-center">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-semibold" data-testid={`stock-num-${product.id}`}>{product.quantity ?? 0}</span>
-                        {getStockBadge(product.quantity)}
-                      </span>
+                      {getStockBadge(product.quantity)}
                     </div>
                     {/* سعر الشراء */}
                     <div className="text-center text-sm">
@@ -818,11 +722,6 @@ export default function ProductsPage() {
                               <Pencil className="h-4 w-4" />
                             </Button>
                           </Link>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleClone(product)}
-                            title={language === 'ar' ? 'استنساخ المنتج' : 'Cloner le produit'}
-                            data-testid={`clone-product-${product.id}`}>
-                            <Copy className="h-4 w-4" />
-                          </Button>
                         </>
                       )}
                     </div>

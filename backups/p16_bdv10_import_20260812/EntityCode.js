@@ -16,14 +16,14 @@ export const shortCode = (uuid, type = 'tenant') => {
   return `${PREFIX[type] || ''}${clean}`;
 };
 
-export const EntityCode = ({ uuid, type = 'tenant', shortId = '', testId = '' }) => {
+export const EntityCode = ({ uuid, type = 'tenant', testId = '' }) => {
   const [copied, setCopied] = useState(false);
-  const code = shortId || shortCode(uuid, type);
+  const code = shortCode(uuid, type);
 
   const handleCopy = async (e) => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(code !== '—' ? code : (uuid || code));
+      await navigator.clipboard.writeText(uuid || code);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
@@ -35,7 +35,7 @@ export const EntityCode = ({ uuid, type = 'tenant', shortId = '', testId = '' })
     <button
       type="button"
       onClick={handleCopy}
-      title={uuid ? `المعرّف: ${code}\nالكامل: ${uuid}\nاضغط للنسخ` : 'اضغط للنسخ'}
+      title={uuid ? `الكامل: ${uuid}\nاضغط للنسخ` : 'اضغط للنسخ'}
       className="inline-flex items-center gap-1 rounded-md bg-muted/60 hover:bg-muted px-1.5 py-0.5 text-[10px] font-mono text-foreground transition-colors group"
       data-testid={testId || `entity-code-${uuid || ''}`}
     >

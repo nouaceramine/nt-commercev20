@@ -8,7 +8,7 @@ import bcrypt
 from config.database import db, init_tenant_database
 from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
-from .helpers import create_access_token, next_tenant_short_id
+from .helpers import create_access_token
 
 # ── Sprint 1: Rate limiting on public endpoints (login, register) ─────────
 from middleware.rate_limit import rate_limit as _rate_limited  # noqa: E402
@@ -69,7 +69,6 @@ async def register_tenant(tenant: TenantCreate):
         "limits_override": {},
         "notes": "",
         "business_type": tenant.business_type if hasattr(tenant, 'business_type') else "retailer",
-        "short_id": await next_tenant_short_id(),
         "database_initialized": False,
         "created_at": now.isoformat()
     }

@@ -15,7 +15,7 @@ import { useEffect } from "react";
  *   useDocumentMeta({
  *     title: "تسجيل جديد - NT Commerce",
  *     description: "اشترك في NT Commerce — نظام نقاط بيع متكامل للسوق الجزائري.",
- *     canonical: "http://168.231.81.154/register",
+ *     canonical: "https://nt-v16-staging.emergent.host/register",
  *   });
  *
  * Why no react-helmet? Saves ~30KB and avoids version conflicts.
@@ -43,7 +43,7 @@ export function useDocumentMeta({
   description,
   keywords,
   canonical,
-  ogImage = "http://168.231.81.154/icon-512.png",
+  ogImage = "https://nt-v16-staging.emergent.host/icon-512.png",
   ogType = "website",
 } = {}) {
   useEffect(() => {

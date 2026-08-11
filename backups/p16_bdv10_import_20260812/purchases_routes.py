@@ -157,12 +157,12 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     # ── Generate Purchase Code ──
     @router.get("/generate-code")
-    async def generate_purchase_code(user: dict = Depends(require_tenant)):
+    async def generate_purchase_code():
         from datetime import datetime as dt
         year = str(dt.now().year)[2:]
         pipeline = [
-            {"$match": {"code": {"$regex": f"^AC\\d+/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substrCP": ["$code", 2, {"$subtract": [{"$strLenCP": "$code"}, 5]}]}}}},
+            {"$match": {"code": {"$regex": f"^AC\\d{{4}}/{year}$"}}},
+            {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}},
             {"$sort": {"num": -1}},
             {"$limit": 1}
         ]

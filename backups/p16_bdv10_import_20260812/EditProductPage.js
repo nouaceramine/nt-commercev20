@@ -101,15 +101,6 @@ export default function EditProductPage() {
     additional_barcodes: [],
   });
 
-  // تحذير عند مغادرة الصفحة بتعديلات غير محفوظة
-  const [isDirty, setIsDirty] = useState(false);
-  useEffect(() => {
-    if (!isDirty) return;
-    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [isDirty]);
-
   useEffect(() => {
     const fetchProduct = async () => {
       try {
@@ -408,7 +399,6 @@ export default function EditProductPage() {
       };
       await apiClient.put(`/products/${id}`, payload);
       toast.success(t.productUpdated);
-      setIsDirty(false);
       navigate(`/products/${id}`);
     } catch (error) {
       toast.error(errText(error) ||  t.somethingWentWrong);
@@ -442,7 +432,7 @@ export default function EditProductPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} onChange={() => setIsDirty(true)}>
+            <form onSubmit={handleSubmit}>
               <Tabs defaultValue="general" className="w-full">
                 <TabsList className="grid grid-cols-7 mb-4 h-auto flex-wrap gap-y-1">
                   <TabsTrigger value="general" className="text-xs gap-1"><Package className="h-3 w-3" />{isAr ? 'عام' : 'Général'}</TabsTrigger>

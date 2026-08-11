@@ -31,7 +31,7 @@ def _assert_safe_bridge_url(url: str) -> None:
 
 from config.database import db, main_db, client, init_tenant_database, get_tenant_db
 from .schemas import TenantCreate, TenantUpdate, TenantResponse, SubscriptionPayment
-from .helpers import get_super_admin, create_access_token, next_tenant_short_id
+from .helpers import get_super_admin, create_access_token
 from services.wallet_service import credit_wallet, get_or_create_wallet
 
 router = APIRouter(tags=["SaaS Tenants"])
@@ -300,7 +300,6 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
         "limits_override": {},
         "notes": "",
         "business_type": tenant.business_type if hasattr(tenant, 'business_type') else "retailer",
-        "short_id": await next_tenant_short_id(),
         "database_initialized": False,
         "recharge_mode": "owner_bridge",
         "self_bridge_url": "",

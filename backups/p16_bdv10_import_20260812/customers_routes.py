@@ -125,10 +125,10 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
 
     # ── Generate Customer Code ──
     @router.get("/generate-code")
-    async def generate_customer_code(user: dict = Depends(require_tenant)):
+    async def generate_customer_code():
         pipeline = [
-            {"$match": {"code": {"$regex": "^CL\\d+$"}}},
-            {"$project": {"num": {"$toInt": {"$substrCP": ["$code", 2, {"$subtract": [{"$strLenCP": "$code"}, 2]}]}}}},
+            {"$match": {"code": {"$regex": "^CL\\d{4}$"}}},
+            {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}},
             {"$sort": {"num": -1}},
             {"$limit": 1}
         ]

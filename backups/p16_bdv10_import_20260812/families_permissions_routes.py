@@ -262,9 +262,6 @@ async def bulk_price_update(request: BulkPriceUpdateRequest, admin: dict = Depen
             if request.round_to > 0:
                 new_price = round(new_price / request.round_to) * request.round_to
 
-            # Clean float artifacts (e.g. 33.333333333333) even without round_to
-            new_price = round(new_price, 2)
-
             # Ensure price is not negative
             new_price = max(0, new_price)
 
@@ -359,7 +356,6 @@ async def preview_price_update(
             if round_to > 0:
                 new_price = round(new_price / round_to) * round_to
 
-            new_price = round(new_price, 2)
             new_price = max(0, new_price)
 
             preview["changes"][field] = {

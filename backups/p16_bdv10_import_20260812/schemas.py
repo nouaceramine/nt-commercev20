@@ -139,7 +139,6 @@ class TenantUpdate(BaseModel):
 
 class TenantResponse(BaseModel):
     id: str
-    short_id: Optional[str] = None
     name: str
     email: str
     phone: str = ""

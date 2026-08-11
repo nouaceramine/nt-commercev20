@@ -26,7 +26,7 @@ export default function UnifiedLoginPage() {
   useDocumentMeta({
     title: "تسجيل الدخول — NT Commerce",
     description: "ادخل إلى حسابك في NT Commerce — منصّة نقاط البيع والتجارة الإلكترونية الذكية للسوق الجزائري.",
-    canonical: "http://168.231.81.154/portal",
+    canonical: "https://nt-v16-staging.emergent.host/portal",
   });
 
   const handleSubmit = async (e) => {
