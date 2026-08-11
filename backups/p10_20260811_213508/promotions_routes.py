@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def create_promotions_routes(db, get_current_user):
-    repo = BaseRepository(lambda: db["promotions"])  # lazy: resolve per-request (tenant-aware)
+    repo = BaseRepository(db["promotions"])
     router = APIRouter(prefix="/promotions", tags=["Promotions"])
 
     @router.get("")

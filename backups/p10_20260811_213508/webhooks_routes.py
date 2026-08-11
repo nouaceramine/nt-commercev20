@@ -5,9 +5,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def create_promotions_routes(db, get_current_user):
-    repo = BaseRepository(lambda: db["promotions"])  # lazy: resolve per-request (tenant-aware)
-    router = APIRouter(prefix="/promotions", tags=["Promotions"])
+def create_webhooks_routes(db, get_current_user):
+    repo = BaseRepository(db["webhooks"])
+    router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
     @router.get("")
     async def list_items(skip: int = 0, limit: int = 100, user=Depends(get_current_user)):

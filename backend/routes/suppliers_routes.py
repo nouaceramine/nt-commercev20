@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def create_suppliers_routes(db, get_current_user):
-    repo = BaseRepository(db["suppliers"])
+    repo = BaseRepository(lambda: db["suppliers"])  # lazy: resolve per-request (tenant-aware)
     router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
 
     @router.get("")

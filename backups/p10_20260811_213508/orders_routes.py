@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def create_orders_routes(db, get_current_user):
-    repo = BaseRepository(lambda: db["orders"])  # lazy: resolve per-request (tenant-aware)
+    repo = BaseRepository(db["orders"])
     router = APIRouter(prefix="/orders", tags=["Orders"])
 
     @router.get("")

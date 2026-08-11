@@ -6,18 +6,8 @@ from datetime import datetime, timezone
 import uuid
 
 class BaseRepository:
-    def __init__(self, collection):
-        # Accepts a concrete collection OR a zero-arg callable returning one.
-        # The callable form is resolved on EVERY access, so the tenant-aware
-        # DB proxy (config.database.db) binds to the CURRENT request's tenant.
-        # Previously routers captured db["x"] once at registration (startup)
-        # time - the proxy had no tenant context then, so every request was
-        # silently pinned to main_db (cross-tenant leak, e.g. /suppliers).
-        self._collection_resolver = collection if callable(collection) else (lambda: collection)
-
-    @property
-    def collection(self) -> AsyncIOMotorCollection:
-        return self._collection_resolver()
+    def __init__(self, collection: AsyncIOMotorCollection):
+        self.collection = collection
 
     async def find_all(self, skip: int = 0, limit: int = 100, sort_field: str = None, sort_dir: int = -1) -> List[Dict[str, Any]]:
         cursor = self.collection.find()

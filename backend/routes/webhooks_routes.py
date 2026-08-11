@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def create_webhooks_routes(db, get_current_user):
-    repo = BaseRepository(db["webhooks"])
+    repo = BaseRepository(lambda: db["webhooks"])  # lazy: resolve per-request (tenant-aware)
     router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
     @router.get("")
