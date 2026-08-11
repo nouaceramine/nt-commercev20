@@ -27,18 +27,27 @@ export default function ProductDetailPage() {
   const [loyaltyPoints, setLoyaltyPoints] = useState(null);
   const [redeemPoints, setRedeemPoints] = useState(0);
 
-  const WILAYAS = [
-    { id: '16', name: 'الجزائر العاصمة' },
-    { id: '31', name: 'وهران' },
-    { id: '25', name: 'قسنطينة' },
-    { id: '9', name: 'بليدة' },
-    { id: '15', name: 'تيزي وزو' },
-    { id: '26', name: 'المدية' },
-    { id: '6', name: 'بجاية' },
-    { id: '23', name: 'عنابة' },
-    { id: '19', name: 'سطيف' },
-    { id: '22', name: 'سيدي بلعباس' },
-  ];
+  const [wilayasData, setWilayasData] = useState([]);
+  const [availableCommunes, setAvailableCommunes] = useState([]);
+
+  useEffect(() => {
+    fetch('/algeria-wilayas.json')
+      .then(r => r.json())
+      .then(data => setWilayasData(data))
+      .catch(() => setWilayasData([]));
+  }, []);
+
+  useEffect(() => {
+    if (customerInfo.wilaya && wilayasData.length > 0) {
+      const wilaya = wilayasData.find(w => w.id === customerInfo.wilaya);
+      setAvailableCommunes(wilaya ? wilaya.communes : []);
+      if (wilaya && !wilaya.communes.includes(customerInfo.commune)) {
+        setCustomerInfo(prev => ({...prev, commune: ''}));
+      }
+    } else {
+      setAvailableCommunes([]);
+    }
+  }, [customerInfo.wilaya, wilayasData]);
 
   useEffect(() => {
     fetchProduct();
@@ -309,12 +318,15 @@ export default function ProductDetailPage() {
                   <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>الولاية *</label>
                   <select required value={customerInfo.wilaya} onChange={e => setCustomerInfo({...customerInfo, wilaya: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}>
                     <option value="">اختر الولاية</option>
-                    {WILAYAS.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    {wilayasData.map(w => <option key={w.id} value={w.id}>{w.id} - {w.name}</option>)}
                   </select>
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>البلدية *</label>
-                  <input required value={customerInfo.commune} onChange={e => setCustomerInfo({...customerInfo, commune: e.target.value})} placeholder="باب الزوار" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
+                  <select required value={customerInfo.commune} onChange={e => setCustomerInfo({...customerInfo, commune: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}>
+                    <option value="">{customerInfo.wilaya ? 'اختر البلدية' : 'اختر الولاية أولا'}</option>
+                    {availableCommunes.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
               </div>
               <div style={{ marginBottom: '12px' }}>
