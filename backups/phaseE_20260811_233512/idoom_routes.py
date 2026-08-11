@@ -11,9 +11,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from services.digital_inventory import claim_codes, release_codes
-
-
 def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
     router = APIRouter()
 
@@ -117,15 +114,13 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
         now = datetime.now(timezone.utc).isoformat()
 
         # Atomically claim one available code (prevents race conditions)
-        claimed = await claim_codes(
-            db, "idoom_codes",
+        code_doc = await db.idoom_codes.find_one_and_update(
             {"denomination": body.denomination, "status": "available"},
-            {"status": "reserved", "sold_at": now, "sold_txn_id": txn_id,
-             "customer_id": body.customer_id or ""},
-            {"status": "available", "sold_at": None, "sold_txn_id": None, "customer_id": None},
-            quantity=1,
+            {"$set": {"status": "reserved", "sold_at": now, "sold_txn_id": txn_id,
+                      "customer_id": body.customer_id or ""}},
+            return_document=True,
+            projection={"_id": 0},
         )
-        code_doc = claimed[0] if claimed else None
         if not code_doc:
             raise HTTPException(status_code=404, detail=f"لا توجد أكواد Idoom متاحة بقيمة {body.denomination} دج")
 
@@ -136,8 +131,10 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
             )
         except Exception as debit_err:
             # Wallet debit failed — release the claimed code back to available
-            await release_codes(db, "idoom_codes", [code_doc["id"]],
-                {"status": "available", "sold_at": None, "sold_txn_id": None, "customer_id": None})
+            await db.idoom_codes.update_one(
+                {"id": code_doc["id"]},
+                {"$set": {"status": "available", "sold_at": None, "sold_txn_id": None, "customer_id": None}},
+            )
             raise HTTPException(status_code=402, detail=str(debit_err))
 
         try:
@@ -215,8 +212,10 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
             except Exception:
                 logger.exception("Failed to compensate idoom sell for txn %s", txn_id)
             try:
-                await release_codes(db, "idoom_codes", [code_doc["id"]],
-                    {"status": "available", "sold_at": None, "sold_txn_id": None, "customer_id": None})
+                await db.idoom_codes.update_one(
+                    {"id": code_doc["id"]},
+                    {"$set": {"status": "available", "sold_at": None, "sold_txn_id": None, "customer_id": None}},
+                )
             except Exception:
                 logger.exception("Failed to release reserved idoom code %s", code_doc.get("id"))
             raise HTTPException(status_code=500, detail="فشل تسجيل عملية البيع") from e

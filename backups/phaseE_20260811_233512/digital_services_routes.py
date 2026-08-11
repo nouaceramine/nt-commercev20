@@ -206,15 +206,18 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 logger.warning("digital order sms failed: %s", exc)
 
     async def _assign_codes(product_id: str, order_id: str, quantity: int) -> list:
-        from services.digital_inventory import claim_codes
-        docs = await claim_codes(
-            db, "digital_codes",
-            {"product_id": product_id, "is_used": False},
-            {"is_used": True, "used_at": _now(), "order_id": order_id},
-            {"is_used": False, "used_at": None, "order_id": None},
-            quantity=quantity,
-        )
-        return [d["id"] for d in docs]
+        codes = await db.digital_codes.find(
+            {"product_id": product_id, "is_used": False}
+        ).limit(quantity).to_list(quantity)
+        now = _now()
+        assigned = []
+        for c in codes:
+            await db.digital_codes.update_one(
+                {"id": c["id"]},
+                {"$set": {"is_used": True, "used_at": now, "order_id": order_id}}
+            )
+            assigned.append(c["id"])
+        return assigned
 
     @router.post("/orders", status_code=201)
     async def create_order(data: OrderCreate, user: dict = Depends(get_current_user)):
@@ -252,8 +255,6 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 if stock < data.quantity:
                     raise HTTPException(status_code=400, detail="نفدت الأكواد المتاحة لهذا المنتج")
                 order["code_ids"] = await _assign_codes(product["id"], order["id"], data.quantity)
-                if len(order["code_ids"]) < data.quantity:
-                    raise HTTPException(status_code=400, detail="نفدت الأكواد المتاحة لهذا المنتج")
                 order["status"] = "COMPLETED"
             else:
                 order["status"] = "PENDING"  # DIRECT_TOPUP / SMS need manual or provider API
