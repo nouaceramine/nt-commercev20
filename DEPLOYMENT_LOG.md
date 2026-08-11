@@ -317,3 +317,31 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - البعيد origin (Nt-commerce17) كان متخلفاً (9cedb82) عن كل مراحل p13–p18 — دُفع الآن: remote HEAD = eef6ecc يطابق المحلي ✔
 - cron يومي 04:00: git push origin main مع تسجيل في ntcommerce_backup.log — أي التزام جديد يُرفع تلقائياً في الليلة نفسها
 - ملاحظة أمان موثقة (بلا إجراء): رمز PAT مضمّن في رابط origin بنص صريح — يُنصح باستبداله بـ deploy key أو إلغاء الرمز وتوليد آخر لاحقاً
+
+---
+
+## p20 — تدوير مفاتيح JWT (2026-08-11)
+
+### قبل
+- الحاوية كانت تعمل بمفتاح placeholder ضعيف معروف: `your-super-secret-jwt-key-change-in-production-ntcommerce-v16` (من `/opt/ntcommerce/.env` عبر env_file — له أولوية على backend/.env)
+- المفتاح القوي في backend/.env لم يكن مستخدماً فعلياً
+
+### النسخ الاحتياطي
+- `backups/p20_jwt_rotation_20260811_220214/` (env.root + env.backend + docker-compose.yml) — مستثنى من git (يحوي أسراراً)
+
+### التغييرات
+- JWT_SECRET_KEY جديد: openssl rand -hex 48 (96 حرفاً) — في /opt/ntcommerce/.env و backend/.env
+- SECRET_KEY جديد: openssl rand -hex 32 (64 حرفاً)
+- JWT_SECRET (legacy) في backend/.env طُوّق بنفس القيمة
+- إعادة إنشاء الحاوية: docker-compose up -d --force-recreate backend
+- .gitignore: استثناء backups/p20_jwt_rotation_*/
+
+### التحقق (curl)
+- GET /api/health ← ok
+- توكن قديم (قبل التدوير) ← 401 ✔ (كل الجلسات أُبطلت كما هو متوقع)
+- تسجيل دخول demo جديد ← 200، توكن موقّع بالمفتاح الجديد
+- GET /api/products عبر nginx ← 200
+- ملاحظة: حساب superadmin@ntcommerce.com غير متأثر (كلمة المرور bcrypt مستقلة عن JWT) — يحتاج فقط إعادة تسجيل دخول
+
+### الأثر
+- كل الجلسات النشطة (مستخدمون + مستأجرون) سُحبت — إعادة تسجيل دخول مطلوبة
