@@ -44,6 +44,36 @@ def create_auth_routes(db, get_current_user):
 
     @router.get("/me")
     async def me(user=Depends(get_current_user)):
-        return {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}
+        # Return the FULL session shape — the previous thin dict dropped
+        # tenant_id/features/limits, so feature-gated pages disappeared
+        # after a page refresh (AuthContext restores from /auth/me).
+        out = {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user.get("full_name") or user.get("name", ""),
+            "name": user.get("name") or user.get("full_name", ""),
+            "role": user.get("role", "user"),
+            "user_type": user.get("user_type"),
+            "tenant_id": user.get("tenant_id"),
+            "company_name": user.get("company_name"),
+            "permissions": user.get("permissions") or {},
+            "features": user.get("features"),
+            "limits": user.get("limits"),
+        }
+        # Tenant users authenticated via utils/auth.get_current_user arrive
+        # WITHOUT plan features (that variant doesn't inject them). Enrich
+        # from the tenant's plan so feature-gated UI works on session restore.
+        if out["tenant_id"] and not out["features"]:
+            from config.database import main_db as _mdb
+            tenant = await _mdb.saas_tenants.find_one({"id": out["tenant_id"]}, {"_id": 0, "password": 0})
+            if tenant:
+                plan = await _mdb.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
+                if plan:
+                    feats = {**plan.get("features", {}), **tenant.get("features_override", {})}
+                    feats.setdefault("ecommerce_hub", False)
+                    out["features"] = feats
+                    out["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
+                out["company_name"] = out["company_name"] or tenant.get("company_name")
+        return out
 
     return router
