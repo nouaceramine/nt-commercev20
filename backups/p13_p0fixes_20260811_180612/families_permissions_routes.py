@@ -374,8 +374,6 @@ async def create_product_family(family: ProductFamilyCreate, admin: dict = Depen
 @router.get("/product-families", response_model=List[ProductFamilyResponse])
 async def get_product_families(user: dict = Depends(require_tenant)):
     families = await db.product_families.find({}, {"_id": 0}).to_list(1000)
-    # Skip malformed docs (e.g. bad CSV import artifacts with no id) instead of 500
-    families = [fam for fam in families if fam.get("id")]
 
     # Update product counts
     for family in families:
