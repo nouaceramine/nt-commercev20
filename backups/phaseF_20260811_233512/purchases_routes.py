@@ -222,8 +222,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             update_dict.update({"paid_amount": new_paid, "remaining": new_remaining, "status": new_status})
 
             balance_diff = old_remaining - new_remaining
-            if purchase.get("stock_status", "confirmed") == "confirmed":
-                await adjust_supplier_mirror(db, purchase["supplier_id"], balance=-balance_diff)
+            await adjust_supplier_mirror(db, purchase["supplier_id"], balance=-balance_diff)
 
             payment_diff = new_paid - old_paid
             if payment_diff > 0:
@@ -259,9 +258,10 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             for item in purchase.get("items", []):
                 await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}})
 
-        if purchase.get("stock_status", "confirmed") == "confirmed":
-            await adjust_supplier_mirror(db, purchase["supplier_id"],
-                total_purchases=-purchase.get("total", 0), balance=-purchase.get("remaining", 0))
+        await db.suppliers.update_one(
+            {"id": purchase["supplier_id"]},
+            {"$inc": {"total_purchases": -purchase.get("total", 0), "balance": -purchase.get("remaining", 0)}}
+        )
 
         if purchase.get("paid_amount", 0) > 0:
             await db.cash_boxes.update_one(
