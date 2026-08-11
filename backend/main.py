@@ -798,14 +798,6 @@ except ImportError:
 
 print("[INIT] All fixes applied successfully")
 
-@app.get("/api/saas/subscribers-list", tags=["SaaS"])
-async def subscribers_list(request):
-    return {"subscribers": [], "note": "Use /api/saas/tenants for full list"}
-
-@app.get("/api/saas/subscribers", tags=["SaaS"])
-async def get_subscribers():
-    return {"subscribers": [{"id": "7ab8244e-9b34-4100-bf76-d8100c0fad3f", "name": "amine nouacer", "email": "amine@amine.com", "plan_id": "starter"}], "total": 1}
-
 # ============ ENHANCED ROUTES (Sections 1-12) ============
 try:
     enhanced_products_router = create_enhanced_products_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)

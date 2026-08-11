@@ -175,7 +175,10 @@ class LLMService:
                     response_text = response_text[4:]
             return json.loads(response_text)
         except Exception as e:
-            logger.error(f"Error detecting anomalies: {e}")
+            if "not configured" in str(e):
+                logger.info("Anomaly detection skipped: AI integration not configured")
+            else:
+                logger.error(f"Error detecting anomalies: {e}")
             return []
     
     async def generate_forecast(self, historical_data: List[Dict[str, Any]], 
@@ -333,7 +336,10 @@ class LLMService:
                     response_text = response_text[4:]
             return json.loads(response_text)
         except Exception as e:
-            logger.error(f"Error generating daily summary: {e}")
+            if "not configured" in str(e):
+                logger.info("Daily summary skipped: AI integration not configured")
+            else:
+                logger.error(f"Error generating daily summary: {e}")
             return {"summary": "تعذر إنشاء الملخص", "highlights": [], "alerts": [], "recommendations": []}
     
     async def parse_whatsapp_message(self, message: str) -> Dict[str, Any]:
