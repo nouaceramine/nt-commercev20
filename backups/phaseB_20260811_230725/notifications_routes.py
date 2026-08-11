@@ -29,7 +29,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
     async def get_notifications(user: dict = Depends(require_tenant)):
         """Get all notifications for current user"""
         notifications = await db.notifications.find(
-            {"channel": {"$ne": "smart"}, "$or": [{"user_id": user["id"]}, {"user_id": None}]},
+            {"$or": [{"user_id": user["id"]}, {"user_id": None}]},
             {"_id": 0}
         ).sort("created_at", -1).to_list(50)
         return notifications
@@ -85,7 +85,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
     @router.put("/notifications/read-all")
     async def mark_all_notifications_read(user: dict = Depends(require_tenant)):
         await db.notifications.update_many(
-            {"read": False, "channel": {"$ne": "smart"}, "$or": [{"user_id": user["id"]}, {"user_id": {"$exists": False}}]},
+            {"read": False, "$or": [{"user_id": user["id"]}, {"user_id": {"$exists": False}}]},
             {"$set": {"read": True}}
         )
         return {"message": "All notifications marked as read"}
@@ -95,7 +95,6 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         notifications = await db.notifications.find(
             {
                 "read": False,
-                "channel": {"$ne": "smart"},
                 "$or": [
                     {"user_id": user["id"]},
                     {"user_id": {"$exists": False}}
@@ -461,13 +460,13 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         user: dict = Depends(require_tenant)
     ):
         """Get all notifications with pagination"""
-        query = {"channel": {"$ne": "smart"}}
+        query = {}
         if unread_only:
             query["read"] = False
 
         notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
         total = await db.notifications.count_documents(query)
-        unread_count = await db.notifications.count_documents({"read": False, "channel": {"$ne": "smart"}})
+        unread_count = await db.notifications.count_documents({"read": False})
 
         return {
             "notifications": notifications,
@@ -478,7 +477,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
     @router.put("/notifications/mark-all-read")
     async def mark_all_notifications_read_v2(user: dict = Depends(require_tenant)):
         await db.notifications.update_many(
-            {"read": False, "channel": {"$ne": "smart"}},
+            {"read": False},
             {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
         )
         return {"success": True}
@@ -486,7 +485,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
     @router.delete("/notifications/clear-all")
     async def clear_all_notifications(admin: dict = Depends(get_tenant_admin)):
         """Clear all notifications"""
-        result = await db.notifications.delete_many({"channel": {"$ne": "smart"}})
+        result = await db.notifications.delete_many({})
         return {"success": True, "deleted_count": result.deleted_count}
 
 

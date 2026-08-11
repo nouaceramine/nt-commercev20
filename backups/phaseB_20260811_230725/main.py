@@ -140,6 +140,7 @@ from core.feature_flags import (
 from routes.saas_routes import get_super_admin
 from routes.auth_routes import router as auth_router
 from routes.audit_routes import router as audit_router
+from routes.alert_routes import router as alert_router
 from routes.performance_routes import record_request_time
 from utils.permissions import create_permission_checker, create_cashier_block
 
@@ -672,6 +673,12 @@ except ImportError:
 try:
     from routes.activity_routes import router as activity_router
     app.include_router(activity_router, prefix="/api", tags=["Activity"])
+except ImportError:
+    pass
+
+try:
+    from routes.alert_routes import router as alert_router
+    app.include_router(alert_router, prefix="/api", tags=["Alerts"])
 except ImportError:
     pass
 

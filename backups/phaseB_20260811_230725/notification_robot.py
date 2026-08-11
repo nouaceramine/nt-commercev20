@@ -66,9 +66,9 @@ class NotificationRobot:
         # Store notifications
         for n in notifications:
             try:
-                await self.db.notifications.update_one(
-                    {"reference_id": n.get("reference_id"), "type": n.get("type"), "channel": "smart"},
-                    {"$set": {**n, "channel": "smart"}, "$setOnInsert": {"id": str(uuid.uuid4()), "read": False}},
+                await self.db.smart_notifications.update_one(
+                    {"reference_id": n.get("reference_id"), "type": n.get("type")},
+                    {"$set": n, "$setOnInsert": {"id": str(uuid.uuid4()), "read": False}},
                     upsert=True
                 )
             except Exception:
