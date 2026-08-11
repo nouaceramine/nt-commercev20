@@ -23,7 +23,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Default OpenAI model used for financial analysis / chat
-AI_MODEL = "gpt-5"
+AI_MODEL = os.environ.get("AI_INTEGRATIONS_OPENAI_MODEL", "gpt-5")
 
 
 class UserMessage:

@@ -385,3 +385,21 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - توليد وصف منتج (A54) ← success، عربية تسويقية سليمة، ~8 ثوانٍ ✔
 - ترجمة فرنسية (قياسية + دارجة) ← success ✔
 - منشور فيسبوك مع سعر ودعوة توصيل + هاشتاغات ← success ✔
+
+---
+
+## p23 — تفعيل الروبوتات الثمانية عبر Gemini (مجاني) (2026-08-11)
+
+### المشكلة
+- الروبوتات الثمانية (services/ai/agents.py) تعمل عبر llm_service.py الذي يتطلب AI_INTEGRATIONS_OPENAI_* — مفتاح Gemini وحده لا يكفي
+
+### الحل
+- Google توفر نقطة متوافقة مع OpenAI: https://generativelanguage.googleapis.com/v1beta/openai/ — نفس مفتاح Gemini يعمل
+- أضفنا AI_INTEGRATIONS_OPENAI_API_KEY + BASE_URL + MODEL=gemini-3.1-flash-lite إلى .env الجذري وbackend/.env
+- llm_service.py: AI_MODEL صار قابلاً للضبط عبر env (كان "gpt-5" ثابتاً)
+- سبب فشل أول: المتغيرات كتبت للجذري فقط + restart لا يعيد تحميل env_file — الحل: كتابة backend/.env (load_dotenv) + up -d --force-recreate
+
+### التحقق (curl بتوكن demo)
+- /api/ai/agents/status ← الثمانية is_enabled:true ✔
+- classify-expense (فاتورة كهرباء Sonelgaz) ← utilities بثقة 1.0 + سبب عربي ✔
+- agents/run expense_classifier (اشتراك Djezzy) ← utilities، 6.7 ث (نداء LLM حقيقي لا fallback) ✔
