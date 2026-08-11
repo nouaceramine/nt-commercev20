@@ -15,19 +15,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     require_permission = create_permission_checker(db, get_current_user)
     router = APIRouter(prefix="/products", tags=["products"])
 
-    async def _audit_product(action: str, product_id: str, product_name: str, admin: dict, details: dict = None):
-        """Write to product_audit_log — collection existed with indexes but had no writer."""
-        await db.product_audit_log.insert_one({
-            "id": str(uuid.uuid4()),
-            "action": action,
-            "product_id": product_id,
-            "product_name": product_name,
-            "user_id": admin.get("id", ""),
-            "performed_by": admin.get("name", admin.get("email", "")),
-            "details": details or {},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-
     # ── Inline Models ──
     class PaginatedProductsResponse(BaseModel):
         items: list
@@ -131,8 +118,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             if "E11000" in str(e) or "DuplicateKey" in type(e).__name__:
                 raise HTTPException(status_code=409, detail="الباركود مستعمل مسبقاً (تعارض تزامن)")
             raise
-        await _audit_product("create", product_id, product_doc["name"], admin,
-                             {"barcode": product_doc.get("barcode", ""), "retail_price": product_doc.get("retail_price", 0)})
         product_doc.pop("_id", None)
         return product_doc
 
@@ -451,8 +436,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.products.update_one({"id": product_id}, {"$set": update_data})
-        await _audit_product("update", product_id, product.get("name_ar") or product.get("name_en") or "",
-                             admin, {"changed_fields": sorted(k for k in update_data if k != "updated_at")})
         updated = await db.products.find_one({"id": product_id}, {"_id": 0})
         return updated
 
@@ -474,7 +457,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         result = await db.products.delete_one({"id": product_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        await _audit_product("delete", product_id, pname, admin, {})
         return {"message": "تم حذف المنتج بنجاح"}
 
     # ── Product History ──

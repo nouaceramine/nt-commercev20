@@ -236,34 +236,17 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             raise HTTPException(status_code=404, detail="Store not available")
         if settings.get("min_order_amount", 0) > 0 and order.subtotal < settings["min_order_amount"]:
             raise HTTPException(status_code=400, detail=f"Minimum order amount is {settings['min_order_amount']}")
-        # Atomic stock claim per product (merged duplicates), all-or-nothing —
-        # same pattern as POS create_sale_op: conditional find_one_and_update,
-        # rollback prior claims on any shortfall
-        _claim = {}
-        _names = {}
         for item in order.items:
-            pid = item.get("product_id")
-            if not pid:
-                continue
-            _claim[pid] = _claim.get(pid, 0) + item.get("quantity", 1)
-            _names[pid] = item.get("name", "")
-        _claimed = []
-        for pid, qty in _claim.items():
-            product = await tenant_db_inst.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1})
+            product = await tenant_db_inst.products.find_one({"id": item.get("product_id")})
             if not product:
-                raise HTTPException(status_code=400, detail=f"Product {_names.get(pid, 'Unknown')} not found")
-            if product.get("is_non_stockable"):
-                continue
-            res = await tenant_db_inst.products.find_one_and_update(
-                {"id": pid, "quantity": {"$gte": qty}},
-                {"$inc": {"quantity": -qty}},
+                raise HTTPException(status_code=400, detail=f"Product {item.get('name', 'Unknown')} not found")
+            if product.get("quantity", 0) < item.get("quantity", 1):
+                raise HTTPException(status_code=400, detail=f"Product {item.get('name', product.get('name_ar', 'Unknown'))} out of stock")
+        for item in order.items:
+            await tenant_db_inst.products.update_one(
+                {"id": item.get("product_id")},
+                {"$inc": {"quantity": -item.get("quantity", 1)}}
             )
-            if res is None:
-                for cid, cqty in _claimed:
-                    await tenant_db_inst.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
-                pname = product.get("name_ar") or product.get("name_en") or _names.get(pid, pid)
-                raise HTTPException(status_code=400, detail=f"المنتج '{pname}' غير متوفر بالكمية المطلوبة (المتاح {product.get('quantity', 0)})")
-            _claimed.append((pid, qty))
         count = await tenant_db_inst.store_orders.count_documents({}) + 1
         order_number = f"WEB{count:06d}"
         order_data = {

@@ -279,26 +279,6 @@ async def bulk_price_update(request: BulkPriceUpdateRequest, admin: dict = Depen
             "new_prices": {f: update_data[f] for f in price_fields}
         })
 
-        # Same audit trail as single-product PUT: one price_history row per changed field
-        now_iso = update_data["updated_at"]
-        for field in price_fields:
-            old_p = product.get(field, 0)
-            new_p = update_data[field]
-            if new_p != old_p:
-                await db.price_history.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "product_id": product["id"],
-                    "product_name": product.get("name_ar") or product.get("name_en") or "",
-                    "old_price": old_p,
-                    "new_price": new_p,
-                    "price_type": field,
-                    "change_percent": round(((new_p - old_p) / old_p) * 100, 2) if old_p else 0.0,
-                    "changed_by": admin.get("name", admin.get("email", "")),
-                    "changed_by_name": admin.get("name", admin.get("email", "")),
-                    "change_reason": "bulk_price_update",
-                    "created_at": now_iso,
-                })
-
     # Log the bulk update
     await db.system_logs.insert_one({
         "id": str(uuid.uuid4()),

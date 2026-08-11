@@ -253,15 +253,10 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             raise HTTPException(status_code=400, detail="File must be Excel format (.xlsx or .xls)")
 
         contents = await file.read()
-        try:
-            wb = load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
-            ws = wb.active
-            rows_iter = ws.iter_rows(values_only=True)
-            header = [str(h).strip() if h is not None else "" for h in next(rows_iter, [])]
-        except Exception:
-            raise HTTPException(status_code=400, detail="ملف Excel تالف أو غير قابل للقراءة")
-        if not header:
-            raise HTTPException(status_code=400, detail="الملف فارغ أو بلا صف عناوين")
+        wb = load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        header = [str(h).strip() if h is not None else "" for h in next(rows_iter, [])]
         excel_rows = [
             {header[i]: cell for i, cell in enumerate(r) if i < len(header)}
             for r in rows_iter
