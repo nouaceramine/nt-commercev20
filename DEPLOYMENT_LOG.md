@@ -370,3 +370,18 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 
 ### المتبقي
 - إضافة GEMINI_API_KEY (مجاني من aistudio.google.com) إلى /opt/ntcommerce/.env + إعادة تشغيل backend — لا حاجة لإعادة بناء الواجهة
+
+---
+
+## p22 — تفعيل مفتاح Gemini وتشغيل AI فعلياً (2026-08-11)
+
+### التغييرات
+- GEMINI_API_KEY أُضيف إلى /opt/ntcommerce/.env و backend/.env (ملفات .env غير مرفوعة لـ git)
+- النموذج الافتراضي gemini-2.5-flash رُفض من Google للمستخدمين الجدد (404) — استعلمنا /v1beta/models بالمفتاح واخترنا gemini-3.1-flash-lite عبر GEMINI_MODEL
+- إصلاح عرض النموذج في /api/ai/status (كان نصاً ثابتاً قديماً ← ai_service.MODEL)
+
+### التحقق (curl بتوكن demo)
+- status ← configured:true, model:gemini-3.1-flash-lite ✔
+- توليد وصف منتج (A54) ← success، عربية تسويقية سليمة، ~8 ثوانٍ ✔
+- ترجمة فرنسية (قياسية + دارجة) ← success ✔
+- منشور فيسبوك مع سعر ودعوة توصيل + هاشتاغات ← success ✔

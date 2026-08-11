@@ -43,6 +43,6 @@ async def ai_status():
     """يتحقق من حالة AI"""
     return {
         "configured": ai_service.is_configured(),
-        "model": "gemini-1.5-flash" if ai_service.is_configured() else None,
+        "model": ai_service.MODEL if ai_service.is_configured() else None,
         "message": "AI جاهز" if ai_service.is_configured() else "أضف GEMINI_API_KEY في .env"
     }
