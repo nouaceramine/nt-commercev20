@@ -121,15 +121,18 @@ async def seed_default_data(db, tenant_id=None):
         created_count = 0
         for collection_name, default_record in records.items():
             try:
-                # Check if default already exists
+                # Atomic upsert — safe under concurrent uvicorn workers
+                # (the old find-then-insert race created duplicate defaults)
                 collection = db[collection_name]
-                existing = await collection.find_one({"is_default": True})
-
-                if not existing:
-                    record = default_record.copy()
-                    if tenant_id:
-                        record["tenant_id"] = tenant_id
-                    await collection.insert_one(record)
+                record = default_record.copy()
+                if tenant_id:
+                    record["tenant_id"] = tenant_id
+                result = await collection.update_one(
+                    {"id": record["id"]},
+                    {"$setOnInsert": record},
+                    upsert=True,
+                )
+                if result.upserted_id is not None:
                     created_count += 1
                     logger.info(f"Created default {collection_name}")
             except Exception as e:

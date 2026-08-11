@@ -390,9 +390,14 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             await db.price_history.insert_one({
                 "id": str(uuid.uuid4()),
                 "product_id": product_id,
+                "product_name": product.get("name_ar") or product.get("name_en") or product.get("name") or "",
                 "old_price": old_price,
                 "new_price": new_price,
+                "price_type": "retail_price",
+                "change_percent": round(((new_price - old_price) / old_price) * 100, 2) if old_price else 0.0,
                 "changed_by": admin.get("name", admin.get("email", "")),
+                "changed_by_name": admin.get("name", admin.get("email", "")),
+                "source": "manual",
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
 

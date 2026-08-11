@@ -75,7 +75,10 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tenant_id = admin.get("tenant_id") or "platform"
         await db.store_settings.update_one({}, {"$set": settings.model_dump()}, upsert=True)
         if settings.store_slug:
-            existing = await main_db.store_slugs.find_one({"tenant_id": tenant_id})
+            # Ownership check must look up the SLUG, not the tenant —
+            # the previous query-by-tenant made this guard a no-op and
+            # allowed two tenants to claim the same public slug.
+            existing = await main_db.store_slugs.find_one({"store_slug": settings.store_slug})
             if existing and existing.get("tenant_id") != tenant_id:
                 raise HTTPException(status_code=400, detail="هذا الرابط المختصر مستخدم من متجر آخر — اختر رابطاً مختلفاً")
             await main_db.store_slugs.update_one(
@@ -239,6 +242,49 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         await tenant_db_inst.store_orders.insert_one(order_data)
+        # NEW: Send Conversions API Purchase Event
+        try:
+            await conversions_service.send_purchase(
+                order_data["id"],
+                order.items,
+                order.total,
+                f"http://168.231.81.154/shop/{store_slug}/product/{order.items[0].get('product_id', '')}" if order.items else "",
+                {
+                    "email": order.customer_email,
+                    "phone": order.customer_phone
+                },
+                tenant_id
+            )
+        except Exception as e:
+            logger.error(f"Conversions API error: {e}")
+
+        # NEW: Send WhatsApp Notification
+        try:
+            await whatsapp_service.send_order_confirmation(
+                order.customer_phone,
+                order_number,
+                order.customer_name,
+                order.total,
+                [item.model_dump() if hasattr(item, 'model_dump') else item for item in order.items]
+            )
+        except Exception as e:
+            logger.error(f"WhatsApp error: {e}")
+
+        # NEW: Add Loyalty Points
+        try:
+            await loyalty_service.get_or_create_customer(
+                tenant_db_inst,
+                order.customer_phone,
+                order.customer_name
+            )
+            await loyalty_service.add_points(
+                tenant_db_inst,
+                order.customer_phone,
+                order.total,
+                order_data["id"]
+            )
+        except Exception as e:
+            logger.error(f"Loyalty error: {e}")
         return {"message": "تم استلام طلبك بنجاح", "order_number": order_number, "order_id": order_data["id"]}
 
     # ── WooCommerce Routes ──

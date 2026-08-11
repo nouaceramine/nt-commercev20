@@ -144,14 +144,13 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 async def _get_db(tenant_id: str, db_proxy):
-    """Get tenant-specific database."""
-    if hasattr(db_proxy, '__call__'):
-        return db_proxy(tenant_id)
-    try:
-        from config.database import get_tenant_db
-        return get_tenant_db(tenant_id)
-    except Exception:
-        return db_proxy
+    """Return the request-scoped DB proxy.
+
+    The proxy routes every operation to the correct tenant database via the
+    tenant ContextVar set by the auth dependency, so it must be used as-is.
+    (Previously this tried to *call* the proxy -> TypeError: not callable,
+    breaking every /api/v2/financial/* endpoint with a 500.)"""
+    return db_proxy
 
 async def _calculate_product_family_capital(db, family_id: str) -> Dict[str, Any]:
     """Calculate invested capital for a product family."""

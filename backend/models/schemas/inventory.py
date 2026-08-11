@@ -53,14 +53,14 @@ class PriceHistoryResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     product_id: str
-    product_name: str
+    product_name: str = ""
     old_price: float
     new_price: float
-    price_type: str  # purchase_price, wholesale_price, retail_price
-    change_percent: float
-    changed_by: str
-    changed_by_name: str
-    source: str  # manual, purchase, import
+    price_type: str = "retail_price"  # purchase_price, wholesale_price, retail_price
+    change_percent: float = 0.0
+    changed_by: str = ""
+    changed_by_name: str = ""
+    source: str = "manual"  # manual, purchase, import
     notes: Optional[str] = ""
     created_at: str
 

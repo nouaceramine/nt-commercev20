@@ -464,9 +464,9 @@ class CustomerFamilyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     name: str
-    description: str
+    description: str = ""
     customer_count: int = 0
-    created_at: str
+    created_at: str = ""
 
 class SupplierFamilyCreate(BaseModel):
     name: str
@@ -480,9 +480,9 @@ class SupplierFamilyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     name: str
-    description: str
+    description: str = ""
     supplier_count: int = 0
-    created_at: str
+    created_at: str = ""
 
 # Customer Families CRUD
 @router.post("/customer-families", response_model=CustomerFamilyResponse)

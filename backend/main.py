@@ -279,6 +279,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         except Exception:
             pass
 
+        # CRITICAL multi-tenancy: route the modular routers' `db` proxy to the
+        # tenant database. The logging context above only tags logs — without
+        # this, every auto-registered route ran tenant requests against
+        # main_db (cross-tenant data leak, e.g. /store/settings).
+        if tenant_id:
+            # aliased import: the name `set_tenant_context` is shadowed above
+            # by middleware.request_context's logging-only variant
+            from config.database import set_tenant_context as _set_db_tenant_ctx
+            _set_db_tenant_ctx(get_tenant_db(tenant_id))
+
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
 

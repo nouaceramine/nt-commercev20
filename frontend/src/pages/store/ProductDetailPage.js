@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { toast } from 'sonner';
-import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft } from 'lucide-react';
+import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin } from 'lucide-react';
 
 export default function ProductDetailPage() {
   const { slug, productId } = useParams();
@@ -18,6 +18,14 @@ export default function ProductDetailPage() {
   const [customerInfo, setCustomerInfo] = useState({
     name: '', phone: '', email: '', wilaya: '', commune: '', address: '', notes: ''
   });
+
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponMessage, setCouponMessage] = useState('');
+  const [couponLoading, setCouponLoading] = useState(false);
+
+  const [loyaltyPoints, setLoyaltyPoints] = useState(null);
+  const [redeemPoints, setRedeemPoints] = useState(0);
 
   const WILAYAS = [
     { id: '16', name: 'الجزائر العاصمة' },
@@ -51,10 +59,52 @@ export default function ProductDetailPage() {
     }
   };
 
+  const validateCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setCouponLoading(true);
+    try {
+      const price = product.retail_price || product.selling_price || 0;
+      const response = await apiClient.post(`/shop/${slug}/validate-coupon`, {
+        code: couponCode,
+        subtotal: price * quantity,
+        customer_phone: customerInfo.phone,
+        product_ids: [product.id]
+      });
+      if (response.data.valid) {
+        setCouponDiscount(response.data.discount);
+        setCouponMessage(response.data.message);
+        toast.success(response.data.message);
+      } else {
+        setCouponDiscount(0);
+        setCouponMessage(response.data.error);
+        toast.error(response.data.error);
+      }
+    } catch (error) {
+      toast.error('فشل التحقق من الكوبون');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const checkLoyalty = async () => {
+    if (!customerInfo.phone || customerInfo.phone.length < 10) return;
+    try {
+      const response = await apiClient.get(`/store/loyalty/customer/${customerInfo.phone}`);
+      if (response.data.success) {
+        setLoyaltyPoints(response.data.data);
+      }
+    } catch (error) {
+      // Silently fail - loyalty is optional
+    }
+  };
+
   const handleOrder = async (e) => {
     e.preventDefault();
     try {
       const price = product.retail_price || product.selling_price || 0;
+      const subtotal = price * quantity;
+      const total = Math.max(0, subtotal - couponDiscount);
+
       const orderData = {
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,
@@ -68,8 +118,10 @@ export default function ProductDetailPage() {
           quantity: quantity,
           price: price
         }],
-        subtotal: price * quantity,
-        total: price * quantity,
+        subtotal: subtotal,
+        total: total,
+        coupon_code: couponCode || undefined,
+        coupon_discount: couponDiscount || undefined,
         notes: customerInfo.notes,
         payment_method: 'cod'
       };
@@ -85,6 +137,7 @@ export default function ProductDetailPage() {
   if (!product) return null;
 
   const price = product.retail_price || product.selling_price || 0;
+  const finalPrice = Math.max(0, price * quantity - couponDiscount);
 
   return (
     <div className="nouacer-store" dir="rtl">
@@ -172,10 +225,69 @@ export default function ProductDetailPage() {
                 <span>{product.name_ar}</span>
                 <span>× {quantity}</span>
               </div>
-              <div style={{ fontWeight: 800, fontSize: '18px', color: '#f7941d' }}>
-                الإجمالي: {(price * quantity).toLocaleString()} دج
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', color: '#636e72', fontSize: '14px' }}>
+                <span>المجموع الفرعي</span>
+                <span>{(price * quantity).toLocaleString()} دج</span>
+              </div>
+              {couponDiscount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', color: '#27ae60', fontSize: '14px' }}>
+                  <span>خصم الكوبون</span>
+                  <span>-{couponDiscount.toLocaleString()} دج</span>
+                </div>
+              )}
+              <div style={{ fontWeight: 800, fontSize: '18px', color: '#f7941d', borderTop: '1px solid #ddd', paddingTop: '8px' }}>
+                الإجمالي: {finalPrice.toLocaleString()} دج
               </div>
             </div>
+
+            {/* Coupon Input */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <Tag size={16} style={{ color: '#f7941d' }} />
+                <input
+                  type="text"
+                  value={couponCode}
+                  onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                  placeholder="أدخل كود الخصم"
+                  style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
+                />
+                <button
+                  onClick={validateCoupon}
+                  disabled={couponLoading || !couponCode.trim()}
+                  style={{ padding: '10px 16px', background: '#f7941d', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}
+                >
+                  {couponLoading ? '...' : 'تطبيق'}
+                </button>
+              </div>
+              {couponMessage && (
+                <p style={{ fontSize: '13px', marginTop: '4px', color: couponDiscount > 0 ? '#27ae60' : '#e74c3c' }}>
+                  {couponMessage}
+                </p>
+              )}
+            </div>
+
+            {/* Loyalty Points (if customer has points) */}
+            {loyaltyPoints && loyaltyPoints.points > 0 && (
+              <div style={{ background: '#fff8e1', padding: '12px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Gift size={16} style={{ color: '#f7941d' }} />
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: '14px', fontWeight: 600 }}>🎁 لديك {loyaltyPoints.points} نقطة ولاء</p>
+                  <p style={{ fontSize: '12px', color: '#636e72' }}>100 نقطة = 500 دج خصم</p>
+                </div>
+                <button
+                  onClick={() => {
+                    const pointsToUse = Math.min(loyaltyPoints.points, Math.floor((price * quantity) / 500) * 100);
+                    const discount = (pointsToUse / 100) * 500;
+                    setRedeemPoints(pointsToUse);
+                    setCouponDiscount(prev => prev + discount);
+                    toast.success(`تم استبدال ${pointsToUse} نقطة بخصم ${discount.toLocaleString()} دج`);
+                  }}
+                  style={{ padding: '6px 12px', background: '#fff', border: '1px solid #f7941d', color: '#f7941d', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+                >
+                  استبدال
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleOrder}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
@@ -185,7 +297,7 @@ export default function ProductDetailPage() {
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>رقم الهاتف *</label>
-                  <input required type="tel" value={customerInfo.phone} onChange={e => setCustomerInfo({...customerInfo, phone: e.target.value})} placeholder="0555123456" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
+                  <input required type="tel" value={customerInfo.phone} onChange={e => setCustomerInfo({...customerInfo, phone: e.target.value})} onBlur={checkLoyalty} placeholder="0555123456" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
                 </div>
               </div>
               <div style={{ marginBottom: '12px' }}>
@@ -214,7 +326,7 @@ export default function ProductDetailPage() {
                 <textarea rows={3} value={customerInfo.notes} onChange={e => setCustomerInfo({...customerInfo, notes: e.target.value})} placeholder="أي ملاحظات خاصة..." style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', resize: 'vertical' }} />
               </div>
               <button type="submit" style={{ width: '100%', padding: '14px', background: '#27ae60', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}>
-                ✅ تأكيد الطلب (الدفع عند الاستلام)
+                ✅ تأكيد الطلب (الدفع عند الاستلام) — {finalPrice.toLocaleString()} دج
               </button>
             </form>
           </div>
@@ -227,8 +339,16 @@ export default function ProductDetailPage() {
             <div style={{ fontSize: '64px', marginBottom: '16px' }}>🎉</div>
             <h3 style={{ marginBottom: '8px' }}>تم استلام طلبك بنجاح!</h3>
             <p style={{ color: '#636e72', marginBottom: '16px' }}>سنتواصل معك قريباً لتأكيد الطلب</p>
-            <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', marginBottom: '24px', fontWeight: 700 }}>رقم الطلب: {orderSuccess.order_number}</div>
-            <button style={{ padding: '14px 32px', background: '#f7941d', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', cursor: 'pointer' }} onClick={() => { setShowOrderForm(false); setOrderSuccess(null); navigate(`/shop/${slug}`); }}>
+            <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontWeight: 700 }}>رقم الطلب: {orderSuccess.order_number}</div>
+
+            {/* Tracking Link */}
+            <div style={{ marginBottom: '24px' }}>
+              <Link to={`/shop/${slug}/track/${orderSuccess.order_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f7941d', textDecoration: 'none', fontSize: '14px' }}>
+                <MapPin size={16} /> تتبع طلبك
+              </Link>
+            </div>
+
+            <button style={{ padding: '14px 32px', background: '#f7941d', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', cursor: 'pointer' }} onClick={() => { setShowOrderForm(false); setOrderSuccess(null); setCouponCode(''); setCouponDiscount(0); setCouponMessage(''); navigate(`/shop/${slug}`); }}>
               متابعة التسوق
             </button>
           </div>
