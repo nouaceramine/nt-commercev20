@@ -74,26 +74,14 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(requir
     unique_filename = f"{uuid.uuid4()}.{file_ext}"
     file_path = UPLOAD_DIR / unique_filename
 
-    # Save file — with size limit and magic-byte content verification
+    # Save file
     try:
-        content = await file.read()
-        if len(content) > 5 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="حجم الملف يتجاوز الحد الأقصى 5MB")
-        _sig = (
-            content[:3] == b"\xff\xd8\xff"                      # JPEG
-            or content[:4] == b"\x89PNG"                            # PNG
-            or content[:3] == b"GIF"                                 # GIF
-            or (content[:4] == b"RIFF" and content[8:12] == b"WEBP") # WEBP
-        )
-        if not _sig:
-            raise HTTPException(status_code=400, detail="محتوى الملف ليس صورة حقيقية")
         with open(file_path, "wb") as buffer:
+            content = await file.read()
             buffer.write(content)
 
         # Return URL (relative to static)
         return {"url": f"/api/static/uploads/{unique_filename}", "filename": unique_filename}
-    except HTTPException:
-        raise
     except Exception:
         raise HTTPException(status_code=500, detail="Internal server error")
 

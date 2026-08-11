@@ -448,26 +448,6 @@ async def startup_event():
     except Exception as e:
         logger.warning("Enhanced indexes: %s", e)
 
-    # Unique barcode per tenant (partial: ignores empty/missing) — idempotent
-    try:
-        from config.database import get_tenant_db as _get_tenant_db, main_db as _main_db
-        _dbs = [_main_db]
-        async for t in _main_db.saas_tenants.find({}, {"_id": 0, "id": 1}):
-            if t.get("id"):
-                try:
-                    _dbs.append(_get_tenant_db(t["id"]))
-                except Exception:
-                    pass
-        for _d in _dbs:
-            await _d.products.create_index(
-                [("barcode", 1)],
-                unique=True, name="barcode_unique_partial",
-                partialFilterExpression={"barcode": {"$gt": ""}},
-            )
-        logger.info("Barcode unique partial indexes ensured on %d databases", len(_dbs))
-    except Exception as e:
-        logger.warning("Barcode index ensure: %s", e)
-
     try:
         from services.event_bus import event_bus
         event_bus.start()
@@ -1419,8 +1399,3 @@ async def repair_update_alias(repair_id: str, data: dict, user: dict = Depends(g
     return await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
 
 # ============ END ROUND 4 ============
-
-
-# Serve uploaded files (product/purchase images) — StaticFiles was imported but never
-# mounted, so every /api/static/uploads/* URL returned 404 (audit P1 fix)
-app.mount("/api/static", StaticFiles(directory=ROOT_DIR / "static"), name="static")

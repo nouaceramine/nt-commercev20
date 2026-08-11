@@ -213,7 +213,7 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
     if sale.get("customer_id"):
         await db.customers.update_one(
             {"id": sale["customer_id"]},
-            {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}}
+            {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0)}}
         )
     if sale.get("paid_amount", 0) > 0:
         cash_box_id = sale.get("cash_box_id") or sale.get("payment_method")
@@ -255,7 +255,7 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
     if sale.get("customer_id"):
         await db.customers.update_one(
             {"id": sale["customer_id"]},
-            {"$inc": {"total_purchases": -sale["total"], "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}}
+            {"$inc": {"total_purchases": -sale["total"], "balance": -sale.get("remaining", 0)}}
         )
 
     if sale.get("paid_amount", 0) > 0:

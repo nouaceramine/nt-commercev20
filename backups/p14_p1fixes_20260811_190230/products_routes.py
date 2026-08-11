@@ -57,16 +57,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         if existing:
             raise HTTPException(status_code=409, detail=f"منتج بنفس الاسم موجود مسبقاً: {existing.get('name_ar') or existing.get('name_en')}")
 
-        _new_barcodes = ([p.barcode] if p.barcode else []) + list(p.additional_barcodes or [])
-        for _bc in _new_barcodes:
-            if not _bc:
-                continue
-            bc_clash = await db.products.find_one({
-                "$or": [{"barcode": _bc}, {"additional_barcodes": _bc}]
-            })
-            if bc_clash:
-                raise HTTPException(status_code=409, detail=f"الباركود مستعمل مسبقاً في المنتج: {bc_clash.get('name_ar') or bc_clash.get('name_en')}")
-
         family_name = ""
         if p.family_id:
             family = await db.product_families.find_one({"id": p.family_id}, {"_id": 0, "name_ar": 1})
@@ -112,12 +102,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "additional_barcodes": p.additional_barcodes or [],
             "created_at": now, "updated_at": now
         }
-        try:
-            await db.products.insert_one(product_doc)
-        except Exception as e:
-            if "E11000" in str(e) or "DuplicateKey" in type(e).__name__:
-                raise HTTPException(status_code=409, detail="الباركود مستعمل مسبقاً (تعارض تزامن)")
-            raise
+        await db.products.insert_one(product_doc)
         product_doc.pop("_id", None)
         return product_doc
 
@@ -407,15 +392,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 update_data["family_name"] = family["name_ar"]
             else:
                 update_data["family_name"] = ""
-
-        new_barcode = update_data.get("barcode")
-        if new_barcode:
-            bc_clash = await db.products.find_one({
-                "id": {"$ne": product_id},
-                "$or": [{"barcode": new_barcode}, {"additional_barcodes": new_barcode}]
-            })
-            if bc_clash:
-                raise HTTPException(status_code=409, detail=f"الباركود مستعمل مسبقاً في المنتج: {bc_clash.get('name_ar') or bc_clash.get('name_en')}")
 
         old_price = product.get("retail_price", 0)
         new_price = update_data.get("retail_price", old_price)
