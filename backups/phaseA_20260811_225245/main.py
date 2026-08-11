@@ -140,6 +140,7 @@ from core.feature_flags import (
 from routes.saas_routes import get_super_admin
 from routes.auth_routes import router as auth_router
 from routes.audit_routes import router as audit_router
+from routes.monitoring_routes import router as monitoring_router
 from routes.alert_routes import router as alert_router
 from routes.performance_routes import record_request_time
 from utils.permissions import create_permission_checker, create_cashier_block
@@ -210,6 +211,40 @@ from models.extra_schemas import (
     RechargeTransactionCreate, RechargeTransactionResponse,
     ChatMessage, ImageOCRRequest,
 )
+
+# ============ ENHANCED IMPORTS (Sections 1-12) ============
+from routes.ecom.enhanced_products_routes import create_enhanced_products_routes
+from routes.ecom.enhanced_orders_routes import create_enhanced_orders_routes
+from routes.ecom.enhanced_customers_routes import create_enhanced_customers_routes
+from routes.ecom.enhanced_shipping_routes import create_enhanced_shipping_routes
+from routes.ecom.enhanced_channels_routes import create_enhanced_channels_routes
+from routes.ecom.enhanced_leads_routes import create_enhanced_leads_routes
+from routes.ecom.enhanced_promotions_routes import create_enhanced_promotions_routes
+from routes.ecom.enhanced_content_routes import create_enhanced_content_routes
+from routes.ecom.enhanced_notifications_routes import create_enhanced_notifications_routes
+from routes.ecom.enhanced_reviews_routes import create_enhanced_reviews_routes
+from routes.ecom.enhanced_inventory_routes import create_enhanced_inventory_routes
+from routes.ecom.enhanced_financial_routes import create_enhanced_financial_routes
+
+# ============ ENHANCED IMPORTS (Sections 13-30) ============
+from routes.ecom.enhanced_analytics_routes import create_enhanced_analytics_routes
+from routes.ecom.enhanced_ai_routes import create_enhanced_ai_routes
+from routes.ecom.enhanced_marketplace_routes import create_enhanced_marketplace_routes
+from routes.ecom.enhanced_subscription_routes import create_enhanced_subscription_routes
+from routes.ecom.enhanced_user_management_routes import create_enhanced_user_management_routes
+from routes.ecom.enhanced_settings_routes import create_enhanced_settings_routes
+from routes.ecom.enhanced_import_export_routes import create_enhanced_import_export_routes
+from routes.ecom.enhanced_notifications_center_routes import create_enhanced_notifications_center_routes
+from routes.ecom.enhanced_suppliers_routes import create_enhanced_suppliers_routes
+from routes.ecom.enhanced_purchase_orders_routes import create_enhanced_purchase_orders_routes
+from routes.ecom.enhanced_loyalty_routes import create_enhanced_loyalty_routes
+from routes.ecom.enhanced_search_routes import create_enhanced_search_routes
+from routes.ecom.enhanced_audit_routes import create_enhanced_audit_routes
+from routes.ecom.enhanced_integrations_routes import create_enhanced_integrations_routes
+from routes.ecom.enhanced_workflow_routes import create_enhanced_workflow_routes
+from routes.ecom.enhanced_security_routes import create_enhanced_security_routes
+from routes.ecom.enhanced_admin_routes import create_enhanced_admin_routes
+from routes.ecom.enhanced_webhooks_routes import create_enhanced_webhooks_routes
 
 from utils.enhanced_indexes import create_all_enhanced_indexes
 
@@ -757,6 +792,218 @@ except ImportError:
 
 print("[INIT] All fixes applied successfully")
 
+# ============ ENHANCED ROUTES (Sections 1-12) ============
+try:
+    enhanced_products_router = create_enhanced_products_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_products_router, prefix="/api/v2")
+    print("[INIT] Products v2 registered")
+except Exception as _e:
+    print(f"[INIT] Products v2: {_e}")
+
+try:
+    enhanced_orders_router = create_enhanced_orders_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_orders_router, prefix="/api/v2")
+    print("[INIT] Orders v2 registered")
+except Exception as _e:
+    print(f"[INIT] Orders v2: {_e}")
+
+try:
+    enhanced_customers_router = create_enhanced_customers_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_customers_router, prefix="/api/v2")
+    print("[INIT] Customers v2 registered")
+except Exception as _e:
+    print(f"[INIT] Customers v2: {_e}")
+
+try:
+    enhanced_shipping_router = create_enhanced_shipping_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_shipping_router, prefix="/api/v2")
+    print("[INIT] Shipping v2 registered")
+except Exception as _e:
+    print(f"[INIT] Shipping v2: {_e}")
+
+try:
+    enhanced_channels_router = create_enhanced_channels_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_channels_router, prefix="/api/v2")
+    print("[INIT] Channels v2 registered")
+except Exception as _e:
+    print(f"[INIT] Channels v2: {_e}")
+
+try:
+    enhanced_leads_router = create_enhanced_leads_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_leads_router, prefix="/api/v2")
+    print("[INIT] Leads v2 registered")
+except Exception as _e:
+    print(f"[INIT] Leads v2: {_e}")
+
+try:
+    enhanced_promotions_router = create_enhanced_promotions_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_promotions_router, prefix="/api/v2")
+    print("[INIT] Promotions v2 registered")
+except Exception as _e:
+    print(f"[INIT] Promotions v2: {_e}")
+
+try:
+    enhanced_content_router = create_enhanced_content_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_content_router, prefix="/api/v2")
+    print("[INIT] Content v2 registered")
+except Exception as _e:
+    print(f"[INIT] Content v2: {_e}")
+
+try:
+    enhanced_notifications_router = create_enhanced_notifications_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_notifications_router, prefix="/api/v2")
+    print("[INIT] Notifications v2 registered")
+except Exception as _e:
+    print(f"[INIT] Notifications v2: {_e}")
+
+try:
+    enhanced_reviews_router = create_enhanced_reviews_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_reviews_router, prefix="/api/v2")
+    print("[INIT] Reviews v2 registered")
+except Exception as _e:
+    print(f"[INIT] Reviews v2: {_e}")
+
+try:
+    enhanced_inventory_router = create_enhanced_inventory_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_inventory_router, prefix="/api/v2")
+    print("[INIT] Inventory v2 registered")
+except Exception as _e:
+    print(f"[INIT] Inventory v2: {_e}")
+
+try:
+    enhanced_financial_router = create_enhanced_financial_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_financial_router, prefix="/api/v2")
+    print("[INIT] Financial v2 registered")
+except Exception as _e:
+    print(f"[INIT] Financial v2: {_e}")
+
+# ============ ENHANCED ROUTES (Sections 13-30) ============
+try:
+    enhanced_analytics_router = create_enhanced_analytics_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_analytics_router, prefix="/api/v2")
+    print("[INIT] Analytics v2 registered")
+except Exception as _e:
+    print(f"[INIT] Analytics v2: {_e}")
+
+try:
+    enhanced_ai_router = create_enhanced_ai_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_ai_router, prefix="/api/v2")
+    print("[INIT] AI v2 registered")
+except Exception as _e:
+    print(f"[INIT] AI v2: {_e}")
+
+try:
+    enhanced_marketplace_router = create_enhanced_marketplace_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_marketplace_router, prefix="/api/v2")
+    print("[INIT] Marketplace v2 registered")
+except Exception as _e:
+    print(f"[INIT] Marketplace v2: {_e}")
+
+try:
+    enhanced_subscription_router = create_enhanced_subscription_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_subscription_router, prefix="/api/v2")
+    print("[INIT] Subscription v2 registered")
+except Exception as _e:
+    print(f"[INIT] Subscription v2: {_e}")
+
+try:
+    enhanced_user_mgmt_router = create_enhanced_user_management_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_user_mgmt_router, prefix="/api/v2")
+    print("[INIT] User Management v2 registered")
+except Exception as _e:
+    print(f"[INIT] User Management v2: {_e}")
+
+try:
+    enhanced_settings_router = create_enhanced_settings_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_settings_router, prefix="/api/v2")
+    print("[INIT] Settings v2 registered")
+except Exception as _e:
+    print(f"[INIT] Settings v2: {_e}")
+
+try:
+    enhanced_import_export_router = create_enhanced_import_export_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_import_export_router, prefix="/api/v2")
+    print("[INIT] Import/Export v2 registered")
+except Exception as _e:
+    print(f"[INIT] Import/Export v2: {_e}")
+
+try:
+    enhanced_notif_center_router = create_enhanced_notifications_center_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_notif_center_router, prefix="/api/v2")
+    print("[INIT] Notifications Center v2 registered")
+except Exception as _e:
+    print(f"[INIT] Notifications Center v2: {_e}")
+
+try:
+    enhanced_suppliers_router = create_enhanced_suppliers_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_suppliers_router, prefix="/api/v2")
+    print("[INIT] Suppliers v2 registered")
+except Exception as _e:
+    print(f"[INIT] Suppliers v2: {_e}")
+
+try:
+    enhanced_purchase_orders_router = create_enhanced_purchase_orders_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_purchase_orders_router, prefix="/api/v2")
+    print("[INIT] Purchase Orders v2 registered")
+except Exception as _e:
+    print(f"[INIT] Purchase Orders v2: {_e}")
+
+try:
+    enhanced_loyalty_router = create_enhanced_loyalty_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_loyalty_router, prefix="/api/v2")
+    print("[INIT] Loyalty v2 registered")
+except Exception as _e:
+    print(f"[INIT] Loyalty v2: {_e}")
+
+try:
+    enhanced_search_router = create_enhanced_search_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_search_router, prefix="/api/v2")
+    print("[INIT] Search v2 registered")
+except Exception as _e:
+    print(f"[INIT] Search v2: {_e}")
+
+try:
+    enhanced_audit_router = create_enhanced_audit_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_audit_router, prefix="/api/v2")
+    print("[INIT] Audit v2 registered")
+except Exception as _e:
+    print(f"[INIT] Audit v2: {_e}")
+
+try:
+    enhanced_integrations_router = create_enhanced_integrations_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_integrations_router, prefix="/api/v2")
+    print("[INIT] Integrations v2 registered")
+except Exception as _e:
+    print(f"[INIT] Integrations v2: {_e}")
+
+try:
+    enhanced_workflow_router = create_enhanced_workflow_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_workflow_router, prefix="/api/v2")
+    print("[INIT] Workflow v2 registered")
+except Exception as _e:
+    print(f"[INIT] Workflow v2: {_e}")
+
+try:
+    enhanced_security_router = create_enhanced_security_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_security_router, prefix="/api/v2")
+    print("[INIT] Security v2 registered")
+except Exception as _e:
+    print(f"[INIT] Security v2: {_e}")
+
+try:
+    enhanced_admin_router = create_enhanced_admin_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_admin_router, prefix="/api/v2")
+    print("[INIT] Admin v2 registered")
+except Exception as _e:
+    print(f"[INIT] Admin v2: {_e}")
+
+try:
+    enhanced_webhooks_router = create_enhanced_webhooks_routes(db=db, get_current_user=get_current_user, require_permission=require_permission)
+    app.include_router(enhanced_webhooks_router, prefix="/api/v2")
+    print("[INIT] Developer/Webhooks v2 registered")
+except Exception as _e:
+    print(f"[INIT] Developer/Webhooks v2: {_e}")
+# ============ END ENHANCED ============
 # ============ LEGACY / SAAS ADMIN ROUTES (restored 2026-08-07) ============
 # These route modules existed in the codebase but were never registered after
 # the Sections refactor — causing 404s across the super-admin panel.
