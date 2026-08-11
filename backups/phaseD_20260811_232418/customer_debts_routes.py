@@ -9,9 +9,6 @@ from datetime import datetime, timezone
 import uuid
 
 
-from services.balances import customer_debt_aggregates, adjust_customer_mirror, adjust_supplier_mirror
-
-
 def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require_tenant, CURRENCY="دج") -> dict:
     router = APIRouter(tags=["customer-debts"])
 
@@ -61,7 +58,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         payment_record = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "amount": actual_payment, "payment_method": payment.payment_method, "notes": payment.notes, "sales_updated": sales_updated, "created_at": datetime.now(timezone.utc).isoformat(), "created_by": user.get("name", "")}
         await db.debt_payments.insert_one(payment_record)
         if actual_payment > 0:
-            await adjust_customer_mirror(db, customer_id, total_debt=-actual_payment, balance=-actual_payment)
+            await db.customers.update_one({"id": customer_id}, {"$inc": {"total_debt": -actual_payment, "balance": -actual_payment}})
         return {"success": True, "payment_applied": actual_payment, "remaining_from_payment": remaining_payment, "sales_updated": sales_updated}
 
     @router.post("/supplier-debts/pay")
@@ -84,7 +81,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
             remaining_payment -= payment_for_this
         supplier = await db.suppliers.find_one({"id": payment.supplier_id})
         if supplier:
-            await adjust_supplier_mirror(db, payment.supplier_id, total_purchases=-payment.amount)
+            await db.suppliers.update_one({"id": payment.supplier_id}, {"$inc": {"total_purchases": -payment.amount}})
         now = datetime.now(timezone.utc).isoformat()
         await db.transactions.insert_one({"id": str(uuid.uuid4()), "type": "expense", "box": payment.payment_method, "amount": -payment.amount, "balance_after": 0, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "created_at": now})
         await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}})
@@ -92,7 +89,8 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
 
     @router.get("/debts/summary")
     async def get_debts_summary(user: dict = Depends(require_tenant)):
-        debts_by_customer = await customer_debt_aggregates(db)
+        pipeline = [{"$match": {"debt_amount": {"$gt": 0}}}, {"$group": {"_id": "$customer_id", "total_debt": {"$sum": "$debt_amount"}, "sales_count": {"$sum": 1}}}]
+        debts_by_customer = await db.sales.aggregate(pipeline).to_list(1000)
         result = []
         for debt in debts_by_customer:
             customer = await db.customers.find_one({"id": debt["_id"]}, {"_id": 0, "name": 1, "phone": 1})
@@ -107,7 +105,8 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
         from fastapi.responses import StreamingResponse
-        debts_by_customer = await customer_debt_aggregates(db)
+        pipeline = [{"$match": {"debt_amount": {"$gt": 0}}}, {"$group": {"_id": "$customer_id", "total_debt": {"$sum": "$debt_amount"}, "sales_count": {"$sum": 1}}}]
+        debts_by_customer = await db.sales.aggregate(pipeline).to_list(1000)
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Customer Debts"

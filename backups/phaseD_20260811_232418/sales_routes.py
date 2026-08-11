@@ -3,7 +3,6 @@ Sales Routes — thin HTTP layer. Business logic lives in
 services/application/sales_service.py
 """
 from fastapi import APIRouter, HTTPException, Depends
-from services.balances import adjust_customer_mirror, adjust_supplier_mirror
 from typing import Optional
 
 
@@ -105,13 +104,17 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
             old_cid = sale.get("customer_id")
             if new_cid != old_cid:
                 if old_cid:
-                    await adjust_customer_mirror(db, old_cid,
-                        total_purchases=-sale.get("total", 0), balance=-sale.get("remaining", 0))
+                    await db.customers.update_one(
+                        {"id": old_cid},
+                        {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0)}}
+                    )
                 if new_cid:
                     cust = await db.customers.find_one({"id": new_cid}, {"_id": 0})
                     if cust:
-                        await adjust_customer_mirror(db, new_cid,
-                            total_purchases=sale.get("total", 0), balance=sale.get("remaining", 0))
+                        await db.customers.update_one(
+                            {"id": new_cid},
+                            {"$inc": {"total_purchases": sale.get("total", 0), "balance": sale.get("remaining", 0)}}
+                        )
                         updates["customer_id"] = new_cid
                         updates["customer_name"] = cust.get("name", "")
                 else:
@@ -129,7 +132,7 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
 
             cust_id = updates.get("customer_id", sale.get("customer_id"))
             if cust_id:
-                await adjust_customer_mirror(db, cust_id, balance=-payment_amount)
+                await db.customers.update_one({"id": cust_id}, {"$inc": {"balance": -payment_amount}})
 
             cash_box_id = data.get("cash_box_id")
             if cash_box_id:

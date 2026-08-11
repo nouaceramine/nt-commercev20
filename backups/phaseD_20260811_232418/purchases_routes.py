@@ -3,7 +3,6 @@ Purchase Routes - Extracted from server.py
 Full CRUD with supplier balance, cash box updates
 """
 from fastapi import APIRouter, HTTPException, Depends
-from services.balances import adjust_supplier_mirror
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -109,8 +108,10 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     "product_id": item.product_id, "read": False, "created_at": now
                 })
 
-        await adjust_supplier_mirror(db, p.supplier_id,
-            total_purchases=p.total, balance=remaining)
+        await db.suppliers.update_one(
+            {"id": p.supplier_id},
+            {"$inc": {"total_purchases": p.total, "balance": remaining}}
+        )
 
         if p.paid_amount > 0:
             await db.cash_boxes.update_one(
@@ -222,7 +223,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             update_dict.update({"paid_amount": new_paid, "remaining": new_remaining, "status": new_status})
 
             balance_diff = old_remaining - new_remaining
-            await adjust_supplier_mirror(db, purchase["supplier_id"], balance=-balance_diff)
+            await db.suppliers.update_one({"id": purchase["supplier_id"]}, {"$inc": {"balance": -balance_diff}})
 
             payment_diff = new_paid - old_paid
             if payment_diff > 0:
