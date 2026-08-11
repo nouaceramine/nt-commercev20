@@ -6,9 +6,6 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter
-from services.reporting import (
-    sales_chart_rows, top_products_rows, product_price_map, product_docs_map,
-)
 
 
 def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, init_cash_boxes, CURRENCY="DZD") -> dict:
@@ -137,8 +134,14 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         monthly_purchase_cost = 0
         try:
             monthly_sales = await db.sales.find({"created_at": {"$gte": month_start}, "status": {"$ne": "returned"}}, {"_id": 0, "items": 1}).to_list(1000)
-            product_ids = {item.get("product_id") for sale in monthly_sales for item in sale.get("items", [])}
-            products_cache = await product_price_map(db, product_ids)
+            product_ids = set()
+            for sale in monthly_sales:
+                for item in sale.get("items", []):
+                    product_ids.add(item.get("product_id"))
+            products_cache = {}
+            if product_ids:
+                products = await db.products.find({"id": {"$in": list(product_ids)}}, {"_id": 0, "id": 1, "purchase_price": 1}).to_list(len(product_ids))
+                products_cache = {p["id"]: p.get("purchase_price", 0) for p in products}
             for sale in monthly_sales:
                 for item in sale.get("items", []):
                     purchase_price = item.get("purchase_price") or products_cache.get(item.get("product_id"), 0)
@@ -165,11 +168,18 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         now = datetime.now(timezone.utc)
         if period == "year":
             start_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+            group_key = {"$substr": ["$created_at", 0, 7]}
         else:
             days = 7 if period == "week" else 30
             start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+            group_key = {"$substr": ["$created_at", 0, 10]}
 
-        result = await sales_chart_rows(db, start_date, monthly=(period == "year"))
+        pipeline = [
+            {"$match": {"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}},
+            {"$group": {"_id": group_key, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
+            {"$sort": {"_id": 1}}
+        ]
+        result = await db.sales.aggregate(pipeline).to_list(100)
         return {"period": period, "data": [{"date": r["_id"], "total": r["total"], "count": r["count"]} for r in result]}
 
     # ── Analytics: Top Products ──
@@ -179,7 +189,14 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        result = await top_products_rows(db, limit, start_date)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}},
+            {"$unwind": "$items"},
+            {"$group": {"_id": "$items.product_id", "product_name": {"$first": "$items.name"}, "total_quantity": {"$sum": "$items.quantity"}, "total_revenue": {"$sum": {"$multiply": ["$items.price", "$items.quantity"]}}}},
+            {"$sort": {"total_revenue": -1}},
+            {"$limit": limit}
+        ]
+        result = await db.sales.aggregate(pipeline).to_list(limit)
         return {"period": period, "products": result}
 
     # ── Analytics: Top Customers ──
@@ -293,14 +310,26 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     @router.get("/reports/sales-chart")
     async def get_sales_chart(days: int = 7, admin: dict = Depends(get_tenant_admin)):
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-        result = await sales_chart_rows(db, start_date)
-        return [{"date": r["_id"], "total": r["total"], "count": r["count"]} for r in result]
+        pipeline = [
+            {"$match": {"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}},
+            {"$addFields": {"date": {"$substr": ["$created_at", 0, 10]}}},
+            {"$group": {"_id": "$date", "total_sales": {"$sum": "$total"}, "count": {"$sum": 1}}},
+            {"$sort": {"_id": 1}}
+        ]
+        result = await db.sales.aggregate(pipeline).to_list(100)
+        return [{"date": r["_id"], "total": r["total_sales"], "count": r["count"]} for r in result]
 
     # ── Reports: Top Products (Legacy) ──
     @router.get("/reports/top-products")
     async def get_report_top_products(limit: int = 10, admin: dict = Depends(get_tenant_admin)):
-        return await top_products_rows(db, limit, None, name_field="product_name",
-                                       revenue_mode="total", sort_key="total_quantity")
+        pipeline = [
+            {"$match": {"status": {"$ne": "returned"}}},
+            {"$unwind": "$items"},
+            {"$group": {"_id": "$items.product_id", "product_name": {"$first": "$items.product_name"}, "total_quantity": {"$sum": "$items.quantity"}, "total_revenue": {"$sum": "$items.total"}}},
+            {"$sort": {"total_quantity": -1}},
+            {"$limit": limit}
+        ]
+        return await db.sales.aggregate(pipeline).to_list(limit)
 
     # ── Reports: Top Customers (Legacy) ──
     @router.get("/reports/top-customers")
@@ -313,11 +342,10 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         sales = await db.sales.find({"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}, {"_id": 0, "items": 1, "total": 1}).to_list(10000)
         total_revenue = sum(s["total"] for s in sales)
-        docs = await product_docs_map(db, (it.get("product_id") for s in sales for it in s.get("items", [])))
         total_cost = 0
         for sale in sales:
             for item in sale.get("items", []):
-                product = docs.get(item["product_id"])
+                product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0, "purchase_price": 1})
                 if product:
                     total_cost += product.get("purchase_price", 0) * item["quantity"]
         gross_profit = total_revenue - total_cost
@@ -329,7 +357,6 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     async def get_detailed_profit_report(days: int = 30, admin: dict = Depends(get_tenant_admin)):
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         sales = await db.sales.find({"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}, {"_id": 0}).to_list(10000)
-        docs = await product_docs_map(db, (it.get("product_id") for s in sales for it in s.get("items", [])))
 
         daily_data = {}
         product_profits = {}
@@ -342,7 +369,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             for item in sale.get("items", []):
                 product_id = item.get("product_id")
                 if product_id:
-                    product = docs.get(product_id)
+                    product = await db.products.find_one({"id": product_id}, {"_id": 0, "purchase_price": 1, "name_ar": 1, "name_en": 1})
                     if product:
                         purchase_price = product.get("purchase_price", 0)
                         sale_price = item.get("price", 0)
