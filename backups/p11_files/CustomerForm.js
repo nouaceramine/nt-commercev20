@@ -1,6 +1,5 @@
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { PRICE_TIERS } from '../../lib/priceTiers';
 import { Button } from '../ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -109,8 +108,8 @@ export default function CustomerForm({
         </div>
       </div>
 
-      {/* Type, Discount, Debt Limit, Birthdate, Price Tier */}
-      <div className="grid grid-cols-5 gap-3">
+      {/* Type, Discount, Debt Limit, Birthdate */}
+      <div className="grid grid-cols-4 gap-3">
         <div className="space-y-1">
           <Label className="text-xs">{language === 'ar' ? 'التصنيف' : 'Type'}</Label>
           <Select
@@ -158,22 +157,6 @@ export default function CustomerForm({
             onChange={(e) => setFormData({ ...formData, birthdate: e.target.value })}
             className="h-9"
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">{language === 'ar' ? 'فئة السعر' : 'Tarif'}</Label>
-          <Select
-            value={formData.price_tier || 'retail'}
-            onValueChange={(value) => setFormData({ ...formData, price_tier: value })}
-          >
-            <SelectTrigger className="h-9" data-testid="customer-price-tier">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PRICE_TIERS.map(tier => (
-                <SelectItem key={tier.value} value={tier.value}>{language === 'ar' ? tier.ar : tier.fr}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
       </div>
 

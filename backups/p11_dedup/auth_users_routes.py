@@ -34,6 +34,73 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
 
     # ============ AUTH ROUTES ============
 
+    @router.post("/auth/register", response_model=TokenResponse)
+    @limiter.limit("10/minute")
+    async def register(request: Request, user: UserCreate):
+        existing = await db.users.find_one({"email": user.email})
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+        # SECURITY: Prevent creating super_admin or saas_admin roles
+        forbidden_roles = ["super_admin", "saas_admin", "superadmin"]
+        if user.role and user.role.lower() in [r.lower() for r in forbidden_roles]:
+            raise HTTPException(
+                status_code=403, 
+                detail="لا يمكن إنشاء حساب بصلاحية سوبر أدمين - Creating super_admin accounts is not allowed"
+            )
+
+        # Password strength validation
+        from utils.password_validator import validate_password
+        pw_check = validate_password(user.password)
+        if not pw_check["is_valid"]:
+            raise HTTPException(status_code=400, detail={"message": "كلمة المرور ضعيفة", "errors": pw_check["errors"]})
+
+        user_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+
+        user_doc = {
+            "id": user_id, "email": user.email,
+            "password": hash_password(user.password),
+            "name": user.name, "role": user.role, "created_at": now
+        }
+        await db.users.insert_one(user_doc)
+        access_token = create_access_token({"sub": user_id, "role": user.role})
+
+        return TokenResponse(
+            access_token=access_token,
+            user=UserResponse(id=user_id, email=user.email, name=user.name, role=user.role, created_at=now)
+        )
+
+    @router.post("/auth/login", response_model=TokenResponse)
+    @limiter.limit("20/minute")
+    async def login(request: Request, credentials: UserLogin):
+        user = await db.users.find_one({"email": email_ci(credentials.email)}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        # Support both password and hashed_password fields
+        stored_password = user.get("hashed_password") or user.get("password")
+        if not stored_password or not verify_password(credentials.password, stored_password):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        access_token = create_access_token({"sub": user["id"], "role": user["role"]})
+        return TokenResponse(
+            access_token=access_token,
+            user=UserResponse(id=user["id"], email=user["email"], name=user["name"], role=user["role"], permissions=user.get("permissions", {}), created_at=user["created_at"])
+        )
+
+    # Unified Login - Auto-detect user type
+    class UnifiedLoginResponse(BaseModel):
+        access_token: str
+        user_type: str  # admin, agent, tenant
+        redirect_to: str
+        user: dict
+
+    # ============ BRUTE FORCE PROTECTION ============
+    _login_attempts = {}  # {email: {"count": int, "locked_until": str}}
+    MAX_LOGIN_ATTEMPTS = 5
+    LOCKOUT_MINUTES = 15
+
     def _check_brute_force(email: str) -> dict:
         """Check if account is locked due to too many failed attempts"""
         info = _login_attempts.get(email)
@@ -283,6 +350,12 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         # No user found
         _record_failed_login(email)
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+
+    @router.get("/auth/me", response_model=UserResponse)
+    async def get_me(current_user: dict = Depends(get_current_user)):
+        return UserResponse(**current_user)
+
+    # ============ TWO-FACTOR AUTHENTICATION (2FA) ============
 
     @router.post("/auth/2fa/setup")
     async def setup_2fa(current_user: dict = Depends(get_current_user)):

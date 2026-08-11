@@ -27,13 +27,6 @@ def create_suppliers_routes(db, get_current_user):
     async def create_item(data: dict, user=Depends(get_current_user)):
         return await repo.create(data)
 
-    @router.patch("/{id}")
-    async def update_item(id: str, data: dict, user=Depends(get_current_user)):
-        success = await repo.update(id, data)
-        if not success:
-            raise HTTPException(status_code=404, detail="Not found")
-        return {"success": True}
-
     @router.delete("/{id}")
     async def delete_item(id: str, user=Depends(get_current_user)):
         success = await repo.delete(id)

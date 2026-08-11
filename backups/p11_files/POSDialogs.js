@@ -1,5 +1,4 @@
 import { errText } from '../../lib/errorText';
-import { getTierPrice } from '../../lib/priceTiers';
 import { useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import apiClient from '../../lib/apiClient';
@@ -126,7 +125,7 @@ export default function POSDialogs({
                           <p className="text-xs text-muted-foreground">{product.barcode || product.article_code}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center">{formatCurrency(getTierPrice(product, priceType))}</TableCell>
+                      <TableCell className="text-center">{formatCurrency(priceType === 'wholesale' ? product.wholesale_price : product.retail_price)}</TableCell>
                       <TableCell className="text-center">
                         <Badge variant={product.quantity > 10 ? 'default' : product.quantity > 0 ? 'secondary' : 'destructive'}>{product.quantity}</Badge>
                       </TableCell>

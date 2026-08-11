@@ -17,7 +17,6 @@ class ProductCreate(BaseModel):
     tariff_d: Optional[float] = 0
     quantity: int = 0
     image_url: Optional[str] = ""
-    images: Optional[List[str]] = []  # معرض الصور: حتى 5 صور (الأولى = الغلاف)
     compatible_models: List[str] = []
     low_stock_threshold: int = 10
     barcode: Optional[str] = ""
@@ -73,13 +72,6 @@ class ProductCreate(BaseModel):
             raise ValueError('السعر يجب أن يكون صفر أو أكثر')
         return v or 0
     
-    @field_validator('images')
-    @classmethod
-    def validate_images(cls, v):
-        if v and len(v) > 5:
-            raise ValueError('الحد الأقصى 5 صور للمنتج')
-        return v or []
-
     @field_validator('quantity', 'low_stock_threshold')
     @classmethod
     def validate_quantity(cls, v) -> bool:

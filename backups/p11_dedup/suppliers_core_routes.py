@@ -19,6 +19,50 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
         payment_method: str = "cash"
         notes: str = ""
 
+    @router.post("", status_code=201)
+    async def create_supplier(supplier: dict, admin: dict = Depends(require_permission("suppliers.edit"))):
+        from models.schemas import SupplierCreate, SupplierResponse
+        s = SupplierCreate(**supplier)
+        sid = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        if s.phone:
+            existing = await db.suppliers.find_one({"phone": s.phone})
+            if existing:
+                raise HTTPException(status_code=409, detail=f"مورد برقم الهاتف هذا موجود مسبقاً: {existing.get('name')}")
+        family_name = ""
+        if s.family_id:
+            family = await db.supplier_families.find_one({"id": s.family_id}, {"_id": 0, "name": 1})
+            if family:
+                family_name = family["name"]
+        doc = {"id": sid, "name": s.name, "phone": s.phone or "", "email": s.email or "", "address": s.address or "", "notes": s.notes or "", "code": s.code or "", "family_id": s.family_id or "", "family_name": family_name, "total_purchases": 0, "balance": 0, "created_at": now}
+        await db.suppliers.insert_one(doc)
+        doc.pop("_id", None)
+        return doc
+
+    @router.get("")
+    async def get_suppliers(search: Optional[str] = None, family_id: Optional[str] = None, admin: dict = Depends(require_permission("suppliers.edit"))):
+        query = {}
+        if search:
+            query["$or"] = [{"name": {"$regex": search, "$options": "i"}}, {"phone": {"$regex": search, "$options": "i"}}, {"code": {"$regex": search, "$options": "i"}}]
+        if family_id:
+            query["family_id"] = family_id
+        suppliers = await db.suppliers.find(query, {"_id": 0}).to_list(1000)
+
+        # Batch fetch families to avoid N+1
+        fam_ids = list(set(s.get("family_id") for s in suppliers if s.get("family_id") and not s.get("family_name")))
+        fam_map = {}
+        if fam_ids:
+            fams = await db.supplier_families.find({"id": {"$in": fam_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(fam_ids))
+            fam_map = {f["id"]: f.get("name", "") for f in fams}
+
+        for s in suppliers:
+            if s.get("family_id") and not s.get("family_name"):
+                s["family_name"] = fam_map.get(s["family_id"], "")
+            for field in ["family_name", "family_id", "code"]:
+                if not s.get(field):
+                    s[field] = ""
+        return suppliers
+
     @router.get("/paginated")
     async def get_suppliers_paginated(
         search: Optional[str] = None, family_id: Optional[str] = None,
@@ -47,6 +91,13 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
                     s[field] = ""
         return result
 
+    @router.get("/generate-code")
+    async def generate_supplier_code():
+        pipeline = [{"$match": {"code": {"$regex": "^FR\\d{4}$"}}}, {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}}, {"$sort": {"num": -1}}, {"$limit": 1}]
+        result = await db.suppliers.aggregate(pipeline).to_list(1)
+        next_num = result[0]["num"] + 1 if result else 1
+        return {"code": f"FR{str(next_num).zfill(4)}"}
+
     @router.get("/{supplier_id}")
     async def get_supplier(supplier_id: str, admin: dict = Depends(require_permission("suppliers.edit"))):
         s = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
@@ -73,6 +124,13 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
             await db.suppliers.update_one({"id": supplier_id}, {"$set": update_data})
         updated = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
         return updated
+
+    @router.delete("/{supplier_id}")
+    async def delete_supplier(supplier_id: str, admin: dict = Depends(require_permission("suppliers.edit"))):
+        result = await db.suppliers.delete_one({"id": supplier_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Supplier not found")
+        return {"message": "Supplier deleted successfully"}
 
     @router.post("/{supplier_id}/advance-payment")
     async def add_supplier_advance_payment(supplier_id: str, payment: SupplierAdvancePayment, user: dict = Depends(require_permission("suppliers.view"))):

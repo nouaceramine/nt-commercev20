@@ -6,7 +6,6 @@
  */
 import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { nextTier, tierLabel } from '../lib/priceTiers';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
@@ -80,13 +79,6 @@ export default function POSPage() {
   const [customerDebt, setCustomerDebt] = useState(0);
   const [blacklist, setBlacklist] = useState([]);
   const [priceType, setPriceType] = useState('retail');
-
-  // تطبيق فئة سعر الزبون تلقائياً عند اختياره (الافتراضي: تجزئة)
-  useEffect(() => {
-    if (!selectedCustomer) return;
-    const cust = customers.find(c => c.id === selectedCustomer);
-    if (cust?.price_tier && cust.price_tier !== priceType) setPriceType(cust.price_tier);
-  }, [selectedCustomer]);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef(null);
 
@@ -391,7 +383,7 @@ export default function POSPage() {
     'customers': () => { setCustomerFamilyFilter(null); setShowCustomersDialog(true); },
     'customer-families': () => { setCustomerFamilyFilter('_all_families'); setShowCustomersDialog(true); },
     'custom-product': () => { setCustomProduct({ name: '', price: '', qty: 1 }); setShowCustomProductDialog(true); },
-    'price-type': () => setPriceType(prev => nextTier(prev)),
+    'price-type': () => setPriceType(prev => prev === 'retail' ? 'wholesale' : 'retail'),
     'note': () => setShowNoteDialog(true),
     'return': () => cart.toggleReturnMode(),
     'deposit': () => { setCashOperation({ type: 'deposit', amount: 0, note: '' }); setShowCashDialog(true); },
@@ -412,7 +404,7 @@ export default function POSPage() {
     { id: 'customers', icon: Users, label: language === 'ar' ? 'الزبائن' : 'Clients', shortcut: '2' },
     { id: 'customer-families', icon: FolderTree, label: language === 'ar' ? 'عائلات الزبائن' : 'Fam. clients', shortcut: '3', badge: true },
     { id: 'custom-product', icon: PackagePlus, label: language === 'ar' ? 'منتج مخصص' : 'Produit libre', shortcut: '4' },
-    { id: 'price-type', icon: Tag, label: (language === 'ar' ? 'السعر: ' : 'Prix: ') + tierLabel(priceType, language), shortcut: '5', highlight: priceType !== 'retail' },
+    { id: 'price-type', icon: Tag, label: language === 'ar' ? (priceType === 'retail' ? 'السعر: تجزئة' : 'السعر: جملة') : (priceType === 'retail' ? 'Prix: détail' : 'Prix: gros'), shortcut: '5', highlight: priceType === 'wholesale' },
     { id: 'note', icon: FileText, label: language === 'ar' ? 'ملاحظة' : 'Note', shortcut: '6' },
     { id: 'return', icon: Undo2, label: language === 'ar' ? 'إرجاع' : 'Retour', shortcut: '7' },
     { id: 'deposit', icon: ArrowDownToLine, label: language === 'ar' ? 'إيداع' : 'Dépôt', shortcut: '8' },

@@ -27,6 +27,12 @@ router = APIRouter()
 async def root():
     return {"message": "NT API is running"}
 
+@router.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+# ============ FEATURES MANAGEMENT ============
+
 @router.get("/settings/features")
 async def get_features_settings(admin: dict = Depends(get_tenant_admin)):
     """Get enabled/disabled features for the system"""
@@ -86,6 +92,24 @@ async def save_features_settings(features: dict, admin: dict = Depends(get_tenan
     return {"message": "Features saved successfully"}
 
 # ============ USER PERMISSIONS MANAGEMENT ============
+
+@router.put("/users/{user_id}/permissions", operation_id="update_user_permissions_sync")
+async def update_user_permissions_sync(user_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+    """Update specific user permissions"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Only super_admin can modify super_admin permissions
+    if user.get("role") == "super_admin" and admin.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only super admin can modify super admin permissions")
+
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"permissions": data.get("permissions", {}), "permissions_updated_at": datetime.now(timezone.utc).isoformat(), "permissions_updated_by": admin["id"]}}
+    )
+
+    return {"message": "Permissions updated successfully"}
 
 @router.post("/sales/{sale_id}/log-action")
 async def log_sale_action(

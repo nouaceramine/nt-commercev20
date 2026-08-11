@@ -83,7 +83,6 @@ export default function CustomersPage() {
     notes: '', 
     family_id: '',
     code: '',  // كود الزبون
-    price_tier: 'retail',  // فئة السعر الافتراضية
     // New fields
     national_id: '',
     commercial_register: '',
@@ -302,7 +301,6 @@ export default function CustomersPage() {
       notes: customer.notes || '',
       family_id: customer.family_id || '',
       code: customer.code || '',  // كود الزبون
-      price_tier: customer.price_tier || 'retail',
       national_id: customer.national_id || '',
       commercial_register: customer.commercial_register || '',
       birthdate: customer.birthdate || '',
@@ -326,7 +324,6 @@ export default function CustomersPage() {
         notes: '', 
         family_id: '',
         code: response.data.code,  // كود الزبون التلقائي
-        price_tier: 'retail',
         national_id: '',
         commercial_register: '',
         birthdate: '',
@@ -338,7 +335,7 @@ export default function CustomersPage() {
       setFormData({ 
         name: '', phone: '', email: '', address: '', notes: '', family_id: '', code: '',
         national_id: '', commercial_register: '', birthdate: '', customer_type: 'regular',
-        max_debt_limit: '', special_discount: '', price_tier: 'retail'
+        max_debt_limit: '', special_discount: ''
       });
     }
   };

@@ -39,6 +39,10 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             "address": c.address or "", "notes": c.notes or "",
             "code": c.code or "",
             "family_id": c.family_id or "", "family_name": family_name,
+            "price_tier": c.price_tier or "retail",
+            "national_id": c.national_id or "", "commercial_register": c.commercial_register or "",
+            "birthdate": c.birthdate or "", "customer_type": c.customer_type or "regular",
+            "max_debt_limit": c.max_debt_limit or 0, "special_discount": c.special_discount or 0,
             "total_purchases": 0, "balance": 0, "created_at": now
         }
         await db.customers.insert_one(customer_doc)

@@ -293,6 +293,11 @@ def create_permissions_routes(db, main_db, get_current_user, get_tenant_admin) -
         role.pop("_id", None)
         return role
 
+    @router.get("/roles")
+    async def get_roles(user: dict = Depends(get_current_user)):
+        roles = await db.roles.find({}, {"_id": 0}).to_list(100)
+        return roles
+
     @router.get("/roles/{role_id}")
     async def get_role(role_id: str, user: dict = Depends(get_current_user)):
         role = await db.roles.find_one({"id": role_id}, {"_id": 0})

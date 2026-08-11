@@ -706,12 +706,6 @@ except ImportError:
     pass
 
 try:
-    from routes.notification_routes import router as notification_router
-    app.include_router(notification_router, prefix="/api", tags=["Notifications"])
-except ImportError:
-    pass
-
-try:
     from routes.activity_routes import router as activity_router
     app.include_router(activity_router, prefix="/api", tags=["Activity"])
 except ImportError:

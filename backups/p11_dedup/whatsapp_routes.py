@@ -116,6 +116,40 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         )
         return {"success": True, "message": "تم تحديث إعدادات WhatsApp بنجاح"}
 
+    @router.post("/send")
+    async def send_whatsapp_message(
+        msg: WhatsAppMessage,
+        current_user: dict = Depends(get_current_user),
+    ):
+        tenant_id = current_user.get("tenant_id")
+        if not tenant_id:
+            raise HTTPException(status_code=403, detail="Tenant access required")
+
+        config = await db.whatsapp_config.find_one({"tenant_id": tenant_id})
+        if not config or not config.get("is_active"):
+            raise HTTPException(status_code=400, detail="WhatsApp غير مفعل")
+
+        # Log the message
+        message_log = {
+            "id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,
+            "direction": "outgoing",
+            "to": msg.to,
+            "message": msg.message,
+            "message_type": msg.message_type,
+            "status": "queued",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.whatsapp_messages.insert_one(message_log)
+
+        # In production, this would call the WhatsApp Business API
+        # For now, we simulate success
+        return {
+            "success": True,
+            "message_id": message_log["id"],
+            "status": "queued",
+        }
+
     @router.get("/webhook")
     async def verify_webhook(request: Request):
         """WhatsApp webhook verification endpoint"""

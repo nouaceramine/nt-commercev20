@@ -4,7 +4,6 @@
  * Addresses: Large Class, Data Clumps, Feature Envy
  */
 import { useState, useCallback } from 'react';
-import { getTierPrice } from '../lib/priceTiers';
 
 const CART_STORAGE_KEY = 'posParkedCarts';
 
@@ -42,7 +41,7 @@ export function usePOSCart({ language, toast }) {
   const addItem = useCallback((product, options = {}) => {
     const { overrideQty, overridePrice, serialNumber, priceType } = options;
     const existingItem = cart.find(item => item.product_id === product.id);
-    const basePrice = overridePrice != null ? overridePrice : getTierPrice(product, priceType);
+    const basePrice = overridePrice != null ? overridePrice : (priceType === 'wholesale' ? product.wholesale_price : product.retail_price);
     const qty = overrideQty != null ? overrideQty : (returnMode ? -1 : 1);
     const bypassExisting = (serialNumber && serialNumber.length > 0) || overridePrice != null;
 

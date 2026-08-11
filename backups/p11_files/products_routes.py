@@ -79,7 +79,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "tariff_d": p.tariff_d or 0,
             "quantity": p.quantity,
             "image_url": p.image_url or "",
-            "images": p.images or [],
             "compatible_models": p.compatible_models,
             "low_stock_threshold": p.low_stock_threshold,
             "barcode": p.barcode or "",
@@ -410,18 +409,6 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     # ── Delete Product ──
     @router.delete("/{product_id}")
     async def delete_product(product_id: str, admin: dict = Depends(require_permission("products.delete"))):
-        # حماية: المنتج الذي عليه مخزون أو له حركات شراء/بيع أصبح "حقيقياً" — حذفه ممنوع
-        product = await db.products.find_one({"id": product_id}, {"_id": 0, "quantity": 1, "name_ar": 1, "name_en": 1})
-        if not product:
-            raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        pname = product.get("name_ar") or product.get("name_en") or ""
-        if (product.get("quantity") or 0) > 0:
-            raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': عليه مخزون ({product.get('quantity')}). صفّر المخزون أولاً")
-        in_purchase = await db.purchases.find_one({"items.product_id": product_id}, {"_id": 1})
-        in_sale = await db.sales.find_one({"items.product_id": product_id}, {"_id": 1})
-        if in_purchase or in_sale:
-            raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': منتج حقيقي له حركات شراء/بيع مسجلة")
-        await db.store_products.delete_many({"product_id": product_id})
         result = await db.products.delete_one({"id": product_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")

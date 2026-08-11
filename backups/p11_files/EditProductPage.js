@@ -20,7 +20,6 @@ import {
 import { Switch } from '../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
-import ProductImagesInput from '../components/forms/ProductImagesInput';
 import {
   ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree,
   Calculator, Trash2, Package, Tag, Warehouse, ShieldAlert, Barcode, CalendarDays,
@@ -81,7 +80,6 @@ export default function EditProductPage() {
     tariff_d: '0',
     quantity: '0',
     image_url: '',
-    images: [],
     barcode: '',
     article_code: '',
     family_id: '',
@@ -119,7 +117,6 @@ export default function EditProductPage() {
           tariff_d: p.tariff_d?.toString() || '0',
           quantity: p.quantity?.toString() || '0',
           image_url: p.image_url || '',
-          images: Array.isArray(p.images) ? p.images : [],
           barcode: p.barcode || '',
           article_code: p.article_code || '',
           family_id: p.family_id || '',
@@ -376,8 +373,7 @@ export default function EditProductPage() {
         tariff_b: parseFloat(formData.tariff_b) || 0,
         tariff_c: parseFloat(formData.tariff_c) || 0,
         tariff_d: parseFloat(formData.tariff_d) || 0,
-        image_url: formData.image_url || (formData.images || [])[0] || '',
-        images: (formData.images || []).filter(Boolean).slice(0, 5),
+        image_url: formData.image_url,
         barcode: formData.barcode,
         article_code: formData.article_code,
         family_id: formData.family_id || null,
@@ -491,12 +487,6 @@ export default function EditProductPage() {
                         </Button>
                       </div>
                       {formData.image_url && <img src={formData.image_url} alt="Preview" className="h-16 w-16 object-cover rounded mt-1" />}
-                      <ProductImagesInput
-                        images={formData.images}
-                        onChange={(imgs) => setFormData(prev => ({ ...prev, images: imgs }))}
-                        max={formData.image_url ? 4 : 5}
-                        language={language}
-                      />
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-xs">{isAr ? 'الوصف' : 'Description'}</Label>

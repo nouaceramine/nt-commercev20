@@ -10,14 +10,6 @@ class CustomerCreate(BaseModel):
     notes: Optional[str] = ""
     family_id: Optional[str] = None
     code: Optional[str] = ""  # كود الزبون CL00001
-    price_tier: Optional[str] = "retail"  # فئة السعر الافتراضية للزبون
-    # الحقول التالية كانت تُرسل من النموذج وتُسقط صامتة — أُضيفت لتُحفظ فعلياً
-    national_id: Optional[str] = ""
-    commercial_register: Optional[str] = ""
-    birthdate: Optional[str] = ""
-    customer_type: Optional[str] = "regular"
-    max_debt_limit: Optional[float] = 0
-    special_discount: Optional[float] = 0
     
     @field_validator('name')
     @classmethod
@@ -60,13 +52,6 @@ class CustomerUpdate(BaseModel):
     notes: Optional[str] = None
     family_id: Optional[str] = None
     code: Optional[str] = None
-    price_tier: Optional[str] = None
-    national_id: Optional[str] = None
-    commercial_register: Optional[str] = None
-    birthdate: Optional[str] = None
-    customer_type: Optional[str] = None
-    max_debt_limit: Optional[float] = None
-    special_discount: Optional[float] = None
 
 class CustomerResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -79,7 +64,6 @@ class CustomerResponse(BaseModel):
     code: str = ""
     family_id: str = ""
     family_name: str = ""
-    price_tier: str = "retail"
     total_purchases: float = 0
     balance: float = 0  # رصيد الزبون (دين)
     created_at: str

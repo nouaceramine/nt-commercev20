@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { PRICE_TIERS } from '../../lib/priceTiers';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -106,13 +105,12 @@ export default function POSCart({
           )}
 
           <Select value={priceType} onValueChange={setPriceType}>
-            <SelectTrigger className="w-28 h-8 text-sm">
+            <SelectTrigger className="w-24 h-8 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PRICE_TIERS.map(tier => (
-                <SelectItem key={tier.value} value={tier.value}>{language === 'ar' ? tier.ar : tier.fr}</SelectItem>
-              ))}
+              <SelectItem value="retail">{language === 'ar' ? 'تجزئة' : 'Detail'}</SelectItem>
+              <SelectItem value="wholesale">{language === 'ar' ? 'جملة' : 'Gros'}</SelectItem>
             </SelectContent>
           </Select>
 

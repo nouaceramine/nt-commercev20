@@ -82,14 +82,6 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
 
     # ============ NOTIFICATIONS (legacy, kept for compatibility) ============
 
-    @router.put("/notifications/read-all")
-    async def mark_all_notifications_read(user: dict = Depends(require_tenant)):
-        await db.notifications.update_many(
-            {"read": False, "$or": [{"user_id": user["id"]}, {"user_id": {"$exists": False}}]},
-            {"$set": {"read": True}}
-        )
-        return {"message": "All notifications marked as read"}
-
     @router.get("/notifications/legacy", operation_id="get_notifications_legacy", include_in_schema=False)
     async def get_notifications_legacy(user: dict = Depends(require_tenant)):
         notifications = await db.notifications.find(
@@ -110,6 +102,14 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             {"$set": {"read": True}}
         )
         return {"message": "Notification marked as read"}
+
+    @router.put("/notifications/read-all")
+    async def mark_all_notifications_read(user: dict = Depends(require_tenant)):
+        await db.notifications.update_many(
+            {"read": False, "$or": [{"user_id": user["id"]}, {"user_id": {"$exists": False}}]},
+            {"$set": {"read": True}}
+        )
+        return {"message": "All notifications marked as read"}
 
     @router.post("/notifications/generate")
     async def generate_auto_notifications(user: dict = Depends(require_tenant)):
@@ -474,12 +474,27 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             "unread_count": unread_count
         }
 
+    @router.put("/notifications/{notification_id}/read", operation_id="mark_notification_read_v2")
+    async def mark_notification_read_v2(notification_id: str, user: dict = Depends(require_tenant)):
+        """Mark a notification as read"""
+        await db.notifications.update_one(
+            {"id": notification_id},
+            {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        return {"success": True}
+
     @router.put("/notifications/mark-all-read")
     async def mark_all_notifications_read_v2(user: dict = Depends(require_tenant)):
         await db.notifications.update_many(
             {"read": False},
             {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
         )
+        return {"success": True}
+
+    @router.delete("/notifications/{notification_id}", operation_id="delete_notification_v2")
+    async def delete_notification_v2(notification_id: str, user: dict = Depends(require_tenant)):
+        """Delete a notification"""
+        await db.notifications.delete_one({"id": notification_id})
         return {"success": True}
 
     @router.delete("/notifications/clear-all")

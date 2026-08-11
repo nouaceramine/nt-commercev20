@@ -34,9 +34,7 @@ import {
   Pencil,
   CheckSquare,
   Square,
-  AlertTriangle,
-  Store,
-  Globe
+  AlertTriangle
 } from 'lucide-react';
 import {
   Select,
@@ -70,51 +68,6 @@ export default function ProductsPage() {
   
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  // حالة النشر: على المتجر الإلكتروني وعلى WooCommerce (اختصارات التفعيل في القائمة)
-  const [storeProductIds, setStoreProductIds] = useState(new Set());
-
-  const fetchStoreProducts = async () => {
-    if (!isAdmin) return;
-    try {
-      const res = await apiClient.get('/store/products');
-      setStoreProductIds(new Set((res.data || []).map(sp => sp.product_id)));
-    } catch { /* المتجر غير مفعّل — تبقى الأيقونات غير نشطة */ }
-  };
-
-  const toggleStoreProduct = async (product) => {
-    const inStore = storeProductIds.has(product.id);
-    try {
-      if (inStore) {
-        await apiClient.delete(`/store/products/${product.id}`);
-        setStoreProductIds(prev => { const n = new Set(prev); n.delete(product.id); return n; });
-        toast.success(language === 'ar' ? 'أُزيل من المتجر' : 'Retiré de la boutique');
-      } else {
-        await apiClient.post('/store/products', { product_id: product.id });
-        setStoreProductIds(prev => new Set(prev).add(product.id));
-        toast.success(language === 'ar' ? 'فُعّل على المتجر' : 'Activé sur la boutique');
-      }
-    } catch (e) {
-      toast.error(language === 'ar' ? 'فشل تغيير حالة المتجر' : 'Échec boutique');
-    }
-  };
-
-  const toggleWooProduct = async (product) => {
-    const published = product.woocommerce_status === 'published';
-    try {
-      if (published) {
-        await apiClient.delete(`/woocommerce/unpublish-product/${product.id}`);
-        setProducts(prev => prev.map(p => p.id === product.id ? { ...p, woocommerce_status: '' } : p));
-        toast.success(language === 'ar' ? 'أُلغي النشر على WooCommerce' : 'Dépublié de WooCommerce');
-      } else {
-        await apiClient.post(`/woocommerce/publish-product/${product.id}`);
-        setProducts(prev => prev.map(p => p.id === product.id ? { ...p, woocommerce_status: 'published' } : p));
-        toast.success(language === 'ar' ? 'نُشر على WooCommerce' : 'Publié sur WooCommerce');
-      }
-    } catch (e) {
-      const msg = e?.response?.data?.detail;
-      toast.error(msg || (language === 'ar' ? 'فشل النشر على WooCommerce' : 'Échec WooCommerce'));
-    }
-  };
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [modelFilter, setModelFilter] = useState(searchParams.get('model') || '');
   const [viewMode, setViewMode] = useState(localStorage.getItem('productsViewMode') || 'grid'); // grid, list, compact
@@ -288,10 +241,6 @@ export default function ProductsPage() {
   useEffect(() => {
     fetchProducts();
   }, [searchQuery, modelFilter, currentPage, itemsPerPage]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    fetchStoreProducts();
-  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -667,11 +616,11 @@ export default function ProductsPage() {
                       </div>
                     )}
                     {/* Code Article */}
-                    <Link to={isAdmin ? `/products/${product.id}/edit` : `/products/${product.id}`} className="font-mono text-xs text-blue-600 font-medium hover:underline">
+                    <Link to={`/products/${product.id}`} className="font-mono text-xs text-blue-600 font-medium hover:underline">
                       {product.article_code || '-'}
                     </Link>
                     {/* Nom d'article */}
-                    <Link to={isAdmin ? `/products/${product.id}/edit` : `/products/${product.id}`} className="flex items-center gap-2">
+                    <Link to={`/products/${product.id}`} className="flex items-center gap-2">
                       <img
                         src={product.image_url || 'https://images.unsplash.com/photo-1634403665443-81dc4d75843a?crop=entropy&cs=srgb&fm=jpg&q=85'}
                         alt=""
@@ -704,25 +653,13 @@ export default function ProductsPage() {
                         : '-'}
                     </div>
                     {/* تعديل */}
-                    <div className="flex justify-center gap-0.5">
+                    <div className="flex justify-center">
                       {isAdmin && (
-                        <>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => toggleStoreProduct(product)}
-                            title={language === 'ar' ? (storeProductIds.has(product.id) ? 'إزالة من المتجر' : 'تفعيل على المتجر') : 'Boutique'}
-                            data-testid={`toggle-store-${product.id}`}>
-                            <Store className={`h-4 w-4 ${storeProductIds.has(product.id) ? 'text-green-600' : 'text-slate-400'}`} />
+                        <Link to={`/products/${product.id}/edit`} onClick={(e) => e.stopPropagation()} data-testid={`edit-product-${product.id}`}>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => toggleWooProduct(product)}
-                            title={language === 'ar' ? (product.woocommerce_status === 'published' ? 'إلغاء النشر على WooCommerce' : 'نشر على WooCommerce') : 'WooCommerce'}
-                            data-testid={`toggle-woo-${product.id}`}>
-                            <Globe className={`h-4 w-4 ${product.woocommerce_status === 'published' ? 'text-green-600' : 'text-slate-400'}`} />
-                          </Button>
-                          <Link to={`/products/${product.id}/edit`} onClick={(e) => e.stopPropagation()} data-testid={`edit-product-${product.id}`}>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        </>
+                        </Link>
                       )}
                     </div>
                     {/* Print */}
@@ -752,7 +689,7 @@ export default function ProductsPage() {
                     />
                   </div>
                 )}
-                <Link to={isAdmin ? `/products/${product.id}/edit` : `/products/${product.id}`}>
+                <Link to={`/products/${product.id}`}>
                   <div className="border rounded-lg p-2 bg-card hover:bg-muted/50 transition-colors text-center">
                     <LazyImage
                       src={product.image_url}
@@ -784,7 +721,7 @@ export default function ProductsPage() {
                     />
                   </div>
                 )}
-                <Link to={isAdmin ? `/products/${product.id}/edit` : `/products/${product.id}`}>
+                <Link to={`/products/${product.id}`}>
                   <div className="product-card border rounded-xl overflow-hidden bg-card h-full flex flex-col">
                     <div className="product-image-container aspect-square relative">
                       <LazyImage
@@ -796,32 +733,14 @@ export default function ProductsPage() {
                         {getStockBadge(product.quantity)}
                       </div>
                       {isAdmin && (
-                        <div className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} flex gap-1`}>
-                          <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleStoreProduct(product); }}
-                            className="bg-white/90 hover:bg-white rounded-full p-1.5 shadow"
-                            title={language === 'ar' ? 'تفعيل/إزالة من المتجر' : 'Boutique'}
-                            data-testid={`toggle-store-card-${product.id}`}
-                          >
-                            <Store className={`h-4 w-4 ${storeProductIds.has(product.id) ? 'text-green-600' : 'text-slate-400'}`} />
-                          </button>
-                          <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleWooProduct(product); }}
-                            className="bg-white/90 hover:bg-white rounded-full p-1.5 shadow"
-                            title="WooCommerce"
-                            data-testid={`toggle-woo-card-${product.id}`}
-                          >
-                            <Globe className={`h-4 w-4 ${product.woocommerce_status === 'published' ? 'text-green-600' : 'text-slate-400'}`} />
-                          </button>
-                          <Link
-                            to={`/products/${product.id}/edit`}
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = `/products/${product.id}/edit`; }}
-                            className="bg-white/90 hover:bg-white rounded-full p-1.5 shadow"
-                            data-testid={`edit-product-card-${product.id}`}
-                          >
-                            <Pencil className="h-4 w-4 text-slate-700" />
-                          </Link>
-                        </div>
+                        <Link
+                          to={`/products/${product.id}/edit`}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = `/products/${product.id}/edit`; }}
+                          className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} bg-white/90 hover:bg-white rounded-full p-1.5 shadow`}
+                          data-testid={`edit-product-card-${product.id}`}
+                        >
+                          <Pencil className="h-4 w-4 text-slate-700" />
+                        </Link>
                       )}
                     </div>
                     <div className="p-5 flex-1 flex flex-col">

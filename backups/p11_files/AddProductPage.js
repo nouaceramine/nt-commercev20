@@ -17,7 +17,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import ProductImagesInput from '../components/forms/ProductImagesInput';
 import { ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree, PlusCircle, Calculator, Package, Tag, Warehouse, ShieldAlert } from 'lucide-react';
 import { Switch } from '../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
@@ -58,7 +57,6 @@ export default function AddProductPage() {
     tariff_c: '0',
     tariff_d: '0',
     image_url: '',
-    images: [],
     barcode: '',
     article_code: '',
     family_id: '',
@@ -269,8 +267,7 @@ export default function AddProductPage() {
         tariff_c: parseFloat(formData.tariff_c) || 0,
         tariff_d: parseFloat(formData.tariff_d) || 0,
         quantity: 0,
-        image_url: formData.image_url || (formData.images || [])[0] || '',
-        images: (formData.images || []).filter(Boolean).slice(0, 5),
+        image_url: formData.image_url,
         barcode: formData.barcode,
         article_code: formData.article_code,
         family_id: formData.family_id || null,
@@ -422,12 +419,6 @@ export default function AddProductPage() {
                         </div>
                         <Input name="image_url" value={formData.image_url?.startsWith('data:') ? '' : formData.image_url} onChange={handleChange} placeholder="URL..." className="h-8 text-xs" />
                         <input ref={imageUploadRef} type="file" accept="image/*" onChange={handleProductImageUpload} className="hidden" />
-                        <ProductImagesInput
-                          images={formData.images}
-                          onChange={(imgs) => setFormData(prev => ({ ...prev, images: imgs }))}
-                          max={formData.image_url ? 4 : 5}
-                          language={language}
-                        />
                       </div>
                     </div>
                     <div className="col-span-2 space-y-3">
