@@ -122,9 +122,9 @@ def build_delivery_settings_router(db, require_tenant, get_tenant_admin):
         settings = await db.system_settings.find_one({"id": "global"}, {"_id": 0})
         if not settings:
             settings = {**DEFAULT_SYSTEM_SETTINGS}
-            await db.system_settings.insert_one(settings)
-        else:
-            settings = {k: v for k, v in settings.items() if k != "_id"}
+            # نسخة منفصلة للإدراج — insert_one يلوّث القاموس الأصلي بـ _id (ObjectId)
+            # وكان يسبب 500 في أول استدعاء عند إنشاء المستند
+            await db.system_settings.insert_one(dict(settings))
         return settings
 
     @router.put("/system/settings")

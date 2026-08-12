@@ -758,3 +758,27 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - لم تُمسّ بيانات الطلبات أو المخزون (الطلبات التجريبية حقيقية وتبقى محتسبة).
 - الواجهة لم تحتج تعديلاً — كانت مجهزة أصلاً بشارة «نفذت الكمية» وزر معطّل.
 **تحقق:** API يرجع products:1 + families:1؛ لقطة متصفح حية تُظهر فئة cable والمنتج بشارة نفذت الكمية. نسخة احتياطية: backups/online_store_routes.py.bak.p40.
+
+
+---
+
+## p41 — 2026-08-13 — إصلاح الصفحة البيضاء لصفحة المنتج + تدقيق شامل للموقع
+
+### 1) الصفحة البيضاء /shop/nt/product/:id (السبب: صور base64 ضخمة)
+**التشخيص:** لا خطأ JS — الصفحة تُبنى سليمة لكن API المنتج يرجع 7.1MB (صورة PNG base64 بـ 2.5MB + 3 صور في images) في ~4 ثوانٍ، فتبقى الصفحة بيضاء أثناء الانتظار (React لا يرسم شيئاً قبل fetchProduct). قائمة المتجر أيضاً 5.2MB.
+**الإصلاح (`backend/routes/online_store_routes.py`):**
+- نقطة تقديم صور جديدة `GET /api/shop/{slug}/img/{product_id}/{idx}.jpg` — تحويل base64 → JPEG محسّن (Pillow، حد أقصى 900px، جودة 72) مع كاش داخلي (مفتاحه tenant+product+idx+updated_at للإبطال عند التعديل) و Cache-Control يوم كامل.
+- المساعد `_pub_product` يستبدل روابط data: في image_url/images بروابط النقطة الخفيفة في: قائمة المتجر + تفاصيل المنتج + المنتجات المشابهة + products_by_family + uncategorized. الروابط الخارجية (http) تمر كما هي.
+- النتيجة: product-api من 7,118,807B/3.9s إلى **2,298B/0.05s**؛ shop-api من 5.2MB إلى 3KB؛ كل صورة ~83KB JPEG. تحقق dump-dom: الصفحة ترسم كاملة (معرض 4 مصغرات + نموذج COD + نفذت الكمية).
+
+### 2) تدقيق شامل
+- **مسح 377 مسار GET** (openapi.json) بتوكن السوبر أدمن: 29 مخالفة = 22 متوقعة (422 معاملات ناقصة، 403 صلاحيات وكيل/webhooks، 400 تكاملات غير مُعدّة) + **500 حقيقية واحدة**.
+- **مسح مماثل بتوكن مستأجر demo: صفر 500.**
+- صفحات المتجر العام (الرئيسية/المنتج/التتبع) وصفحات الإدارة (توجيه لتسجيل الدخول) كلها ترسم سليمة.
+- فحص سجلات backend (3 ساعات): لا أخطاء سوى نمط ObjectId أدناه.
+
+### 3) إصلاح نمط 500: insert_one يلوّث القاموس المُرجع بـ _id
+- `/api/system/settings` (delivery_settings_routes.py): أول استدعاء ينشئ المستند وكان يرجعه ملوثاً بـ ObjectId ← 500. الإصلاح: `insert_one(dict(settings))`.
+- `/api/woocommerce/settings` (online_store_routes.py): نفس النمط ← نفس الإصلاح.
+- تدقيق استباقي لكل insert_one(doc) المشابهة في 9 ملفات routes: كلها تستخدم doc.pop("_id") سليماً — لا حالات أخرى.
+- نسخ احتياطية: delivery_settings_routes.py.bak.p41 (+ online_store_routes.py.bak.p40 سابقاً).

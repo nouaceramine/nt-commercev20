@@ -14,6 +14,9 @@ from services.whatsapp_service import whatsapp_service
 from services.coupon_service import coupon_service
 from services.loyalty_service import loyalty_service
 from services.shipping_tracker import shipping_tracker
+from fastapi.responses import Response as _ImgResponse
+import base64 as _b64
+import io as _io
 
 
 def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_tenant_db) -> dict:
@@ -158,6 +161,72 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         return {"message": "تم تحديث حالة الطلب"}
 
     # Public store endpoints (no auth required)
+    # ── تقديم صور المنتجات العامة محسّنة (JPEG مصغّر + كاش) ──
+    # الصور تُخزَّن base64 في قاعدة البيانات؛ إرسالها داخل JSON يجعل الصفحة بيضاء
+    # لثقلها (عدة ميغابايت). هنا نحوّل الروابط الداخلية إلى نقطة تقديم خفيفة.
+    _IMG_CACHE: dict = {}
+
+    def _optimize_data_url(data_url, max_dim=900, quality=72):
+        try:
+            from PIL import Image
+            raw = _b64.b64decode(data_url.split(",", 1)[1])
+            img = Image.open(_io.BytesIO(raw))
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.thumbnail((max_dim, max_dim))
+            buf = _io.BytesIO()
+            img.save(buf, "JPEG", quality=quality, optimize=True)
+            return buf.getvalue()
+        except Exception:
+            return None
+
+    def _pub_img(store_slug, pid, idx, val):
+        if isinstance(val, str) and val.startswith("data:"):
+            return f"/api/shop/{store_slug}/img/{pid}/{idx}.jpg"
+        return val
+
+    def _pub_product(store_slug, p):
+        if not p:
+            return p
+        p = dict(p)
+        pid = p.get("id")
+        p["image_url"] = _pub_img(store_slug, pid, 0, p.get("image_url"))
+        if isinstance(p.get("images"), list):
+            p["images"] = [_pub_img(store_slug, pid, i + 1, v) for i, v in enumerate(p["images"])]
+        return p
+
+    @router.get("/shop/{store_slug}/img/{product_id}/{idx}.jpg")
+    async def public_product_image(store_slug: str, product_id: str, idx: int):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+        meta = await tenant_db_inst.products.find_one({"id": product_id}, {"_id": 0, "updated_at": 1})
+        if not meta:
+            raise HTTPException(status_code=404, detail="Product not found")
+        key = (tenant_id, product_id, idx, meta.get("updated_at"))
+        headers = {"Cache-Control": "public, max-age=86400"}
+        if key in _IMG_CACHE:
+            return _ImgResponse(content=_IMG_CACHE[key], media_type="image/jpeg", headers=headers)
+        product = await tenant_db_inst.products.find_one({"id": product_id}, {"_id": 0, "image_url": 1, "images": 1})
+        src = None
+        if idx == 0:
+            src = product.get("image_url")
+        else:
+            imgs = product.get("images") or []
+            if 0 < idx <= len(imgs):
+                src = imgs[idx - 1]
+        if not src or not isinstance(src, str) or not src.startswith("data:"):
+            raise HTTPException(status_code=404, detail="Image not found")
+        data = _optimize_data_url(src)
+        if not data:
+            raise HTTPException(status_code=404, detail="Image not available")
+        if len(_IMG_CACHE) > 600:
+            _IMG_CACHE.clear()
+        _IMG_CACHE[key] = data
+        return _ImgResponse(content=data, media_type="image/jpeg", headers=headers)
+
     @router.get("/shop/{store_slug}")
     async def get_public_store(store_slug: str):
         slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
@@ -203,6 +272,10 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         total_products = len(products)
         low_stock = len([p for p in products if p.get("quantity", 0) < 5])
 
+        products = [_pub_product(store_slug, p) for p in products]
+        for fid, grp in products_by_family.items():
+            grp["products"] = [_pub_product(store_slug, p) for p in grp["products"]]
+        uncategorized = [_pub_product(store_slug, p) for p in uncategorized]
         return {
             "success": True,
             "settings": settings,
@@ -338,7 +411,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
         if not settings:
             settings = {"id": "global", "enabled": False, "store_url": "", "consumer_key": "", "consumer_secret": "", "sync_products": True, "sync_orders": True, "sync_customers": True, "last_sync": ""}
-            await db.woocommerce_settings.insert_one(settings)
+            # نسخة منفصلة للإدراج — insert_one يلوّث القاموس بـ _id ويسبب 500 في أول استدعاء
+            await db.woocommerce_settings.insert_one(dict(settings))
         return settings
 
     @router.put("/woocommerce/settings")
@@ -467,8 +541,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
         return {
             "success": True,
-            "product": product,
-            "related_products": related_products,
+            "product": _pub_product(store_slug, product),
+            "related_products": [_pub_product(store_slug, p) for p in related_products],
             "settings": settings
         }
 
