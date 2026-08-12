@@ -175,11 +175,13 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         product_ids = [sp["product_id"] for sp in store_products]
 
         products = await tenant_db_inst.products.find(
-            {"id": {"$in": product_ids}, "quantity": {"$gt": 0}},
-            {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, 
-             "purchase_price": 1, "image_url": 1, "description_ar": 1, 
+            {"id": {"$in": product_ids}},
+            {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
+             "purchase_price": 1, "image_url": 1, "description_ar": 1,
              "description_en": 1, "quantity": 1, "family_id": 1, "barcode": 1}
         ).to_list(1000)
+        # المتوفر أولاً ثم النافد (يظهر بشارة «نفذت الكمية» في الواجهة)
+        products.sort(key=lambda p: (p.get("quantity", 0) <= 0, p.get("name_ar") or ""))
 
         family_ids = list(set(p.get("family_id") for p in products if p.get("family_id")))
         families = []
@@ -447,7 +449,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             raise HTTPException(status_code=404, detail="Product not found in store")
 
         product = await tenant_db_inst.products.find_one(
-            {"id": product_id, "quantity": {"$gt": 0}}, {"_id": 0}
+            {"id": product_id}, {"_id": 0}
         )
         if not product:
             raise HTTPException(status_code=404, detail="Product not available")
