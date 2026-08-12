@@ -522,13 +522,17 @@ class DailyAutomationAgent:
         results["alerts"].extend(low_stock)
         results["tasks_completed"].append("low_stock_check")
         
-        # Store daily report
-        await self.db.daily_reports.insert_one({
-            "id": f"daily_{today}",
-            "date": today,
-            "results": results,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
+        # Store daily report (upsert — re-running on the same day must not crash
+        # on the unique id index; observed E11000 in production)
+        await self.db.daily_reports.update_one(
+            {"id": f"daily_{today}"},
+            {"$set": {
+                "date": today,
+                "results": results,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }},
+            upsert=True
+        )
         
         return results
     

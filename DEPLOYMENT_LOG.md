@@ -462,3 +462,24 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 ### التحقق
 - بناء + نشر main.bd736fce.js (حذف main.23ec415d.js) ✔
 - المسارات الستة موجودة في الحزمة المنشورة (grep لاتيني) ✔
+
+---
+
+## p27 — اختبار شامل للروبوتات الثمانية + إصلاح علة (2026-08-12)
+
+### الاختبار (curl على مستأجر demo، نداءات LLM حقيقية عبر Gemini)
+| الروبوت | النتيجة |
+|---|---|
+| invoice_processor | استخرج فاتورة SARL TechnoDZ كاملة (بنود + TVA 23560) بثقة 0.95 وأنشأ قيداً ✔ |
+| expense_classifier | (مختبر سابقاً في p23) ✔ |
+| financial_analyzer | تحليل عربي كامل للفترة (إيرادات 10800، هامش) ✔ |
+| fraud_detector | كشف معاملة شاذة 1,260,000 بشدة high ✔ |
+| smart_reporter | P&L كامل بالأرقام ✔ |
+| tax_assistant | تقدير ضريبي جزائري (TVA 19% + TAP + IBS) مع توصيات ✔ |
+| forecaster | توقع 3 أشهر مع درجات ثقة ✔ |
+| daily_automation | فشل أولاً: E11000 duplicate key عند إعادة التشغيل نفس اليوم |
+
+### الإصلاح
+- agents.py: insert_one ← update_one upsert في حفظ التقرير اليومي
+- بعد الإصلاح: تشغيلان متتاليان ناجحان (daily_summary, anomaly_detection, overdue_check, low_stock_check) ✔
+- النسخ الاحتياطي: backups/p27_agents_test_*/
