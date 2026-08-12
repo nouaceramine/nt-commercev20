@@ -532,6 +532,20 @@ async def delete_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
     return {"message": "تم حذف المستأجر وكل بياناته المرتبطة بنجاح", "report": report}
 
 
+@router.post("/saas/restore-test")
+async def restore_test_run(admin: dict = Depends(get_super_admin)):
+    from services.restore_test import run_restore_test, enforce_archive_retention
+    report = await run_restore_test()
+    report["retention"] = enforce_archive_retention(keep=5)
+    return report
+
+
+@router.get("/saas/restore-test/latest")
+async def restore_test_latest(admin: dict = Depends(get_super_admin)):
+    from services.restore_test import latest_restore_test
+    return await latest_restore_test() or {"message": "no restore test yet"}
+
+
 @router.get("/saas/migrations/status")
 async def migrations_status(admin: dict = Depends(get_super_admin)):
     from services.migrations_runner import status

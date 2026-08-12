@@ -143,6 +143,9 @@ def build_router(get_admin, main_db=None):
         latest = await _mdb.platform_db_health.find_one(
             {}, {"_id": 0}, sort=[("at", -1)]
         )
+        latest_rt = await _mdb.platform_restore_tests.find_one(
+            {}, {"_id": 0, "reports": 0}, sort=[("started_at", -1)]
+        )
         tenants = []
         for name in await client.list_database_names():
             if not (name.startswith("tenant_") or name == "template_tenant"):
@@ -161,6 +164,7 @@ def build_router(get_admin, main_db=None):
         over = [t for t in tenants if t["size_mb"] >= 500]
         return {
             "last_doctor_run": latest,
+            "last_restore_test": latest_rt,
             "databases": sorted(tenants, key=lambda t: -t["size_mb"]),
             "size_alert_threshold_mb": 500,
             "over_threshold": over,

@@ -79,11 +79,18 @@ class DataIntegrityRobot:
         missing collections/indexes/seed docs, persists a health snapshot to
         main_db.platform_db_health, and alerts admins on unhealthy tenants."""
         now = datetime.now(timezone.utc)
-        if self._last_doctor_run:
+        last_at = self._last_doctor_run
+        if not last_at:
+            try:  # persisted cadence survives restarts (p33)
+                doc = await self.db.platform_db_health.find_one({}, {"at": 1}, sort=[("at", -1)])
+                last_at = doc and doc.get("at")
+            except Exception:
+                pass
+        if last_at:
             try:
-                if (now - datetime.fromisoformat(self._last_doctor_run)).days < 7:
+                if (now - datetime.fromisoformat(last_at)).days < 7:
                     return
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
         try:
             from services.tenant_template import doctor_all
@@ -99,6 +106,7 @@ class DataIntegrityRobot:
             self._last_doctor_run = now.isoformat()
             self.stats["doctor_runs"] += 1
             await self._check_db_sizes(now)
+            await self._monthly_restore_test(now)
             logger.info(
                 f"Weekly DB doctor: {len(reports)} tenants checked, "
                 f"{len(unhealthy)} unhealthy after fix"
@@ -118,6 +126,48 @@ class DataIntegrityRobot:
                     logger.error(f"Doctor alert failed: {ne}")
         except Exception as e:
             logger.error(f"Weekly DB doctor failed: {e}")
+
+    async def _monthly_restore_test(self, now) -> None:
+        """Monthly automated restore-test + archive retention (p33, items 7-8)."""
+        last = getattr(self, "_last_restore_test", None)
+        if not last:
+            try:  # persisted cadence survives restarts (p33)
+                doc = await self.db.platform_restore_tests.find_one(
+                    {}, {"started_at": 1}, sort=[("started_at", -1)]
+                )
+                last = doc and doc.get("started_at")
+            except Exception:
+                pass
+        if last:
+            try:
+                if (now - datetime.fromisoformat(last)).days < 30:
+                    return
+            except (ValueError, TypeError):
+                pass
+        try:
+            from services.restore_test import run_restore_test, enforce_archive_retention
+            report = await run_restore_test()
+            retention = enforce_archive_retention(keep=5)
+            self._last_restore_test = now.isoformat()
+            self.stats["restore_tests"] = self.stats.get("restore_tests", 0) + 1
+            logger.info(
+                f"monthly restore test: ok={report.get('ok')}, "
+                f"retention removed {len(retention['removed'])} archives"
+            )
+            if not report.get("ok") and self.notification:
+                try:
+                    await self.notification.send_to_admins(
+                        None,
+                        "فشل اختبار استعادة النسخ الاحتياطية",
+                        f"اختبار الاستعادة فشل: {report.get('error') or report.get('mismatches')}",
+                        severity="critical",
+                        category="integrity",
+                    )
+                    self.stats["alerts_sent"] += 1
+                except Exception as ne:
+                    logger.error(f"restore-test alert failed: {ne}")
+        except Exception as e:
+            logger.error(f"monthly restore test failed: {e}")
 
     async def _check_db_sizes(self, now) -> None:
         """Alert when any tenant/template DB crosses 500 MB (p32-6). Snapshot is

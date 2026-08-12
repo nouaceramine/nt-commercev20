@@ -65,6 +65,33 @@ async def run_migrations() -> dict:
     return report
 
 
+async def migrate_database(dbname: str) -> list:
+    """Apply pending migrations to ONE database (used right after provisioning)."""
+    tdb = client[dbname]
+    applied = set()
+    async for d in tdb.migration_log.find({"ok": True}, {"name": 1}):
+        applied.add(d["name"])
+    done = []
+    for name in _discover():
+        if name in applied:
+            continue
+        mod = importlib.import_module(f"migrations.{name}")
+        try:
+            await mod.up(tdb)
+            await tdb.migration_log.insert_one({
+                "name": name, "ok": True,
+                "applied_at": datetime.now(timezone.utc).isoformat(),
+            })
+            done.append(name)
+        except Exception as exc:
+            await tdb.migration_log.insert_one({
+                "name": name, "ok": False, "error": str(exc),
+                "applied_at": datetime.now(timezone.utc).isoformat(),
+            })
+            break
+    return done
+
+
 async def status() -> dict:
     mods = _discover()
     out = {"available": mods, "databases": {}}

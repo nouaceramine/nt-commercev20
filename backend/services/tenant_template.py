@@ -231,6 +231,16 @@ async def copy_template_to_tenant(tenant_id: str) -> dict:
         {"$set": {"template_version": TEMPLATE_VERSION, "provisioned_at": _now()}},
         upsert=True,
     )
+    # Apply any migrations newer than the template snapshot (p33): counters,
+    # migration_log and friends are infra, not seed data, so the copy step
+    # does not carry them over — the new tenant must catch up immediately.
+    try:
+        from services.migrations_runner import migrate_database
+        stats["migrations_applied"] = await migrate_database(
+            f"tenant_{tenant_id.replace('-', '_')}"
+        )
+    except Exception as exc:
+        stats["migrations_error"] = str(exc)
     return stats
 
 
