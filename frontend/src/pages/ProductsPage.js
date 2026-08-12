@@ -236,7 +236,7 @@ export default function ProductsPage() {
   };
 
   const handleQuickSelect = (product) => {
-    navigate(`/products/${product.id}`);
+    navigate(isAdmin ? `/products/${product.id}/edit` : '/products');
   };
 
   const handleItemsPerPageChange = (newValue) => {

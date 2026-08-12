@@ -436,7 +436,7 @@ export default function EditProductPage() {
       await apiClient.put(`/products/${id}`, payload);
       toast.success(t.productUpdated);
       setIsDirty(false);
-      navigate(`/products/${id}`);
+      navigate('/products');
     } catch (error) {
       toast.error(errText(error) ||  t.somethingWentWrong);
     } finally {

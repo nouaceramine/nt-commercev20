@@ -650,7 +650,7 @@ function AppRoutes() {
         path="/products/:id"
         element={
           <ProtectedRoute featureKey="inventory">
-            <ProductDetailPage />
+            <Navigate to="/products" replace />
           </ProtectedRoute>
         }
       />
