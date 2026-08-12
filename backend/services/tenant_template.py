@@ -247,8 +247,15 @@ async def doctor_tenant(tenant_id: str, fix: bool = False) -> dict:
             missing_collections.append(col_name)
         tpl_count = await tpl[col_name].count_documents({})
         if tpl_count:
-            async for doc in tpl[col_name].find({}, {"_id": 0, "id": 1, "code": 1}):
-                key = {"id": doc["id"]} if "id" in doc else {"code": doc["code"]}
+            proj = {"_id": 0, "id": 1, "code": 1, "name": 1}
+            async for doc in tpl[col_name].find({}, proj):
+                key = None
+                for f in ("id", "code", "name"):
+                    if f in doc:
+                        key = {f: doc[f]}
+                        break
+                if key is None:
+                    continue  # infra docs (e.g. counters) have no stable identity
                 if not await tenant_db[col_name].find_one(key):
                     missing_docs.append(f"{col_name}:{key}")
         tpl_idx = {i["name"] async for i in tpl[col_name].list_indexes()} - {"_id_"}

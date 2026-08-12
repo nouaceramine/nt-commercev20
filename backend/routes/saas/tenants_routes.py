@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
+import json
 import bcrypt
 import ipaddress
 import os
@@ -10,6 +11,7 @@ import socket
 import httpx
 import logging
 from urllib.parse import urlparse
+from utils.auth import email_ci
 
 logger = logging.getLogger(__name__)
 
@@ -432,20 +434,114 @@ async def update_tenant_features(tenant_id: str, body: dict, admin: dict = Depen
     return {"features_override": clean}
 
 
+# Collections that must NEVER be bulk-cleaned by tenant_id during cascade delete
+_CASCADE_EXCLUDE = {"saas_tenants", "saas_plans", "users", "agent_commissions"}
+
+
+async def _cascade_delete_tenant(tenant: dict, admin: dict) -> dict:
+    """Full cascade delete (p32): archive tenant DB to JSON, drop it, remove the
+    hijack-class main user sharing the tenant email, clean every tenant_id
+    reference in platform collections, reverse in-window pending commissions,
+    and write an audit log entry. Returns a per-step report."""
+    from config.database import client, main_db
+
+    tenant_id = tenant["id"]
+    email = (tenant.get("email") or "").strip()
+    db_name = f"tenant_{tenant_id.replace('-', '_')}"
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    steps = {}
+
+    # 1) Archive tenant DB to JSON files (volume-mounted /backups)
+    tenant_db = client[db_name]
+    cols = await tenant_db.list_collection_names()
+    cols = [c for c in cols if not c.startswith("system.")]
+    if cols:
+        archive_dir = f"/backups/tenant_delete_{tenant_id}_{ts}"
+        os.makedirs(archive_dir, exist_ok=True)
+        total_docs = 0
+        for col in cols:
+            try:
+                docs = await tenant_db[col].find({}).to_list(None)
+            except Exception as exc:
+                logger.warning(f"cascade archive skip {col}: {exc}")
+                continue
+            total_docs += len(docs)
+            if docs:
+                with open(f"{archive_dir}/{col}.json", "w", encoding="utf-8") as f:
+                    f.write(json.dumps(docs, default=str, ensure_ascii=False))
+        steps["archive"] = {"dir": archive_dir, "collections": len(cols), "docs": total_docs}
+    else:
+        steps["archive"] = {"skipped": "tenant db empty or missing"}
+
+    # 2) Drop the tenant database
+    await client.drop_database(db_name)
+    steps["drop_db"] = db_name
+
+    # 3) Delete main-DB users owning the same email (the p30 login-hijack class)
+    if email:
+        res = await main_db.users.delete_many({"email": email_ci(email)})
+        steps["main_users_deleted"] = res.deleted_count
+
+    # 4) Reverse PENDING commissions still inside the 7-day chargeback window.
+    #    AVAILABLE commissions are earned agent income and must NOT be touched.
+    now_iso = now.isoformat()
+    comm = await main_db.agent_commissions.update_many(
+        {"tenant_id": tenant_id, "status": "pending", "chargeback_until": {"$gt": now_iso}},
+        {"$set": {"status": "reversed", "updated_at": now_iso}},
+    )
+    steps["commissions_reversed"] = comm.modified_count
+
+    # 5) Clean tenant_id references across platform collections (dynamic scan —
+    #    catches any collection, present or future, that carries tenant_id)
+    cleaned = {}
+    for col in await main_db.list_collection_names():
+        if col in _CASCADE_EXCLUDE or col.startswith("system."):
+            continue
+        try:
+            r = await main_db[col].delete_many({"tenant_id": tenant_id})
+            if r.deleted_count:
+                cleaned[col] = r.deleted_count
+        except Exception as exc:
+            logger.warning(f"cascade clean skip {col}: {exc}")
+    steps["refs_cleaned"] = cleaned
+
+    # 6) Remove the tenant record itself
+    await main_db.saas_tenants.delete_one({"id": tenant_id})
+    steps["tenant_record_deleted"] = True
+
+    # 7) Audit log
+    await main_db.platform_audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "tenant_cascade_delete",
+        "tenant_id": tenant_id,
+        "tenant_email": email,
+        "performed_by": admin.get("email") or admin.get("id"),
+        "at": now_iso,
+        "report": steps,
+    })
+    return {"tenant_id": tenant_id, "db_name": db_name, "steps": steps}
+
+
 @router.delete("/saas/tenants/{tenant_id}")
 async def delete_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
-    result = await db.saas_tenants.delete_one({"id": tenant_id})
-    if result.deleted_count == 0:
+    tenant = await db.saas_tenants.find_one({"id": tenant_id})
+    if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    # Reverse PENDING commissions that are still inside the 7-day chargeback window.
-    # Commissions whose window has already expired should have been promoted to AVAILABLE
-    # and must NOT be reversed — reversing them would incorrectly claw back earned income.
-    now = datetime.now(timezone.utc).isoformat()
-    await db.agent_commissions.update_many(
-        {"tenant_id": tenant_id, "status": "pending", "chargeback_until": {"$gt": now}},
-        {"$set": {"status": "reversed", "updated_at": now}},
-    )
-    return {"message": "Tenant deleted successfully"}
+    report = await _cascade_delete_tenant(tenant, admin)
+    return {"message": "تم حذف المستأجر وكل بياناته المرتبطة بنجاح", "report": report}
+
+
+@router.get("/saas/migrations/status")
+async def migrations_status(admin: dict = Depends(get_super_admin)):
+    from services.migrations_runner import status
+    return await status()
+
+
+@router.post("/saas/migrations/run")
+async def migrations_run(admin: dict = Depends(get_super_admin)):
+    from services.migrations_runner import run_migrations
+    return await run_migrations()
 
 
 @router.post("/saas/tenants/{tenant_id}/toggle-status")

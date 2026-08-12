@@ -11,7 +11,18 @@ from typing import Any
 MONGO_URL: str = os.environ.get("MONGO_URL")
 DB_NAME: str = os.environ.get("DB_NAME")
 
-client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URL)
+client: AsyncIOMotorClient = AsyncIOMotorClient(
+    MONGO_URL,
+    # Connection stability (p32): avoid intermittent 'connection closed' on long ops
+    maxPoolSize=50,
+    minPoolSize=5,
+    maxIdleTimeMS=30000,
+    serverSelectionTimeoutMS=10000,
+    connectTimeoutMS=10000,
+    socketTimeoutMS=120000,
+    waitQueueTimeoutMS=10000,
+    retryWrites=True,
+)
 main_db: AsyncIOMotorDatabase = client[DB_NAME]
 
 # ContextVar for per-request tenant database isolation

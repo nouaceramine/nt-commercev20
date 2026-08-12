@@ -15,6 +15,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
     volumes:
       - ./backend:/app
+      - ./backups:/backups
     restart: unless-stopped
     networks:
       - ntcommerce

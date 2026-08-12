@@ -136,6 +136,36 @@ def build_router(get_admin, main_db=None):
         content = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
         return {"key": key, "lines": content[-lines:], "log_file": f"logs/{key}.log"}
 
+    @router.get("/db-health")
+    async def db_health(user: dict = Depends(get_admin)):
+        """Latest golden-template doctor snapshot + live per-tenant DB sizes (p32)."""
+        from config.database import client, main_db as _mdb
+        latest = await _mdb.platform_db_health.find_one(
+            {}, {"_id": 0}, sort=[("at", -1)]
+        )
+        tenants = []
+        for name in await client.list_database_names():
+            if not (name.startswith("tenant_") or name == "template_tenant"):
+                continue
+            try:
+                stats = await client[name].command("dbStats")
+                tenants.append({
+                    "db": name,
+                    "size_mb": round(stats.get("dataSize", 0) / 1048576, 2),
+                    "storage_mb": round(stats.get("storageSize", 0) / 1048576, 2),
+                    "collections": stats.get("collections", 0),
+                    "objects": stats.get("objects", 0),
+                })
+            except Exception:
+                continue
+        over = [t for t in tenants if t["size_mb"] >= 500]
+        return {
+            "last_doctor_run": latest,
+            "databases": sorted(tenants, key=lambda t: -t["size_mb"]),
+            "size_alert_threshold_mb": 500,
+            "over_threshold": over,
+        }
+
     @router.get("/metrics")
     async def all_metrics(user: dict = Depends(get_admin)):
         """Return in-memory request metrics for every registered component."""

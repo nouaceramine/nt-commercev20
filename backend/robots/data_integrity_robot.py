@@ -32,7 +32,9 @@ class DataIntegrityRobot:
             "sessions_closed": 0,
             "orphaned_records": 0,
             "alerts_sent": 0,
+            "doctor_runs": 0,
         }
+        self._last_doctor_run = None  # weekly golden-template doctor (p32)
 
     async def start(self) -> None:
         self.is_running = True
@@ -69,7 +71,93 @@ class DataIntegrityRobot:
             except Exception as e:
                 logger.error(f"Integrity check failed for {tenant.get('id')}: {e}")
 
+        await self._run_weekly_doctor()
         return self.stats
+
+    async def _run_weekly_doctor(self) -> None:
+        """Weekly golden-template doctor over every tenant DB (p32): auto-fixes
+        missing collections/indexes/seed docs, persists a health snapshot to
+        main_db.platform_db_health, and alerts admins on unhealthy tenants."""
+        now = datetime.now(timezone.utc)
+        if self._last_doctor_run:
+            try:
+                if (now - datetime.fromisoformat(self._last_doctor_run)).days < 7:
+                    return
+            except ValueError:
+                pass
+        try:
+            from services.tenant_template import doctor_all
+            reports = await doctor_all(fix=True)
+            unhealthy = [r.get("tenant_id") for r in reports if not r.get("healthy")]
+            await self.db.platform_db_health.insert_one({
+                "id": str(uuid.uuid4()),
+                "at": now.isoformat(),
+                "tenants_checked": len(reports),
+                "unhealthy": unhealthy,
+                "reports": reports,
+            })
+            self._last_doctor_run = now.isoformat()
+            self.stats["doctor_runs"] += 1
+            await self._check_db_sizes(now)
+            logger.info(
+                f"Weekly DB doctor: {len(reports)} tenants checked, "
+                f"{len(unhealthy)} unhealthy after fix"
+            )
+            if unhealthy and self.notification:
+                try:
+                    await self.notification.send_to_admins(
+                        None,
+                        "فحص قواعد البيانات الأسبوعي",
+                        f"بقيت {len(unhealthy)} قاعدة غير سليمة بعد الإصلاح التلقائي: "
+                        + ", ".join(unhealthy[:5]),
+                        severity="critical",
+                        category="integrity",
+                    )
+                    self.stats["alerts_sent"] += 1
+                except Exception as ne:
+                    logger.error(f"Doctor alert failed: {ne}")
+        except Exception as e:
+            logger.error(f"Weekly DB doctor failed: {e}")
+
+    async def _check_db_sizes(self, now) -> None:
+        """Alert when any tenant/template DB crosses 500 MB (p32-6). Snapshot is
+        stored in main_db.platform_db_sizes for growth tracking."""
+        threshold_mb = 500
+        try:
+            sizes = []
+            for name in await self.client.list_database_names():
+                if not (name.startswith("tenant_") or name == "template_tenant"):
+                    continue
+                try:
+                    st = await self.client[name].command("dbStats")
+                    sizes.append({
+                        "db": name,
+                        "size_mb": round(st.get("dataSize", 0) / 1048576, 2),
+                    })
+                except Exception:
+                    continue
+            over = [x for x in sizes if x["size_mb"] >= threshold_mb]
+            await self.db.platform_db_sizes.insert_one({
+                "id": str(uuid.uuid4()),
+                "at": now.isoformat(),
+                "sizes": sizes,
+                "over_threshold": [x["db"] for x in over],
+            })
+            if over and self.notification:
+                try:
+                    await self.notification.send_to_admins(
+                        None,
+                        "تنبيه حجم قواعد البيانات",
+                        "قواعد تجاوزت 500 ميغابايت: "
+                        + ", ".join(f"{x['db']} ({x['size_mb']}MB)" for x in over[:5]),
+                        severity="warning",
+                        category="integrity",
+                    )
+                    self.stats["alerts_sent"] += 1
+                except Exception as ne:
+                    logger.error(f"DB size alert failed: {ne}")
+        except Exception as e:
+            logger.error(f"DB size check failed: {e}")
 
     async def _fix_sale_totals(self, tenant: dict, tdb) -> None:
         """Detect sales where total_amount ≠ sum(items) and correct them."""

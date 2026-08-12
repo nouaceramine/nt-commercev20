@@ -37,9 +37,18 @@ async def register_tenant(tenant: TenantCreate):
                 detail=f"تم بلوغ الحدّ الأقصى للمستأجرين على المنصّة ({cap}). الرجاء التواصل مع الإدارة.",
             )
 
-    existing = await db.saas_tenants.find_one({"email": tenant.email})
+    existing = await db.saas_tenants.find_one({"email": email_ci(tenant.email)})
     if existing:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+
+    # p32: also reject emails owned by a main-DB user — such a user would
+    # hijack /api/auth/login and shadow the tenant account (the p30 bug class)
+    stale_user = await db.users.find_one({"email": email_ci(tenant.email)})
+    if stale_user:
+        raise HTTPException(
+            status_code=400,
+            detail="البريد الإلكتروني مستخدم بالفعل في حساب آخر. الرجاء استخدام بريد مختلف أو التواصل مع الإدارة.",
+        )
 
     plan = await db.saas_plans.find_one({"id": tenant.plan_id}, {"_id": 0})
     if not plan:
