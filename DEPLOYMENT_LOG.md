@@ -428,3 +428,19 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 
 ### ملاحظة
 - من استنسخ المستودع سابقاً يحتاج clone جديد (التاريخ أُعيدت كتابته)
+
+---
+
+## p25 — توسعة خريطة اللوحة الأم (2026-08-12)
+
+### التغيير
+- core/modules_map.py: إضافة 3 مكوّنات كانت غير مراقبة:
+  - installments (الأقساط) ← /api/installments
+  - digital_panel (البانل الرقمي) ← /api/digital-panel, /api/digital
+  - ecom_hub (صندوق الطلبات الموحّد) ← /api/ecom, /api/orders, /api/promotions, /api/platform-cards
+- لا تغيير في الواجهة (اللوحة تجلب المكوّنات ديناميكياً)
+
+### التحقق
+- registry.get_all() داخل الحاوية ← 27 مكوّناً (كان 24) ✔
+- /api/health ← ok ✔
+- النسخ الاحتياطي: backups/p25_motherboard_modules_*/
