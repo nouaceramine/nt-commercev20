@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { toast } from 'sonner';
-import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin } from 'lucide-react';
+import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin, Minus, Plus, CheckCircle } from 'lucide-react';
 
 export default function ProductDetailPage() {
   const { slug, productId } = useParams();
@@ -12,11 +12,12 @@ export default function ProductDetailPage() {
   const [relatedProducts, setRelatedProducts] = useState([]);
   const [store, setStore] = useState(null);
   const [quantity, setQuantity] = useState(1);
-  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [mainImage, setMainImage] = useState('');
   const [orderSuccess, setOrderSuccess] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [customerInfo, setCustomerInfo] = useState({
-    name: '', phone: '', email: '', wilaya: '', commune: '', address: '', notes: ''
+    name: '', phone: '', wilaya: '', commune: '', address: '', notes: ''
   });
 
   const [couponCode, setCouponCode] = useState('');
@@ -25,7 +26,6 @@ export default function ProductDetailPage() {
   const [couponLoading, setCouponLoading] = useState(false);
 
   const [loyaltyPoints, setLoyaltyPoints] = useState(null);
-  const [redeemPoints, setRedeemPoints] = useState(0);
 
   const [wilayasData, setWilayasData] = useState([]);
   const [availableCommunes, setAvailableCommunes] = useState([]);
@@ -42,7 +42,7 @@ export default function ProductDetailPage() {
       const wilaya = wilayasData.find(w => w.id === customerInfo.wilaya);
       setAvailableCommunes(wilaya ? wilaya.communes : []);
       if (wilaya && !wilaya.communes.includes(customerInfo.commune)) {
-        setCustomerInfo(prev => ({...prev, commune: ''}));
+        setCustomerInfo(prev => ({ ...prev, commune: '' }));
       }
     } else {
       setAvailableCommunes([]);
@@ -51,7 +51,7 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     fetchProduct();
-  }, [slug, productId]);
+  }, [slug, productId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchProduct = async () => {
     setLoading(true);
@@ -60,6 +60,9 @@ export default function ProductDetailPage() {
       setProduct(response.data.product);
       setRelatedProducts(response.data.related_products || []);
       setStore(response.data.settings);
+      const p = response.data.product;
+      setMainImage(p.image_url || (p.images && p.images[0]) || '');
+      window.scrollTo(0, 0);
     } catch (error) {
       toast.error('المنتج غير متوفر');
       navigate(`/shop/${slug}`);
@@ -68,14 +71,31 @@ export default function ProductDetailPage() {
     }
   };
 
+  // ── Gallery: image_url + images array, deduplicated ──
+  const galleryImages = useMemo(() => {
+    if (!product) return [];
+    const list = [product.image_url, ...(product.images || [])].filter(Boolean);
+    return [...new Set(list)];
+  }, [product]);
+
+  const price = product ? (product.retail_price || product.selling_price || 0) : 0;
+  const oldPrice = product && product.purchase_price > 0 ? Math.round(price * 1.2) : 0;
+  const savePercent = oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
+  const deliveryFee = store?.delivery_enabled === false ? 0 : (store?.delivery_fee || 0);
+  const freeDelivery = store?.free_delivery_threshold > 0 && (price * quantity) >= store.free_delivery_threshold;
+  const effectiveDelivery = freeDelivery ? 0 : deliveryFee;
+  const subtotal = price * quantity;
+  const finalTotal = Math.max(0, subtotal - couponDiscount) + effectiveDelivery;
+
+  const primary = store?.primary_color || '#f7941d';
+
   const validateCoupon = async () => {
     if (!couponCode.trim()) return;
     setCouponLoading(true);
     try {
-      const price = product.retail_price || product.selling_price || 0;
       const response = await apiClient.post(`/shop/${slug}/validate-coupon`, {
         code: couponCode,
-        subtotal: price * quantity,
+        subtotal: subtotal,
         customer_phone: customerInfo.phone,
         product_ids: [product.id]
       });
@@ -103,24 +123,22 @@ export default function ProductDetailPage() {
         setLoyaltyPoints(response.data.data);
       }
     } catch (error) {
-      // Silently fail - loyalty is optional
+      // نقاط الولاء اختيارية — تجاهل الخطأ
     }
   };
 
   const handleOrder = async (e) => {
     e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
     try {
-      const price = product.retail_price || product.selling_price || 0;
-      const subtotal = price * quantity;
-      const total = Math.max(0, subtotal - couponDiscount);
-
       const orderData = {
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,
-        customer_email: customerInfo.email,
         delivery_address: customerInfo.address,
         delivery_city: customerInfo.commune,
         delivery_wilaya: customerInfo.wilaya,
+        delivery_fee: effectiveDelivery,
         items: [{
           product_id: product.id,
           name: product.name_ar || product.name,
@@ -128,7 +146,7 @@ export default function ProductDetailPage() {
           price: price
         }],
         subtotal: subtotal,
-        total: total,
+        total: finalTotal,
         coupon_code: couponCode || undefined,
         coupon_discount: couponDiscount || undefined,
         notes: customerInfo.notes,
@@ -136,17 +154,20 @@ export default function ProductDetailPage() {
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
       setOrderSuccess(response.data);
-      setShowOrderForm(false);
     } catch (error) {
-      toast.error('فشل إرسال الطلب');
+      toast.error(error?.response?.data?.detail || 'فشل إرسال الطلب');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   if (loading) return <div className="nouacer-store"><div className="nc-loading"><div className="nc-spinner" /></div></div>;
   if (!product) return null;
 
-  const price = product.retail_price || product.selling_price || 0;
-  const finalPrice = Math.max(0, price * quantity - couponDiscount);
+  const inputStyle = {
+    width: '100%', padding: '11px 14px', border: '1px solid #d1d5db', borderRadius: '8px',
+    fontSize: '13px', background: '#fff', fontFamily: 'inherit', outline: 'none'
+  };
 
   return (
     <div className="nouacer-store" dir="rtl">
@@ -158,215 +179,312 @@ export default function ProductDetailPage() {
         </div>
       </header>
 
-      <section className="nc-section" style={{ paddingTop: '40px' }}>
-        <div className="nc-section-inner">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
-            <div className="nc-product-image" style={{ height: '400px', borderRadius: '16px' }}>
-              {product.image_url ? (
-                <img src={product.image_url} alt={product.name_ar} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '16px' }} />
-              ) : (
-                <div className="nc-product-placeholder" style={{ fontSize: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>📦</div>
+      {/* ===== صف المنتج الرئيسي: صورة يمين + معلومات ونموذج يسار ===== */}
+      <section style={{ maxWidth: '1100px', margin: '30px auto', padding: '0 20px' }}>
+        <div className="pd-main-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', alignItems: 'start' }}>
+
+          {/* عمود الصور */}
+          <div className="pd-image-col" style={{ position: 'sticky', top: '100px' }}>
+            {mainImage ? (
+              <img
+                src={mainImage}
+                alt={product.name_ar || product.name}
+                data-testid="pd-main-image"
+                style={{
+                  width: '100%', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+                  maxHeight: '420px', objectFit: 'contain', background: '#fff', display: 'block'
+                }}
+              />
+            ) : (
+              <div style={{
+                width: '100%', height: '320px', borderRadius: '12px', background: '#f8f9fa',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '100px'
+              }}>📦</div>
+            )}
+            {galleryImages.length > 1 && (
+              <div data-testid="pd-gallery" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginTop: '12px' }}>
+                {galleryImages.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img}
+                    alt={`${product.name_ar || product.name} ${i + 1}`}
+                    onClick={() => setMainImage(img)}
+                    data-testid={`pd-thumb-${i}`}
+                    style={{
+                      width: '100%', height: '70px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer',
+                      border: mainImage === img ? `2px solid ${primary}` : '2px solid transparent',
+                      opacity: mainImage === img ? 1 : 0.75, transition: 'all 0.2s', background: '#fff'
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* عمود المعلومات + نموذج الطلب */}
+          <div>
+            <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#1a1a2e', marginBottom: '12px', lineHeight: 1.3 }}>
+              {product.name_ar || product.name}
+            </h1>
+
+            {/* السعر + التوفير */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+              <span data-testid="pd-price" style={{ fontSize: '26px', fontWeight: 900, color: primary }}>
+                {price.toLocaleString()} دج
+              </span>
+              {oldPrice > price && (
+                <span style={{ fontSize: '18px', textDecoration: 'line-through', color: '#9ca3af' }}>
+                  {oldPrice.toLocaleString()} دج
+                </span>
+              )}
+              {savePercent > 0 && (
+                <span data-testid="pd-save-badge" style={{
+                  background: '#dcfce7', color: '#16a34a', fontSize: '13px', fontWeight: 700,
+                  padding: '3px 10px', borderRadius: '20px'
+                }}>
+                  وفر {savePercent}%
+                </span>
               )}
             </div>
 
-            <div>
-              <h1 style={{ fontSize: '32px', fontWeight: 800, color: '#1a1a2e', marginBottom: '16px' }}>
-                {product.name_ar || product.name}
-              </h1>
-              <p style={{ color: '#636e72', marginBottom: '24px', lineHeight: 1.7 }}>
-                {product.description_ar || product.description || 'لا يوجد وصف'}
+            {/* الوصف القصير */}
+            {(product.short_description || product.description_ar || product.description) && (
+              <p style={{ color: '#6b7280', fontSize: '14px', lineHeight: 1.7, marginBottom: '16px' }}>
+                {product.short_description || product.description_ar || product.description}
+              </p>
+            )}
+
+            <p style={{ fontSize: '13px', marginBottom: '16px', color: product.quantity > 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+              {product.quantity > 0 ? `✔ متوفر في المخزون (${product.quantity})` : '✖ نفذت الكمية'}
+            </p>
+
+            {/* ===== صندوق طلب COD المضمّن ===== */}
+            <form
+              onSubmit={handleOrder}
+              data-testid="cod-form-box"
+              style={{
+                background: '#f0f9ff', border: '2px solid #7dd3fc', borderRadius: '14px',
+                padding: '20px', marginBottom: '15px'
+              }}
+            >
+              <p style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a2e', textAlign: 'center', marginBottom: '15px' }}>
+                🛒 أدخل معلوماتك لطلب المنتج
               </p>
 
-              <div className="nc-product-price" style={{ marginBottom: '24px' }}>
-                <span className="nc-price-current" style={{ fontSize: '36px' }}>
-                  {price.toLocaleString()} دج
-                </span>
-                {product.purchase_price > 0 && (
-                  <span className="nc-price-old" style={{ fontSize: '20px', marginRight: '12px', textDecoration: 'line-through', color: '#999' }}>
-                    {Math.round(price * 1.2).toLocaleString()} دج
-                  </span>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
-                <span>الكمية:</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button className="nc-qty-btn" onClick={() => setQuantity(Math.max(1, quantity - 1))} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #ddd', background: '#fff', cursor: 'pointer' }}>-</button>
-                  <span style={{ fontWeight: 700, fontSize: '18px', minWidth: '30px', textAlign: 'center' }}>{quantity}</span>
-                  <button className="nc-qty-btn" onClick={() => setQuantity(quantity + 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #ddd', background: '#fff', cursor: 'pointer' }}>+</button>
-                </div>
-                <span style={{ color: '#636e72' }}>
-                  {product.quantity > 0 ? `(${product.quantity} متوفر)` : '(نفذت الكمية)'}
-                </span>
-              </div>
-
-              <button
-                className="nc-add-cart-btn"
-                style={{ fontSize: '18px', padding: '16px 32px', background: '#f7941d', color: '#fff', border: 'none', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', width: '100%', justifyContent: 'center' }}
-                onClick={() => setShowOrderForm(true)}
-                disabled={product.quantity <= 0}
-              >
-                <ShoppingCart size={20} /> اطلب الآن (الدفع عند الاستلام)
-              </button>
-
-              <div style={{ display: 'flex', gap: '16px', marginTop: '24px', flexWrap: 'wrap' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#636e72', fontSize: '14px' }}>
-                  <Truck size={16} /> توصيل سريع
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#636e72', fontSize: '14px' }}>
-                  <Shield size={16} /> ضمان أصلي
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#636e72', fontSize: '14px' }}>
-                  <RefreshCw size={16} /> إرجاع خلال 3 أيام
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {showOrderForm && !orderSuccess && (
-        <div className="nc-modal-overlay active" onClick={() => setShowOrderForm(false)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="nc-modal" onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '16px', padding: '32px', maxWidth: '500px', width: '90%', maxHeight: '90vh', overflow: 'auto' }}>
-            <h2 style={{ marginBottom: '20px', textAlign: 'center' }}>📝 إتمام الطلب</h2>
-            <div style={{ background: '#f8f9fa', padding: '16px', borderRadius: '10px', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span>{product.name_ar}</span>
-                <span>× {quantity}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', color: '#636e72', fontSize: '14px' }}>
-                <span>المجموع الفرعي</span>
-                <span>{(price * quantity).toLocaleString()} دج</span>
-              </div>
-              {couponDiscount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', color: '#27ae60', fontSize: '14px' }}>
-                  <span>خصم الكوبون</span>
-                  <span>-{couponDiscount.toLocaleString()} دج</span>
-                </div>
-              )}
-              <div style={{ fontWeight: 800, fontSize: '18px', color: '#f7941d', borderTop: '1px solid #ddd', paddingTop: '8px' }}>
-                الإجمالي: {finalPrice.toLocaleString()} دج
-              </div>
-            </div>
-
-            {/* Coupon Input */}
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <Tag size={16} style={{ color: '#f7941d' }} />
+              <div className="pd-form-row-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
                 <input
-                  type="text"
+                  required type="text" placeholder="الاسم الكامل *"
+                  value={customerInfo.name}
+                  onChange={e => setCustomerInfo({ ...customerInfo, name: e.target.value })}
+                  style={inputStyle} data-testid="cod-name"
+                />
+                <input
+                  required type="tel" placeholder="رقم الهاتف *"
+                  pattern="0[5-7][0-9]{8}"
+                  value={customerInfo.phone}
+                  onChange={e => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
+                  onBlur={checkLoyalty}
+                  style={inputStyle} data-testid="cod-phone"
+                />
+              </div>
+
+              <div className="pd-form-row-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                <select
+                  required
+                  value={customerInfo.wilaya}
+                  onChange={e => setCustomerInfo({ ...customerInfo, wilaya: e.target.value })}
+                  style={{ ...inputStyle, cursor: 'pointer' }} data-testid="cod-wilaya"
+                >
+                  <option value="">اختر الولاية *</option>
+                  {wilayasData.map(w => <option key={w.id} value={w.id}>{w.id} - {w.name}</option>)}
+                </select>
+                <select
+                  required
+                  value={customerInfo.commune}
+                  onChange={e => setCustomerInfo({ ...customerInfo, commune: e.target.value })}
+                  style={{ ...inputStyle, cursor: 'pointer' }} data-testid="cod-commune"
+                >
+                  <option value="">{customerInfo.wilaya ? 'اختر البلدية *' : 'اختر الولاية أولا'}</option>
+                  {availableCommunes.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <input
+                required type="text" placeholder="العنوان التفصيلي *"
+                value={customerInfo.address}
+                onChange={e => setCustomerInfo({ ...customerInfo, address: e.target.value })}
+                style={{ ...inputStyle, marginBottom: '10px' }} data-testid="cod-address"
+              />
+
+              {/* الكوبون */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                <Tag size={14} style={{ color: primary, flexShrink: 0 }} />
+                <input
+                  type="text" placeholder="كود الخصم (اختياري)"
                   value={couponCode}
                   onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                  placeholder="أدخل كود الخصم"
-                  style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}
+                  style={{ ...inputStyle, flex: 1 }}
                 />
                 <button
-                  onClick={validateCoupon}
+                  type="button" onClick={validateCoupon}
                   disabled={couponLoading || !couponCode.trim()}
-                  style={{ padding: '10px 16px', background: '#f7941d', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}
+                  style={{
+                    padding: '10px 16px', background: primary, color: '#fff', border: 'none',
+                    borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600
+                  }}
                 >
                   {couponLoading ? '...' : 'تطبيق'}
                 </button>
               </div>
               {couponMessage && (
-                <p style={{ fontSize: '13px', marginTop: '4px', color: couponDiscount > 0 ? '#27ae60' : '#e74c3c' }}>
+                <p style={{ fontSize: '12px', marginBottom: '10px', color: couponDiscount > 0 ? '#16a34a' : '#dc2626' }}>
                   {couponMessage}
                 </p>
               )}
-            </div>
 
-            {/* Loyalty Points (if customer has points) */}
-            {loyaltyPoints && loyaltyPoints.points > 0 && (
-              <div style={{ background: '#fff8e1', padding: '12px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Gift size={16} style={{ color: '#f7941d' }} />
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: '14px', fontWeight: 600 }}>🎁 لديك {loyaltyPoints.points} نقطة ولاء</p>
-                  <p style={{ fontSize: '12px', color: '#636e72' }}>100 نقطة = 500 دج خصم</p>
+              {/* نقاط الولاء */}
+              {loyaltyPoints && loyaltyPoints.points > 0 && (
+                <div style={{
+                  background: '#fff8e1', padding: '10px 12px', borderRadius: '8px', marginBottom: '10px',
+                  display: 'flex', alignItems: 'center', gap: '8px'
+                }}>
+                  <Gift size={16} style={{ color: primary }} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '13px', fontWeight: 600 }}>لديك {loyaltyPoints.points} نقطة ولاء</p>
+                    <p style={{ fontSize: '11px', color: '#6b7280' }}>100 نقطة = 500 دج خصم</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pointsToUse = Math.min(loyaltyPoints.points, Math.floor(subtotal / 500) * 100);
+                      const discount = (pointsToUse / 100) * 500;
+                      setCouponDiscount(prev => prev + discount);
+                      toast.success(`تم استبدال ${pointsToUse} نقطة بخصم ${discount.toLocaleString()} دج`);
+                    }}
+                    style={{
+                      padding: '6px 12px', background: '#fff', border: `1px solid ${primary}`,
+                      color: primary, borderRadius: '6px', cursor: 'pointer', fontSize: '12px'
+                    }}
+                  >
+                    استبدال
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    const pointsToUse = Math.min(loyaltyPoints.points, Math.floor((price * quantity) / 500) * 100);
-                    const discount = (pointsToUse / 100) * 500;
-                    setRedeemPoints(pointsToUse);
-                    setCouponDiscount(prev => prev + discount);
-                    toast.success(`تم استبدال ${pointsToUse} نقطة بخصم ${discount.toLocaleString()} دج`);
-                  }}
-                  style={{ padding: '6px 12px', background: '#fff', border: '1px solid #f7941d', color: '#f7941d', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
-                >
-                  استبدال
-                </button>
-              </div>
-            )}
+              )}
 
-            <form onSubmit={handleOrder}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>الاسم الكامل *</label>
-                  <input required value={customerInfo.name} onChange={e => setCustomerInfo({...customerInfo, name: e.target.value})} placeholder="أحمد بن علي" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
+              {/* الكمية + ملخص الطلب */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px',
+                background: '#fff', borderRadius: '10px', padding: '10px 12px'
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', border: '1px solid #d1d5db',
+                  borderRadius: '8px', overflow: 'hidden', height: '40px', background: '#fff', flexShrink: 0
+                }}>
+                  <button type="button" onClick={() => setQuantity(Math.min(product.quantity || 99, quantity + 1))}
+                    style={{ width: '36px', height: '100%', background: '#f3f4f6', border: 'none', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Plus size={14} />
+                  </button>
+                  <span data-testid="cod-qty" style={{ width: '40px', textAlign: 'center', fontWeight: 700, fontSize: '15px' }}>{quantity}</span>
+                  <button type="button" onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                    style={{ width: '36px', height: '100%', background: '#f3f4f6', border: 'none', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Minus size={14} />
+                  </button>
                 </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>رقم الهاتف *</label>
-                  <input required type="tel" value={customerInfo.phone} onChange={e => setCustomerInfo({...customerInfo, phone: e.target.value})} onBlur={checkLoyalty} placeholder="0555123456" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
+                <div style={{ flex: 1, fontSize: '13px', lineHeight: 1.6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
+                    <span>المنتج × {quantity}</span><span>{subtotal.toLocaleString()} دج</span>
+                  </div>
+                  {couponDiscount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16a34a' }}>
+                      <span>الخصم</span><span>-{couponDiscount.toLocaleString()} دج</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
+                    <span>التوصيل</span>
+                    <span data-testid="cod-delivery">{effectiveDelivery > 0 ? `${effectiveDelivery.toLocaleString()} دج` : 'مجاني'}</span>
+                  </div>
                 </div>
               </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>البريد الإلكتروني</label>
-                <input type="email" value={customerInfo.email} onChange={e => setCustomerInfo({...customerInfo, email: e.target.value})} placeholder="email@example.com" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>الولاية *</label>
-                  <select required value={customerInfo.wilaya} onChange={e => setCustomerInfo({...customerInfo, wilaya: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}>
-                    <option value="">اختر الولاية</option>
-                    {wilayasData.map(w => <option key={w.id} value={w.id}>{w.id} - {w.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>البلدية *</label>
-                  <select required value={customerInfo.commune} onChange={e => setCustomerInfo({...customerInfo, commune: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }}>
-                    <option value="">{customerInfo.wilaya ? 'اختر البلدية' : 'اختر الولاية أولا'}</option>
-                    {availableCommunes.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>العنوان التفصيلي *</label>
-                <input required value={customerInfo.address} onChange={e => setCustomerInfo({...customerInfo, address: e.target.value})} placeholder="حي ..., شارع ..., عمارة ..." style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd' }} />
-              </div>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>ملاحظات</label>
-                <textarea rows={3} value={customerInfo.notes} onChange={e => setCustomerInfo({...customerInfo, notes: e.target.value})} placeholder="أي ملاحظات خاصة..." style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', resize: 'vertical' }} />
-              </div>
-              <button type="submit" style={{ width: '100%', padding: '14px', background: '#27ae60', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}>
-                ✅ تأكيد الطلب (الدفع عند الاستلام) — {finalPrice.toLocaleString()} دج
+
+              {/* زر تأكيد الطلب */}
+              <button
+                type="submit"
+                disabled={submitting || product.quantity <= 0}
+                data-testid="cod-confirm-btn"
+                style={{
+                  width: '100%', height: '48px', marginTop: '12px',
+                  background: `linear-gradient(135deg, ${primary}, #e67e22)`,
+                  color: '#fff', border: 'none', borderRadius: '10px', fontSize: '15px',
+                  fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: '8px', transition: 'all 0.2s',
+                  opacity: (submitting || product.quantity <= 0) ? 0.6 : 1
+                }}
+              >
+                {submitting ? 'جارٍ إرسال الطلب...' : (
+                  <>
+                    <CheckCircle size={18} />
+                    انقر هنا لتأكيد الطلب — {finalTotal.toLocaleString()} دج
+                  </>
+                )}
               </button>
+              <p style={{ textAlign: 'center', fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
+                💵 الدفع عند الاستلام
+              </p>
             </form>
+
+            {/* شارات الثقة */}
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#6b7280', fontSize: '13px' }}>
+                <Truck size={15} /> توصيل سريع
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#6b7280', fontSize: '13px' }}>
+                <Shield size={15} /> ضمان أصلي
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#6b7280', fontSize: '13px' }}>
+                <RefreshCw size={15} /> إرجاع خلال 3 أيام
+              </span>
+            </div>
           </div>
         </div>
-      )}
 
+        {/* ===== الوصف الطويل في بطاقة منفصلة ===== */}
+        {(product.description_ar || product.description) && (
+          <div data-testid="pd-long-desc" style={{
+            marginTop: '40px', padding: '30px', background: '#fff', borderRadius: '16px',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.06)', lineHeight: 1.8, color: '#374151', fontSize: '15px'
+          }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '12px', color: '#1a1a2e' }}>وصف المنتج</h2>
+            <p style={{ whiteSpace: 'pre-line' }}>{product.description_ar || product.description}</p>
+          </div>
+        )}
+      </section>
+
+      {/* ===== نجاح الطلب ===== */}
       {orderSuccess && (
-        <div className="nc-modal-overlay active" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="nc-modal" style={{ background: '#fff', borderRadius: '16px', padding: '40px', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: '16px', padding: '40px', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
             <div style={{ fontSize: '64px', marginBottom: '16px' }}>🎉</div>
             <h3 style={{ marginBottom: '8px' }}>تم استلام طلبك بنجاح!</h3>
-            <p style={{ color: '#636e72', marginBottom: '16px' }}>سنتواصل معك قريباً لتأكيد الطلب</p>
-            <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontWeight: 700 }}>رقم الطلب: {orderSuccess.order_number}</div>
-
-            {/* Tracking Link */}
+            <p style={{ color: '#6b7280', marginBottom: '16px' }}>سنتواصل معك قريباً لتأكيد الطلب</p>
+            <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontWeight: 700 }}>
+              رقم الطلب: {orderSuccess.order_number}
+            </div>
             <div style={{ marginBottom: '24px' }}>
-              <Link to={`/shop/${slug}/track/${orderSuccess.order_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f7941d', textDecoration: 'none', fontSize: '14px' }}>
+              <Link to={`/shop/${slug}/track/${orderSuccess.order_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: primary, textDecoration: 'none', fontSize: '14px' }}>
                 <MapPin size={16} /> تتبع طلبك
               </Link>
             </div>
-
-            <button style={{ padding: '14px 32px', background: '#f7941d', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', cursor: 'pointer' }} onClick={() => { setShowOrderForm(false); setOrderSuccess(null); setCouponCode(''); setCouponDiscount(0); setCouponMessage(''); navigate(`/shop/${slug}`); }}>
+            <button
+              style={{ padding: '14px 32px', background: primary, color: '#fff', border: 'none', borderRadius: '12px', fontSize: '16px', cursor: 'pointer' }}
+              onClick={() => { setOrderSuccess(null); setCouponCode(''); setCouponDiscount(0); setCouponMessage(''); navigate(`/shop/${slug}`); }}
+            >
               متابعة التسوق
             </button>
           </div>
         </div>
       )}
 
+      {/* ===== منتجات مشابهة ===== */}
       {relatedProducts.length > 0 && (
         <section className="nc-section" style={{ background: '#f8f9fa' }}>
           <div className="nc-section-inner">
@@ -380,7 +498,7 @@ export default function ProductDetailPage() {
                   <div className="nc-product-info" style={{ padding: '16px' }}>
                     <h3 className="nc-product-title" style={{ fontSize: '16px', marginBottom: '8px' }}>{p.name_ar || p.name}</h3>
                     <div className="nc-product-price">
-                      <span className="nc-price-current" style={{ color: '#f7941d', fontWeight: 700 }}>{(p.retail_price || p.selling_price || 0).toLocaleString()} دج</span>
+                      <span className="nc-price-current" style={{ color: primary, fontWeight: 700 }}>{(p.retail_price || p.selling_price || 0).toLocaleString()} دج</span>
                     </div>
                   </div>
                 </Link>
@@ -389,6 +507,15 @@ export default function ProductDetailPage() {
           </div>
         </section>
       )}
+
+      {/* تجاوب الجوال: عمود واحد */}
+      <style>{`
+        @media (max-width: 768px) {
+          .pd-main-row { grid-template-columns: 1fr !important; }
+          .pd-image-col { position: static !important; }
+          .pd-form-row-2 { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
     </div>
   );
 }

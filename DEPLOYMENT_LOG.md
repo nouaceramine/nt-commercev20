@@ -729,3 +729,19 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - Bundle: main.51c31fc8.js (استبدل main.16947345.js) — التحقق من hash في index.html وعبر curl.
 - نسخ احتياطية: ai_routes.py.bak.p38b, AddProductPage/EditProductPage.bak.p38b, purchases_routes/PurchasesPage/PurchaseDialogs.bak.p38c, www_before_p38/.
 - علامات الحزمة المتحقق منها: ai-images-btn, ai-images-dialog, product-images, Openverse, warehouse-select, purchase-cart-list, accept formats.
+
+
+---
+
+## p39 — 2026-08-13 — إكمال صفحة المنتج في المتجر العام (على نمط nouacer.com/product)
+
+**قبل:** صورة واحدة فقط، سعر بدون شارة توفير، نموذج طلب في نافذة منبثقة (modal)، لا ملخص طلب داخل الصفحة.
+**بعد:** `frontend/src/pages/store/ProductDetailPage.js` أُعيد بناؤها على نمط https://nouacer.com/product/cable-hoco/ مع الحفاظ على هوية المتجر وألوانه وميزاته (كوبون/ولاء/تتبع):
+- **معرض صور**: صورة رئيسية قابلة للتبديل + مصغرات (image_url + images بدون تكرار) — data-testid: pd-main-image, pd-gallery, pd-thumb-N. عمود الصور sticky على الشاشات الكبيرة.
+- **كتلة السعر**: السعر الحالي (بلون المتجر primary_color) + السعر القديم مشطوباً + شارة «وفر X%» (pd-save-badge).
+- **صندوق طلب COD مضمّن** (cod-form-box) بتصميم المرجع (خلفية f0f9ff، إطار 7dd3fc): الاسم+الهاتف في سطر، الولاية (58 ولاية)+البلدية المتسلسلة، العنوان، حقل الكوبون، نقاط الولاء، محدد الكمية (+/-)، ملخص حي (المنتج×الكمية، الخصم، التوصيل — مجاني عند delivery_fee=0 مع دعم free_delivery_threshold)، زر «انقر هنا لتأكيد الطلب — الإجمالي» بتدرّج لوني (cod-confirm-btn). إرسال delivery_fee الفعلي مع الطلب.
+- **بطاقة الوصف الطويل** منفصلة أسفل (pd-long-desc).
+- حالة التوفر بالمخزون، شارات الثقة، شاشة نجاح الطلب مع رقم الطلب ورابط التتبع، منتجات مشابهة — كلها محفوظة.
+- تجاوب الجوال: عمود واحد عبر media query.
+- تحقق: bundle main.55540380.js، لقطة متصفح فعلية للصفحة الحية تُظهر كل العناصر تعمل.
+- نسخة احتياطية: backups/ProductDetailPage.js.bak.p39.
