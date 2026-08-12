@@ -403,3 +403,28 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - /api/ai/agents/status ← الثمانية is_enabled:true ✔
 - classify-expense (فاتورة كهرباء Sonelgaz) ← utilities بثقة 1.0 + سبب عربي ✔
 - agents/run expense_classifier (اشتراك Djezzy) ← utilities، 6.7 ث (نداء LLM حقيقي لا fallback) ✔
+
+---
+
+## p24 — تطهير GitHub من بيانات المستأجرين (2026-08-12)
+
+### المشكلة
+- ملفات حساسة كانت متتبعة ومرفوعة على GitHub العام:
+  - backups/daily/*.archive (أرشيفات 3 قواعد بيانات كاملة — تسربت عبر التزام git add -A سابق)
+  - archive/data/backups/global_all_tenants_*.json.gz
+  - backups/p16.../tenant_5e7c8fc5_pre_sales_import.archive
+
+### الحل
+- نسخة أمان كاملة من .git في backups/p24_gitpurge_20260812_001200/ (محلية فقط)
+- git rm --cached للملفات (بقيت على القرص — النسخ الاحتياطية اليومية لم تتأثر)
+- .gitignore: backups/daily/ + backups/p*_*/ + archive/data/backups/ + *.archive + *.mongodump
+- git filter-branch --index-filter --prune-empty على كل التاريخ + reflog expire + gc --prune=now
+- git push --force (d515ea9 → 8fff2dc)
+
+### التحقق
+- git log --all -- <المسارات> ← فارغ تماماً ✔
+- الملفات على القرص سليمة ✔ (النسخ اليومية مستمرة)
+- الحقول الحساسة لم تعد في أي التزام محلي أو بعيد ✔
+
+### ملاحظة
+- من استنسخ المستودع سابقاً يحتاج clone جديد (التاريخ أُعيدت كتابته)
