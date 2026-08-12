@@ -684,9 +684,11 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 
 ---
 
+---
+
 ## p37 — إصلاح التنقل الخاطئ /shop/undefined بعد حفظ المنتج — 2026-08-12
 
-- **الجذر**: مسار  كان يعرض مكوّن المتجر العام  الذي يتطلب  — في السياق الإداري slug=undefined → طلب  يفشل → معالج الخطأ ينقل إلى . كان يضرب بعد الحفظ وعند الاختيار السريع.
-- **الإصلاح** (بلا تغيير تصميمي): (1) EditProductPage بعد الحفظ → ؛ (2) الاختيار السريع في القائمة →  للأدمن و لغيره؛ (3) مسار  → redirect إلى .
-- **Backup**: backups/p34_gaps_20260812/{ProductsPage,EditProductPage,App.js}
-- **النشر**: main.16947345.js (كان 22240482) مع تحقق hash.
+- **الجذر**: مسار /products/:id كان يعرض مكوّن المتجر العام ProductDetailPage الذي يتطلب slug — في السياق الإداري slug=undefined فطلب /shop/undefined/product/... يفشل ومعالج الخطأ ينقل إلى /shop/undefined. كان يضرب بعد الحفظ وعند الاختيار السريع.
+- **الإصلاح** (بلا تغيير تصميمي): (1) EditProductPage بعد الحفظ ينتقل إلى /products؛ (2) الاختيار السريع في القائمة ينتقل إلى /edit للأدمن و/products لغيره؛ (3) مسار /products/:id أصبح redirect إلى /products.
+- **Backup**: backups/p34_gaps_20260812/ (ProductsPage, EditProductPage, App.js)
+- **النشر**: main.16947345.js (كان 22240482) مع تحقق hash في index.html.
