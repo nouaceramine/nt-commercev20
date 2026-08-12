@@ -6,6 +6,7 @@ import uuid
 import bcrypt
 
 from config.database import db, init_tenant_database
+from services.tenant_template import copy_template_to_tenant
 from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import create_access_token, next_tenant_short_id
@@ -75,7 +76,13 @@ async def register_tenant(tenant: TenantCreate):
     }
 
     await db.saas_tenants.insert_one(tenant_doc)
-    await init_tenant_database(tenant_id)
+    # Golden template provisioning (p31): full collections/indexes/seeds;
+    # legacy seeding kept as fallback if the template is missing/broken
+    try:
+        await copy_template_to_tenant(tenant_id)
+    except Exception as _tpl_err:
+        print(f"[REG] template copy failed, legacy seeding: {_tpl_err}")
+        await init_tenant_database(tenant_id)
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
 
     if tenant_doc.get("agent_id"):

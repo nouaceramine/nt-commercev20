@@ -531,3 +531,24 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - نسخ السجل إلى backups/p29.../stale_main_user_nouacer.json ثم حذفه
 - بعده: /api/auth/login بالبريد ← 401 ✔ (لا خطف)، سجل saas_tenants سليم ✔
 - دخول المشترك الآن عبر /tenant-login ← /api/saas/tenant-login (يفحص saas_tenants)
+
+---
+
+## p31 — القاعدة الذهبية template_tenant (2026-08-12)
+
+### المشكلة البنيوية
+- مسارا بذر منفصلان غير متزامنين: init_tenant_database (3 بذور عند التسجيل) و init_default_data (7 لاحقاً) — كل مستأجر يولد مختلفاً
+- قواعد المستأجرين الجدد بصفر فهارس (الأساسية فيها 405)
+
+### الحل
+- services/tenant_template.py: build_template / copy_template_to_tenant / doctor_tenant / doctor_all
+- template_tenant: 142 جدولاً + 385 فهرساً (محصودة من الأساسية العاملة) + 27 وثيقة بذرة (صناديق، مخزن، عائلات، زبون/مورد نقدي، عملات DZD/USD/EUR، ضرائب TVA 19/9 + TAP، 3 قوالب فواتير، 5 فئات عيوب، إعدادات ولاء)
+- ربط مساري الإنشاء (التسجيل العام + إنشاء الإدارة) بالنسخ من القالب مع fallback للبذر القديم
+- endpoints للمشرف: /saas/template/info, /rebuild, /doctor/{id}, /doctor-all (fix= اختياري)
+- علة أُصلحت: list_collection_names() ليست async-iterable في Motor
+
+### التحقق
+- مشترك تجريبي عبر /saas/register ← doctor: healthy True فوراً (0 ناقص) ✔
+- قاعدة المستخدم الحقيقي (NT-0002) رُقّيت: +21 بذرة +385 فهرساً، healthy ✔
+- 3 قواعد اختبار حُذفت بعد النجاح ✔
+- ملاحظة: "connection closed" عرضي في العمليات الطويلة — doctor(fix) يكمل الناقص عند إعادة التشغيل

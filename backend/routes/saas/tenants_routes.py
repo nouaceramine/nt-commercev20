@@ -30,6 +30,7 @@ def _assert_safe_bridge_url(url: str) -> None:
         raise HTTPException(status_code=400, detail="رابط الجسر يشير إلى عنوان شبكة داخلية غير مسموح")
 
 from config.database import db, main_db, client, init_tenant_database, get_tenant_db
+from services.tenant_template import copy_template_to_tenant
 from .schemas import TenantCreate, TenantUpdate, TenantResponse, SubscriptionPayment
 from .helpers import get_super_admin, create_access_token, next_tenant_short_id
 from services.wallet_service import credit_wallet, get_or_create_wallet
@@ -98,7 +99,12 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
     # Make sure the tenant DB exists (lazy init like the unified-login flow).
     tenant_db = get_tenant_db(tenant_id)
     if not tenant.get("database_initialized", False):
-        tenant_db = await init_tenant_database(tenant_id)
+        try:
+            await copy_template_to_tenant(tenant_id)
+            tenant_db = get_tenant_db(tenant_id)
+        except Exception as _tpl_err:
+            print(f"[TENANT] template copy failed, legacy seeding: {_tpl_err}")
+            tenant_db = await init_tenant_database(tenant_id)
         await main_db.saas_tenants.update_one(
             {"id": tenant_id},
             {"$set": {
@@ -309,7 +315,11 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
     }
 
     await db.saas_tenants.insert_one(tenant_doc)
-    await init_tenant_database(tenant_id)
+    try:
+        await copy_template_to_tenant(tenant_id)
+    except Exception as _tpl_err:
+        print(f"[TENANT] template re-init failed, legacy seeding: {_tpl_err}")
+        await init_tenant_database(tenant_id)
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
 
     # Create PENDING commission for the agent if this tenant has one
@@ -619,3 +629,47 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
     await db.saas_payments.insert_one(payment_doc)
 
     return {"new_subscription_ends_at": new_end.isoformat()}
+
+
+# ============ Golden Template management (p31) ============
+from services.tenant_template import (
+    build_template as _tpl_build,
+    copy_template_to_tenant as _tpl_copy,
+    doctor_tenant as _tpl_doctor,
+    doctor_all as _tpl_doctor_all,
+    TEMPLATE_DB_NAME,
+)
+
+
+@router.get("/saas/template/info")
+async def template_info(admin: dict = Depends(get_super_admin)):
+    tpl = client[TEMPLATE_DB_NAME]
+    cols = await tpl.list_collection_names()
+    nidx = 0
+    for c in cols:
+        async for i in tpl[c].list_indexes():
+            if i["name"] != "_id_":
+                nidx += 1
+    settings = await tpl.settings.find_one({"id": "general"}, {"_id": 0})
+    return {
+        "database": TEMPLATE_DB_NAME,
+        "collections": len(cols),
+        "indexes": nidx,
+        "template_version": (settings or {}).get("template_version"),
+        "built_at": (settings or {}).get("built_at"),
+    }
+
+
+@router.post("/saas/template/rebuild")
+async def template_rebuild(admin: dict = Depends(get_super_admin)):
+    return await _tpl_build()
+
+
+@router.get("/saas/template/doctor/{tenant_id}")
+async def template_doctor_one(tenant_id: str, fix: bool = False, admin: dict = Depends(get_super_admin)):
+    return await _tpl_doctor(tenant_id, fix=fix)
+
+
+@router.get("/saas/template/doctor-all")
+async def template_doctor_all(fix: bool = False, admin: dict = Depends(get_super_admin)):
+    return await _tpl_doctor_all(fix=fix)
