@@ -10,7 +10,8 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { SidebarReorder } from './SidebarReorder';
 import { 
-  LayoutDashboard, 
+  LayoutDashboard,
+  Megaphone, 
   Package, 
   PlusCircle, 
   LogOut, 
@@ -400,6 +401,7 @@ export const Layout = ({ children }) => {
         { path: '/barcode-print', icon: QrCode, label: language === 'ar' ? 'الباركود' : 'Codes-barres', subFeature: 'barcode', featureKey: 'barcode' },
         { path: '/bulk-price-update', icon: DollarSign, label: t.bulkPriceUpdate },
         { path: '/price-history', icon: History, label: language === 'ar' ? 'سجل الأسعار' : 'Historique prix' },
+        { path: '/repairs/parts', icon: Package, label: language === 'ar' ? 'قطع الغيار' : 'Pièces' },
         { path: '/defective-goods', icon: PackageX, label: language === 'ar' ? 'بضائع معيبة' : 'Défectueux' },
       ]
     },
@@ -430,6 +432,7 @@ export const Layout = ({ children }) => {
         { path: '/reports', icon: BarChart3, label: t.reports, subFeature: 'sales_reports', featureKey: 'reports' },
         { path: '/analytics', icon: BarChart3, label: language === 'ar' ? 'إحصائيات متقدمة' : 'Analyses', subFeature: 'financial_reports', featureKey: 'reports' },
         { path: '/smart-reports', icon: Sparkles, label: language === 'ar' ? 'تقارير ذكية' : 'Rapports IA', subFeature: 'smart_reports', featureKey: 'reports' },
+        { path: '/auto-reports', icon: Calendar, label: language === 'ar' ? 'التقارير التلقائية' : 'Rapports auto', featureKey: 'reports' },
       ]
     },
     {
@@ -515,6 +518,10 @@ export const Layout = ({ children }) => {
         { path: '/digital-panel/subscriptions', icon: Tv, label: language === 'ar' ? 'الاشتراكات' : 'Abonnements' },
         { path: '/digital-panel/resellers', icon: Users, label: language === 'ar' ? 'الموزّعون' : 'Revendeurs' },
         { path: '/digital-panel/services', icon: Boxes, label: language === 'ar' ? 'كتالوج الخدمات' : 'Catalogue' },
+        ...(isAdmin ? [
+          { path: '/digital-services', icon: Boxes, label: language === 'ar' ? 'إدارة الخدمات' : 'Gestion services' },
+          { path: '/digital-admin', icon: Shield, label: language === 'ar' ? 'إدارة البانل' : 'Admin panel' },
+        ] : [])
       ]
     },
     {
@@ -541,6 +548,9 @@ export const Layout = ({ children }) => {
         { path: '/ecom-hub',           icon: Inbox,      label: language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte unifiée',     featureKey: 'ecommerce_hub' },
         { path: '/ecom-hub/channels',  icon: Link2,      label: language === 'ar' ? 'قنوات البيع'           : 'Canaux de vente',  featureKey: 'ecommerce_hub' },
         { path: '/ecom-hub/analytics', icon: BarChart3,  label: language === 'ar' ? 'تحليلات التجارة'        : 'Analyses e-com',   featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/store',     icon: Store,      label: language === 'ar' ? 'متجري الإلكتروني'       : 'Ma boutique',     featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/ads',       icon: Megaphone,  label: language === 'ar' ? 'الإعلانات'               : 'Publicités',      featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/shipping',  icon: Truck,      label: language === 'ar' ? 'الشحن والتوصيل'          : 'Livraison',       featureKey: 'ecommerce_hub' },
         { path: '/ecom-hub/guide',     icon: BookOpen,   label: language === 'ar' ? 'دليل الاستخدام والربط'   : 'Guide & connexion', featureKey: 'ecommerce_hub' },
         // ── Legacy storefront tools (always available) ──
         { path: '/store', icon: Store, label: language === 'ar' ? 'المتجر' : 'Boutique', subFeature: 'online_store' },
@@ -576,6 +586,8 @@ export const Layout = ({ children }) => {
           { path: '/backup-system', icon: Database, label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes', featureKey: 'backup' },
           { path: '/data-import-export', icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
           { path: '/settings/sidebar', icon: LayoutDashboard, label: language === 'ar' ? 'ترتيب القائمة' : 'Ordre menu' },
+          { path: '/settings/datetime', icon: Clock, label: language === 'ar' ? 'التاريخ والوقت' : 'Date & heure' },
+          { path: '/settings/printing/template-editor', icon: FileText, label: language === 'ar' ? 'قوالب الطباعة' : 'Modèles impression' },
         ] : []),
         ...(isEffectiveSuperAdmin ? [
           { path: '/motherboard', icon: CircuitBoard, label: language === 'ar' ? 'اللوحة الأم' : 'Carte mère', minRole: 'super_admin' },

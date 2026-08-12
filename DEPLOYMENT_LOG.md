@@ -444,3 +444,21 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - registry.get_all() داخل الحاوية ← 27 مكوّناً (كان 24) ✔
 - /api/health ← ok ✔
 - النسخ الاحتياطي: backups/p25_motherboard_modules_*/
+
+---
+
+## p26 — إظهار الصفحات المخفية في القوائم (2026-08-12)
+
+### التغيير
+- components/Layout.js: إضافة 8 روابط لصفحات كانت تعمل بلا زر قائمة + استيراد أيقونة Megaphone:
+  - المبيعات: /auto-reports (التقارير التلقائية، featureKey reports)
+  - الصيانة: /repairs/parts (قطع الغيار)
+  - التجارة الإلكترونية: /ecom-hub/store, /ecom-hub/ads, /ecom-hub/shipping (featureKey ecommerce_hub)
+  - الخدمات الرقمية: /digital-services, /digital-admin (isAdmin فقط)
+  - الإعدادات: /settings/datetime, /settings/printing/template-editor
+- لم تُضف /portal (نسخة من صفحة الدخول) ولا /features (صفحة تسويقية عامة)
+- النسخ الاحتياطي: backups/p26_menu_links_*/
+
+### التحقق
+- بناء + نشر main.bd736fce.js (حذف main.23ec415d.js) ✔
+- المسارات الستة موجودة في الحزمة المنشورة (grep لاتيني) ✔
