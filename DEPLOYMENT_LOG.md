@@ -671,3 +671,13 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - **Backup**: `backups/p34_gaps_20260812/{AddProductPage,EditProductPage}.js`
 - **اختبار النقطة حياً** (حساب الديمو): `success: true`، وصف تسويقي عربي كامل عبر gemini-3.1-flash-lite.
 - **النشر**: main.22240482.js (كان bd736fce) — تحقق من hash في index.html ومن وجود الزر في الحزمة عبر data-testid.
+
+---
+
+## p36 — تدوير GitHub PAT والانتقال إلى مستودع جديد — 2026-08-12
+
+- **قبل**: remote يستخدم Classic PAT مكشوفاً (`ghp_VBd0...`) نحو `nouaceramine/Nt-commerce17`.
+- **بعد**: remote جديد `nouaceramine/nt-commercev20` بتوكن Fine-grained (`ntcommerce-vps`) مقيد بريبو واحد وصلاحيتين فقط (Contents + Workflows — الثانية لزمت لدفع `.github/workflows/lint.yml`).
+- دُفع تاريخ main كاملاً بنجاح إلى المستودع الجديد.
+- **تنظيف التوكن القديم**: أُزيل من `archive/setup_enhanced.py` و`/root/.bash_history` (0 بقايا خارج أرشيف p24 الاحتياطي على الخادم المحلي).
+- **بانتظار المستخدم**: إبطال الـ Classic PAT القديم من GitHub (يصبح أرشيف p24 غير ضار بعدها).

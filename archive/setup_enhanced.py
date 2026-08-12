@@ -9,7 +9,7 @@ import os, sys, subprocess, urllib.request, json, base64
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-TOKEN = "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"
+TOKEN = "REDACTED_OLD_PAT"
 OWNER, REPO = "nouaceramine", "Nt-commerce17"
 APP_DIR = "/opt/ntcommerce" if os.path.isdir("/opt/ntcommerce") else "/app"
 ROUTES_DIR = os.path.join(APP_DIR, "backend/routes/ecom")
