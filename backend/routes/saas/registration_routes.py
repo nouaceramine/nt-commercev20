@@ -8,6 +8,7 @@ import bcrypt
 from config.database import db, init_tenant_database
 from services.tenant_template import copy_template_to_tenant
 from utils.auth import email_ci
+from utils.ids import new_id
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import create_access_token, next_tenant_short_id
 
@@ -57,7 +58,7 @@ async def register_tenant(tenant: TenantCreate):
     now = datetime.now(timezone.utc)
     trial_ends_at = now + timedelta(days=14)
 
-    tenant_id = str(uuid.uuid4())
+    tenant_id = new_id()
     hashed_password = bcrypt.hashpw(tenant.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     tenant_doc = {

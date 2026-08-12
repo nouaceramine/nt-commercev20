@@ -323,9 +323,17 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     # ── WooCommerce Routes ──
 
+    def _decrypt_wc(settings):
+        """Decrypt WooCommerce secrets read from DB (legacy plaintext passes through)."""
+        if settings:
+            from utils.crypto import decrypt_field
+            settings["consumer_key"] = decrypt_field(settings.get("consumer_key"))
+            settings["consumer_secret"] = decrypt_field(settings.get("consumer_secret"))
+        return settings
+
     @router.get("/woocommerce/settings")
     async def get_woocommerce_settings(admin: dict = Depends(get_tenant_admin)):
-        settings = await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0})
+        settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
         if not settings:
             settings = {"id": "global", "enabled": False, "store_url": "", "consumer_key": "", "consumer_secret": "", "sync_products": True, "sync_orders": True, "sync_customers": True, "last_sync": ""}
             await db.woocommerce_settings.insert_one(settings)
@@ -333,7 +341,11 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.put("/woocommerce/settings")
     async def update_woocommerce_settings(settings: WooCommerceSettings, admin: dict = Depends(get_tenant_admin)):
-        await db.woocommerce_settings.update_one({"id": "global"}, {"$set": settings.model_dump()}, upsert=True)
+        from utils.crypto import encrypt_field
+        data = settings.model_dump()
+        data["consumer_key"] = encrypt_field(data.get("consumer_key"))
+        data["consumer_secret"] = encrypt_field(data.get("consumer_secret"))
+        await db.woocommerce_settings.update_one({"id": "global"}, {"$set": data}, upsert=True)
         return {"message": "تم حفظ إعدادات WooCommerce"}
 
     @router.post("/woocommerce/test-connection")
@@ -345,7 +357,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.post("/woocommerce/publish-product/{product_id}")
     async def publish_product_to_woocommerce(product_id: str, admin: dict = Depends(get_tenant_admin)):
-        wc_settings = await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0})
+        wc_settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
         if not wc_settings or not wc_settings.get("enabled"):
             raise HTTPException(status_code=400, detail="WooCommerce غير مفعل")
         product = await db.products.find_one({"id": product_id}, {"_id": 0})
@@ -358,7 +370,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.post("/woocommerce/publish-products")
     async def publish_multiple_products(product_ids: List[str], admin: dict = Depends(get_tenant_admin)):
-        wc_settings = await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0})
+        wc_settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
         if not wc_settings or not wc_settings.get("enabled"):
             raise HTTPException(status_code=400, detail="WooCommerce غير مفعل")
         now = datetime.now(timezone.utc).isoformat()

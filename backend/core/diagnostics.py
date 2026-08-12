@@ -136,6 +136,12 @@ def build_router(get_admin, main_db=None):
         content = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
         return {"key": key, "lines": content[-lines:], "log_file": f"logs/{key}.log"}
 
+    @router.get("/id-formats")
+    async def id_formats(user: dict = Depends(get_admin)):
+        """The platform's central ID formats registry (p34, gap 2)."""
+        from utils.ids import describe
+        return {"formats": describe()}
+
     @router.get("/db-health")
     async def db_health(user: dict = Depends(get_admin)):
         """Latest golden-template doctor snapshot + live per-tenant DB sizes (p32)."""
@@ -162,9 +168,19 @@ def build_router(get_admin, main_db=None):
             except Exception:
                 continue
         over = [t for t in tenants if t["size_mb"] >= 500]
+        from services.db_tree import get_tree
+        tree = await get_tree()
         return {
             "last_doctor_run": latest,
             "last_restore_test": latest_rt,
+            "db_tree": {
+                "mother": tree["mother"][0] if tree["mother"] else None,
+                "template": tree["template"][0] if tree["template"] else None,
+                "tenant_count": len(tree["tenants"]),
+                "demo_count": len(tree["demo"]),
+                "orphan_count": len(tree["orphans"]),
+                "total_nodes": tree["total_nodes"],
+            },
             "databases": sorted(tenants, key=lambda t: -t["size_mb"]),
             "size_alert_threshold_mb": 500,
             "over_threshold": over,

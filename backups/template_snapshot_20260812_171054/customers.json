@@ -1,0 +1,1 @@
+[{"_id": "6a7c925802c7179f7404d61b", "id": "default-customer", "name": "زبون نقدي", "phone": "", "email": "", "family_id": "default-customer-family", "balance": 0, "total_debt": 0, "is_default": true, "created_at": "2026-08-12T15:34:35.769016+00:00"}]

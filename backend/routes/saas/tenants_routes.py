@@ -12,6 +12,7 @@ import httpx
 import logging
 from urllib.parse import urlparse
 from utils.auth import email_ci
+from utils.ids import new_id
 
 logger = logging.getLogger(__name__)
 
@@ -512,7 +513,7 @@ async def _cascade_delete_tenant(tenant: dict, admin: dict) -> dict:
 
     # 7) Audit log
     await main_db.platform_audit_log.insert_one({
-        "id": str(uuid.uuid4()),
+        "id": new_id(),
         "action": "tenant_cascade_delete",
         "tenant_id": tenant_id,
         "tenant_email": email,
@@ -530,6 +531,50 @@ async def delete_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
         raise HTTPException(status_code=404, detail="Tenant not found")
     report = await _cascade_delete_tenant(tenant, admin)
     return {"message": "تم حذف المستأجر وكل بياناته المرتبطة بنجاح", "report": report}
+
+
+@router.get("/saas/store-template/info")
+async def store_template_info_ep(admin: dict = Depends(get_super_admin)):
+    from services.store_template import store_template_info
+    return await store_template_info()
+
+
+@router.post("/saas/store-template/rebuild")
+async def store_template_rebuild(admin: dict = Depends(get_super_admin)):
+    from services.store_template import build_store_template
+    return await build_store_template()
+
+
+@router.post("/saas/store-template/copy/{tenant_id}")
+async def store_template_copy(tenant_id: str, admin: dict = Depends(get_super_admin)):
+    from services.store_template import copy_store_to_tenant
+    return await copy_store_to_tenant(tenant_id)
+
+
+@router.get("/saas/db-tree")
+async def db_tree_view(admin: dict = Depends(get_super_admin)):
+    from services.db_tree import get_tree
+    return await get_tree()
+
+
+@router.post("/saas/db-tree/rebuild")
+async def db_tree_rebuild(admin: dict = Depends(get_super_admin)):
+    from services.db_tree import rebuild_tree
+    return await rebuild_tree()
+
+
+@router.post("/saas/template/snapshot")
+async def template_snapshot_run(admin: dict = Depends(get_super_admin)):
+    from services.template_snapshot import snapshot_template, enforce_snapshot_retention
+    report = await snapshot_template()
+    report["retention"] = enforce_snapshot_retention(keep=4)
+    return report
+
+
+@router.get("/saas/template/snapshot/latest")
+async def template_snapshot_latest(admin: dict = Depends(get_super_admin)):
+    from services.template_snapshot import latest_snapshot
+    return await latest_snapshot() or {"message": "no snapshot yet"}
 
 
 @router.post("/saas/restore-test")

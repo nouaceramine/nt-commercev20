@@ -241,6 +241,12 @@ async def copy_template_to_tenant(tenant_id: str) -> dict:
         )
     except Exception as exc:
         stats["migrations_error"] = str(exc)
+    # Master store template copy (p34, gap 4) — non-fatal, non-destructive
+    try:
+        from services.store_template import copy_store_to_tenant
+        stats["store_template"] = await copy_store_to_tenant(tenant_id)
+    except Exception as exc:
+        stats["store_template_error"] = str(exc)
     return stats
 
 

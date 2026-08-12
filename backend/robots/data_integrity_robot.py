@@ -106,6 +106,8 @@ class DataIntegrityRobot:
             self._last_doctor_run = now.isoformat()
             self.stats["doctor_runs"] += 1
             await self._check_db_sizes(now)
+            await self._snapshot_golden_template(now)
+            await self._refresh_db_tree()
             await self._monthly_restore_test(now)
             logger.info(
                 f"Weekly DB doctor: {len(reports)} tenants checked, "
@@ -126,6 +128,28 @@ class DataIntegrityRobot:
                     logger.error(f"Doctor alert failed: {ne}")
         except Exception as e:
             logger.error(f"Weekly DB doctor failed: {e}")
+
+    async def _refresh_db_tree(self) -> None:
+        """Refresh the mother-tree registry with the weekly cycle (p34, gap 3)."""
+        try:
+            from services.db_tree import rebuild_tree
+            r = await rebuild_tree()
+            logger.info(f"db tree refreshed: {r['nodes']} nodes")
+        except Exception as e:
+            logger.error(f"db tree refresh failed: {e}")
+
+    async def _snapshot_golden_template(self, now) -> None:
+        """Weekly golden-template snapshot to /backups (p34, gap 1)."""
+        try:
+            from services.template_snapshot import snapshot_template, enforce_snapshot_retention
+            report = await snapshot_template()
+            retention = enforce_snapshot_retention(keep=4)
+            logger.info(
+                f"template snapshot: {report['collections']} cols / {report['docs']} docs, "
+                f"retention removed {len(retention['removed'])}"
+            )
+        except Exception as e:
+            logger.error(f"template snapshot failed: {e}")
 
     async def _monthly_restore_test(self, now) -> None:
         """Monthly automated restore-test + archive retention (p33, items 7-8)."""

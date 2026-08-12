@@ -127,12 +127,13 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
     # ── API Keys ──
     @router.post("/api-keys")
     async def create_api_key(data: dict, admin: dict = Depends(get_super_admin)):
+        from utils.crypto import encrypt_field
         key = secrets.token_urlsafe(32)
         entry = {
             "id": str(uuid.uuid4()),
             "tenant_id": data.get("tenant_id", ""),
             "key_name": data.get("key_name", "Default"),
-            "api_key": key,
+            "api_key": encrypt_field(key),  # encrypted at rest (p34)
             "permissions": data.get("permissions", ["read"]),
             "is_active": True,
             "created_by": admin.get("name", admin.get("email", "")),
@@ -140,13 +141,14 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
         }
         await main_db.api_keys.insert_one(entry)
         entry.pop("_id", None)
+        entry["api_key"] = key  # plaintext shown ONCE, never stored
         return entry
 
     @router.get("/api-keys")
     async def get_api_keys(admin: dict = Depends(get_super_admin)):
         keys = await main_db.api_keys.find({}, {"_id": 0}).to_list(100)
         for k in keys:
-            k["api_key"] = k["api_key"][:8] + "..." if k.get("api_key") else ""
+            k["api_key"] = "••••••••" if k.get("api_key") else ""  # never expose stored keys
         return keys
 
     @router.delete("/api-keys/{key_id}")

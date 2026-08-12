@@ -620,3 +620,41 @@ database.py, registration_routes.py, tenants_routes.py, migrations_runner.py (ج
 
 ### الملفات المتغيرة
 restore_test.py (جديد), tenants_routes.py, data_integrity_robot.py, diagnostics.py, migrations_runner.py, tenant_template.py, scripts/generate_schema_docs.py (جديد), SCHEMA.md (جديد)
+
+---
+
+## p34 — دستور النظام: سد الفجوات الخمس (بعد موافقة المستخدم: قاعدة لكل مستأجر + Monolith معياري) — 2026-08-12
+
+### Backup قبل العمل
+`/opt/ntcommerce/backups/p34_gaps_20260812/` — data_integrity_robot.py, tenants_routes.py, tenant_template.py, security_routes.py, online_store_routes.py
+
+### قرارات المستخدم (موثقة)
+- قاعدة بيانات لكل **مستأجر** فقط (المستخدمون داخل المستأجر يشاركون قاعدته بصلاحيات)
+- إبقاء **Monolith معياري** الآن، فصل الخدمات عند نمو الحمل فعلياً
+- تنفيذ الفجوات الخمس كلها
+
+### الفجوة 1 — القالب الذهبي في مكان آمن
+- **جديد**: `services/template_snapshot.py` — تصدير `template_tenant` إلى JSON في `/backups/template_snapshot_<ts>/` أسبوعياً (روبوت) + يدوياً `POST /api/saas/template/snapshot`، احتفاظ بآخر 4.
+- **اختبار**: 16 مجموعة/32 مستنداً على القرص + سجل في `platform_template_snapshots`.
+
+### الفجوة 2 — نظام ID الموحد
+- **جديد**: `utils/ids.py` — المولّد المركزي الوحيد: `new_id()` (uuid4)، `short_token()`، `next_document_number(db, kind)` ترقيم تسلسلي ذري عبر counters (INV-2026-000001...)، وسجل `ID_FORMATS` يوثق 6 صيغ معرّفات. القاعدة: كل معرّف جديد يُولد هنا فقط؛ البيانات القديمة لا تُمس.
+- **تبنّى فوراً**: تسجيل المستأجرين + سجل تدقيق الحذف المتتالي. نقطة `GET /api/diagnostics/id-formats`.
+- **اختبار**: تسلسل 000001→000002 ذري + 6 صيغ موثقة.
+
+### الفجوة 3 — سجل الشجرة الأم
+- **جديد**: `services/db_tree.py` — شجرة رسمية في `platform_db_tree`: أم (ntcommerce) ← نموذج ذهبي + نموذج متجر ← أفرع المستأجرين + كشف القواعد اليتيمة. تحديث أسبوعي (روبوت) + نقاط `GET/POST /api/saas/db-tree[/rebuild]` + بطاقة في `/api/diagnostics/db-health`.
+- **اختبار**: 4 عقد، صفر يتيم، بطاقة اللوحة الأم تعرض الشجرة.
+
+### الفجوة 4 — نموذج المتجر الإلكتروني
+- **جديد**: `services/store_template.py` + قاعدة `store_template` الرئيسية (store_settings/payment_settings/shipping_settings/ecom_integrations — افتراضات جاهزة: COD مفعل، متجر معطل حتى يفعله المشترك). تُنسخ تلقائياً لكل مستأجر جديد ضمن `copy_template_to_tenant` (غير تدميري).
+- **نقاط**: `GET /saas/store-template/info`، `POST /rebuild`، `POST /copy/{tenant_id}`.
+- **اختبار E2E**: مستأجر جديد وُلد بمتجر مهيأ كاملاً.
+
+### الفجوة 5 — تشفير السكون التطبيقي
+- **جديد**: `utils/crypto.py` — Fernet (AES-128-CBC+HMAC)، صيغة `enc:v1:`، مفتاح `FIELD_ENCRYPTION_KEY` في البيئة (fail-fast)، النصوص القديمة تمر وتُشفر عند أول كتابة.
+- **تطبيق**: مفاتيح API (تُخزن مشفرة، تُعرض نصاً مرة واحدة، تُقنّع في القوائم) + أسرار WooCommerce (تشفير عند الحفظ، فك عند القراءة لصاحب المتجر فقط).
+- **اختبار**: DB يخزن `enc:v1:...`، GET يعيد النص الأصلي، القائمة مقنّعة. تشفير النقل (TLS) ما زال بانتظار الدومين.
+
+### الملفات المتغيرة
+template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها جديدة) + tenants_routes.py, data_integrity_robot.py, tenant_template.py, diagnostics.py, registration_routes.py, security_routes.py, online_store_routes.py
