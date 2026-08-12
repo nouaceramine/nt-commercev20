@@ -498,3 +498,19 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - Docker يتجاوز UFW ← backend صار 127.0.0.1:8001:8001 (المنفذ 8001 مغلق خارجياً، التحقق: 000 من الخارج، 200 عبر nginx)
 - حذف قاعدة restore_test المتبقية من اختبار الاستعادة
 - تقرير شامل: /opt/ntcommerce/REPORT_20260812.txt — كل الفحوص خضراء (403 على /api/products بدون توكن = سلوك صحيح)
+
+---
+
+## p29 — محو قواعد المستأجرين التجريبيين (2026-08-12) — بطلب المستخدم
+
+### قبل
+- نسخة نهائية: backups/p29_tenant_purge_20260812_133007/ (tenant_ncrtelecom_final.archive 39.9MB + tenant_hani_final.archive 0.5MB)
+- ملاحظة: سجلات saas_tenants كانت قد حُذفت مسبقاً (من الجلسة الموازية) — القاعدتان كانتا يتيمتين
+
+### المحو
+- dropDatabase: tenant_5e7c8fc5 (ncrtelecom تجريبي) + tenant_dc57b2a1 (hani)
+- تنظيف المراجع اليتيمة من ntcommerce: impersonation_logs 17, auto_reports 16, push_notifications 1406, store_slugs 2, collection_reports 2, whatsapp_config 1 (المجموع 1444)
+
+### بعد
+- قواعد البيانات: admin, config, local, ntcommerce فقط ✔
+- health + login demo + products ✔
