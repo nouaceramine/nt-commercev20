@@ -140,3 +140,4 @@ backups/p*_*/
 archive/data/backups/
 *.archive
 *.mongodump
+backups/
