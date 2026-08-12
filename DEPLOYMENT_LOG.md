@@ -814,3 +814,31 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 **التشخيص:** الموقع نفسه سليم (root 200 + الحزمة 7f08b1c4 موجودة + الصفحة ترسم كاملة). ما حدث: عند نشر p42 حُذفت main.*.js القديمة قبل اكتمال النسخ (سباق نشر مع عملية build عالقة)، فمن حمّل الصفحة أثناء التبديل — أو كان يحمل index.html قديماً من الكاش يشير لحزمة محذوفة — رأى صفحة بيضاء. nginx يقدّم index.html بـ no-cache لذا أي تحديث صفحة يحلها فوراً.
 **الإجراء الجديد المعتمد:** عدم حذف الحزم المجزّأة القديمة أثناء النشر إطلاقاً — cp -r للبناء الجديد فقط، وindex.html يشير للهاش الجديد تلقائياً، والحزم القديمة تبقى كاحتياط للصفحات المخزَّنة في كاش الزوار. التنظيف لاحقاً يدوياً بعد التأكد أن لا index.html قديم يشير إليها.
 **إجراءات:** قتل عملية build عالقة من p42؛ الإبقاء على main.55540380.js وmain.7f08b1c4.js كليهما في /var/www.
+
+
+---
+
+## p44 — 2026-08-12 — ربط الدومين nt-commerce.net عبر Cloudflare + إصلاح Mixed Content
+
+### قبل
+- الدومين nt-commerce.net مشترى من Cloudflare Registrar، سجلات DNS كانت تشير لعناوين CF الاحتياطية (خطأ 1034).
+- الواجهة المبنية تحوي `REACT_APP_BACKEND_URL=http://168.231.81.154` ثابتاً ← المتصفح يمنع كل طلبات API عند فتح الموقع عبر https (Mixed Content).
+- وضع التشفير في Cloudflare كان Full ← خطأ 522 (لا شهادة على الخادم بعد).
+
+### التغييرات
+1. **DNS (من لوحة Cloudflare بواسطة المستخدم):** A record ← 168.231.81.154 (Proxied)، حذف سجل A الاحتياطي الثاني، CNAME www (Proxied)، وضع التشفير Flexible مؤقتاً.
+2. **frontend/.env:** `REACT_APP_BACKEND_URL=` (فارغ ← كل طلبات API نسبية `/api` من نفس الأصل) — النسخة الاحتياطية: `backups/env.frontend.bak.p44`.
+3. **frontend/src/pages/ecom/EcomChannelsPage.js:** رابط ويبهوك Shopify المعروض أصبح `${window.location.origin}/api/...` بدل الرابط الثابت (يعرض الرابط الصحيح تلقائياً على أي دومين) — النسخة الاحتياطية: `EcomChannelsPage.js.bak.p44`.
+4. إعادة بناء الواجهة: الحزمة الجديدة `main.e63d39d0.js` — صفر occurrence للـ IP كقاعدة API (تبقى فقط 4 سلاسل SEO canonical/og غير مؤثرة).
+5. نشر آمن: `cp -r build/. /var/www/ntcommerce/` بدون حذف — الحزم القديمة (55540380, 7f08b1c4) باقية كاحتياط كاش. نسخة احتياطية: `backups/www_before_p44`.
+
+### بعد (تم التحقق بـ curl)
+- `https://nt-commerce.net/` ← 200، index.html يشير للحزمة الجديدة ✅
+- `https://nt-commerce.net/api/shop/nt` ← 200 ✅
+- `https://nt-commerce.net/api/shop/nt/img/{pid}/0.jpg` ← 200 JPEG 83KB ✅
+- `http://168.231.81.154/` ← 200 (الوصول القديم ما زال يعمل — نفس النسخة تعمل على الرابطين) ✅
+- `https://nt-commerce.net/api/webhooks/tiktok-leads` ← POST تجريبي ناجح (lead_created + customer_created) ✅ — **رابط الويبهوك النهائي لـ TikTok**
+
+### متبقٍّ مؤجل
+- شهادة Cloudflare Origin على nginx ← رفع الوضع إلى Full (Strict) + إجبار HTTPS.
+- روابط hardcoded غير حرجة: canonical/og:image في الواجهة، ورسالة Conversions API + عرض store slug في backend (تعمل لكن بالـ IP القديم).
