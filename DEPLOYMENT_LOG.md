@@ -658,3 +658,16 @@ restore_test.py (جديد), tenants_routes.py, data_integrity_robot.py, diagnost
 
 ### الملفات المتغيرة
 template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها جديدة) + tenants_routes.py, data_integrity_robot.py, tenant_template.py, diagnostics.py, registration_routes.py, security_routes.py, online_store_routes.py
+
+---
+
+## p35 — زر الوصف بالذكاء الاصطناعي في صفحات المنتج — 2026-08-12
+
+### المشكلة
+المستخدم أبلغ: صفحتا إضافة/تعديل المنتج (`/products/add`, `/products/:id/edit`) لا تحويان زر توليد الوصف بالذكاء الاصطناعي، رغم أن النقطة `/api/ai/generate-description` تعمل (Gemini). التنفيذ كان موجوداً فقط في `TenantDialogs.js` (حوار لوحة المستأجر) ولم يصل للصفحات الرئيسية.
+
+### الحل (بلا أي تغيير تصميمي — نفس نمط زر الباركود)
+- `AddProductPage.js` + `EditProductPage.js`: زر ghost صغير بأيقونة Sparkles بجانب عنوان حقل الوصف (`data-testid="ai-description-btn"`)، يستدعي `/ai/generate-description` باسم المنتج ووصفه الحالي كمميزات، ويملأ حقل الوصف بالنتيجة العربية، مع toast نجاح/فشل بالعربية والفرنسية.
+- **Backup**: `backups/p34_gaps_20260812/{AddProductPage,EditProductPage}.js`
+- **اختبار النقطة حياً** (حساب الديمو): `success: true`، وصف تسويقي عربي كامل عبر gemini-3.1-flash-lite.
+- **النشر**: main.22240482.js (كان bd736fce) — تحقق من hash في index.html ومن وجود الزر في الحزمة عبر data-testid.

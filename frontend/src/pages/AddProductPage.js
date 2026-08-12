@@ -18,7 +18,7 @@ import {
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import ProductImagesInput from '../components/forms/ProductImagesInput';
-import { ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree, PlusCircle, Calculator, Package, Tag, Warehouse, ShieldAlert } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree, PlusCircle, Calculator, Package, Tag, Warehouse, ShieldAlert, Sparkles } from 'lucide-react';
 import { Switch } from '../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 
@@ -251,6 +251,33 @@ export default function AddProductPage() {
     });
   };
 
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const generateAiDescription = async () => {
+    if (!formData.name) {
+      toast.error(isAr ? 'أدخل اسم المنتج أولاً' : "Entrez le nom du produit d'abord");
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const res = await apiClient.post('/ai/generate-description', {
+        name: formData.name,
+        category: '',
+        features: formData.description_en || '',
+      });
+      if (res.data.success && res.data.description) {
+        setFormData(prev => ({ ...prev, description_en: res.data.description }));
+        toast.success(isAr ? 'تم توليد الوصف بالذكاء الاصطناعي' : 'Description générée par IA');
+      } else {
+        toast.error(res.data.error || (isAr ? 'فشل توليد الوصف' : 'Échec de la génération'));
+      }
+    } catch (err) {
+      toast.error(isAr ? 'فشل الاتصال بالذكاء الاصطناعي' : 'Connexion IA impossible');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleSubmit = async (e, createNew = false) => {
     e?.preventDefault();
     
@@ -442,7 +469,12 @@ export default function AddProductPage() {
                     </div>
                     <div className="col-span-2 space-y-3">
                       <div className="space-y-1">
-                        <Label className="text-xs">{isAr ? 'الوصف' : 'Description'}</Label>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">{isAr ? 'الوصف' : 'Description'}</Label>
+                          <Button type="button" variant="ghost" size="sm" onClick={generateAiDescription} disabled={aiLoading} className="h-5 px-1 text-xs" data-testid="ai-description-btn">
+                            {aiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}{isAr ? 'وصف AI' : 'Description IA'}
+                          </Button>
+                        </div>
                         <Input name="description_en" value={formData.description_en} onChange={handleChange} className="h-9" placeholder={isAr ? 'وصف المنتج...' : 'Description du produit...'} />
                       </div>
                       <div className="space-y-1">
