@@ -158,6 +158,19 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             {"id": order_id},
             {"$set": {"status": status, "updated_at": now}}
         )
+        # مزامنة الحالة إلى صندوق الطلبات الموحَّد (تحديث مباشر — بلا آثار جانبية على المخزون)
+        try:
+            _st_map = {"pending": "new", "confirmed": "confirmed", "shipped": "shipped",
+                       "delivered": "delivered", "cancelled": "cancelled", "refunded": "refunded"}
+            _est = _st_map.get(status)
+            if _est:
+                await db.ecom_orders.update_one(
+                    {"channel": "webstore", "external_id": order_id},
+                    {"$set": {"status": _est, "updated_at": now},
+                     "$push": {"status_history": {"status": _est, "at": now, "by": admin.get("id"), "note": "مزامنة من صفحة المتجر"}}}
+                )
+        except Exception:
+            pass
         return {"message": "تم تحديث حالة الطلب"}
 
     # Public store endpoints (no auth required)
@@ -351,6 +364,48 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         await tenant_db_inst.store_orders.insert_one(order_data)
+        # مزامنة فورية إلى صندوق الطلبات الموحَّد (قناة webstore)
+        # inventory_deducted=True: المخزون حُسم أعلاه لحظة الإنشاء — يمنع الحسم المزدوج عند التأكيد من الصندوق
+        try:
+            ecom_items = [
+                {
+                    "name": it.get("name", ""), "sku": "",
+                    "product_id": it.get("product_id"),
+                    "qty": int(it.get("quantity", 1) or 1),
+                    "price": float(it.get("price", 0) or 0),
+                    "total": round(int(it.get("quantity", 1) or 1) * float(it.get("price", 0) or 0), 2),
+                }
+                for it in order.items
+            ]
+            ecom_sub = round(sum(i["total"] for i in ecom_items), 2)
+            ecom_ship = max(0.0, float(getattr(order, "delivery_fee", 0) or 0))
+            ecom_doc = {
+                "id": str(uuid.uuid4()),
+                "order_code": order_number,
+                "channel": "webstore",
+                "external_id": order_data["id"],
+                "integration_id": None,
+                "status": "new",
+                "payment_status": "unpaid",
+                "customer": {
+                    "name": order.customer_name or "",
+                    "phone": order.customer_phone or "",
+                    "address": getattr(order, "delivery_address", "") or "",
+                    "city": getattr(order, "delivery_city", "") or "",
+                    "wilaya": getattr(order, "delivery_wilaya", "") or "",
+                },
+                "items": ecom_items,
+                "subtotal": ecom_sub, "shipping_fee": ecom_ship, "total": round(ecom_sub + ecom_ship, 2),
+                "notes": order.notes or "",
+                "tags": [],
+                "shipping_label_id": None, "tracking_number": None, "courier": None,
+                "inventory_deducted": True,
+                "status_history": [{"status": "new", "at": now, "by": "webstore"}],
+                "created_at": now, "updated_at": now, "created_by": "webstore",
+            }
+            await tenant_db_inst.ecom_orders.insert_one(ecom_doc)
+        except Exception as e:
+            logger.error(f"ecom webstore sync error: {e}")
         # NEW: Send Conversions API Purchase Event
         try:
             await conversions_service.send_purchase(

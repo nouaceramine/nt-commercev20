@@ -43,6 +43,20 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
 
     inventory_result = await _sync_inventory_on_status_change(db, order, new_status, now)
 
+    # مزامنة عكسية لطلبات متجر الويب: عكس الحالة إلى store_orders
+    # (المخزون أداره _sync_inventory أعلاه — نعلّم stock_restored لتفادي إعادة مزدوجة)
+    if order.get("channel") == "webstore" and order.get("external_id"):
+        try:
+            _rev = {"new": "pending", "confirmed": "confirmed", "packed": "confirmed",
+                    "shipped": "shipped", "delivered": "delivered",
+                    "cancelled": "cancelled", "refunded": "refunded"}
+            _so = {"status": _rev.get(new_status, "pending"), "updated_at": now}
+            if new_status in ("cancelled", "refunded"):
+                _so["stock_restored"] = True
+            await db.store_orders.update_one({"id": order["external_id"]}, {"$set": _so})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("webstore reverse sync failed for %s: %s", order_id, exc)
+
     if new_status == "delivered":
         try:
             from services.smart_notifications import notify_shipment_delivered

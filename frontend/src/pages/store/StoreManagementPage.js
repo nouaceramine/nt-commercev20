@@ -104,6 +104,19 @@ export default function StoreManagementPage() {
     fetchData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // تحديث تلقائي للطلبات كل 20 ثانية (صامت — بدون مؤشر تحميل)
+  useEffect(() => {
+    const tick = setInterval(() => { fetchOrdersOnly(); }, 20000);
+    return () => clearInterval(tick);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchOrdersOnly = async () => {
+    try {
+      const ordersRes = await apiClient.get(`/store/orders`);
+      setOrders(Array.isArray(ordersRes.data) ? ordersRes.data : []);
+    } catch { /* صامت */ }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -170,6 +183,7 @@ export default function StoreManagementPage() {
     try {
       await apiClient.put(`/store/orders/${orderId}/status`, { status });
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+      fetchOrdersOnly();
       toast.success(language === 'ar' ? 'تم تحديث حالة الطلب' : 'Order status updated');
     } catch (error) {
       toast.error(language === 'ar' ? 'فشل تحديث الحالة' : 'Failed to update status');

@@ -20,6 +20,7 @@ CHANNELS = {
     "telegram":  {"label_ar": "تيليجرام",           "label_en": "Telegram",  "icon": "✈️", "color": "#0088cc"},
     "viber":     {"label_ar": "Viber",              "label_en": "Viber",     "icon": "🟣", "color": "#665cac"},
     "manual":    {"label_ar": "إدخال يدوي",         "label_en": "Manual",    "icon": "✍️", "color": "#6b7280"},
+    "webstore":  {"label_ar": "متجر الويب",          "label_en": "Web Store", "icon": "🌐", "color": "#0ea5e9"},
     # ── Shipping carriers — stored as integrations to keep credentials in one collection ──
     "yalidine":  {"label_ar": "يالدين (شحن)",        "label_en": "Yalidine",  "icon": "🚚", "color": "#f97316", "kind": "shipping"},
     "zr":        {"label_ar": "ZR Express (شحن)",    "label_en": "ZR",        "icon": "🚚", "color": "#dc2626", "kind": "shipping"},

@@ -126,6 +126,50 @@ export const Layout = ({ children }) => {
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const navRef = useRef(null);
 
+  // ── طلبات المتجر: شارة العدد + تنبيه صوتي عند وصول طلب جديد ──
+  const [pendingStoreOrders, setPendingStoreOrders] = useState(0);
+  const pendingOrdersRef = useRef(null);
+  useEffect(() => {
+    const playBeep = () => {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new Ctx();
+        [0, 0.22].forEach((delay) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.value = 880;
+          const t0 = ctx.currentTime + delay;
+          gain.gain.setValueAtTime(0.0001, t0);
+          gain.gain.exponentialRampToValueAtTime(0.3, t0 + 0.03);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+          osc.start(t0);
+          osc.stop(t0 + 0.2);
+        });
+      } catch { /* المتصفح يمنع الصوت قبل تفاعل المستخدم */ }
+    };
+    const tick = async () => {
+      try {
+        const res = await apiClient.get('/store/orders');
+        const pending = (Array.isArray(res.data) ? res.data : []).filter(o => o.status === 'pending').length;
+        if (pendingOrdersRef.current !== null && pending > pendingOrdersRef.current) {
+          playBeep();
+          toast.success('🛍️ طلب جديد من المتجر الإلكتروني!', {
+            duration: 8000,
+            action: { label: language === 'ar' ? 'عرض' : 'Voir', onClick: () => navigate('/ecom-hub') },
+          });
+        }
+        pendingOrdersRef.current = pending;
+        setPendingStoreOrders(pending);
+      } catch { /* صامت */ }
+    };
+    tick();
+    const timer = setInterval(tick, 30000);
+    return () => clearInterval(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch tenant branding (custom logo + name)
   useEffect(() => {
     const fetchBranding = async () => {
@@ -1018,6 +1062,21 @@ export const Layout = ({ children }) => {
           </div>
 
           <div className="flex items-center gap-4 ms-6">
+            {/* Orders shortcut — صندوق الطلبات الموحَّد */}
+            <button
+              onClick={() => navigate('/ecom-hub')}
+              className="relative p-2 rounded-lg hover:bg-muted transition-colors"
+              data-testid="orders-shortcut-btn"
+              title={language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte de commandes unifiée'}
+            >
+              <ShoppingBag className="h-5 w-5 text-muted-foreground" />
+              {pendingStoreOrders > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center font-bold animate-pulse" data-testid="orders-shortcut-badge">
+                  {pendingStoreOrders}
+                </span>
+              )}
+            </button>
+
             {/* Notifications */}
             <NotificationBell />
 

@@ -782,3 +782,25 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - `/api/woocommerce/settings` (online_store_routes.py): نفس النمط ← نفس الإصلاح.
 - تدقيق استباقي لكل insert_one(doc) المشابهة في 9 ملفات routes: كلها تستخدم doc.pop("_id") سليماً — لا حالات أخرى.
 - نسخ احتياطية: delivery_settings_routes.py.bak.p41 (+ online_store_routes.py.bak.p40 سابقاً).
+
+
+---
+
+## p42 — 2026-08-13 — طلبات المتجر في الصندوق الموحَّد + أيقونة اختصار + تنبيه صوتي + تحديث تلقائي
+
+### 1) الطلبات لا تظهر إلا بعد تحديث الصفحة (/store)
+- `StoreManagementPage.js`: جلب صامت للطلبات كل 20 ثانية (fetchOrdersOnly بلا مؤشر تحميل) + إعادة جلب فورية بعد تغيير أي حالة.
+
+### 2) أيقونة اختصار الطلبات في الأعلى (Layout)
+- زر ShoppingBag بجانب جرس التنبيهات (data-testid: orders-shortcut-btn) ينقل إلى /ecom-hub مع شارة حمراء نابضة بعدد الطلبات المعلَّقة (orders-shortcut-badge)، تُحدَّث كل 30 ثانية.
+
+### 3) تنبيه صوتي عند طلب جديد
+- في Layout (عالمي — يعمل من أي صفحة): فحص /store/orders كل 30 ثانية؛ عند زيادة عدد المعلَّقة ← نغمة مزدوجة 880Hz عبر Web Audio API (بلا ملفات صوت) + toast «🛍️ طلب جديد من المتجر الإلكتروني!» بزر «عرض» ينقل للصندوق.
+
+### 4) طلبات متجر الويب في صندوق الطلبات الموحَّد (/ecom-hub)
+- قناة جديدة `webstore` («متجر الويب» 🌐 #0ea5e9) في ecom/constants.py.
+- **مزامنة أمامية** (online_store_routes.py): إنشاء طلب المتجر ← نسخة فورية في ecom_orders بنفس order_code (WEB...)، external_id يربط النسختين، و`inventory_deducted=True` لأن المخزون حُسم لحظة الإنشاء (يمنع الحسم المزدوج عند التأكيد من الصندوق — مؤكَّد بالاختبار: deducted/restored فارغتان). تغيير الحالة من /store ← تحديث مباشر بلا آثار جانبية (pending→new، الباقي مطابق).
+- **مزامنة عكسية** (ecom_order_service.py): تغيير الحالة من الصندوق لطلب webstore ← عكسها إلى store_orders (new/packed→pending/confirmed)؛ عند الإلغاء/الاسترداد يعيد _sync_inventory المخزون ونعلّم stock_restored لتفادي إعادة مزدوجة.
+- **Backfill** لمرة واحدة (idempotent عبر external_id): 11 طلباً موجوداً نُسخت (8 في ntcommerce + 3 في tenant NT-0002).
+- تحقق curl: channel=webstore يرجع الطلبات؛ summary يعرض by_channel.webstore؛ اختبار عكسي حي (WEB000005 new←confirmed وصل store_orders).
+- Bundle: main.7f08b1c4.js. نسخ احتياطية: Layout/StoreManagementPage/online_store_routes/ecom_constants/ecom_orders_routes/ecom_order_service .bak.p42.
