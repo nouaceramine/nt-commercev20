@@ -804,3 +804,13 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - **Backfill** لمرة واحدة (idempotent عبر external_id): 11 طلباً موجوداً نُسخت (8 في ntcommerce + 3 في tenant NT-0002).
 - تحقق curl: channel=webstore يرجع الطلبات؛ summary يعرض by_channel.webstore؛ اختبار عكسي حي (WEB000005 new←confirmed وصل store_orders).
 - Bundle: main.7f08b1c4.js. نسخ احتياطية: Layout/StoreManagementPage/online_store_routes/ecom_constants/ecom_orders_routes/ecom_order_service .bak.p42.
+
+
+
+---
+
+## ملاحظة إجرائية — 2026-08-13 — سبب تعطّل الصفحة الرئيسية المؤقت (نافذة نشر p42)
+
+**التشخيص:** الموقع نفسه سليم (root 200 + الحزمة 7f08b1c4 موجودة + الصفحة ترسم كاملة). ما حدث: عند نشر p42 حُذفت main.*.js القديمة قبل اكتمال النسخ (سباق نشر مع عملية build عالقة)، فمن حمّل الصفحة أثناء التبديل — أو كان يحمل index.html قديماً من الكاش يشير لحزمة محذوفة — رأى صفحة بيضاء. nginx يقدّم index.html بـ no-cache لذا أي تحديث صفحة يحلها فوراً.
+**الإجراء الجديد المعتمد:** عدم حذف الحزم المجزّأة القديمة أثناء النشر إطلاقاً — cp -r للبناء الجديد فقط، وindex.html يشير للهاش الجديد تلقائياً، والحزم القديمة تبقى كاحتياط للصفحات المخزَّنة في كاش الزوار. التنظيف لاحقاً يدوياً بعد التأكد أن لا index.html قديم يشير إليها.
+**إجراءات:** قتل عملية build عالقة من p42؛ الإبقاء على main.55540380.js وmain.7f08b1c4.js كليهما في /var/www.
