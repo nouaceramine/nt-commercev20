@@ -483,3 +483,18 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 - agents.py: insert_one ← update_one upsert في حفظ التقرير اليومي
 - بعد الإصلاح: تشغيلان متتاليان ناجحان (daily_summary, anomaly_detection, overdue_check, low_stock_check) ✔
 - النسخ الاحتياطي: backups/p27_agents_test_*/
+
+---
+
+## p28 — الإطلاق الآمن (تنظيف + جدار ناري + تقرير) (2026-08-12)
+
+### رُفض من الخطة المقترحة (تدميري)
+- محو قواعد البيانات، docker prune --volumes، docker-compose.staging.yml (غير موجود)، SSL ذاتي التوقيع (يكسر 413-fix ويُظهر تحذير أحمر للزبائن)، محو bash_history
+
+### نُفّذ (آمن)
+- تنظيف: كاش البناء + pycache + سجلات قديمة + journal (80M) + apt + docker dangling (4.68G) — القرص من 36% إلى 13% (تحرير 22GB)
+- ملاحظة: التنظيف حذف ملفات .bak داخل backups/20260807 (نسخ قديمة — النسخ اليومية للقواعد سليمة)
+- UFW: deny incoming، سماح 22/80/443 فقط — نشط
+- Docker يتجاوز UFW ← backend صار 127.0.0.1:8001:8001 (المنفذ 8001 مغلق خارجياً، التحقق: 000 من الخارج، 200 عبر nginx)
+- حذف قاعدة restore_test المتبقية من اختبار الاستعادة
+- تقرير شامل: /opt/ntcommerce/REPORT_20260812.txt — كل الفحوص خضراء (403 على /api/products بدون توكن = سلوك صحيح)

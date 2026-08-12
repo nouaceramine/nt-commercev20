@@ -1,0 +1,66 @@
+==========================================
+تقرير فحص NT-Commerce الشامل (إطلاق آمن p28)
+التاريخ: 2026-08-12 13:15:33
+==========================================
+
+=== 1. قواعد البيانات ===
+  admin | 0.1 MB
+  config | 0.1 MB
+  local | 0.1 MB
+  ntcommerce | 9.9 MB
+  restore_test_6e4f_446b_86be_52125babb7a9 | 1.0 MB
+  tenant_5e7c8fc5_17d4_4c8b_8c59_a6b8c63bf131 | 20.5 MB
+  tenant_dc57b2a1_6e4f_446b_86be_52125babb7a9 | 1.3 MB
+--- المستأجرون:
+--- حجم بيانات المستأجر الرئيسي:
+  sales: 36461 | products: 7409 | customers: 189
+
+=== 2. الحاويات ===
+ntcommerce-backend-1 | Up About a minute
+ntcommerce-mongodb | Up 15 hours
+ntcommerce-redis | Up 15 hours
+
+=== 3. API ===
+  /api/health -> 200
+  /api/products -> 403
+  /api/ai/status -> 200
+
+=== 4. الواجهة ===
+  bundle: main.bd736fce.js OK
+  / -> 200
+
+=== 5. Nginx + الأمان ===
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+Status: active
+
+To                         Action      From
+  client_max_body_size موجود (1=نعم): 1
+  منفذ 8001 خارجياً -> 000 (000 = مغلق ✔)
+
+=== 6. النسخ الاحتياطي والمراقبة ===
+  /opt/ntcommerce/scripts/daily_backup.sh
+  /opt/ntcommerce/scripts/health_monitor.sh
+--- آخر نسخ يومية:
+  tenant_dc57b2a1_6e4f_446b_86be_52125babb7a9_20260812_033001.archive
+  tenant_5e7c8fc5_17d4_4c8b_8c59_a6b8c63bf131_20260812_033001.archive
+  ntcommerce_20260812_033001.archive
+--- آخر سطر مراقبة:
+  [2026-08-12 13:15:01] OK disk=13%
+  مهام cron: 4
+
+=== 7. الموارد ===
+/dev/sda1        97G   13G   85G  13% /
+Mem:           7.8Gi       1.2Gi       2.5Gi       1.0Mi       4.1Gi       6.3Gi
+ 13:15:36 up 5 days, 21:05,  0 users,  load average: 0.38, 0.52, 0.25
+
+=== 8. Git ===
+50817dd p27: full 8-agent test suite passed + fix daily_automation E11000 (upsert daily report)
+ D backups/20260807_180046/env.bak
+ D backups/20260807_180046/main.py.bak
+ D backups/20260807_180046/main.py.round4.bak
+ D backups/20260807_180046/monitoring_routes.py.bak
+ D backups/20260807_180046/nginx.ntcommerce.bak
+
+==========================================
+أخطاء: 1 | تحذيرات: 0
+يوجد أخطاء تحتاج إصلاحاً
