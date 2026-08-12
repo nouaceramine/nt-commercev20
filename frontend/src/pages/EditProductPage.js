@@ -21,6 +21,7 @@ import { Switch } from '../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
 import ProductImagesInput from '../components/forms/ProductImagesInput';
+import AiImagePicker from '../components/forms/AiImagePicker';
 import {
   ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree,
   Calculator, Trash2, Package, Tag, Warehouse, ShieldAlert, Barcode, CalendarDays,
@@ -528,6 +529,14 @@ export default function EditProductPage() {
                         </Button>
                       </div>
                       {formData.image_url && <img src={formData.image_url} alt="Preview" className="h-16 w-16 object-cover rounded mt-1" />}
+                      <div className="flex items-center justify-end">
+                        <AiImagePicker
+                          getName={() => formData.name}
+                          language={language}
+                          onPick={(url) => setFormData(prev => ({ ...prev, images: [...(prev.images || []), url] }))}
+                          maxReached={(formData.images?.length || 0) >= (formData.image_url ? 4 : 5)}
+                        />
+                      </div>
                       <ProductImagesInput
                         images={formData.images}
                         onChange={(imgs) => setFormData(prev => ({ ...prev, images: imgs }))}

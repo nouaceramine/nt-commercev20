@@ -74,6 +74,14 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             "status": status, "notes": p.notes or "",
             "created_at": now, "created_by": admin["name"]
         }
+        # المخزن المستهدف (اختياري) — يُسجّل على الفاتورة، والمخزون العام يبقى كما هو
+        wid = purchase.get("warehouse_id") or ""
+        purchase_doc["warehouse_id"] = wid
+        purchase_doc["warehouse_name"] = purchase.get("warehouse_name") or ""
+        if wid:
+            wh = await db.warehouses.find_one({"id": wid})
+            if wh:
+                purchase_doc["warehouse_name"] = wh.get("name", purchase_doc["warehouse_name"])
         confirm_stock = purchase.get("confirm_stock", True)
         purchase_doc["stock_status"] = "confirmed" if confirm_stock else "draft"
         await db.purchases.insert_one(purchase_doc)

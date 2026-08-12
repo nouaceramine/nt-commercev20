@@ -22,7 +22,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../../components/ui/alert-dialog';
 import {
-  ShoppingBag, Search, Plus, Minus, Trash2, Package, Truck,
+  ShoppingBag, Search, Plus, Minus, Trash2, Package, Truck, Warehouse,
   CreditCard, Banknote, Wallet, TrendingUp, TrendingDown, Calculator,
   DollarSign, AlertCircle, PlusCircle, Save, Edit, Image, Check,
   RefreshCw, Percent, Tag, Eye,
@@ -33,6 +33,7 @@ export default function PurchaseDialogs({
   showNewPurchaseDialog, setShowNewPurchaseDialog, purchaseCode,
   searchQuery, setSearchQuery, searchInputRef, filteredProducts,
   addToCart, suppliers, selectedSupplier, setSelectedSupplier,
+  warehouses = [], selectedWarehouse, setSelectedWarehouse,
   setShowNewSupplierDialog, supplierPreviousDebt,
   cart, updatePrice, updateQuantity, removeFromCart, openEditPricesDialog,
   subtotal, paymentType, setPaymentType, paidAmount, setPaidAmount,
@@ -131,90 +132,82 @@ export default function PurchaseDialogs({
                     {language === 'ar' ? `دين سابق: ${supplierPreviousDebt.toFixed(2)} ${t.currency}` : `Dette précédente: ${supplierPreviousDebt.toFixed(2)} ${t.currency}`}
                   </p>
                 )}
+                {warehouses.length > 0 && (
+                  <div className="mt-2">
+                    <Select value={selectedWarehouse || ''} onValueChange={setSelectedWarehouse}>
+                      <SelectTrigger className="h-8 text-xs" data-testid="warehouse-select">
+                        <Warehouse className="h-3.5 w-3.5 me-2" />
+                        <SelectValue placeholder={language === 'ar' ? 'المخزن (اختياري)' : 'Entrepôt (optionnel)'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {warehouses.map(w => (<SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
-              <div className="border rounded-lg max-h-[300px] overflow-y-auto">
+              <div className="border rounded-lg max-h-[380px] overflow-y-auto divide-y" data-testid="purchase-cart-list">
                 {cart.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">{t.emptyCart}</p>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead className="w-8"></TableHead>
-                        <TableHead>{language === 'ar' ? 'المنتج' : 'Produit'}</TableHead>
-                        <TableHead className="text-center">{language === 'ar' ? 'سعر الشراء' : 'Prix achat'}</TableHead>
-                        <TableHead className="text-center">{language === 'ar' ? 'الكمية' : 'Qté'}</TableHead>
-                        <TableHead className="text-center">{language === 'ar' ? 'المجموع' : 'Total'}</TableHead>
-                        <TableHead className="w-20"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {cart.map(item => (
-                        <TableRow key={item.product_id} className={item.updatePrices ? 'bg-green-50' : ''}>
-                          <TableCell className="p-2">
-                            {item.productImage ? (<img src={item.productImage} alt="" className="w-10 h-10 rounded object-cover" />) : (
-                              <div className="w-10 h-10 rounded bg-muted flex items-center justify-center"><Package className="h-5 w-5 text-muted-foreground" /></div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium text-sm">{item.product_name}</p>
-                              {item.updatePrices && (<Badge variant="outline" className="text-xs bg-green-100 text-green-700"><RefreshCw className="h-3 w-3 me-1" />{language === 'ar' ? 'سيتم التحديث' : 'Sera mis à jour'}</Badge>)}
-                              {item.originalPurchasePrice !== item.unit_price && (<p className="text-xs text-amber-600 mt-1">{language === 'ar' ? 'السعر القديم:' : 'Ancien:'} {item.originalPurchasePrice.toFixed(2)}</p>)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-2">
-                            <div className="flex items-center gap-1 justify-center">
-                              <Input type="number" value={item.unit_price} onChange={(e) => updatePrice(item.product_id, parseFloat(e.target.value) || 0)} className="w-24 h-8 text-center" />
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:bg-blue-50" onClick={() => openEditPricesDialog(item)}><Edit className="h-4 w-4" /></Button>
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-2">
-                            <div className="flex items-center gap-1 justify-center">
-                              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQuantity(item.product_id, -1)}><Minus className="h-3 w-3" /></Button>
-                              <span className="w-10 text-center font-medium">{item.quantity}</span>
-                              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQuantity(item.product_id, 1)}><Plus className="h-3 w-3" /></Button>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center font-semibold">{item.total.toFixed(2)}</TableCell>
-                          <TableCell className="p-2"><Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCart(item.product_id)}><Trash2 className="h-4 w-4" /></Button></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  cart.map(item => (
+                    <div key={item.product_id} className={`flex items-center gap-2 px-2 py-1.5 ${item.updatePrices ? 'bg-green-50' : ''}`}>
+                      {item.productImage ? (<img src={item.productImage} alt="" className="w-8 h-8 rounded object-cover shrink-0" />) : (
+                        <div className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="h-4 w-4 text-muted-foreground" /></div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-xs truncate">{item.product_name}</p>
+                        <div className="flex items-center gap-1">
+                          {item.updatePrices && (<Badge variant="outline" className="text-[10px] px-1 py-0 bg-green-100 text-green-700"><RefreshCw className="h-2.5 w-2.5 me-0.5" />{language === 'ar' ? 'تحديث' : 'MàJ'}</Badge>)}
+                          {item.originalPurchasePrice !== item.unit_price && (<span className="text-[10px] text-amber-600">{language === 'ar' ? 'القديم:' : 'Anc.:'} {item.originalPurchasePrice.toFixed(2)}</span>)}
+                        </div>
+                      </div>
+                      <Input type="number" value={item.unit_price} onChange={(e) => updatePrice(item.product_id, parseFloat(e.target.value) || 0)} className="w-20 h-7 text-center text-xs shrink-0" />
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-600 hover:bg-blue-50 shrink-0" onClick={() => openEditPricesDialog(item)}><Edit className="h-3 w-3" /></Button>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.product_id, -1)}><Minus className="h-3 w-3" /></Button>
+                        <span className="w-7 text-center text-xs font-medium">{item.quantity}</span>
+                        <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.product_id, 1)}><Plus className="h-3 w-3" /></Button>
+                      </div>
+                      <span className="w-16 text-center text-xs font-semibold shrink-0">{item.total.toFixed(2)}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 shrink-0" onClick={() => removeFromCart(item.product_id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  ))
                 )}
               </div>
-              <div className="p-4 bg-muted/30 rounded-lg space-y-4">
-                <div className="flex justify-between text-lg font-bold"><span>{t.total}</span><span>{subtotal.toFixed(2)} {t.currency}</span></div>
-                <div>
-                  <Label>{language === 'ar' ? 'نوع الدفع' : 'Type de paiement'}</Label>
-                  <div className="grid grid-cols-3 gap-2 mt-2">
-                    <Button type="button" variant={paymentType === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentType('cash')} className="flex-col h-16 gap-1"><Banknote className="h-5 w-5" /><span className="text-xs">{language === 'ar' ? 'نقداً' : 'Comptant'}</span></Button>
-                    <Button type="button" variant={paymentType === 'credit' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentType('credit')} className="flex-col h-16 gap-1 border-red-200"><CreditCard className="h-5 w-5" /><span className="text-xs">{language === 'ar' ? 'دين' : 'Crédit'}</span></Button>
-                    <Button type="button" variant={paymentType === 'partial' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentType('partial')} className="flex-col h-16 gap-1 border-amber-200"><Calculator className="h-5 w-5" /><span className="text-xs">{language === 'ar' ? 'جزئي' : 'Partiel'}</span></Button>
+              <div className="p-2.5 bg-muted/30 rounded-lg space-y-2.5">
+                <div className="flex justify-between text-base font-bold"><span>{t.total}</span><span>{subtotal.toFixed(2)} {t.currency}</span></div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs shrink-0">{language === 'ar' ? 'نوع الدفع' : 'Type de paiement'}</Label>
+                  <div className="grid grid-cols-3 gap-1.5 flex-1">
+                    <Button type="button" variant={paymentType === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentType('cash')} className="h-8 text-xs gap-1"><Banknote className="h-3.5 w-3.5" />{language === 'ar' ? 'نقداً' : 'Comptant'}</Button>
+                    <Button type="button" variant={paymentType === 'credit' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentType('credit')} className="h-8 text-xs gap-1 border-red-200"><CreditCard className="h-3.5 w-3.5" />{language === 'ar' ? 'دين' : 'Crédit'}</Button>
+                    <Button type="button" variant={paymentType === 'partial' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentType('partial')} className="h-8 text-xs gap-1 border-amber-200"><Calculator className="h-3.5 w-3.5" />{language === 'ar' ? 'جزئي' : 'Partiel'}</Button>
                   </div>
                 </div>
-                {paymentType === 'partial' && (<div><Label>{t.paidAmount}</Label><Input type="number" value={paidAmount} onChange={(e) => setPaidAmount(Math.min(parseFloat(e.target.value) || 0, subtotal))} className="mt-1" max={subtotal} /></div>)}
-                {paymentType !== 'cash' && (<div className="flex justify-between text-red-600 font-semibold p-2 bg-red-50 rounded"><span>{language === 'ar' ? 'سيُسجل كدين' : 'Sera enregistré comme dette'}</span><span>{(subtotal - paidAmount).toFixed(2)} {t.currency}</span></div>)}
+                {paymentType === 'partial' && (<div className="flex items-center gap-2"><Label className="text-xs shrink-0">{t.paidAmount}</Label><Input type="number" value={paidAmount} onChange={(e) => setPaidAmount(Math.min(parseFloat(e.target.value) || 0, subtotal))} className="h-8 text-xs" max={subtotal} /></div>)}
+                {paymentType !== 'cash' && (<div className="flex justify-between text-red-600 text-xs font-semibold p-1.5 bg-red-50 rounded"><span>{language === 'ar' ? 'سيُسجل كدين' : 'Sera enregistré comme dette'}</span><span>{(subtotal - paidAmount).toFixed(2)} {t.currency}</span></div>)}
                 {(paymentType === 'cash' || paymentType === 'partial') && (
-                  <div><Label>{t.paymentMethod}</Label>
-                    <div className="flex gap-2 mt-2">
-                      <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="flex-1"><Banknote className="h-4 w-4 me-1" />{t.cash}</Button>
-                      <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="flex-1"><CreditCard className="h-4 w-4 me-1" />{t.bank}</Button>
-                      <Button type="button" variant={paymentMethod === 'wallet' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('wallet')} className="flex-1"><Wallet className="h-4 w-4 me-1" /></Button>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs shrink-0">{t.paymentMethod}</Label>
+                    <div className="flex gap-1.5 flex-1">
+                      <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="flex-1 h-8 text-xs"><Banknote className="h-3.5 w-3.5 me-1" />{t.cash}</Button>
+                      <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="flex-1 h-8 text-xs"><CreditCard className="h-3.5 w-3.5 me-1" />{t.bank}</Button>
+                      <Button type="button" variant={paymentMethod === 'wallet' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('wallet')} className="flex-1 h-8 text-xs"><Wallet className="h-3.5 w-3.5" /></Button>
                     </div>
                   </div>
                 )}
-                <div><Label>{t.notes}</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={language === 'ar' ? 'ملاحظات...' : 'Notes...'} className="mt-1" rows={2} /></div>
+                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={language === 'ar' ? 'ملاحظات...' : 'Notes...'} className="min-h-0 h-8 text-xs resize-none" rows={1} />
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => completePurchase(true)} disabled={loading || cart.length === 0 || !selectedSupplier} className="flex-1 h-12"
+                <Button variant="outline" onClick={() => completePurchase(true)} disabled={loading || cart.length === 0 || !selectedSupplier} className="flex-1 h-9 text-xs gap-1"
                   title={language === 'ar' ? 'تسجيل بدون تعديل المخزون' : 'Sans modifier le stock'}
                   data-testid="save-draft-btn">
-                  💾 {language === 'ar' ? 'حفظ الفاتورة فقط' : 'Enregistrer seulement'}
+                  <Save className="h-3.5 w-3.5" />{language === 'ar' ? 'حفظ الفاتورة فقط' : 'Enregistrer seulement'}
                 </Button>
-                <Button onClick={() => completePurchase(false)} disabled={loading || cart.length === 0 || !selectedSupplier} className={`flex-1 h-12 text-lg ${paymentType === 'credit' ? 'bg-red-600 hover:bg-red-700' : ''}`}
+                <Button onClick={() => completePurchase(false)} disabled={loading || cart.length === 0 || !selectedSupplier} className={`flex-1 h-9 text-xs gap-1 ${paymentType === 'credit' ? 'bg-red-600 hover:bg-red-700' : ''}`}
                   data-testid="confirm-purchase-btn">
-                  {loading ? t.loading : ('✅ ' + (paymentType === 'credit' ? (language === 'ar' ? 'تسجيل شراء بالدين' : 'Enregistrer achat à crédit') : (language === 'ar' ? 'تأكيد المخزون' : 'Confirmer le stock')))}
+                  <Check className="h-3.5 w-3.5" />{loading ? t.loading : (paymentType === 'credit' ? (language === 'ar' ? 'تسجيل شراء بالدين' : 'Enregistrer achat à crédit') : (language === 'ar' ? 'تأكيد المخزون' : 'Confirmer le stock'))}
                 </Button>
               </div>
             </div>

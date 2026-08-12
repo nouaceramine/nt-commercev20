@@ -17,7 +17,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { Download, Upload, FileSpreadsheet, FileText, RefreshCw, History, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
+import { Download, Upload, FileSpreadsheet, FileText, File, FileType, RefreshCw, History, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
 
 export default function DataImportExportPage() {
   const { language } = useLanguage();
@@ -75,7 +75,7 @@ export default function DataImportExportPage() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      const ext = format === 'csv' ? 'csv' : 'xlsx';
+      const ext = format;
       link.setAttribute('download', `${collectionKey}_${new Date().toISOString().split('T')[0]}.${ext}`);
       document.body.appendChild(link);
       link.click();
@@ -177,7 +177,7 @@ export default function DataImportExportPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => handleExport(col.key, 'csv')}
                     disabled={exporting === `${col.key}_csv` || col.count === 0} data-testid={`export-csv-${col.key}`}>
                     {exporting === `${col.key}_csv` ? <RefreshCw className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
@@ -187,6 +187,21 @@ export default function DataImportExportPage() {
                     disabled={exporting === `${col.key}_xlsx` || col.count === 0} data-testid={`export-xlsx-${col.key}`}>
                     {exporting === `${col.key}_xlsx` ? <RefreshCw className="h-3 w-3 animate-spin" /> : <FileSpreadsheet className="h-3 w-3" />}
                     Excel
+                  </Button>
+                  <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => handleExport(col.key, 'txt')}
+                    disabled={exporting === `${col.key}_txt` || col.count === 0} data-testid={`export-txt-${col.key}`}>
+                    {exporting === `${col.key}_txt` ? <RefreshCw className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+                    TXT
+                  </Button>
+                  <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => handleExport(col.key, 'pdf')}
+                    disabled={exporting === `${col.key}_pdf` || col.count === 0} data-testid={`export-pdf-${col.key}`}>
+                    {exporting === `${col.key}_pdf` ? <RefreshCw className="h-3 w-3 animate-spin" /> : <File className="h-3 w-3" />}
+                    PDF
+                  </Button>
+                  <Button size="sm" variant="outline" className="flex-1 gap-1 col-span-2" onClick={() => handleExport(col.key, 'docx')}
+                    disabled={exporting === `${col.key}_docx` || col.count === 0} data-testid={`export-docx-${col.key}`}>
+                    {exporting === `${col.key}_docx` ? <RefreshCw className="h-3 w-3 animate-spin" /> : <FileType className="h-3 w-3" />}
+                    Word
                   </Button>
                 </div>
                 <Button size="sm" variant="ghost" className="w-full mt-2 gap-1 text-xs" onClick={() => handleDownloadTemplate(col.key, 'xlsx')}>
@@ -278,8 +293,8 @@ export default function DataImportExportPage() {
 
               <div>
                 <label className="text-sm font-medium">{language === 'ar' ? 'اختر الملف' : 'Select File'}</label>
-                <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setImportFile(e.target.files[0])} className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90" data-testid="import-file-input" />
-                <p className="text-xs text-muted-foreground mt-1">{language === 'ar' ? 'الصيغ المدعومة: CSV, Excel (.xlsx)' : 'Supported formats: CSV, Excel (.xlsx)'}</p>
+                <input type="file" accept=".csv,.xlsx,.xls,.txt,.docx" onChange={(e) => setImportFile(e.target.files[0])} className="mt-1 block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90" data-testid="import-file-input" />
+                <p className="text-xs text-muted-foreground mt-1">{language === 'ar' ? 'الصيغ المدعومة للاستيراد: CSV, Excel, TXT, Word — وللتصدير أيضاً PDF' : 'Import: CSV, Excel, TXT, Word — export also PDF'}</p>
               </div>
 
               <div className="flex gap-2 pt-4">

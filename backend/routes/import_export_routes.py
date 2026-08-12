@@ -83,7 +83,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
     @router.get("/export/{collection}")
     async def export_data(
         collection: str,
-        format: str = Query("csv", enum=["csv", "xlsx"]),
+        format: str = Query("csv", enum=["csv", "xlsx", "txt", "pdf", "docx"]),
         tenant_id: Optional[str] = None,
         user: dict = Depends(get_current_user)
     ):
@@ -121,7 +121,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'}
             )
 
-        else:  # xlsx
+        elif format == "xlsx":  # xlsx
             wb = Workbook()
             ws = wb.active
             ws.title = collection
@@ -156,6 +156,119 @@ def create_import_export_routes(db, get_current_user) -> dict:
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'}
             )
 
+        elif format == "txt":
+            # Tab-separated UTF-8 text (opens cleanly in Excel/notepad)
+            def _txt_row(doc):
+                vals = [str(doc.get("_id", ""))]
+                for f in fields:
+                    val = doc.get(f, "")
+                    if isinstance(val, ObjectId):
+                        val = str(val)
+                    elif isinstance(val, datetime):
+                        val = val.isoformat()
+                    elif isinstance(val, (dict, list)):
+                        val = json.dumps(val, ensure_ascii=False)
+                    vals.append(str(val).replace("\t", " ").replace("\n", " ") if val is not None else "")
+                return vals
+
+            lines = ["\t".join(["id"] + fields)]
+            for doc in docs:
+                lines.append("\t".join(_txt_row(doc)))
+            payload = "\ufeff" + "\n".join(lines)  # BOM for Excel UTF-8 detection
+            filename = f"{collection}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
+            return StreamingResponse(
+                iter([payload]),
+                media_type="text/plain; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+
+        elif format == "pdf":
+            # Arabic-aware PDF table (Noto Naskh Arabic + reshaping)
+            import os as _os
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+            from reportlab.lib import colors
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            import arabic_reshaper
+            from bidi.algorithm import get_display
+
+            font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+            def _ar(v):
+                txt = str(v)
+                try:
+                    return get_display(arabic_reshaper.reshape(txt))
+                except Exception:
+                    return txt
+
+            def _pdf_row(doc):
+                vals = [str(doc.get("_id", ""))[:12]]
+                for f in fields:
+                    val = doc.get(f, "")
+                    if isinstance(val, ObjectId):
+                        val = str(val)
+                    elif isinstance(val, datetime):
+                        val = val.isoformat()
+                    elif isinstance(val, (dict, list)):
+                        val = json.dumps(val, ensure_ascii=False)
+                    vals.append(str(val) if val is not None else "")
+                return [_ar(v) for v in vals]
+
+            data = [[_ar(h) for h in ["id"] + fields]] + [_pdf_row(d) for d in docs]
+            buf = io.BytesIO()
+            pdf_doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                        rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+            tbl = Table(data, repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("FONT", (0, 0), (-1, -1), "Arabic", 7.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]))
+            pdf_doc.build([tbl])
+            buf.seek(0)
+            filename = f"{collection}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+            return StreamingResponse(
+                buf,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+
+        else:  # docx
+            import docx as _docx
+            d = _docx.Document()
+            table = d.add_table(rows=1, cols=len(["id"] + fields))
+            table.style = "Table Grid"
+            for i, h in enumerate(["id"] + fields):
+                table.rows[0].cells[i].text = str(h)
+            for doc in docs:
+                cells = table.add_row().cells
+                vals = [str(doc.get("_id", ""))]
+                for f in fields:
+                    val = doc.get(f, "")
+                    if isinstance(val, ObjectId):
+                        val = str(val)
+                    elif isinstance(val, datetime):
+                        val = val.isoformat()
+                    elif isinstance(val, (dict, list)):
+                        val = json.dumps(val, ensure_ascii=False)
+                    vals.append(str(val) if val is not None else "")
+                for i, v in enumerate(vals):
+                    cells[i].text = v
+            buf = io.BytesIO()
+            d.save(buf)
+            buf.seek(0)
+            filename = f"{collection}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.docx"
+            return StreamingResponse(
+                buf,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+
     @router.post("/import/{collection}")
     async def import_data(
         collection: str,
@@ -178,9 +291,14 @@ def create_import_export_routes(db, get_current_user) -> dict:
         records = []
 
         try:
-            if filename.endswith('.csv'):
+            if filename.endswith('.csv') or filename.endswith('.txt'):
                 text = content.decode('utf-8-sig')
-                reader = csv.DictReader(io.StringIO(text))
+                if filename.endswith('.txt'):
+                    first_line = text.splitlines()[0] if text.splitlines() else ''
+                    delim = '\t' if '\t' in first_line else ','
+                    reader = csv.DictReader(io.StringIO(text), delimiter=delim)
+                else:
+                    reader = csv.DictReader(io.StringIO(text))
                 for row in reader:
                     record = {}
                     for f in fields:
@@ -222,8 +340,83 @@ def create_import_export_routes(db, get_current_user) -> dict:
                     record["updated_at"] = datetime.now(timezone.utc).isoformat()
                     records.append(record)
                 wb.close()
+            elif filename.endswith('.docx'):
+                import docx as _docx
+                d = _docx.Document(io.BytesIO(content))
+                rows_data = []
+                if d.tables:
+                    for r in d.tables[0].rows:
+                        rows_data.append([c.text.strip() for c in r.cells])
+                else:
+                    for para in d.paragraphs:
+                        if para.text.strip():
+                            rows_data.append([v.strip() for v in para.text.split('\t')])
+                if not rows_data:
+                    raise HTTPException(status_code=400, detail="Empty file")
+                headers_row = rows_data[0]
+                for row in rows_data[1:]:
+                    record = {}
+                    for i, val in enumerate(row):
+                        if i < len(headers_row) and headers_row[i] in fields:
+                            field = headers_row[i]
+                            if field in ["retail_price", "wholesale_price", "purchase_price", "amount", "total", "discount", "salary", "remaining", "tax_rate", "quantity", "min_stock"]:
+                                try:
+                                    val = float(val) if val else 0
+                                except (ValueError, TypeError):
+                                    val = 0
+                            record[field] = val
+                    record["created_at"] = datetime.now(timezone.utc).isoformat()
+                    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    records.append(record)
+
+            elif filename.endswith('.pdf'):
+                raise HTTPException(
+                    status_code=400,
+                    detail="استيراد PDF غير مدعوم — ملفات PDF للعرض والطباعة فقط. للاستيراد استخدم Excel أو Word أو TXT أو CSV.",
+                )
+                import re as _re
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(content))
+                lines = []
+                for page in reader.pages:
+                    for ln in (page.extract_text() or '').splitlines():
+                        if ln.strip():
+                            lines.append(ln.strip())
+                hi = None
+                for i, ln in enumerate(lines):
+                    if sum(1 for f in fields if f in ln) >= 2:
+                        hi = i
+                        break
+                if hi is None:
+                    raise HTTPException(status_code=400, detail="Could not find a data table in the PDF")
+
+                def _split_ln(ln):
+                    if '\t' in ln:
+                        return [v.strip() for v in ln.split('\t')]
+                    if '|' in ln:
+                        return [v.strip() for v in ln.split('|')]
+                    return [v.strip() for v in _re.split(r'\s{2,}', ln)]
+
+                headers_row = _split_ln(lines[hi])
+                for ln in lines[hi + 1:]:
+                    vals = _split_ln(ln)
+                    record = {}
+                    for i, val in enumerate(vals):
+                        if i < len(headers_row) and headers_row[i] in fields:
+                            field = headers_row[i]
+                            if field in ["retail_price", "wholesale_price", "purchase_price", "amount", "total", "discount", "salary", "remaining", "tax_rate", "quantity", "min_stock"]:
+                                try:
+                                    val = float(val) if val else 0
+                                except (ValueError, TypeError):
+                                    val = 0
+                            record[field] = val
+                    if record:
+                        record["created_at"] = datetime.now(timezone.utc).isoformat()
+                        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+                        records.append(record)
+
             else:
-                raise HTTPException(status_code=400, detail="Unsupported file format. Use .csv or .xlsx")
+                raise HTTPException(status_code=400, detail="Unsupported file format. Use .csv, .xlsx, .txt, .docx or .pdf")
 
         except HTTPException:
             raise
@@ -247,16 +440,28 @@ def create_import_export_routes(db, get_current_user) -> dict:
         if mode == "replace":
             await tdb[collection].delete_many({})
 
+        inserted = 0
+        skipped_dups = 0
         if records:
-            result = await tdb[collection].insert_many(records)
-            import_log["inserted_count"] = len(result.inserted_ids)
+            from pymongo.errors import BulkWriteError
+            try:
+                # unordered: valid rows still import when some hit unique indexes
+                result = await tdb[collection].insert_many(records, ordered=False)
+                inserted = len(result.inserted_ids)
+            except BulkWriteError as bwe:
+                inserted = bwe.details.get("nInserted", 0)
+                skipped_dups = len(bwe.details.get("writeErrors", []))
+            import_log["inserted_count"] = inserted
+            import_log["skipped_duplicates"] = skipped_dups
 
         await tdb["import_logs"].insert_one(import_log)
 
         return {
             "success": True,
-            "message": f"Imported {len(records)} records to {collection}",
-            "records_imported": len(records),
+            "message": f"Imported {inserted} records to {collection}"
+                       + (f" ({skipped_dups} duplicates skipped)" if skipped_dups else ""),
+            "records_imported": inserted,
+            "skipped_duplicates": skipped_dups,
             "mode": mode
         }
 

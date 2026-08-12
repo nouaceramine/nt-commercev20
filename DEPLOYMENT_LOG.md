@@ -692,3 +692,40 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - **الإصلاح** (بلا تغيير تصميمي): (1) EditProductPage بعد الحفظ ينتقل إلى /products؛ (2) الاختيار السريع في القائمة ينتقل إلى /edit للأدمن و/products لغيره؛ (3) مسار /products/:id أصبح redirect إلى /products.
 - **Backup**: backups/p34_gaps_20260812/ (ProductsPage, EditProductPage, App.js)
 - **النشر**: main.16947345.js (كان 22240482) مع تحقق hash في index.html.
+
+
+---
+
+## p38 — 2026-08-13 — تصدير/استيراد متعدد الصيغ + صور AI للمنتجات + تحسين فاتورة الشراء
+
+### أ) استيراد/تصدير المنتجات (csv / xlsx / txt / pdf / docx)
+**قبل:** التصدير CSV فقط، الاستيراد CSV/Excel فقط.
+**بعد:**
+- `backend/routes/import_export_routes.py`: تصدير بخمس صيغ — txt (مفصول بعلامات الجدولة + BOM)، pdf (reportlab + خط NotoNaskhArabic + arabic_reshaper + bidi للعربية، A4 أفقي)، docx (python-docx Table Grid). الاستيراد: csv/txt (كشف الفاصل تلقائياً)، xlsx، docx. استيراد PDF معطّل برسالة عربية واضحة (غير عملي).
+- `insert_many(ordered=False)` مع BulkWriteError → تسامح مع التكرارات + تقرير `skipped_duplicates`.
+- `backend/assets/NotoNaskhArabic-Regular.ttf` خط عربي مضمّن في الحاوية.
+- `requirements.txt`: arabic-reshaper, python-bidi, pypdf, python-docx — أعيد بناء الصورة (up -d --build).
+- `frontend/src/pages/DataImportExportPage.js`: أزرار 5 صيغ تصدير + accept موسّع.
+- تحقق curl: pdf-export 200 (11053B)، round-trip عربي سليم للصيغ الأربع.
+
+### ب) جلب صور المنتج بالذكاء الاصطناعي
+**قبل:** لا توجد وسيلة لجلب صور للمنتج.
+**بعد:**
+- `POST /api/ai/product-images` في `backend/routes/ai_routes.py`: Gemini يحوّل اسم المنتج (أي لغة) لعبارة بحث إنجليزية → Openverse API (مجاني، رخص تجارية) → 5 صور حقيقية. تبسيط تدريجي للعبارة عند 0 نتائج (مطابقة Openverse كل-الكلمات). ملاحظة: توليد صور Gemini معطّل لاستنفاد الحصة (429) — صور حقيقية أنسب للمنتجات.
+- `frontend/src/components/forms/AiImagePicker.js`: زر «صور AI» (data-testid=ai-images-btn) + نافذة اختيار 5 صور، النقر يضيف الرابط إلى formData.images.
+- مدمج في AddProductPage.js و EditProductPage.js بجانب ProductImagesInput.
+- تحقق curl: 3 أسماء عربية → 5 صور لكل منها.
+
+### ج) صفحة المشتريات — عملية شراء جديد
+**قبل:** أزرار دفع ضخمة (h-16 عمودية)، سلة بجدول ثقيل، لا اختيار مخزن.
+**بعد:**
+- `PurchaseDialogs.js`: أزرار نوع الدفع/طريقة الدفع h-8 أفقية مدمجة، ملاحظات سطر واحد، زرا الحفظ/التأكيد h-9 بأيقونات lucide. السلة قائمة مدمجة (divide-y، صف واحد لكل منتج: صورة 8×8 + اسم + سعر + كمية + مجموع + حذف) بارتفاع 380px بدل 300px.
+- اختيار المخزن: Select (data-testid=warehouse-select) تحت المورد، يُجلب من GET /warehouses.
+- `PurchasesPage.js`: جلب المخازن + تمرير warehouse_id/warehouse_name في POST /purchases + إعادة تعيين بعد الشراء.
+- `backend/routes/purchases_routes.py`: تسجيل warehouse_id/warehouse_name على الفاتورة (مع جلب الاسم من DB). المخزون العام يبقى كما هو.
+- تحقق: GET /warehouses → «المخزن الرئيسي»؛ POST /purchases مع warehouse_id → حارس المورد يعمل (404 لمورد غير موجود).
+
+### النشر
+- Bundle: main.51c31fc8.js (استبدل main.16947345.js) — التحقق من hash في index.html وعبر curl.
+- نسخ احتياطية: ai_routes.py.bak.p38b, AddProductPage/EditProductPage.bak.p38b, purchases_routes/PurchasesPage/PurchaseDialogs.bak.p38c, www_before_p38/.
+- علامات الحزمة المتحقق منها: ai-images-btn, ai-images-dialog, product-images, Openverse, warehouse-select, purchase-cart-list, accept formats.

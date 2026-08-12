@@ -1,10 +1,15 @@
 """
 AI Routes — Google Gemini API Endpoints
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 import os
 import sys
+import urllib.parse
+import urllib.request as _urlreq
+import json as _json
+import google.generativeai as genai
+from services.ai_service import AIService
 
 from services.ai_service import ai_service
 
@@ -21,6 +26,74 @@ async def generate_description(data: dict, admin: dict = Depends(get_tenant_admi
         features=data.get("features", "")
     )
     return result
+
+@router.post("/product-images")
+async def product_images(data: dict, admin: dict = Depends(get_tenant_admin)):
+    """
+    جلب صور حقيقية للمنتج بناءً على اسمه:
+    1) Gemini يحوّل الاسم (أي لغة) إلى عبارة بحث إنجليزية محسّنة — مع fallback للاسم نفسه
+    2) Openverse API (مجاني، بلا مفتاح) يرجع صوراً مرخّصة للاستخدام التجاري
+    ملاحظة: توليد صور Gemini متعطّل حالياً بسبب استنفاد حصة المفتاح (429) — صور حقيقية أفضل للمنتجات أصلاً
+    """
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="أدخل اسم المنتج أولاً")
+
+    query = name
+    try:
+        model = genai.GenerativeModel(AIService.MODEL)
+        r = await model.generate_content_async(
+            f'Product name (may be Arabic or French): "{name}"\n'
+            'Write ONE short English image-search query (3-6 words) to find professional e-commerce product photos of this item. '
+            'Reply with the query ONLY — no quotes, no punctuation, no explanation.'
+        )
+        q = (r.text or "").strip().strip('"').strip()
+        if 2 <= len(q) <= 80:
+            query = q
+    except Exception:
+        pass
+
+    images = []
+    error = None
+
+    def _search(q):
+        params = urllib.parse.urlencode({"q": q, "page_size": 12, "license_type": "commercial", "filter_dead": "false"})
+        req = _urlreq.Request(
+            f"https://api.openverse.org/v1/images/?{params}",
+            headers={"User-Agent": "NTCommerce/1.0 (product-image-search)"},
+        )
+        with _urlreq.urlopen(req, timeout=12) as resp:
+            payload = _json.loads(resp.read().decode("utf-8"))
+        return [it for it in payload.get("results", []) if it.get("url") and it.get("thumbnail")]
+
+    try:
+        # تبسيط تدريجي: عبارة Gemini قد تكون أدقّ من فهرس Openverse (مطابقة كل الكلمات)
+        candidates = [query]
+        words = query.split()
+        while len(words) > 2:
+            words = words[:-1]
+            candidates.append(" ".join(words))
+        if name not in candidates:
+            candidates.append(name)
+        results = []
+        for cand in candidates:
+            results = _search(cand)
+            if results:
+                query = cand
+                break
+        for it in results[:5]:
+            images.append({
+                "url": it["url"],
+                "thumb": it["thumbnail"],
+                "title": (it.get("title") or "")[:80],
+                "license": it.get("license") or "",
+                "source": it.get("source") or "",
+            })
+    except Exception as e:
+        error = str(e)[:120]
+
+    return {"success": bool(images), "query": query, "images": images, "error": error}
+
 
 @router.post("/translate")
 async def translate_text(data: dict, admin: dict = Depends(get_tenant_admin)):

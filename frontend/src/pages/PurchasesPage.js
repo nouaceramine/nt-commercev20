@@ -29,6 +29,8 @@ export default function PurchasesPage() {
   
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [selectedWarehouse, setSelectedWarehouse] = useState('');
   const [purchases, setPurchases] = useState([]);
   const [supplierDebts, setSupplierDebts] = useState([]);
   const [cart, setCart] = useState([]);
@@ -88,14 +90,16 @@ export default function PurchasesPage() {
 
   const fetchData = async () => {
     try {
-      const [productsRes, suppliersRes, purchasesRes] = await Promise.all([
+      const [productsRes, suppliersRes, purchasesRes, warehousesRes] = await Promise.all([
         apiClient.get(`/products`),
         apiClient.get(`/suppliers`),
-        apiClient.get(`/purchases`)
+        apiClient.get(`/purchases`),
+        apiClient.get(`/warehouses`).catch(() => ({ data: [] }))
       ]);
       setProducts(productsRes.data);
       setSuppliers(suppliersRes.data);
       setPurchases(purchasesRes.data);
+      setWarehouses(Array.isArray(warehousesRes.data) ? warehousesRes.data : []);
       
       // Calculate supplier debts
       calculateSupplierDebts(purchasesRes.data, suppliersRes.data);
@@ -356,7 +360,9 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
         payment_type: paymentType,
         notes,
         code: purchaseCode,  // كود الشراء
-        confirm_stock: !asDraft
+        confirm_stock: !asDraft,
+        warehouse_id: selectedWarehouse || '',
+        warehouse_name: warehouses.find(w => w.id === selectedWarehouse)?.name || ''
       };
 
       await apiClient.post(`/purchases`, purchaseData);
@@ -375,6 +381,7 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
       setSelectedSupplier(null);
       setNotes('');
       setPurchaseCode('');  // Reset code
+      setSelectedWarehouse('');
       setPaymentType('cash');
       setShowNewPurchaseDialog(false);
       fetchData();
@@ -678,6 +685,7 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
           purchaseCode={purchaseCode} searchQuery={searchQuery} setSearchQuery={setSearchQuery}
           searchInputRef={searchInputRef} filteredProducts={filteredProducts} addToCart={addToCart}
           suppliers={suppliers} selectedSupplier={selectedSupplier} setSelectedSupplier={setSelectedSupplier}
+          warehouses={warehouses} selectedWarehouse={selectedWarehouse} setSelectedWarehouse={setSelectedWarehouse}
           setShowNewSupplierDialog={setShowNewSupplierDialog} supplierPreviousDebt={supplierPreviousDebt}
           cart={cart} updatePrice={updatePrice} updateQuantity={updateQuantity}
           removeFromCart={removeFromCart} openEditPricesDialog={openEditPricesDialog}
