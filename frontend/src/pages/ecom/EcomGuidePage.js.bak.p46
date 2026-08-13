@@ -178,7 +178,7 @@ const SHIPPING_GUIDES = [
 
 export default function EcomGuidePage() {
   return (
-    <>
+    <Layout>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-guide-page">
         {/* Header */}
         <div>
@@ -369,6 +369,6 @@ export default function EcomGuidePage() {
           </Link>
         </div>
       </div>
-    </>
+    </Layout>
   );
 }

@@ -17,9 +17,8 @@ export function EcomHubTabs() {
   const navigate = useNavigate();
   const location = useLocation();
   const { language } = useLanguage();
-  const current = HUB_TABS.find(t =>
-    t.path === '/ecom-hub' ? location.pathname === '/ecom-hub' : location.pathname.startsWith(t.path)
-  )?.key || 'orders';
+  const current = HUB_TABS.find(t => t.path === location.pathname)?.key
+    || (location.pathname === '/ecom-hub' ? 'orders' : 'orders');
 
   return (
     <Tabs value={current} onValueChange={(k) => { const t = HUB_TABS.find(x => x.key === k); if (t) navigate(t.path); }}>

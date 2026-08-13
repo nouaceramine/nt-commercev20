@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckCircle2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
+import { EcomHubTabs } from '../../components/ecom/EcomHubTabs';
 
 const SUPPORTED_CHANNELS = ['shopify', 'facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram', 'viber', 'yalidine', 'zr', 'maystro'];
 
@@ -280,8 +281,9 @@ export default function EcomChannelsPage() {
   const schema = CREDENTIAL_SCHEMA[form.channel] || [];
 
   return (
-    <>
+    <Layout>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-channels-page">
+        <EcomHubTabs />
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <Link to="/ecom-hub" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
@@ -492,6 +494,6 @@ export default function EcomChannelsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </Layout>
   );
 }

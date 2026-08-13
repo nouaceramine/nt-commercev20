@@ -875,3 +875,32 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - إعادة المسح الكامل: **صفر 500 حقيقية** (يتبقى فقط `/payments/status/{id}` برسالة Stripe غير المُعدّ — مقصود).
 - صفر أخطاء في اللوغ بعد الإصلاحات رغم إعادة مسح 938 طلباً.
 - تحذير بدء التشغيل المتكرر (sim_catalog unique index على duplicates قديمة) — غير مؤثر، مؤجل.
+
+
+---
+
+## p46 — 2026-08-13 — توحيد مركز التجارة الإلكترونية (/ecom-hub) وإعادة تنظيم القوائم
+
+### الطلب
+جعل /ecom-hub ملمّاً بكل ما يتعلق بالتجارة الإلكترونية: حذف 12 عنصراً من القائمة اليمنى ونقلها داخل المركز بجانب «الطلبات».
+
+### التغييرات (نسخ احتياطية .bak.p46 + backups/www_before_p46)
+1. **جديد `pages/ecom/EcomHubShell.js`:** غلاف موحّد — `<Layout>` + شريط تبويبات المركز + **تبويبات فرعية حسب القسم** + `<Outlet/>`.
+2. **`EcomHubTabs.js`:** تظليل التبويب الأب عند المسارات الفرعية (startsWith).
+3. **تجريد 14 صفحة من `<Layout>` و`<EcomHubTabs/>`** (الغلاف صار مالك الإطار) — صفحات المركز الست + StoreManagement/Loyalty/WooCommerce/Shipping/ApiKeys/TwoFactor/IntegrationStatus/EcomGuide.
+4. **App.js:** مسارات متداخلة تحت `/ecom-hub` بوابة `ecommerce_hub` موحّدة + بوابات adminOnly الأصلية لكل صفحة:
+   - الطلبات (index) | المتجر → StoreManagementPage | المتجر/الولاء → LoyaltyPage
+   - القنوات والتكاملات → Channels + WooCommerce + حالة التكاملات + مفاتيح API + 2FA + الدليل
+   - الإعلانات | الشحن → ShippingTab + شركات الشحن + Yalidine | التحليلات
+   - **تحويلات** من كل الروابط القديمة (/store, /loyalty, /woocommerce, /shipping, /api-keys, /two-factor, /integrations/status, /integrations/yalidine, /ecom-hub/guide) — لا رابط قديم يُكسر.
+5. **Layout.js:** مجموعة «التجارة الإلكترونية» ← مدخل واحد «صندوق الطلبات الموحَّد»؛ حذف مجموعة «خدمة الشحن والتوصيل».
+6. **StoreManagementPage:** عنوان فرعي ديناميكي — «أنشئ متجرك الإلكتروني وابدأ البيع» عندما يكون المتجر معطلاً.
+7. **الميزة:** `ecommerce_hub` مفعّلة أصلاً في الخطط الثلاث (تحقق DB) — كل المشتركين يصلون للمركز.
+
+### إصلاحات أثناء العمل
+- قصّ خاطئ لمسار /two-factor الأحادي السطر ترك يتيمة `</ProtectedRoute>` (أصلحت، توازن 111=111).
+- EcomHubShell استورد Layout كـ default بينما هو named export.
+
+### تحقق
+- بناء `main.7446820c.js` + نشر آمن بدون حذف الحزم القديمة.
+- المسارات والغلاف موجودون في الحزمة؛ الموقع 200؛ APIs الصفحات المنقولة كلها 200 (store/orders, store/slug, woocommerce/settings, shipping/settings, loyalty/settings).

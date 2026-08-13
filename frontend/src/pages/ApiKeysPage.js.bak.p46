@@ -153,16 +153,16 @@ export default function ApiKeysPage() {
 
   if (loading) {
     return (
-      <>
+      <Layout>
         <div className="flex items-center justify-center h-64">
           <div className="spinner" />
         </div>
-      </>
+      </Layout>
     );
   }
 
   return (
-    <>
+    <Layout>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -416,6 +416,6 @@ export default function ApiKeysPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </>
+    </Layout>
   );
 }

@@ -588,8 +588,35 @@ export const Layout = ({ children }) => {
       title: language === 'ar' ? '🛍️ التجارة الإلكترونية' : 'E-Commerce',
       icon: Store,
       items: [
-        // ── p46: single entry — كل التجارة الإلكترونية داخل المركز ──
-        { path: '/ecom-hub', icon: Inbox, label: language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte unifiée', featureKey: 'ecommerce_hub' },
+        // ── Unified E-Commerce Hub (P1+, gated by ecommerce_hub flag) ──
+        { path: '/ecom-hub',           icon: Inbox,      label: language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte unifiée',     featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/channels',  icon: Link2,      label: language === 'ar' ? 'قنوات البيع'           : 'Canaux de vente',  featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/analytics', icon: BarChart3,  label: language === 'ar' ? 'تحليلات التجارة'        : 'Analyses e-com',   featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/store',     icon: Store,      label: language === 'ar' ? 'متجري الإلكتروني'       : 'Ma boutique',     featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/ads',       icon: Megaphone,  label: language === 'ar' ? 'الإعلانات'               : 'Publicités',      featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/shipping',  icon: Truck,      label: language === 'ar' ? 'الشحن والتوصيل'          : 'Livraison',       featureKey: 'ecommerce_hub' },
+        { path: '/ecom-hub/guide',     icon: BookOpen,   label: language === 'ar' ? 'دليل الاستخدام والربط'   : 'Guide & connexion', featureKey: 'ecommerce_hub' },
+        // ── Legacy storefront tools (always available) ──
+        { path: '/store', icon: Store, label: language === 'ar' ? 'المتجر' : 'Boutique', subFeature: 'online_store' },
+        { path: '/loyalty', icon: Award, label: language === 'ar' ? 'الولاء' : 'Fidélité', featureKey: 'loyalty_points' },
+        ...(isAdmin ? [
+          { path: '/woocommerce', icon: Store, label: 'WooCommerce', subFeature: 'woocommerce' },
+          { path: '/integrations/status', icon: Settings, label: language === 'ar' ? 'حالة التكاملات' : 'Intégrations' },
+          { path: '/two-factor', icon: Shield, label: language === 'ar' ? '2FA' : '2FA' },
+          { path: '/api-keys', icon: Key, label: t.apiKeys },
+        ] : [])
+      ]
+    },
+    {
+      id: 'shipping',
+      featureKey: null,
+      title: language === 'ar' ? 'خدمة الشحن والتوصيل' : 'Livraison',
+      icon: Truck,
+      items: [
+        ...(isAdmin ? [
+          { path: '/shipping', icon: Truck, label: language === 'ar' ? 'الشحن' : 'Livraison', subFeature: 'shipping_companies' },
+          { path: '/integrations/yalidine', icon: Truck, label: 'Yalidine' },
+        ] : [])
       ]
     },
     {

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Layout } from '../../components/Layout';
+import { EcomHubTabs } from '../../components/ecom/EcomHubTabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -39,8 +40,9 @@ export default function EcomShippingTab() {
   };
 
   return (
-    <>
+    <Layout>
       <div className="space-y-6" data-testid="ecom-shipping-tab">
+        <EcomHubTabs />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="h-5 w-5" />{ar ? 'تكامل Yalidine' : 'Intégration Yalidine'}</CardTitle></CardHeader>
@@ -95,6 +97,6 @@ export default function EcomShippingTab() {
           </Card>
         </div>
       </div>
-    </>
+    </Layout>
   );
 }

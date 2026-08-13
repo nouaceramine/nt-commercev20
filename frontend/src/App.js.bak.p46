@@ -97,7 +97,6 @@ import PaymentsPage from "./pages/PaymentsPage";
 
 // E-Commerce Hub (P1+, gated by ecommerce_hub feature flag)
 import EcomHubPage from "./pages/ecom/EcomHubPage";
-import EcomHubShell from "./pages/ecom/EcomHubShell";
 import EcomChannelsPage from "./pages/ecom/EcomChannelsPage";
 import EcomGuidePage from "./pages/ecom/EcomGuidePage";
 import EcomAnalyticsPage from "./pages/ecom/EcomAnalyticsPage";
@@ -357,26 +356,58 @@ function AppRoutes() {
         path="/ecom-hub"
         element={
           <ProtectedRoute featureKey="ecommerce_hub">
-            <EcomHubShell />
+            <EcomHubPage />
           </ProtectedRoute>
         }
-      >
-        <Route index element={<EcomHubPage />} />
-        <Route path="store" element={<ProtectedRoute adminOnly><StoreManagementPage /></ProtectedRoute>} />
-        <Route path="store/loyalty" element={<ProtectedRoute adminOnly featureKey="loyalty_points"><LoyaltyPage /></ProtectedRoute>} />
-        <Route path="channels" element={<EcomChannelsPage />} />
-        <Route path="channels/woocommerce" element={<ProtectedRoute adminOnly><WooCommercePage /></ProtectedRoute>} />
-        <Route path="channels/status" element={<IntegrationStatusPage />} />
-        <Route path="channels/api-keys" element={<ProtectedRoute adminOnly><ApiKeysPage /></ProtectedRoute>} />
-        <Route path="channels/2fa" element={<TwoFactorPage />} />
-        <Route path="channels/guide" element={<EcomGuidePage />} />
-        <Route path="ads" element={<EcomAdsTab />} />
-        <Route path="shipping" element={<EcomShippingTab />} />
-        <Route path="shipping/companies" element={<ProtectedRoute adminOnly><ShippingPage /></ProtectedRoute>} />
-        <Route path="shipping/yalidine" element={<IntegrationStatusPage />} />
-        <Route path="analytics" element={<EcomAnalyticsPage />} />
-        <Route path="guide" element={<Navigate to="/ecom-hub/channels/guide" replace />} />
-      </Route>
+      />
+      <Route
+        path="/ecom-hub/channels"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomChannelsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/store"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomStoreTab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/ads"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomAdsTab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/shipping"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomShippingTab />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/guide"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomGuidePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ecom-hub/analytics"
+        element={
+          <ProtectedRoute featureKey="ecommerce_hub">
+            <EcomAnalyticsPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/digital-services"
         element={
@@ -409,8 +440,22 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-            <Route path="/integrations/status" element={<Navigate to="/ecom-hub/channels/status" replace />} />
-            <Route path="/integrations/yalidine" element={<Navigate to="/ecom-hub/shipping/yalidine" replace />} />
+      <Route
+        path="/integrations/status"
+        element={
+          <ProtectedRoute>
+            <IntegrationStatusPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/integrations/yalidine"
+        element={
+          <ProtectedRoute>
+            <IntegrationStatusPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/tax-reports"
         element={
@@ -463,7 +508,7 @@ function AppRoutes() {
       <Route path="/task-management" element={<ProtectedRoute><TaskManagementPage /></ProtectedRoute>} />
       <Route path="/internal-chat" element={<ProtectedRoute><InternalChatPage /></ProtectedRoute>} />
       <Route path="/supplier-tracking" element={<ProtectedRoute><SupplierTrackingPage /></ProtectedRoute>} />
-            <Route path="/two-factor" element={<Navigate to="/ecom-hub/channels/2fa" replace />} />
+      <Route path="/two-factor" element={<ProtectedRoute><TwoFactorPage /></ProtectedRoute>} />
 
       {/* SaaS Admin Dashboard + sub-routes (per-tab pages) */}
       <Route
@@ -681,7 +726,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-            <Route path="/store" element={<Navigate to="/ecom-hub/store" replace />} />
+      <Route
+        path="/store"
+        element={
+          <ProtectedRoute adminOnly>
+            <StoreManagementPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/cash"
         element={
@@ -730,7 +782,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-            <Route path="/api-keys" element={<Navigate to="/ecom-hub/channels/api-keys" replace />} />
+      <Route
+        path="/api-keys"
+        element={
+          <ProtectedRoute adminOnly>
+            <ApiKeysPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/features"
         element={
@@ -891,8 +950,22 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-            <Route path="/woocommerce" element={<Navigate to="/ecom-hub/channels/woocommerce" replace />} />
-            <Route path="/shipping" element={<Navigate to="/ecom-hub/shipping/companies" replace />} />
+      <Route
+        path="/woocommerce"
+        element={
+          <ProtectedRoute adminOnly>
+            <WooCommercePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/shipping"
+        element={
+          <ProtectedRoute adminOnly>
+            <ShippingPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/sim-management"
         element={
@@ -909,7 +982,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-            <Route path="/loyalty" element={<Navigate to="/ecom-hub/store/loyalty" replace />} />
+      <Route
+        path="/loyalty"
+        element={
+          <ProtectedRoute adminOnly featureKey="loyalty_points">
+            <LoyaltyPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/services"
         element={

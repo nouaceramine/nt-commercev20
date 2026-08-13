@@ -218,7 +218,7 @@ export default function StoreManagementPage() {
   };
 
   return (
-    <>
+    <Layout>
       <div className="space-y-6" data-testid="store-management-page">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -229,8 +229,8 @@ export default function StoreManagementPage() {
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
               {language === 'ar' 
-                ? (storeSettings.enabled ? 'إدارة متجرك الإلكتروني والطلبات' : 'أنشئ متجرك الإلكتروني وابدأ البيع')
-                : (storeSettings.enabled ? 'Manage your online store and orders' : 'Create your online store and start selling')}
+                ? 'إدارة متجرك الإلكتروني والطلبات'
+                : 'Manage your online store and orders'}
             </p>
           </div>
 
@@ -680,6 +680,6 @@ export default function StoreManagementPage() {
           </TabsContent>
         </Tabs>
       </div>
-    </>
+    </Layout>
   );
 }
