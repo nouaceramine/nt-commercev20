@@ -926,3 +926,25 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 - **الإصلاح (main.py):** حلقة على main_db + كل قواعد المستأجرين (نمط barcode المجاور) مع try/except لكل قاعدة وتسجيل "created on X/Y databases".
 - **بعد:** إقلاعان متتاليان نظيفان: "Enhanced indexes created on 4/4 databases" + بذر SIM بدون أي تحذير. (ملاحظة: أول إقلاع بعد الترقيع أظهر "connection closed" عابر في بذر SIM بسبب عبء بناء الفهارس الأول؛ اختفى في الإقلاع الثاني ولم يتكرر.)
 - صحّة الخدمة بعد الإقلاع: /api/health → 200.
+
+## p48 — شهادة origin + تحويل www + إنهاء المهام المؤجلة (2026-08-13)
+**النسخ الاحتياطية:** backups/nginx-ntcommerce.bak.p48 + bak2.p48 + nginx-www.bak.p48 + le-renewal.bak.p48
+
+### A) شهادة Let's Encrypt على الخادم الأصلي (تؤهل لـ Full Strict)
+- أُصدرت شهادة موثوقة عبر certbot --nginx للدومينين nt-commerce.net + www (تنتهي 2026-11-11).
+- **بدون --no-redirect:** لم تُضف أي إعادة توجيه 80→443 (Flexible يتصل بالأصل عبر HTTP — إعادة التوجيه تسبب حلقة). المنفذان 80 و443 يقدّمان نفس المحتوى.
+- فشلت تجربة التجديد الأولى (dry-run) لـ www: كتلة www الجديدة حوّلت طلب ACME → 403. **الإصلاح:** تحويل التجديد إلى webroot (/var/www/letsencrypt) في /etc/letsencrypt/renewal/nt-commerce.net.conf + `location ^~ /.well-known/acme-challenge/` في الكتلتين → dry-run نجح: "all simulated renewals succeeded". مؤقّت certbot.timer يومي نشط.
+- إصلاح جانبي: الكتلة الرئيسية أصبحت `default_server` لـ 80/443 (كانت كتلة www تلتقط المضيفين غير المطابقين مثل 127.0.0.1).
+
+### B) تحويل www → الدومين الرئيسي (301)
+- كتلة جديدة /etc/nginx/conf.d/ntcommerce-www.conf: 301 https://nt-commerce.net$request_uri على 80+443 (مسار ACME مستثنى).
+
+### C) مفتاح GitHub الكلاسيكي القديم (ghp_VBd0...)
+- فُحص عبر API: **401 — ملغى/غير صالح بالفعل**. لا خطر. البادئة موجودة في سجلات نصية قديمة (غير ضارة لأنه ميت).
+
+### D) حالة حساب NT-0011 (BorexDz)
+- saas_tenants: initialized=true + تجزئة كلمة مرور موجودة؛ مستخدم admin في قاعدة المستأجر موجود.
+- انتحال E2E: POST /api/saas/impersonate/{tenant_id} → رمز → /me → المستخدم + 18 ميزة (منها ecommerce_hub) → إغلاق الجلسة 200. الحساب جاهز لدخول المشترك.
+
+### التحقق النهائي الشامل
+CF apex 200 | CF www 301→apex | CF API 200 | origin 443 ssl_verify=0 | IP مباشر 200 | localhost 200
