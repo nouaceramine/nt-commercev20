@@ -904,3 +904,11 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 ### تحقق
 - بناء `main.7446820c.js` + نشر آمن بدون حذف الحزم القديمة.
 - المسارات والغلاف موجودون في الحزمة؛ الموقع 200؛ APIs الصفحات المنقولة كلها 200 (store/orders, store/slug, woocommerce/settings, shipping/settings, loyalty/settings).
+
+## p46 — تحقق متصفح عميق لمركز التجارة (2026-08-13)
+- **الطريقة:** Chromium headless (puppeteer-core) بجلسة مستأجر حقيقية (رمز NT2 مُصاغ بالخادم، tenant_admin)، حجم نافذة 1400×900، انتظار networkidle2 + 1.5s لكل صفحة.
+- **النتيجة:** 22/22 مساراً يعمل:
+  - 14 صفحة مركز: /ecom-hub + store, store/loyalty, channels(+woocommerce/status/api-keys/2fa/guide), ads, shipping(+companies/yalidine), analytics — كلها تعرض ecom-hub-shell مع التبويبات الفرعية الصحيحة لكل قسم.
+  - 8 تحويلات قديمة (/store، /loyalty، /woocommerce، /shipping، /api-keys، /two-factor، /integrations/status، /integrations/yalidine) كلها تحوّل للمسار الجديد الصحيح.
+- **أخطاء console: 0 — أخطاء صفحة (pageerror): 0 — طلبات فاشلة ≥400: 0.**
+- ملاحظة: زيارة /ecom-hub لأول مرة تحوّل إلى دليل البداية — سلوك مقصود سابق (onboarding tour عبر localStorage ecom_guide_seen)، ليس خطأ.
