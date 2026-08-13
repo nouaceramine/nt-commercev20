@@ -443,8 +443,27 @@ async def startup_event():
         logger.warning("Cash box init: %s", e)
 
     try:
-        await create_all_enhanced_indexes()
-        logger.info("Enhanced indexes created")
+        # p47: create_all_enhanced_indexes(db) requires a db arg — the bare call
+        # always raised TypeError (caught by the warning below) so these indexes
+        # were never created. Loop main + all tenant DBs (data lives per-tenant),
+        # mirroring the barcode-index pattern below; per-db guard so one failing
+        # database never blocks the rest.
+        from config.database import get_tenant_db as _get_tenant_db, main_db as _main_db
+        _idx_dbs = [_main_db]
+        async for _t in _main_db.saas_tenants.find({}, {"_id": 0, "id": 1}):
+            if _t.get("id"):
+                try:
+                    _idx_dbs.append(_get_tenant_db(_t["id"]))
+                except Exception:
+                    pass
+        _idx_ok = 0
+        for _d in _idx_dbs:
+            try:
+                await create_all_enhanced_indexes(_d)
+                _idx_ok += 1
+            except Exception as _ie:
+                logger.warning("Enhanced indexes on %s: %s", getattr(_d, "name", "?"), _ie)
+        logger.info("Enhanced indexes created on %d/%d databases", _idx_ok, len(_idx_dbs))
     except Exception as e:
         logger.warning("Enhanced indexes: %s", e)
 

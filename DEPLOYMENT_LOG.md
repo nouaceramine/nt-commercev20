@@ -912,3 +912,17 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
   - 8 تحويلات قديمة (/store، /loyalty، /woocommerce، /shipping، /api-keys، /two-factor، /integrations/status، /integrations/yalidine) كلها تحوّل للمسار الجديد الصحيح.
 - **أخطاء console: 0 — أخطاء صفحة (pageerror): 0 — طلبات فاشلة ≥400: 0.**
 - ملاحظة: زيارة /ecom-hub لأول مرة تحوّل إلى دليل البداية — سلوك مقصود سابق (onboarding tour عبر localStorage ecom_guide_seen)، ليس خطأ.
+
+## p47 — تنظيف تحذيرات الإقلاع (2026-08-13)
+**النسخ الاحتياطية:** mongodump لـ platform_sim_catalog (14 وثيقة) في backups/p47_sim_catalog/ + backups/main.py.bak.p47
+
+### A) تكرارات platform_sim_catalog
+- **قبل:** 14 وثيقة مع 5 مجموعات مكررة (Ooredoo/retail ×3، Mobilis/retail ×3، Djezzy/retail ×2، Mobilis/wholesale ×2، Djezzy/wholesale ×2) → فشل بناء الفهرس الفريد sim_operator_tier_unique عند كل إقلاع (E11000).
+- **الإصلاح:** الإبقاء على أول وثيقة لكل (operator, tier) وحذف 7 زائدة → 7 وثائق، ثم بناء الفهرس الفريد يدوياً.
+- **بعد:** E11000 اختفى نهائياً؛ /api/admin/supplier/catalog/sims → 200 بالكتالوج الصحيح.
+
+### B) create_all_enhanced_indexes() بلا وسيط
+- **قبل:** main.py يستدعيها بدون الوسيط db المطلوب → TypeError يُبتلع كتحذير عند كل إقلاع؛ فهارس الوحدات المحسّنة لم تُنشأ قط منذ إدخالها.
+- **الإصلاح (main.py):** حلقة على main_db + كل قواعد المستأجرين (نمط barcode المجاور) مع try/except لكل قاعدة وتسجيل "created on X/Y databases".
+- **بعد:** إقلاعان متتاليان نظيفان: "Enhanced indexes created on 4/4 databases" + بذر SIM بدون أي تحذير. (ملاحظة: أول إقلاع بعد الترقيع أظهر "connection closed" عابر في بذر SIM بسبب عبء بناء الفهارس الأول؛ اختفى في الإقلاع الثاني ولم يتكرر.)
+- صحّة الخدمة بعد الإقلاع: /api/health → 200.
