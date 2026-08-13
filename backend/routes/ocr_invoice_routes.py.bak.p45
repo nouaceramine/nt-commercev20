@@ -196,25 +196,10 @@ def create_ocr_invoice_routes(db, require_tenant, get_tenant_admin, CURRENCY, Ap
         keys = await db.api_keys.find({}, {"_id": 0}).to_list(100)
         result = []
         for k in keys:
-            # p45: normalize legacy/foreign-schema docs (e.g. platform keys written by security_routes)
-            kv = k.get("key_value") or k.get("api_key", "") or ""
-            if not k.get("name") and k.get("key_name"):
-                k["name"] = k["key_name"]
-            k.setdefault("name", "")
-            k.setdefault("type", "internal")
-            k.setdefault("service", "")
-            k.setdefault("endpoint_url", "")
-            if not isinstance(k.get("permissions"), list):
-                k["permissions"] = [k["permissions"]] if k.get("permissions") else []
-            k.setdefault("is_active", True)
-            k["last_used"] = str(k.get("last_used") or "")
-            k["created_at"] = str(k.get("created_at") or "")
-            k["key_preview"] = f"...{kv[-4:]}" if len(kv) > 4 else kv
+            k["key_preview"] = f"...{k['key_value'][-4:]}" if len(k.get('key_value', '')) > 4 else k.get('key_value', '')
             # Hide full key value
-            if k.get("type") == "internal":
+            if k["type"] == "internal":
                 k["key_value"] = k["key_preview"]
-            else:
-                k["key_value"] = kv
             result.append(ApiKeyResponse(**k))
         return result
 

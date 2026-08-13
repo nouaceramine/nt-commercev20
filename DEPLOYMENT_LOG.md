@@ -842,3 +842,36 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 ### متبقٍّ مؤجل
 - شهادة Cloudflare Origin على nginx ← رفع الوضع إلى Full (Strict) + إجبار HTTPS.
 - روابط hardcoded غير حرجة: canonical/og:image في الواجهة، ورسالة Conversions API + عرض store slug في backend (تعمل لكن بالـ IP القديم).
+
+
+---
+
+## p45 — 2026-08-13 — إصلاح دخول المشتركين الحرج + فحص شامل صارم + إصلاح 6 أخطاء
+
+### العطل المُبلَّغ: مشترك جديد (NT-0011) لا يستطيع الدخول
+
+### التشخيص — 3 عيوب متسلسلة:
+1. **unified-login ينهار 500 لكل المشتركين منذ p11:** كوميت `e36d911` (dead-code dedup) حذف بالخطأ `_login_attempts` / `MAX_LOGIN_ATTEMPTS` / `LOCKOUT_MINUTES` من `auth_users_routes.py` بينما الدوال المستدعية بقيت ← `NameError` عند أي محاولة دخول. لم يُلاحظ لأن المالك يدخل كـ super admin (مسار مختلف سليم) والمستأجرين القدامى بجلسات طويلة.
+2. **صفحة /portal تستدعي `/api/auth/login`** (يفحص users الرئيسية فقط) بدل `/api/auth/unified-login` (مدير/وكيل/مشترك).
+3. **كود التنكّر** في `saas/tenants_routes.py` ينشئ مستخدم المستأجر بحقل `hashed_password` فارغ: يقرأ `tenant.get("hashed_password")` بينما الحقل الصحيح `password` — أصاب حساب NT-0011.
+
+### الإصلاحات:
+- **A:** استعادة الأسطر الثلاثة في `auth_users_routes.py` + تصحيح حقل التنكّر في `saas/tenants_routes.py` (نسخ: `.bak.p45`).
+- **B:** نسخ هاش كلمة المرور الصحيح من `saas_tenants.password` إلى مستخدم NT-0011 في قاعدة متجره.
+- **C:** `UnifiedLoginPage.js` ← `/api/auth/unified-login` + احترام `redirect_to` (نسخة: `.bak.p45`) — بناء `main.ba9d708e.js` ونشر آمن بدون حذف.
+- **D:** اختبار E2E كامل: تسجيل مشترك تجريبي (NT-0012) ← دخوله بنفسه عبر unified-login ← `/auth/me` بكامل features ← حذفه وتنظيف قاعدته.
+
+### الفحص الشامل (469 مسار GET × دورين + لوغات 24س):
+| الخطأ | السبب | الإصلاح |
+|---|---|---|
+| `POST /shop/bob/order` → 500 (6 طلبات!) | كود مزامنة p42 استخدم `now` غير معرّف + `logger` غير معرّف أخفى الخطأ الأصلي | تعريف الاثنين في `online_store_routes.py` |
+| طلبات يتيمة: الطلب يُحفظ والعميل يرى 500 | نفس السبب | تعبئة 6 طلبات NT-0011 في ecom_orders بحالاتها (`p45_backfill.py`) |
+| `GET /api/api-keys` → 500/422 | سجل قديم بمخطط مختلف (p34-test من security_routes) + `k["type"]` | تطبيع الحقول في `ocr_invoice_routes.py` |
+| `GET /api/shipping/settings` → KeyError | `s["company_id"]` على سجلات قديمة | `s.get("company_id")` في `shipping_loyalty_routes.py` |
+| سجل store_slug يتيم ("amine" لمستأجر محذوف) | بقايا بيانات | حُذف (كان يرد 404 نظيف) |
+
+### تحقق نهائي:
+- اختبار طلب حي كامل على متجر bob (تفعيل مؤقت): 200 «تم استلام طلبك» + حسم مخزون صحيح + مزامنة ecom + تنظيف كامل وإعادة المتجر معطلاً كما تركه المشترك.
+- إعادة المسح الكامل: **صفر 500 حقيقية** (يتبقى فقط `/payments/status/{id}` برسالة Stripe غير المُعدّ — مقصود).
+- صفر أخطاء في اللوغ بعد الإصلاحات رغم إعادة مسح 938 طلباً.
+- تحذير بدء التشغيل المتكرر (sim_catalog unique index على duplicates قديمة) — غير مؤثر، مؤجل.

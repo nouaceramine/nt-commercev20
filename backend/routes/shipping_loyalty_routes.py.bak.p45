@@ -55,7 +55,7 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
         settings = await db.shipping_settings.find({}, {"_id": 0}).to_list(20)
 
         # Add default settings for companies not configured
-        configured_ids = {s.get("company_id") for s in settings}
+        configured_ids = {s["company_id"] for s in settings}
         for company in ALGERIAN_SHIPPING_COMPANIES:
             if company["id"] not in configured_ids:
                 settings.append({

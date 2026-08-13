@@ -34,11 +34,6 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
 
     # ============ AUTH ROUTES ============
 
-    # Brute-force protection state (p45: restored — accidentally removed by p11 dead-code dedup)
-    _login_attempts = {}  # {email: {"count": int, "locked_until": str}}
-    MAX_LOGIN_ATTEMPTS = 5
-    LOCKOUT_MINUTES = 15
-
     def _check_brute_force(email: str) -> dict:
         """Check if account is locked due to too many failed attempts"""
         info = _login_attempts.get(email)

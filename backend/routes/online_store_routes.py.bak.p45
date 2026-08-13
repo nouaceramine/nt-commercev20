@@ -17,8 +17,6 @@ from services.shipping_tracker import shipping_tracker
 from fastapi.responses import Response as _ImgResponse
 import base64 as _b64
 import io as _io
-import logging as _logging
-logger = _logging.getLogger(__name__)
 
 
 def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_tenant_db) -> dict:
@@ -369,7 +367,6 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         # مزامنة فورية إلى صندوق الطلبات الموحَّد (قناة webstore)
         # inventory_deducted=True: المخزون حُسم أعلاه لحظة الإنشاء — يمنع الحسم المزدوج عند التأكيد من الصندوق
         try:
-            now = datetime.now(timezone.utc).isoformat()  # p45: was undefined -> every webstore order 500'd after insert
             ecom_items = [
                 {
                     "name": it.get("name", ""), "sku": "",

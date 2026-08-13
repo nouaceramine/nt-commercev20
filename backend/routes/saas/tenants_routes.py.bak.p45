@@ -131,7 +131,7 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
             "id": new_uid,
             "name": tenant.get("name", tenant["email"]),
             "email": tenant["email"],
-            "hashed_password": tenant.get("password", ""),  # p45: saas_tenants stores the bcrypt hash in `password`
+            "hashed_password": tenant.get("hashed_password", ""),
             "role": "admin",
             "permissions": {},
             "created_at": datetime.now(timezone.utc).isoformat(),

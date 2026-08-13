@@ -41,7 +41,7 @@ export default function UnifiedLoginPage() {
       password: passEl ? passEl.value : ''
     };
     
-    fetch('/api/auth/unified-login', {
+    fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -54,9 +54,7 @@ export default function UnifiedLoginPage() {
         toast.success('تم تسجيل الدخول بنجاح!');
         var role = (result.user && result.user.role) || 'admin';
         var target = '/dashboard';
-        if (result.redirect_to) {
-          target = result.redirect_to;
-        } else if (role === 'super_admin') {
+        if (role === 'super_admin') {
           target = '/saas-admin';
         } else if (role === 'agent') {
           target = '/agent/dashboard';
