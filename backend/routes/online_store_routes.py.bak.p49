@@ -415,7 +415,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 order_data["id"],
                 order.items,
                 order.total,
-                f"https://nt-commerce.net/shop/{store_slug}/product/{order.items[0].get('product_id', '')}" if order.items else "",
+                f"http://168.231.81.154/shop/{store_slug}/product/{order.items[0].get('product_id', '')}" if order.items else "",
                 {
                     "email": order.customer_email,
                     "phone": order.customer_phone
@@ -544,7 +544,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         slug_mapping = await main_db.store_slugs.find_one({"tenant_id": tenant_id}, {"_id": 0})
         if not slug_mapping:
             return {"success": True, "slug": None, "url": None, "enabled": False}
-        base_url = "https://nt-commerce.net"
+        base_url = "http://168.231.81.154"
         return {
             "success": True,
             "slug": slug_mapping.get("store_slug"),

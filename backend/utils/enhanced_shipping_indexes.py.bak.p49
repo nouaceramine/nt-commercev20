@@ -22,7 +22,7 @@ SHIPPING_INDEXES = {
     ],
     "ecom_shipping_labels": [
         {"keys": [("id", 1)], "opts": {"unique": True}},
-        {"keys": [("tracking_number", 1)], "opts": {"unique": True, "sparse": True}},  # p49: match main.py:633 spec (was plain -> IndexKeySpecsConflict every startup)
+        {"keys": [("tracking_number", 1)], "opts": {}},
         {"keys": [("order_id", 1)], "opts": {}},
         {"keys": [("courier_id", 1)], "opts": {}},
         {"keys": [("status", 1)], "opts": {}},

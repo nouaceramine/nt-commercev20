@@ -8,14 +8,14 @@
         <meta name="keywords" content="نقاط بيع, POS الجزائر, نظام محاسبة, متجر إلكتروني, Yalidine, Shopify, إدارة مخزون, NT Commerce" />
         <meta name="author" content="NT Commerce" />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://nt-commerce.net/" />
+        <link rel="canonical" href="http://168.231.81.154/" />
 
         <!-- Open Graph (Facebook, LinkedIn, WhatsApp) -->
         <meta property="og:type" content="website" />
         <meta property="og:title" content="NT Commerce — منصّة محاسبة ذكية + متجر إلكتروني للسوق الجزائري 🇩🇿" />
         <meta property="og:description" content="نظام نقاط بيع سحابي متكامل: محاسبة، مخزون، فواتير، Yalidine، Shopify. تجربة مجّانية 14 يوم." />
-        <meta property="og:url" content="https://nt-commerce.net/" />
-        <meta property="og:image" content="https://nt-commerce.net/icon-512.png" />
+        <meta property="og:url" content="http://168.231.81.154/" />
+        <meta property="og:image" content="http://168.231.81.154/icon-512.png" />
         <meta property="og:site_name" content="NT Commerce" />
         <meta property="og:locale" content="ar_DZ" />
 
@@ -23,7 +23,7 @@
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="NT Commerce — منصّة محاسبة ذكية + متجر إلكتروني للجزائر" />
         <meta name="twitter:description" content="نظام نقاط بيع متكامل. تجربة مجّانية 14 يوم." />
-        <meta name="twitter:image" content="https://nt-commerce.net/icon-512.png" />
+        <meta name="twitter:image" content="http://168.231.81.154/icon-512.png" />
 
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

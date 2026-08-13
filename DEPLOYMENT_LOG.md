@@ -948,3 +948,28 @@ template_snapshot.py, ids.py, db_tree.py, store_template.py, crypto.py (كلها
 
 ### التحقق النهائي الشامل
 CF apex 200 | CF www 301→apex | CF API 200 | origin 443 ssl_verify=0 | IP مباشر 200 | localhost 200
+
+## p49 — استبدال IP بالدومين + تقييد الجدار على Cloudflare + تنظيف شامل (2026-08-13)
+**النسخ الاحتياطية:** .bak.p49 لكل ملف معدّل + backups/main.py.bak2.p49 + backups/git-config.bak.p49 + backups/ufw.bak.p49
+
+### A) IP → الدومين (SEO ومشاركة الروابط)
+- 8 ملفات: public/index.html (canonical/og:url/og:image/twitter:image) + robots.txt + sitemap.xml (5 روابط) + UnifiedLoginPage/LandingPage/RegisterPage/useDocumentMeta (canonical الافتراضية) + online_store_routes.py (عرض slug المتجر + رسالة Conversions API).
+- main.py: CORS وسّع بإضافة https://nt-commerce.net + www (الإبقاء على أصلي IP).
+- بناء + نشر main.6b9ef438.js (cp -r بلا حذف) — تحقق عبر CF: canonical/og/sitemap كلها بالدومين، صفر مراجع IP، ويبهوك TikTok 200.
+
+### B) تنظيف الحزم القديمة
+- حذف 5 حزم main قديمة + 17 ملفاً يتيماً (maps/LICENSE/chunks) بعد التأكد من asset-manifest — حرّر 66.5MB (static من 171M إلى 20M). الموقع والحزمة 200.
+
+### C) مفتاح GitHub خارج رابط remote
+- انتقل إلى /root/.git-credentials (600) + credential.helper store — الرابط نظيف، git ls-remote ناجح.
+
+### D) الجدار: 80/443 لعناوين Cloudflare فقط
+- /usr/local/sbin/cf_ufw_sync.sh (idempotent): 44 قاعدة allow لنطاقات CF الرسمية v4+v6، حذف القواعد العامة 80/443 + القواعد الرمادية 8000/3000 (حقبة التطوير).
+- cron أسبوعي (الاثنين 04:17) لتحديث النطاقات.
+- **تحقق: عبر CF apex 200 / www 301 / API 200 / webhook 200 — IP مباشر 80 و443 محجوبان (000) — localhost 200 — SSH سليم.**
+- ملاحظة: الوصول عبر http://168.231.81.154 توقف بالتصميم — الدومين هو المدخل الوحيد.
+
+### E) إصلاحان خفيان ظهرا بعد تفعيل فهارس p47
+1. **tracking_number_1 IndexKeySpecsConflict**: main.py:633 يطلب unique+sparse وenhanced_shipping_indexes.py يطلب عادياً — كل واحد يتعارض مع الآخر كل إقلاع. الحل: توحيد المواصفة unique+sparse في الملفين (القواعد الأربع أُعيد بناء فهارسها يدوياً — المجموعة فارغة، صفر مخاطرة).
+2. **FeatureFlagManager.ensure_defaults غير موجود**: استدعاء قديم في main.py يرمي AttributeError يبتلعه try ← **set_feature_flag_manager لم يُنفَّذ قط منذ كتابته** (المدير لم يُسجَّل). حُذف السطر — /api/platform/features يعمل 200.
+- إقلاع نهائي نظيف 100% (صفر تحذيرات عدا FutureWarning تجميلي في ai_routes).

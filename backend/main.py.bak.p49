@@ -86,7 +86,7 @@ app.add_middleware(RequestContextMiddleware)
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://nt-commerce.net", "https://www.nt-commerce.net", "http://168.231.81.154", "http://168.231.81.154:8001"],
+    allow_origins=["http://168.231.81.154", "http://168.231.81.154:8001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -506,9 +506,7 @@ async def startup_event():
         from utils.super_admin_seed import ensure_super_admin
         await ensure_super_admin()
         ffm = FeatureFlagManager(main_db)
-        # p49: removed vestigial `await ffm.ensure_defaults(...)` — the method no longer
-        # exists on FeatureFlagManager (_load() self-seeds from PLATFORM_FEATURES), and
-        # its AttributeError aborted this block so set_feature_flag_manager never ran.
+        await ffm.ensure_defaults(PLATFORM_FEATURES)
         set_feature_flag_manager(ffm)
     except Exception as e:
         logger.warning("Feature flags: %s", e)

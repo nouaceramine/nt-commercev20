@@ -28,7 +28,7 @@ export default function LandingPage() {
     title: "NT Commerce — منصّة محاسبة ذكية + متجر إلكتروني للسوق الجزائري 🇩🇿",
     description: "نظام نقاط بيع (POS) سحابي متكامل: محاسبة، مخزون، فواتير، متجر إلكتروني، تكامل Shopify + Yalidine، وإدارة كروت Idoom/SIM. تجربة مجّانية 14 يوم.",
     keywords: "نقاط بيع, POS الجزائر, نظام محاسبة, متجر إلكتروني, Yalidine, Shopify, إدارة مخزون, محل تجاري, NT Commerce, SaaS الجزائر",
-    canonical: "https://nt-commerce.net/",
+    canonical: "http://168.231.81.154/",
   });
 
   useEffect(() => {

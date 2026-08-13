@@ -19,7 +19,7 @@ Disallow: /reports
 Disallow: /settings
 
 # Sitemap location
-Sitemap: https://nt-commerce.net/sitemap.xml
+Sitemap: http://168.231.81.154/sitemap.xml
 
 # Be respectful — crawl-delay 1 second
 Crawl-delay: 1
