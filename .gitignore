@@ -141,3 +141,4 @@ archive/data/backups/
 *.archive
 *.mongodump
 backups/
+*.bak.*
