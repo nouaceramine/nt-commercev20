@@ -1133,3 +1133,40 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 
 ### بعد
 - الموقع 200، API 200، الحاويات سليمة.
+
+
+---
+
+## p57 — تنظيف شامل: حذف الميت والمؤقت والتجريبي (2026-08-14)
+
+### قبل
+- مستأجر تجريبي demo@ntcommerce.com (is_demo=true) + قاعدته (4.3MB) + 354 وثيقة مرتبطة في القاعدة الرئيسية.
+- حزمة `backend/modules/` (124KB) طبقة "motherboard" ميتة — لا يستدعيها main.py (تسببت سابقاً في لبس p54).
+- 16 ملف .bak.pXX ملاصقاً لملفات المصدر + سكربتات خطرة على الإنتاج (reset_db.py، reset_system.py).
+- /tmp على الخادم: 110MB / 303 ملفات (tsv، رموز، سكربتات استيراد قديمة).
+- 4 حزم JS قديمة في /var/www (~17MB) لا يشير إليها index.html + ملفات js/css يتيمة.
+- صور docker ميتة: ntcommerce-frontend، nginx:alpine، وسم mongo:7 المكرر.
+- مجموعة platform_restore_tests (11 وثيقة اختبار)، مفتاح redis يتيم "x"، 25 مجلد __pycache__.
+
+### الحذف (بعد backup في /opt/ntcommerce/backups/p57_cleanup/)
+1. **demo@ntcommerce.com** (بموافقة المستخدم الصريحة): mongodump كامل + وثيقة المستأجر → backup، ثم حذف وثيقة saas_tenants + إسقاط tenant_c24e3b19... + حذف المراجع في impersonation_logs(2)، auto_reports(16)، push_notifications(322)، platform_db_tree(1)، collection_reports(1).
+2. **modules/** + reset_db.py + reset_system.py → أرشيف tgz في backup ثم حذف من الشجرة (التاريخ محفوظ في git).
+3. **ملفات .bak الملاصقة** → نُقلت (لم تُحذف) إلى backups/p57_cleanup/inline_baks/.
+4. **/tmp** مسح كامل (110MB → 0).
+5. **الحزم القديمة**: أبقيت فقط ملفات js/css الموجودة في البناء الحالي (main.4bea96ac.js) — الحذف بعد النشر وليس أثناءه.
+6. **الصور الميتة**: ntcommerce-frontend + nginx:alpine + mongo:7 حُذفت؛ أُبقيت قواعد البناء (python:3.11-slim، node:20-alpine) والصور الحية.
+7. **بيانات**: platform_restore_tests أُسقطت، مفتاح redis "x" حُذف، __pycache__ نظّفت.
+
+### أبقيت (حيّة)
+- template_tenant + store_template (تستخدمهما خدمة التزويد services/tenant_template.py).
+- قاعدتا المستأجرَين الحقيقيَّين + القاعدة الرئيسية.
+- /opt/ntcommerce/backups/ كاملة (قاعدة: لا حذف للنسخ الاحتياطية).
+
+### التحقق
+- backend أعيد تشغيله بعد حذف modules/ → openapi 769 مساراً (autoheal 7، auth 17) — لا شيء تأثر.
+- متصفح: /portal يعمل بدون أي خطأ تحميل (pageerror/reqfail: none).
+- AutoHeal بعد التنظيف: **98/100** (Low وحيد = البريد بالمحاكاة بانتظار مفتاح Brevo).
+- القرص: 13% مستخدم (85G متاحة).
+
+### بعد
+- الموقع 200، API 200، القاعدة تحوي فقط بيانات حية.
