@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { DatabaseManager } from '../../components/DatabaseManager';
 import { SystemAlertsSection } from './components/SystemAlertsSection';
+import { PasswordResetRequestsCard } from './components/PasswordResetRequestsCard';
 import { MonitoringSection } from './components/MonitoringSection';
 import { FinanceReportsSection } from './components/FinanceReportsSection';
 import { MonitoringDashboard } from './components/MonitoringDashboard';
@@ -666,6 +667,7 @@ export default function SaasAdminPage() {
 
           {/* System Alerts Tab */}
           <TabsContent value="alerts" className="space-y-6" data-testid="alerts-content">
+            <PasswordResetRequestsCard />
             <SystemAlertsSection />
           </TabsContent>
 

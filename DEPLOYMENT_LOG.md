@@ -991,3 +991,41 @@ CF apex 200 | CF www 301→apex | CF API 200 | origin 443 ssl_verify=0 | IP مب
 2. UnifiedLoginPage.js: أي دخول جديد يمسح كل بقايا الانتحال (4 مفاتيح).
 3. AuthContext.js: التنظيف الافتتاحي صار يكشف حالة الانتحال المكتملة-لكن-المنتهية (فك ترميز exp) ويمسحها — التعافي الذاتي دون تدخل.
 **التحقق (متصفح حقيقي ×3):** حالة المتصفح المعطلة (رمز منتهٍ+علم) ← تعافى وبقي في /saas-admin بصفر 401 ✔ · انتحال نشط برمز صالح يعمل كما صُمم ✔ · دخول فعلي من النموذج مع بقايا قديمة ← مُسحت ودخل /tenant/dashboard ✔. بناء main.46096d3a.js. حذف مستأجر الاختبار (cascade 200).
+
+## p53 — حزمة صفحة الدخول (2026-08-14)
+
+### الهدف
+1. نسيت كلمة المرور (استعادة برمز 6 أرقام)
+2. فرض 2FA عند تسجيل الدخول
+3. رسائل قفل واضحة + عدّاد محاولات متبقية
+
+### قبل
+- unified-login يصدر التوكن فوراً دون التحقق من two_fa_enabled (2FA موجود للإعداد فقط، لا يُفرض عند الدخول)
+- لا توجد أي آلية لاستعادة كلمة المرور
+- القفل 429 يظهر كـ toast فقط، ورسالة 401 بلا عدّاد
+- حالة القفل `_login_attempts` في الذاكرة لكل worker — مع 4 uvicorn workers العدّاد غير متسق والقفل يحتاج حتى 20 محاولة
+
+### بعد
+**Backend (routes/auth_users_routes.py + services/email_service.py):**
+- `_2fa_gate()`: بعد نجاح كلمة المرور في الفروع الأربعة (مدير/وكيل/موظف/مشترك)، إن كان 2FA مفعّلاً يُخزَّن payload النهائي في main_db.pending_2fa_logins (TTL 5 دقائق، استعمال واحد) ويُعاد `{requires_2fa, pending_token}`
+- POST /api/auth/2fa/login-verify: تحقق TOTP (valid_window=1)، 5 محاولات كحد أقصى، يُصدر نفس payload الدخول
+- POST /api/auth/forgot-password: رمز 6 أرقام (15 دقيقة)، يبحث في users/saas_tenants/saas_agents/tenant_user_directory، ردّ عام دائماً (لا كشف للحسابات)، يحاول الإرسال عبر email_service (mock حالياً)
+- POST /api/auth/reset-password: تحقق الرمز (5 محاولات)، يحدّث كلمة المرور في المخزن الصحيح (bcrypt)، يمسح القفل
+- GET /api/auth/password-reset-requests (admin): قائمة الطلبات — الرمز يظهر فقط للطلبات الفعّالة غير المستعملة (لوضع mock)
+- 401 يتضمن المحاولات المتبقية؛ 429 فوري عند بلوغ الحد
+- **p53b**: حالة القفل انتقلت إلى Redis (bf_cnt:/bf_lock:) مشتركة بين العمّال الأربعة مع سقوط للذاكرة
+- email_service: إضافة get_active_provider() العامة
+
+**Frontend:**
+- UnifiedLoginPage.js: 4 عروض (دخول/2FA/نسيت/إعادة تعيين) بنفس التصميم، صندوق خطأ مضمّن أحمر للقفل وبيانات خاطئة، رابط "نسيت كلمة المرور؟"
+- admin/components/PasswordResetRequestsCard.js: بطاقة في /saas-admin/alerts تعرض الطلبات المعلّقة مع الرمز وزر نسخ (تختفي عند عدم وجود طلبات)
+- bundle: main.40e48539.js
+
+### اختبارات
+- curl: 401 بعدّاد (4→3→2→1→429) متسق عبر العمّال بعد p53b؛ forgot عام للمعروف/المجهول؛ reset E2E برمز حقيقي + دخول ناجح + استعادة كلمة المرور الأصلية
+- 2FA E2E (curl + متصفح): requires_2fa بلا توكن → رمز خاطئ 401 بعدّاد → رمز صحيح يصدر access_token → إعادة الاستعمال مرفوضة
+- متصفح: رابط نسيت + عروض forgot/reset + تحقق عدم التطابق + بطاقة الأدمن تعرض الرمز — كلها PASS بلا أخطاء JS
+- demo@ntcommerce.com أُعيد لحالته الأصلية بعد كل اختبار
+
+### نسخ احتياطية
+routes/auth_users_routes.py.bak.p53/.bak.p53b, services/email_service.py.bak.p53, frontend/src/pages/UnifiedLoginPage.js.bak.p53, frontend/src/pages/admin/SaasAdminPage.js.bak.p53

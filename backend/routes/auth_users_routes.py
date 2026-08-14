@@ -15,10 +15,26 @@ import io
 import base64
 import bcrypt
 import jwt
+import secrets
 
 from utils.auth import email_ci
 
 logger = logging.getLogger(__name__)
+
+
+
+# ── p53: login-package request models ────────────────────────────────────────
+class TwoFALoginVerifyRequest(BaseModel):
+    pending_token: str
+    code: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
 
 
 def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_tenant_admin, require_tenant, get_tenant_db, hash_password, verify_password, create_access_token, init_tenant_database, init_default_data, init_cash_boxes, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_HOURS, security, UserCreate, UserLogin, UserUpdate, UserResponse, TokenResponse, PasswordUpdate, limiter=None) -> dict:
@@ -35,32 +51,114 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
     # ============ AUTH ROUTES ============
 
     # Brute-force protection state (p45: restored — accidentally removed by p11 dead-code dedup)
-    _login_attempts = {}  # {email: {"count": int, "locked_until": str}}
+    # p53b: shared across the 4 uvicorn workers via Redis (in-memory fallback).
+    _login_attempts = {}  # {email: {"count": int, "locked_until": str}} — fallback only
     MAX_LOGIN_ATTEMPTS = 5
     LOCKOUT_MINUTES = 15
 
-    def _check_brute_force(email: str) -> dict:
-        """Check if account is locked due to too many failed attempts"""
-        info = _login_attempts.get(email)
-        if not info:
-            return
-        if info.get("locked_until"):
+    _bf_redis = None
+    try:
+        import redis as _redis_mod
+        _bf_redis = _redis_mod.from_url(
+            os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+            decode_responses=True, socket_connect_timeout=2,
+        )
+        _bf_redis.ping()
+    except Exception:  # noqa: BLE001
+        _bf_redis = None
+
+    def _bf_keys(email: str):
+        e = (email or "").strip().lower()
+        return f"bf_cnt:{e}", f"bf_lock:{e}"
+
+    def _bf_locked_minutes(email: str) -> int:
+        """Minutes left on the lockout (0 = not locked)."""
+        if _bf_redis:
+            try:
+                ttl = _bf_redis.ttl(_bf_keys(email)[1])
+                return (ttl + 59) // 60 if ttl and ttl > 0 else 0
+            except Exception:  # noqa: BLE001
+                pass
+        e = (email or "").strip().lower()
+        info = _login_attempts.get(e)
+        if info and info.get("locked_until"):
             locked = datetime.fromisoformat(info["locked_until"])
             if datetime.now(timezone.utc) < locked:
-                remaining = int((locked - datetime.now(timezone.utc)).total_seconds() / 60) + 1
-                raise HTTPException(status_code=429, detail=f"الحساب مقفل. حاول بعد {remaining} دقيقة")
-            else:
-                _login_attempts.pop(email, None)
+                return int((locked - datetime.now(timezone.utc)).total_seconds() / 60) + 1
+            _login_attempts.pop(e, None)
+        return 0
 
-    def _record_failed_login(email: str) -> dict:
-        info = _login_attempts.get(email, {"count": 0})
+    def _check_brute_force(email: str) -> None:
+        """Check if account is locked due to too many failed attempts"""
+        remaining = _bf_locked_minutes(email)
+        if remaining:
+            raise HTTPException(status_code=429, detail=f"الحساب مقفل. حاول بعد {remaining} دقيقة")
+
+    def _record_failed_login(email: str) -> None:
+        if _bf_redis:
+            try:
+                cnt_key, lock_key = _bf_keys(email)
+                count = _bf_redis.incr(cnt_key)
+                _bf_redis.expire(cnt_key, 30 * 60)
+                if count >= MAX_LOGIN_ATTEMPTS:
+                    _bf_redis.set(lock_key, "1", ex=LOCKOUT_MINUTES * 60)
+                    _bf_redis.delete(cnt_key)
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        e = (email or "").strip().lower()
+        info = _login_attempts.get(e, {"count": 0})
         info["count"] = info.get("count", 0) + 1
         if info["count"] >= MAX_LOGIN_ATTEMPTS:
             info["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
-        _login_attempts[email] = info
+        _login_attempts[e] = info
 
-    def _clear_failed_login(email: str) -> dict:
-        _login_attempts.pop(email, None)
+    def _clear_failed_login(email: str) -> None:
+        if _bf_redis:
+            try:
+                _bf_redis.delete(*_bf_keys(email))
+            except Exception:  # noqa: BLE001
+                pass
+        _login_attempts.pop((email or "").strip().lower(), None)
+
+    def _bf_attempts_used(email: str) -> int:
+        if _bf_redis:
+            try:
+                v = _bf_redis.get(_bf_keys(email)[0])
+                return int(v) if v else 0
+            except Exception:  # noqa: BLE001
+                pass
+        return _login_attempts.get((email or "").strip().lower(), {}).get("count", 0)
+
+    # ── p53: pending-2FA gate ────────────────────────────────────────────────
+    PENDING_2FA_TTL_MINUTES = 5
+    RESET_CODE_TTL_MINUTES = 15
+
+    async def _2fa_gate(user_record: dict, final_payload: dict) -> dict:
+        """If the account has TOTP 2FA enabled, stash the minted login payload
+        server-side (5 min TTL, single use) and ask the client for the
+        authenticator code instead of returning the token directly."""
+        secret = user_record.get("two_fa_secret")
+        if not (user_record.get("two_fa_enabled") and secret):
+            return final_payload
+        now = datetime.now(timezone.utc)
+        # lazy cleanup of expired pending logins (ISO strings compare lexically in UTC)
+        await main_db.pending_2fa_logins.delete_many({"expires_at": {"$lt": now.isoformat()}})
+        pending_id = str(uuid.uuid4())
+        await main_db.pending_2fa_logins.insert_one({
+            "_id": pending_id,
+            "secret": secret,
+            "payload": final_payload,
+            "attempts": 0,
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(minutes=PENDING_2FA_TTL_MINUTES)).isoformat(),
+        })
+        return {
+            "requires_2fa": True,
+            "pending_token": pending_id,
+            "message": "أدخل رمز التحقق المكوّن من 6 أرقام من تطبيق المصادقة",
+        }
+
 
     @router.post("/auth/unified-login")
     @limiter.limit("20/minute")
@@ -84,7 +182,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             if stored_password and verify_password(password, stored_password):
                 _clear_failed_login(email)
                 access_token = create_access_token({"sub": user["id"], "role": user["role"]})
-                return {
+                return await _2fa_gate(user, {
                     "access_token": access_token,
                     "user_type": "admin",
                     "redirect_to": "/saas-admin",
@@ -96,7 +194,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "permissions": user.get("permissions", {}),
                         "features": user.get("features")
                     }
-                }
+                })
 
         # 2. Check Agents
         agent = await db.saas_agents.find_one({"email": email_ci(email)}, {"_id": 0})
@@ -115,7 +213,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "type": "agent"
                     }
                     access_token = create_access_token(token_data)
-                    return {
+                    return await _2fa_gate(agent, {
                         "access_token": access_token,
                         "user_type": "agent",
                         "redirect_to": "/agent/dashboard",
@@ -127,7 +225,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "current_balance": agent.get("current_balance", 0),
                             "credit_limit": agent.get("credit_limit", 0)
                         }
-                    }
+                    })
             except Exception:
                 pass
 
@@ -158,7 +256,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "tenant_id": directory["tenant_id"],
                         }
                         access_token = create_access_token(token_data)
-                        return {
+                        return await _2fa_gate(emp_user, {
                             "access_token": access_token,
                             "user_type": "tenant",
                             "redirect_to": "/tenant/dashboard",
@@ -171,7 +269,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                                 "permissions": emp_user.get("permissions", {}),
                                 "is_employee": True,
                             },
-                        }
+                        })
 
         # 3. Check Tenants
         tenant = await db.saas_tenants.find_one({"email": email_ci(email)}, {"_id": 0})
@@ -263,7 +361,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     features = {**plan.get("features", {}), **tenant.get("features_override", {})} if plan else {}
                     limits = {**plan.get("limits", {}), **tenant.get("limits_override", {})} if plan else {}
 
-                    return {
+                    return await _2fa_gate(tenant, {
                         "access_token": access_token,
                         "user_type": "tenant",
                         "redirect_to": "/tenant/dashboard",
@@ -279,7 +377,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "features": features,
                             "limits": limits
                         }
-                    }
+                    })
             except HTTPException:
                 raise
             except Exception:
@@ -287,7 +385,162 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
 
         # No user found
         _record_failed_login(email)
-        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+        if _bf_locked_minutes(email):
+            raise HTTPException(status_code=429, detail=f"تم قفل الحساب مؤقتاً لمدة {LOCKOUT_MINUTES} دقيقة بسبب تكرار محاولات الدخول الخاطئة")
+        _remaining = MAX_LOGIN_ATTEMPTS - _bf_attempts_used(email)
+        raise HTTPException(status_code=401, detail=f"بيانات الدخول غير صحيحة — تبقّى {_remaining} من المحاولات قبل قفل الحساب مؤقتاً")
+
+    @router.post("/auth/2fa/login-verify")
+    @limiter.limit("10/minute")
+    async def login_verify_2fa(request: Request, body: TwoFALoginVerifyRequest):
+        """p53: second step of login — validate the TOTP code against the
+        pending login and release the stashed payload (single use)."""
+        doc = await main_db.pending_2fa_logins.find_one({"_id": body.pending_token})
+        if not doc:
+            raise HTTPException(status_code=401, detail="انتهت صلاحية طلب التحقق — أعد تسجيل الدخول")
+        if datetime.fromisoformat(doc["expires_at"]) < datetime.now(timezone.utc):
+            await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
+            raise HTTPException(status_code=401, detail="انتهت صلاحية طلب التحقق — أعد تسجيل الدخول")
+        if doc.get("attempts", 0) >= 5:
+            await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
+            raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — أعد تسجيل الدخول من جديد")
+        code = (body.code or "").strip().replace(" ", "")
+        if not pyotp.TOTP(doc["secret"]).verify(code, valid_window=1):
+            await main_db.pending_2fa_logins.update_one({"_id": body.pending_token}, {"$inc": {"attempts": 1}})
+            remaining = 5 - (doc.get("attempts", 0) + 1)
+            raise HTTPException(status_code=401, detail=f"رمز التحقق غير صحيح — تبقّى {remaining} من المحاولات")
+        payload = doc["payload"]
+        await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
+        return payload
+
+    @router.post("/auth/forgot-password")
+    @limiter.limit("5/minute")
+    async def forgot_password(request: Request, body: ForgotPasswordRequest):
+        """p53: issue a 6-digit reset code (15 min TTL). The code is emailed
+        when a real provider is configured; while email runs in mock mode the
+        super admin relays it from /saas-admin/alerts. Response is generic to
+        avoid account enumeration."""
+        generic = {"message": "إذا كان البريد مسجلاً لدينا، فستصلك تعليمات إعادة تعيين كلمة المرور."}
+        email = (body.email or "").strip().lower()
+        if not email or "@" not in email:
+            return generic
+
+        account = None  # (kind, account_id, tenant_id)
+        u = await db.users.find_one({"email": email_ci(email)}, {"_id": 0, "id": 1})
+        if u:
+            account = ("main_user", u["id"], None)
+        if not account:
+            t = await db.saas_tenants.find_one({"email": email_ci(email)}, {"_id": 0, "id": 1})
+            if t:
+                account = ("tenant_owner", t["id"], t["id"])
+        if not account:
+            a = await db.saas_agents.find_one({"email": email_ci(email)}, {"_id": 0, "id": 1})
+            if a:
+                account = ("agent", a["id"], None)
+        if not account:
+            d = await main_db.tenant_user_directory.find_one({"email": email}, {"_id": 0})
+            if d:
+                account = ("employee", d["user_id"], d["tenant_id"])
+        if not account:
+            return generic
+
+        code = f"{secrets.randbelow(1000000):06d}"
+        now = datetime.now(timezone.utc)
+        await main_db.password_reset_requests.update_one(
+            {"email": email},
+            {"$set": {
+                "email": email,
+                # plaintext on purpose (15-min TTL): the super admin relays it
+                # while the email provider is in mock mode.
+                "code": code,
+                "account_kind": account[0],
+                "account_id": account[1],
+                "tenant_id": account[2],
+                "created_at": now.isoformat(),
+                "expires_at": (now + timedelta(minutes=RESET_CODE_TTL_MINUTES)).isoformat(),
+                "used": False,
+                "attempts": 0,
+                "delivered": False,
+            }},
+            upsert=True,
+        )
+        html = (
+            "<div dir='rtl' style='font-family:Arial,sans-serif'>"
+            "<h3>إعادة تعيين كلمة المرور — NT Commerce</h3>"
+            f"<p>رمز إعادة التعيين الخاص بك: <b style='font-size:20px'>{code}</b></p>"
+            "<p>الرمز صالح لمدة 15 دقيقة. إذا لم تطلب إعادة التعيين، تجاهل هذه الرسالة.</p>"
+            "</div>"
+        )
+        try:
+            from services.email_service import send_email as _send_mail
+            delivered = await _send_mail(email, "إعادة تعيين كلمة المرور — NT Commerce", html=html)
+            if delivered:
+                await main_db.password_reset_requests.update_one({"email": email}, {"$set": {"delivered": True}})
+        except Exception as exc:  # noqa: BLE001 — best effort, never leak
+            logger.warning("forgot-password email send failed: %s", exc)
+        return generic
+
+    @router.post("/auth/reset-password")
+    @limiter.limit("10/minute")
+    async def reset_password(request: Request, body: ResetPasswordRequest):
+        """p53: validate the code and set the new password in the right store."""
+        email = (body.email or "").strip().lower()
+        req = await main_db.password_reset_requests.find_one({"email": email})
+        now = datetime.now(timezone.utc)
+        if not req or req.get("used") or req.get("expires_at", "") < now.isoformat():
+            raise HTTPException(status_code=400, detail="الرمز غير صالح أو منتهي الصلاحية — اطلب رمزاً جديداً")
+        if req.get("attempts", 0) >= 5:
+            await main_db.password_reset_requests.update_one({"email": email}, {"$set": {"used": True}})
+            raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — اطلب رمزاً جديداً")
+        if (body.code or "").strip() != req.get("code"):
+            await main_db.password_reset_requests.update_one({"email": email}, {"$inc": {"attempts": 1}})
+            remaining = 5 - (req.get("attempts", 0) + 1)
+            raise HTTPException(status_code=400, detail=f"الرمز غير صحيح — تبقّى {remaining} من المحاولات")
+        new_pw = body.new_password or ""
+        if len(new_pw) < 6:
+            raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 6 أحرف على الأقل")
+
+        new_hash = bcrypt.hashpw(new_pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        kind = req.get("account_kind")
+        if kind == "main_user":
+            await db.users.update_one({"id": req["account_id"]}, {"$set": {"hashed_password": new_hash}})
+        elif kind == "tenant_owner":
+            await db.saas_tenants.update_one({"id": req["account_id"]}, {"$set": {"password": new_hash}})
+            tenant_db_conn = get_tenant_db(req["tenant_id"])
+            await tenant_db_conn.users.update_many({"email": email}, {"$set": {"hashed_password": new_hash}})
+        elif kind == "agent":
+            await db.saas_agents.update_one({"id": req["account_id"]}, {"$set": {"password": new_hash}})
+        elif kind == "employee":
+            tenant_db_conn = get_tenant_db(req["tenant_id"])
+            await tenant_db_conn.users.update_one({"id": req["account_id"]}, {"$set": {"hashed_password": new_hash}})
+        else:
+            raise HTTPException(status_code=400, detail="طلب غير صالح — اطلب رمزاً جديداً")
+
+        await main_db.password_reset_requests.update_one(
+            {"email": email}, {"$set": {"used": True, "used_at": now.isoformat()}, "$unset": {"code": ""}}
+        )
+        _clear_failed_login(email)
+        return {"message": "تم تغيير كلمة المرور بنجاح — يمكنك تسجيل الدخول الآن"}
+
+    @router.get("/auth/password-reset-requests")
+    async def list_password_reset_requests(admin: dict = Depends(get_admin_user)):
+        """p53: super-admin visibility into pending reset requests (needed while
+        the email provider is in mock mode and codes are relayed manually)."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        items = []
+        async for r in main_db.password_reset_requests.find({}, {"_id": 0}).sort("created_at", -1).limit(50):
+            expired = r.get("expires_at", "") < now_iso
+            r["expired"] = expired
+            if r.get("used") or expired:
+                r.pop("code", None)
+            items.append(r)
+        provider = "mock"
+        try:
+            from services.email_service import get_active_provider
+            provider = await get_active_provider()
+        except Exception:  # noqa: BLE001
+            pass
+        return {"items": items, "email_provider": provider}
 
     @router.post("/auth/2fa/setup")
     async def setup_2fa(current_user: dict = Depends(get_current_user)):

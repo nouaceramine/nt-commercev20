@@ -187,6 +187,16 @@ async def send_email(to: str, subject: str, html: str = "", body: str = "") -> b
     return await _default_service.send_email(to=to, subject=subject, html=content)
 
 
+async def get_active_provider() -> str:
+    """DB-aware active provider name (p53) — reflects the super-admin's saved
+    preference / configured keys, falling back to env-only detection."""
+    try:
+        cfg = await _default_service._resolved_config()
+        return _default_service._pick_provider(cfg)
+    except Exception:  # noqa: BLE001
+        return get_email_provider()
+
+
 def get_email_provider() -> str:
     """Public helper for diagnostics — env-only (no DB lookup)."""
     if os.environ.get("BREVO_API_KEY"):
