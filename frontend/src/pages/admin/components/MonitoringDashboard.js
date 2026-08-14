@@ -6,7 +6,7 @@ import { Button } from '../../../components/ui/button';
 import {
   Users, Building, CreditCard, TrendingUp, Package,
   Clock, AlertTriangle, DollarSign, Truck, Bot, BarChart3,
-  Database, Activity, Bell, ShieldCheck, Banknote, Boxes,
+  Database, Activity, Bell, ShieldCheck, Banknote, Boxes, HeartPulse,
   Smartphone, Receipt, LayoutDashboard, Bug, FileText, Server
 } from 'lucide-react';
 import PlatformCapacityCard from './PlatformCapacityCard';
@@ -30,6 +30,7 @@ const QUICK_LINKS = [
   { to: '/saas-admin/default-pos-shortcuts', Icon: LayoutDashboard, labelAr: 'اختصارات POS' },
   { to: '/saas-admin/tenant-debts',      Icon: Receipt,       labelAr: 'ديون التجار' },
   { to: '/saas-admin/audit-timeline',    Icon: Activity,      labelAr: 'سجل التدقيق' },
+  { to: '/saas-admin/autoheal',         Icon: HeartPulse,    labelAr: 'الإصلاح الذاتي' },
 ];
 
 export const MonitoringDashboard = () => {
@@ -89,6 +90,15 @@ export const MonitoringDashboard = () => {
           >
             <AlertTriangle className="h-4 w-4" />
             سجل الأخطاء
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/saas-admin/autoheal')}
+            className="gap-2"
+            data-testid="go-to-autoheal-btn"
+          >
+            <HeartPulse className="h-4 w-4" />
+            الإصلاح الذاتي
           </Button>
           <Button
             variant="outline"
