@@ -973,3 +973,9 @@ CF apex 200 | CF www 301→apex | CF API 200 | origin 443 ssl_verify=0 | IP مب
 1. **tracking_number_1 IndexKeySpecsConflict**: main.py:633 يطلب unique+sparse وenhanced_shipping_indexes.py يطلب عادياً — كل واحد يتعارض مع الآخر كل إقلاع. الحل: توحيد المواصفة unique+sparse في الملفين (القواعد الأربع أُعيد بناء فهارسها يدوياً — المجموعة فارغة، صفر مخاطرة).
 2. **FeatureFlagManager.ensure_defaults غير موجود**: استدعاء قديم في main.py يرمي AttributeError يبتلعه try ← **set_feature_flag_manager لم يُنفَّذ قط منذ كتابته** (المدير لم يُسجَّل). حُذف السطر — /api/platform/features يعمل 200.
 - إقلاع نهائي نظيف 100% (صفر تحذيرات عدا FutureWarning تجميلي في ai_routes).
+
+## p50 — إغلاق سلسلة الأمان: Full (Strict) + Always Use HTTPS (2026-08-13)
+- المالك فعّل من لوحة Cloudflare: SSL/TLS ← **Full (Strict)** ثم Edge Certificates ← **Always Use HTTPS**.
+- تحقق كامل: http apex → 301 https ✔ | http www → 301 https apex ✔ | https apex 200 ✔ | API حي ✔ | www 301 ✔ | webhook 200 ✔.
+- البنية النهائية: زائر ← إجبار HTTPS عند الحافة → Cloudflare ← Full Strict (شهادة LE مُتحقق منها) → الأصل :443 ← التطبيق. الجدار يقبل 80/443 من عناوين Cloudflare فقط. شهادة LE تتجدد تلقائياً (webroot عبر CF — مُثبت بـ dry-run).
+- **لا مهام أمنية مؤجلة متبقية.**
