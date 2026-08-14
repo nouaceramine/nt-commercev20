@@ -49,6 +49,12 @@ export default function UnifiedLoginPage() {
     .then(function(res) { return res.json(); })
     .then(function(result) {
       if (result.access_token) {
+        // p52: a fresh normal login must wipe any stale impersonation session,
+        // otherwise the expired super_admin_token keeps hijacking /saas/* calls.
+        localStorage.removeItem('super_admin_token');
+        localStorage.removeItem('super_admin_user');
+        localStorage.removeItem('is_impersonating');
+        localStorage.removeItem('impersonation_session_id');
         localStorage.setItem('token', result.access_token);
         localStorage.setItem('user', JSON.stringify(result.user));
         toast.success('تم تسجيل الدخول بنجاح!');

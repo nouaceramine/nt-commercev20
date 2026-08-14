@@ -15,10 +15,23 @@ export const AuthProvider = ({ children }) => {
     // indicates the user logged out or a stale token survived a refresh.
     if (typeof window !== 'undefined') {
       const hasFlag = localStorage.getItem('is_impersonating') === '1';
-      const hasSuperToken = !!localStorage.getItem('super_admin_token');
-      if (hasSuperToken && !hasFlag) {
-        localStorage.removeItem('super_admin_token');
-        localStorage.removeItem('super_admin_user');
+      const superTokenRaw = localStorage.getItem('super_admin_token');
+      if (superTokenRaw) {
+        // p52: also drop a COMPLETE-but-EXPIRED impersonation state (flag + dead token).
+        let expired = false;
+        try {
+          const b64 = superTokenRaw.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+          const pl = JSON.parse(atob(b64));
+          expired = !!(pl.exp && pl.exp * 1000 < Date.now());
+        } catch (e) { expired = false; }
+        if (!hasFlag || expired) {
+          localStorage.removeItem('super_admin_token');
+          localStorage.removeItem('super_admin_user');
+          if (expired && hasFlag) {
+            localStorage.removeItem('is_impersonating');
+            localStorage.removeItem('impersonation_session_id');
+          }
+        }
       }
     }
     const verifyToken = async () => {
