@@ -292,7 +292,14 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     tenant_db_conn = get_tenant_db(tenant_id)
                     if not tenant.get("database_initialized", False):
                         logger.info(f"First login (unified) for tenant {tenant_id} - initializing database...")
-                        tenant_db_conn = await init_tenant_database(tenant_id)
+                        # p60: try golden-template provisioning first (same as registration/saas paths)
+                        try:
+                            from services.tenant_template import copy_template_to_tenant
+                            await copy_template_to_tenant(tenant_id)
+                            tenant_db_conn = get_tenant_db(tenant_id)
+                        except Exception as _tpl_err:
+                            logger.warning(f"template copy failed on first login, legacy seeding: {_tpl_err}")
+                            tenant_db_conn = await init_tenant_database(tenant_id)
 
                         # Create admin user in tenant's database
                         admin_user_id = str(uuid.uuid4())

@@ -1232,3 +1232,36 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 
 ### بعد
 - كل طلب إلكتروني له أثر محاسبي دقيق: فائدة محققة عند التسليم، خسارة موثقة (شحن ذهاب + إرجاع) عند الاسترجاع — معطيات الربحية صحيحة ودقيقة.
+
+
+---
+
+## p60 — 2026-08-15 — توحيد مساري بذر المستأجرين + إغلاق آخر المهام المؤجلة القابلة للتنفيذ
+
+### قبل
+- مسارا بذر منفصلان غير متزامنين (مؤجل منذ السطر 540): `init_tenant_database` (3 بذور: خزائن/مستودع/إعدادات) مقابل `init_default_data` (6 بذور: عائلات + زبون/مورد/منتج افتراضي) — كل مستأجر يولد مختلفاً حسب المسار.
+- مسار أول دخول موحّد (auth_users_routes) لا يجرّب القالب الذهبي إطلاقاً، بعكس مساري التسجيل وإنشاء المستأجر.
+- تحذير بدء التشغيل `sim catalog index create failed ... E11000 duplicate key {operator:"Djezzy",tier:"retail"}` (مؤجل منذ السطر 877).
+- روابط IP قديمة hardcoded غير حرجة (مؤجل منذ p44): canonical/og:image في الواجهة + رسالة Conversions API + عرض store slug في backend.
+
+### التغيير
+1. **نسخ احتياطي أولاً**: `/opt/ntcommerce/backups/p60_seed_unify/` (database.py + main.py + auth_users_routes.py).
+2. **`config/database.py`**: دالة مشتركة جديدة `seed_default_entities(tenant_db)` (المصدر الوحيد للحقيقة للكيانات الستة الافتراضية، idempotent بفحوص find_one) + تُستدعى في نهاية `init_tenant_database` — مسار البذر الاحتياطي (legacy fallback) ينتج الآن نفس المجموعة الكاملة (9 بذور).
+3. **`main.py`**: `init_default_data` أصبحت تفويضاً للدالة المشتركة — استحال انحراف المسارين مجدداً.
+4. **`routes/auth_users_routes.py`**: أول دخول موحّد يجرّب `copy_template_to_tenant` أولاً (مثل مساري التسجيل/saas) مع fallback للبذر القديم عند الفشل.
+5. **sim_catalog**: تحقق — لا تكرارات حالياً (7 وثائق، dupe scan فارغ)، الفهرس الفريد `sim_operator_tier_unique` موجود، ولا تحذير في إقلاع هذا اليوم. التكرارات أُزيلت ضمن تنظيف p57. **أُغلق دون تدخل.**
+6. **روابط IP القديمة**: تحقق شامل — صفر occurrence لـ `168.231` في frontend/src و frontend/public، ولا شيء في backend سوى CORS allow_origins في main.py (مقصود: إبقاء الوصول المباشر القديم يعمل). رسالة Conversions API تبني روابط Facebook/TikTok فقط. **أُغلق دون تدخل.**
+
+### بعد (تم التحقق)
+- إعادة تشغيل backend: startup نظيف، openapi.json ← 200 ✅
+- اختبار المسار الموحّد على مستأجر scratch `p60test-seed-unify`: التشغيل الأول ← 9/9 بذور (4 خزائن + مستودع + إعدادات + 3 عائلات + زبون + مورد + منتج) ✅؛ التشغيل الثاني idempotent (نفس الأعداد) ✅؛ قاعدة scratch حُذفت ✅
+- `POST /api/auth/unified-login` بكلمة خاطئة ← 401 (المسار حي) ✅
+- `https://nt-commerce.net/` ← 200 و `/api/shop/nt` ← 200 عبر Cloudflare ✅
+- المستأجران الحيّان لم يُمسّا (يفتقدان default-product لأن المستخدمين حذفاه — لا فرض للبذور على قواعد قائمة)
+
+### المتبقي (جهة المستخدم فقط — لا يمكن تنفيذها من الخادم)
+- مفتاح Brevo API في /saas-admin/email-settings (وضع البريد mock).
+- تفعيل 2FA لحساب superadmin@ntcommerce.com.
+- شهادة Cloudflare Origin → Full (Strict) (لوحة Cloudflare).
+- تدوير GitHub PAT (حساب GitHub).
+- NT-0011 يؤكد دخوله (اشتراكه ينتهي 2026-08-26).

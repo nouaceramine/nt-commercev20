@@ -60,6 +60,111 @@ def set_tenant_context(tenant_db: AsyncIOMotorDatabase) -> None:
     _tenant_db_ctx.set(tenant_db)
 
 
+
+async def seed_default_entities(tenant_db) -> None:
+    """p60: shared idempotent seeder for the 6 default entities
+    (customer/supplier families + default customer/supplier/product).
+    Single source of truth used by both init_tenant_database (legacy path)
+    and main.init_default_data (manual endpoint)."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    default_customer_family_id = "default-customer-family"
+    if not await tenant_db.customer_families.find_one({"id": default_customer_family_id}):
+        await tenant_db.customer_families.insert_one({
+            "id": default_customer_family_id,
+            "name": "عائلة زبائن متنوعة",
+            "name_fr": "Famille clients divers",
+            "description": "عائلة افتراضية للزبائن",
+            "discount": 0,
+            "created_at": now,
+            "updated_at": now
+        })
+    default_customer_id = "default-customer"
+    if not await tenant_db.customers.find_one({"id": default_customer_id}):
+        await tenant_db.customers.insert_one({
+            "id": default_customer_id,
+            "name": "زبون متنوع",
+            "name_fr": "Client divers",
+            "phone": "",
+            "email": "",
+            "address": "",
+            "family_id": default_customer_family_id,
+            "family_name": "عائلة زبائن متنوعة",
+            "balance": 0,
+            "total_purchases": 0,
+            "notes": "زبون افتراضي للمبيعات العامة",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_supplier_family_id = "default-supplier-family"
+    if not await tenant_db.supplier_families.find_one({"id": default_supplier_family_id}):
+        await tenant_db.supplier_families.insert_one({
+            "id": default_supplier_family_id,
+            "name": "عائلة مورد متنوع",
+            "name_fr": "Famille fournisseurs divers",
+            "description": "عائلة افتراضية للموردين",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_supplier_id = "default-supplier"
+    if not await tenant_db.suppliers.find_one({"id": default_supplier_id}):
+        await tenant_db.suppliers.insert_one({
+            "id": default_supplier_id,
+            "name": "مورد متنوع",
+            "name_fr": "Fournisseur divers",
+            "phone": "",
+            "email": "",
+            "address": "",
+            "family_id": default_supplier_family_id,
+            "family_name": "عائلة مورد متنوع",
+            "balance": 0,
+            "total_purchases": 0,
+            "notes": "مورد افتراضي للمشتريات العامة",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_product_family_id = "default-product-family"
+    if not await tenant_db.product_families.find_one({"id": default_product_family_id}):
+        await tenant_db.product_families.insert_one({
+            "id": default_product_family_id,
+            "name": "عائلة منتج متنوع",
+            "name_fr": "Famille produits divers",
+            "name_ar": "عائلة منتج متنوع",
+            "name_en": "Various Products Family",
+            "description": "عائلة افتراضية للمنتجات",
+            "description_ar": "عائلة افتراضية للمنتجات المتنوعة",
+            "description_en": "Default family for various products",
+            "parent_id": "",
+            "parent_name": "",
+            "image": "",
+            "created_at": now,
+            "updated_at": now
+        })
+    default_product_id = "default-product"
+    if not await tenant_db.products.find_one({"id": default_product_id}):
+        await tenant_db.products.insert_one({
+            "id": default_product_id,
+            "name_ar": "منتج متنوع",
+            "name_en": "Produit divers",
+            "article_code": "DIVERS-001",
+            "barcode": "",
+            "family_id": default_product_family_id,
+            "family_name": "عائلة منتج متنوع",
+            "purchase_price": 0,
+            "wholesale_price": 0,
+            "retail_price": 0,
+            "quantity": 0,
+            "min_stock": 0,
+            "unit": "وحدة",
+            "description": "منتج افتراضي للمبيعات المتنوعة",
+            "supplier_id": default_supplier_id,
+            "supplier_name": "مورد متنوع",
+            "image": "",
+            "created_at": now,
+            "updated_at": now
+        })
+
+
 async def init_tenant_database(tenant_id: str) -> AsyncIOMotorDatabase:
     """Initialize a new tenant database with default collections and data"""
     from datetime import datetime, timezone
@@ -98,6 +203,10 @@ async def init_tenant_database(tenant_id: str) -> AsyncIOMotorDatabase:
             "currency": "دج",
             "language": "ar"
         })
+    
+    # p60: legacy seeding path now produces the same complete default set
+    # as the golden template / init_default_data endpoint (idempotent).
+    await seed_default_entities(tenant_db)
     
     return tenant_db
 
