@@ -15,6 +15,7 @@ Safety rules (from the AutoHeal spec):
 """
 import asyncio
 import hashlib
+import re
 import logging
 import os
 import shutil
@@ -71,6 +72,16 @@ def start_autoheal_scheduler(interval_seconds: int = SCAN_INTERVAL_SECONDS, firs
     logger.info("AutoHeal scheduler started (every %ss, first run in %ss)", interval_seconds, first_delay)
 
 
+async def emit_exception_finding(component_key: str, component_name_ar: str,
+                                 path: str, method: str, error_id: str, exc: Exception) -> None:
+    """p55 Channel 1 — real-time bridge: core.error_handler calls this on every
+    unhandled exception so it becomes an AutoHeal finding instantly (no 5-min wait)."""
+    try:
+        await get_engine().emit_exception(component_key, component_name_ar, path, method, error_id, exc)
+    except Exception:  # noqa: BLE001 — never break the error handler itself
+        logger.warning("AutoHeal emit_exception_finding failed", exc_info=True)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -116,6 +127,10 @@ class AutoHealEngine:
             self._check_expired_subscriptions,
             self._check_email_provider,
             self._check_bruteforce_wave,
+            # p55: log-system channels
+            self._check_error_log_patterns,
+            self._check_client_logs,
+            self._check_component_metrics,
         ]
         for check in checks:
             try:
@@ -402,6 +417,141 @@ class AutoHealEngine:
             "within-1h", "security",
             remediation_key="clear_bruteforce_locks", remediation_payload={},
         )
+
+    # ── p55 Channel 1: real-time exception intake ────────────────────────────
+    async def emit_exception(self, component_key, component_name_ar, path, method, error_id, exc):
+        exc_type = type(exc).__name__
+        norm_path = re.sub(r"[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9a-f]{24}|/\d+", "/{id}", path)
+        sensitive = component_key in ("auth", "payments", "sales", "finance", "wallet", "customers")
+        sev = "Critical" if sensitive else "High"
+        f = self._finding(
+            sev, "System-wide", component_key, f"exc:{exc_type}:{norm_path}",
+            f"استثناء غير معالَج في {component_name_ar}: {exc_type}",
+            f"{method} {path} → {exc_type}: {str(exc)[:200]}",
+            f"راجع logs/{component_key}.log — error_id: {error_id}",
+            "immediate" if sensitive else "within-1h", "availability",
+        )
+        stored = await self._upsert_finding("realtime", f)
+        if stored and sev == "Critical":
+            await self._notify_critical(stored)
+
+    # ── p55 Channel 2: incremental errors.log pattern reader ────────────────
+    async def _check_error_log_patterns(self):
+        log_file = os.path.join(os.path.dirname(__file__), "..", "logs", "errors.log")
+        if not os.path.isfile(log_file):
+            return None
+        try:
+            size = os.path.getsize(log_file)
+            state = await self._main_db.autoheal_state.find_one({"_id": "errors_log_offset"})
+            offset = state["value"] if state else None
+            if offset is None:
+                # first run: skip history, start tailing from now
+                await self._main_db.autoheal_state.update_one(
+                    {"_id": "errors_log_offset"},
+                    {"$set": {"value": size, "initialized_at": _iso(_now())}},
+                    upsert=True,
+                )
+                logger.info("AutoHeal errors.log tailing initialized at offset %s", size)
+                return None
+            if size < offset:  # log rotated
+                offset = 0
+            with open(log_file, encoding="utf-8", errors="replace") as fh:
+                fh.seek(offset)
+                chunk = fh.read(1_000_000)  # cap per cycle
+                new_offset = fh.tell()
+            await self._main_db.autoheal_state.update_one(
+                {"_id": "errors_log_offset"}, {"$set": {"value": new_offset}}, upsert=True
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+        patterns = {}  # (component, norm_msg) -> {"count": int, "sample": str}
+        for line in chunk.splitlines():
+            parts = line.split(" | ", 3)
+            if len(parts) < 4 or parts[1].strip() != "ERROR":
+                continue  # continuation lines of tracebacks
+            comp = parts[2].replace("nt.", "", 1)
+            msg = parts[3]
+            norm = re.sub(r"[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9a-f]{24}|\d+", "#", msg)
+            norm = re.sub(r"\s+", " ", norm).strip()[:120]
+            key = (comp, norm)
+            p = patterns.setdefault(key, {"count": 0, "sample": msg})
+            p["count"] += 1
+
+        findings = []
+        for (comp, norm), p in patterns.items():
+            if p["count"] >= 20:
+                sev = "High"
+            elif p["count"] >= 5:
+                sev = "Medium"
+            else:
+                continue
+            findings.append(self._finding(
+                sev, "System-wide", comp, f"logpat:{_sig(comp, norm)}",
+                f"نمط أخطاء متكرر في {comp} ({p['count']}× خلال دورة المسح)",
+                f"العينة: {p['sample'][:180]}",
+                f"راجع logs/{comp}.log للتفاصيل الكاملة",
+                "within-1h" if sev == "High" else "within-24h", "availability",
+            ))
+        return findings or None
+
+    # ── p55 Channel 3: frontend/client error logs (system_logs) ─────────────
+    async def _check_client_logs(self):
+        try:
+            cutoff = _iso(_now() - timedelta(minutes=10))
+            docs = await self._main_db.system_logs.find(
+                {"level": "error", "created_at": {"$gte": cutoff}},
+                {"_id": 0, "source": 1, "type": 1, "message": 1, "url": 1},
+            ).to_list(200)
+        except Exception:  # noqa: BLE001
+            return None
+        if len(docs) < 5:
+            return None
+        groups = {}
+        for d in docs:
+            g = groups.setdefault(d.get("source") or "unknown", [])
+            g.append(d)
+        findings = []
+        for source, items in groups.items():
+            if len(items) < 5:
+                continue
+            sample = (items[0].get("message") or "")[:180]
+            urls = {i.get("url") for i in items if i.get("url")}
+            findings.append(self._finding(
+                "Medium", "Subscriber", "API", f"client_logs:{source}",
+                f"{len(items)} أخطاء واجهة ({source}) خلال 10 دقائق",
+                f"العينة: {sample}" + (f" — الصفحات: {', '.join(list(urls)[:3])}" if urls else ""),
+                "أخطاء متصفح لا تصل للـ backend — راجع /saas-admin/system-logs",
+                "within-24h", "availability",
+            ))
+        return findings or None
+
+    # ── p55: per-component performance/error metrics (registry) ─────────────
+    async def _check_component_metrics(self):
+        try:
+            from core.registry import get_all_metrics
+            metrics = get_all_metrics()
+        except Exception:  # noqa: BLE001
+            return None
+        findings = []
+        for key, m in metrics.items():
+            reqs, rate, avg = m.get("requests", 0), m.get("error_rate", 0), m.get("avg_ms", 0)
+            if reqs >= 20 and rate >= 20:
+                sev, kind, desc = "High", "err", f"معدل أخطاء {rate}٪ في مكوّن {key} ({m['errors']}/{reqs} طلب)"
+            elif reqs >= 20 and rate >= 5:
+                sev, kind, desc = "Medium", "err", f"معدل أخطاء {rate}٪ في مكوّن {key}"
+            elif reqs >= 10 and avg > 3000:
+                sev, kind, desc = "Medium", "slow", f"مكوّن {key} بطيء — متوسط {avg:.0f}ms"
+            else:
+                continue
+            findings.append(self._finding(
+                sev, "System-wide", key, f"metrics:{kind}",
+                desc,
+                "مقاييس registry الحية (عينة من العامل الحالي — تُصفَّر عند إعادة التشغيل)",
+                f"راجع logs/{key}.log ولوحة التشخيص /diagnostics",
+                "within-1h" if sev == "High" else "within-24h", "availability",
+            ))
+        return findings or None
 
     # ── safe inline remediation (degree 2) ─────────────────────────────────
     async def _cleanup_expired_auth_artifacts(self):

@@ -1086,3 +1086,21 @@ routes/auth_users_routes.py.bak.p53/.bak.p53b, services/email_service.py.bak.p53
 
 ### نسخ احتياطية
 main.py.bak.p54, modules/saas.py.bak.p54 (أُعيدت — آلية ميتة), App.js.bak.p54, Layout.js.bak.p54
+
+## p55 — ربط نظام اللوغات بـ AutoHeal Engine (2026-08-14)
+
+### القنوات المضافة
+1. **جسر فوري (Channel 1)**: core/error_handler.py — كل استثناء غير معالَج يستدعي emit_exception_finding ← finding لحظي (scan_id="realtime") بتوقيع (نوع الاستثناء+المكوّن+المسار المطبّع). Critical للمكونات الحساسة (auth/payments/sales/finance/wallet/customers) مع إدراج تلقائي في system_errors (يظهر في /saas-admin/alerts)، High للباقي
+2. **قارئ أنماط errors.log (Channel 2)**: _check_error_log_patterns — قراءة تزايدية بـ offset محفوظ في autoheal_state (أول تشغيل يتخطى التاريخ)، تحليل تنسيق "ts | LEVEL | nt.comp | msg"، تطبيع الرسائل (أرقام/UUIDs→#)، ≥5 تكرار=Medium، ≥20=High، يتعامل مع rotation
+3. **أخطاء الواجهات (Channel 3)**: _check_client_logs — system_logs (level=error آخر 10 دقائق) مجمّعة حسب المصدر، ≥5=Medium
+4. **مقاييس registry**: _check_component_metrics — error_rate ≥20٪=High / ≥5٪=Medium (من 20 طلباً)، avg>3000ms=Medium (من 10 طلبات)
+
+### اختبارات
+- القناة 2: 6 أسطر ERROR اصطناعية (nt.pos) ← finding "نمط أخطاء متكرر في pos (6×)" ✓
+- القناة 3: 5 سجلات frontend ← finding "5 أخطاء واجهة (frontend)" ✓
+- القناة 1: emit مباشر بنفس مسار الخطاف ← Critical فوري في auth + ظهر في system_errors ✓
+- محاولة 500 حقيقي عبر API: pydantic تصدّى (422) — حماية موجودة
+- تنظيف كل البيانات الاصطناعية؛ النقاط عادت 98
+
+### نسخ احتياطية
+services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55

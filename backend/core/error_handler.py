@@ -61,6 +61,17 @@ def install_error_handling(app) -> None:
             "time": datetime.now(timezone.utc).isoformat(),
         })
 
+        # p55: real-time bridge — every unhandled exception becomes an AutoHeal finding
+        try:
+            import asyncio as _aio
+            from services.autoheal_service import emit_exception_finding
+            _aio.create_task(emit_exception_finding(
+                key, spec.name_ar if spec else "النواة",
+                request.url.path, request.method, error_id, exc,
+            ))
+        except Exception:  # noqa: BLE001
+            pass
+
         return JSONResponse(
             status_code=500,
             content={
