@@ -27,8 +27,6 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-    ports:
-      - "27017:27017"
     volumes:
       - mongodb_data:/data/db
     restart: unless-stopped
@@ -38,8 +36,6 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ntcommerce-redis
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped

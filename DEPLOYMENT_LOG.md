@@ -1041,3 +1041,14 @@ routes/auth_users_routes.py.bak.p53/.bak.p53b, services/email_service.py.bak.p53
 - إعادة إنشاء الحاوية (الحجم mongodb_data محفوظ) → الحدود الجديدة 65536/65536 مؤكدة
 - backend أعاد الاتصال تلقائياً (health 200)، صفر panics بعد الإصلاح
 - نسخة احتياطية: /opt/ntcommerce/backups/docker-compose.yml.bak.autoheal
+
+## AutoHeal ERR-004 — إلغاء نشر منافذ قواعد البيانات (2026-08-14)
+
+### قبل
+- mongodb (27017) و redis (6379) منشوران على 0.0.0.0 عبر docker-proxy — محميان بـ UFW لكنه انكشاف زائد
+
+### بعد
+- حُذفت كتلة ports من خدمتي mongodb و redis في docker-compose.yml وأُعيد إنشاء الحاويتين
+- المنفذان داخل شبكة ntcommerce الداخلية فقط (backend يصل عبر أسماء الخدمات — لا تأثير)
+- تحقق: 0 مستمع خارجي، health 200، جولة DB+Redis عبر API تعمل (عدّاد القفل 4→3)
+- نسخة احتياطية: /opt/ntcommerce/backups/docker-compose.yml.bak.portharden
