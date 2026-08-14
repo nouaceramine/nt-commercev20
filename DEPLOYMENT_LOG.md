@@ -1029,3 +1029,15 @@ CF apex 200 | CF www 301→apex | CF API 200 | origin 443 ssl_verify=0 | IP مب
 
 ### نسخ احتياطية
 routes/auth_users_routes.py.bak.p53/.bak.p53b, services/email_service.py.bak.p53, frontend/src/pages/UnifiedLoginPage.js.bak.p53, frontend/src/pages/admin/SaasAdminPage.js.bak.p53
+
+## AutoHeal SCAN-2026-08-14 — إصلاح انهيار MongoDB المزمن (2026-08-14)
+
+### المكتشف
+- mongodb انهار 16 مرة تاريخياً (RestartCount=16) — آخرها 17:22:46: WT_PANIC "Too many open files"
+- السبب الجذري: soft nofile=1024 في الحاوية (لا ulimits في docker-compose.yml)
+
+### الإصلاح (تلقائي — درجة 3: Service Restart/Config)
+- docker-compose.yml: إضافة ulimits.nofile soft/hard=65536 لخدمة mongodb
+- إعادة إنشاء الحاوية (الحجم mongodb_data محفوظ) → الحدود الجديدة 65536/65536 مؤكدة
+- backend أعاد الاتصال تلقائياً (health 200)، صفر panics بعد الإصلاح
+- نسخة احتياطية: /opt/ntcommerce/backups/docker-compose.yml.bak.autoheal
