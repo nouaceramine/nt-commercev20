@@ -979,3 +979,7 @@ CF apex 200 | CF www 301→apex | CF API 200 | origin 443 ssl_verify=0 | IP مب
 - تحقق كامل: http apex → 301 https ✔ | http www → 301 https apex ✔ | https apex 200 ✔ | API حي ✔ | www 301 ✔ | webhook 200 ✔.
 - البنية النهائية: زائر ← إجبار HTTPS عند الحافة → Cloudflare ← Full Strict (شهادة LE مُتحقق منها) → الأصل :443 ← التطبيق. الجدار يقبل 80/443 من عناوين Cloudflare فقط. شهادة LE تتجدد تلقائياً (webroot عبر CF — مُثبت بـ dry-run).
 - **لا مهام أمنية مؤجلة متبقية.**
+
+## p51 — جولة تصفح شاملة عبر الدومين + إصلاح صور عائلات demo (2026-08-13)
+- تصفح 11 صفحة عبر https://nt-commerce.net بثلاث جلسات (زائر/مشترك NT2/سوبر أدمن): الرئيسية، /portal، /register، /shop/demo-shop، /shop/nt، /tenant/dashboard، /ecom-hub (4 أقسام)، /pos، /saas-admin — كلها 200 بلا أخطاء console/صفحة.
+- **اكتشاف وإصلاح:** بطاقات عائلات متجر demo (إلكترونيات/هواتف ذكية/إكسسوارات/حواسيب) كانت تشير كلها لنفس صورة Unsplash ميتة (404) في حقل image_url ← مسح الحقل في 4 وثائق (product_families) ← الواجهة تعرض الأيقونة البديلة. إعادة تصفح: صفر طلبات فاشلة.
