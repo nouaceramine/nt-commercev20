@@ -1052,3 +1052,37 @@ routes/auth_users_routes.py.bak.p53/.bak.p53b, services/email_service.py.bak.p53
 - المنفذان داخل شبكة ntcommerce الداخلية فقط (backend يصل عبر أسماء الخدمات — لا تأثير)
 - تحقق: 0 مستمع خارجي، health 200، جولة DB+Redis عبر API تعمل (عدّاد القفل 4→3)
 - نسخة احتياطية: /opt/ntcommerce/backups/docker-compose.yml.bak.portharden
+
+## p54 — نظام AutoHeal Engine الدائم (2026-08-14)
+
+### الهدف
+تحويل وثيقة AutoHeal من مسح يدوي لمرة واحدة إلى نظام مراقبة وإصلاح ذاتي دائم داخل المنصة
+
+### Backend
+- **services/autoheal_service.py** (جديد): محرك المسح AutoHealEngine
+  - 11 فحصاً: MongoDB ping، Redis ping، القرص، الذاكرة، حمل CPU، وصول الموقع عبر HTTPS، أخطاء نظام حرجة نشطة، حداثة النسخ اليومي (/backups/daily > 36س)، اشتراكات منتهية نشطة، وضع البريد mock، موجة قفل brute-force
+  - Smart retry (درجة 1) للفحوصات العابرة؛ تنظيف آمن تلقائي (درجة 2): مذكرات 2FA/استعادة منتهية
+  - إصلاحات بموافقة (درجات 4-6): deactivate_expired_tenants / resolve_critical_system_errors / clear_bruteforce_locks
+  - dedupe بالتوقيع (signature) + عدّاد تكرار؛ المُتجاهَل Low/Medium لا يعود (لا سبام)، Critical/High يعاود الظهور
+  - Known Issues: الحرجة/العالية تُرقّى تلقائياً مع قاعدة منع
+  - نقاط الصحة: 100 − 25×حرج − 10×عالي − 5×متوسط − 2×منخفض
+  - النتائج الحرجة الجديدة تُدرج في system_errors فتظهر في /saas-admin/alerts الموجودة
+  - مجدول كل 300 ثانية مع **Redis leader lock** (4 عمّال uvicorn — واحد فقط يمسح)
+- **routes/saas/autoheal_routes.py** (جديد، 7 نقاط): health / scans / findings / scan (يدوي) / findings/{id}/approve / dismiss / known-issues — مسجّلة عبر _AUTO_REG_MODULES
+- **main.py**: تسجيل المسار + تشغيل المجدول في startup_event
+
+### Frontend
+- **pages/admin/saas/AutoHealPage.js** (جديد): نقاط الصحة + عدّادات الخطورة + جدول النتائج بأزرار موافقة/تجاهل + سجل المسحات + المشاكل المعروفة + زر "تشغيل مسح الآن"
+- App.js: route /saas-admin/autoheal (superAdminOnly)
+- Layout.js: عنصر قائمة يمنى "الإصلاح الذاتي" (أيقونة Activity) بعد سجل الأخطاء
+- bundle: main.d22f072d.js
+
+### اختبارات
+- curl: تسجيل المسارات ✓، مسح يدوي reactive ✓، health ✓ (score 98)، findings/scans/known-issues ✓، 403 بدون توكن ✓
+- دورة الموافقة E2E: مستأجر تجريبي منتهي → فُحص Medium awaiting_approval → approve → عُطّل مع أثر تدقيق → حُذف التجريبي ✓
+- leader lock مؤكد بالسجلات: pid واحد acquired، الباقي skipped ✓
+- إصلاحا أثناء التطوير: ObjectId في استجابة /scan + إصرار التجاهل
+- متصفح: الصفحة تعرض النقاط والجداول وزر المسح + عنصر القائمة — PASS بلا أخطاء JS
+
+### نسخ احتياطية
+main.py.bak.p54, modules/saas.py.bak.p54 (أُعيدت — آلية ميتة), App.js.bak.p54, Layout.js.bak.p54

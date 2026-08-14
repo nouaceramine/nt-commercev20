@@ -149,6 +149,7 @@ import SaasAuditTimelinePage from "./pages/admin/saas/AuditTimelinePage";
 import SaasSubscribersPage from "./pages/admin/saas/SubscribersPage";
 import SaasAgentsPage from "./pages/admin/saas/AgentsPage";
 import SaasEmailSettingsPage from "./pages/admin/saas/EmailSettingsPage";
+import AutoHealPage from "./pages/admin/saas/AutoHealPage";
 import StoreManagementPage from "./pages/store/StoreManagementPage";
 import PublicStorePage from "./pages/store/PublicStorePage";
 import DataImportExportPage from "./pages/DataImportExportPage";
@@ -513,6 +514,10 @@ function AppRoutes() {
       <Route
         path="/saas-admin/alerts"
         element={<ProtectedRoute superAdminOnly><SaasAdminPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/autoheal"
+        element={<ProtectedRoute superAdminOnly><AutoHealPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/withdrawals"

@@ -501,6 +501,13 @@ async def startup_event():
     except Exception as e:
         logger.warning("Robots start: %s", e)
 
+    # p54: AutoHeal self-healing scanner (scheduled every 5 min)
+    try:
+        from services.autoheal_service import start_autoheal_scheduler
+        start_autoheal_scheduler()
+    except Exception as e:
+        logger.warning("AutoHeal scheduler: %s", e)
+
     try:
         from core.feature_flags import FeatureFlagManager, PLATFORM_FEATURES
         from utils.super_admin_seed import ensure_super_admin
@@ -1176,6 +1183,7 @@ _AUTO_REG_MODULES = [
     'routes.twofa_routes',
     'routes.suppliers_core_routes',
     'routes.system_errors',
+    'routes.saas.autoheal_routes',  # p54: AutoHeal engine API
     'routes.wallet.wallet_billing_routes',
 ]
 

@@ -384,6 +384,7 @@ export const Layout = ({ children }) => {
         { path: '/saas-admin/audit-timeline',      icon: Clock,         label: language === 'ar' ? 'سجل التدقيق' : 'Journal audit' },
         { path: '/saas-admin/impersonation-logs',  icon: Shield,        label: language === 'ar' ? 'سجل الانتحال' : 'Journal impersonation' },
         { path: '/saas-admin/alerts',              icon: Bell,          label: language === 'ar' ? 'سجل الأخطاء' : 'Alertes' },
+        { path: '/saas-admin/autoheal',            icon: Activity,      label: language === 'ar' ? 'الإصلاح الذاتي' : 'AutoHeal' },
         { path: '/system-updates',                 icon: Bell,          label: language === 'ar' ? 'تحديثات النظام' : 'Mises à jour' },
         { path: '/saas-admin/system-logs',         icon: FileText,      label: language === 'ar' ? 'سجل النظام' : 'Journal système' },
       ]
