@@ -371,6 +371,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "name": tenant["name"],
                             "company_name": tenant.get("company_name", ""),
                             "plan_name": plan.get("name_ar", "") if plan else "",
+                            "is_trial": tenant.get("is_trial", False),
                             "subscription_ends_at": tenant.get("subscription_ends_at"),
                             "database_name": f"tenant_{tenant['id'].replace('-', '_')}",
                             "is_first_login": not tenant.get("database_initialized", False),

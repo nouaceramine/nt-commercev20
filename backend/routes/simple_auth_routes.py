@@ -74,6 +74,14 @@ def create_auth_routes(db, get_current_user):
                     out["features"] = feats
                     out["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
                 out["company_name"] = out["company_name"] or tenant.get("company_name")
+        # p56: surface subscription/trial state so the expiry banner survives
+        # session restore (AuthContext rebuilds the user from /auth/me).
+        if out["tenant_id"]:
+            from config.database import main_db as _mdb2
+            _t = await _mdb2.saas_tenants.find_one({"id": out["tenant_id"]}, {"_id": 0, "is_trial": 1, "subscription_ends_at": 1})
+            if _t:
+                out["is_trial"] = _t.get("is_trial", False)
+                out["subscription_ends_at"] = _t.get("subscription_ends_at")
         return out
 
     return router

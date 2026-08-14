@@ -1104,3 +1104,32 @@ main.py.bak.p54, modules/saas.py.bak.p54 (أُعيدت — آلية ميتة), A
 
 ### نسخ احتياطية
 services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
+
+
+---
+
+## p56 — حزمة تحسينات UX + صيانة (2026-08-14)
+
+### قبل
+- صفحة الدخول: عربية فقط، بدون تحذير Caps Lock، سنة التذييل ثابتة 2024، بدون رابط عودة للرئيسية.
+- لا يوجد تنبيه للمستأجر عند قرب انتهاء الاشتراك/الفترة التجريبية.
+- `/api/auth/me` لا يعيد `is_trial`/`subscription_ends_at` → الحقول تضيع بعد تحديث الصفحة.
+- لا يوجد تنظيف دوري للحاويات/الصور الميتة في docker.
+
+### التغييرات
+1. **backend/routes/auth_users_routes.py** (.bak موجود مسبقاً p56): حمولة دخول المستأجر تتضمن `is_trial` (تم في وقت سابق من p56).
+2. **backend/routes/simple_auth_routes.py** (.bak.p56): `/auth/me` يعيد الآن `is_trial` + `subscription_ends_at` للمستأجرين (تثري من saas_tenants).
+3. **frontend/src/components/Layout.js** (.bak.p56): بانر انتهاء الاشتراك داخل `<main>` بعد بانر الانتحال — كهرماني عند ≤7 أيام، أحمر عند انتهاء فعلي، نص ثنائي اللغة يميّز التجريبي عن المدفوع، `data-testid="subscription-banner"`.
+4. **frontend/src/pages/UnifiedLoginPage.js** (.bak.p56): إعادة كتابة كاملة —
+   - مبدّل لغة AR/FR (Globe) أعلى الصفحة عبر useLanguage، كل النصوص ثنائية اللغة (قاموس STR).
+   - تحذير Caps Lock على حقول كلمة المرور الثلاثة (`getModifierState('CapsLock')`, `data-testid="capslock-warning"`).
+   - تذييل بسنة ديناميكية `© {new Date().getFullYear()}` + رابط «العودة للرئيسية» (`data-testid="back-home-link"`).
+5. **crontab root** (/tmp/cron.bak.p56): تنظيف أسبوعي الأحد 04:30 — `docker container prune -f && docker image prune -f` → /var/log/docker_prune.log.
+
+### التحقق
+- curl: `/api/auth/me` يعيد `subscription_ends_at` + `is_trial` (200). الصحة 200.
+- متصفح (puppeteer, data-testid): مبدّل اللغة يبدّل AR↔FR فعلياً؛ التذييل © 2026؛ رابط الرئيسية موجود؛ تحذير Caps Lock يظهر/يختفي; البانر: ‎+3 أيام → كهرماني «تبقّى 3 أيام على نهاية الفترة التجريبية»؛ منتهٍ → أحمر «انتهت الفترة التجريبية…»؛ ‎+30 يوم → لا بانر. (تم تغيير تاريخ انتهاء المستأجر التجريبي مؤقتاً ثم أعيد إلى 2026-08-26، وكلمة المرور أعيدت لأصلها).
+- الحزمة الجديدة: main.4bea96ac.js منشورة في /var/www/ntcommerce.
+
+### بعد
+- الموقع 200، API 200، الحاويات سليمة.

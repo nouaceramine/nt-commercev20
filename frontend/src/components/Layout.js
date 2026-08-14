@@ -102,6 +102,11 @@ export const Layout = ({ children }) => {
   const { t, language, toggleLanguage, isRTL } = useLanguage();
   // Get user type and features
   const { user, logout, isAdmin, isSuperAdmin, isEffectiveSuperAdmin, isImpersonating, stopImpersonation, isTenant, isCashier, isFeatureEnabled } = useAuth();
+  // p56: subscription / trial expiry notice for tenants
+  const subEnd = user && user.subscription_ends_at ? new Date(user.subscription_ends_at) : null;
+  const subDaysLeft = subEnd && !isNaN(subEnd.getTime()) ? Math.ceil((subEnd.getTime() - Date.now()) / 86400000) : null;
+  const showSubBanner = Boolean(isTenant) && subDaysLeft !== null && subDaysLeft <= 7;
+  const subExpired = subDaysLeft !== null && subDaysLeft <= 0;
   const { isDark, toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -1116,6 +1121,19 @@ export const Layout = ({ children }) => {
               >
                 {language === 'ar' ? 'العودة لحساب السوبر-أدمن' : 'Retour au super-admin'}
               </button>
+            </div>
+          )}
+          {showSubBanner && (
+            <div data-testid="subscription-banner" className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-4 py-2 text-sm ${subExpired ? 'border-red-300 bg-red-50 dark:border-red-700/50 dark:bg-red-900/20' : 'border-amber-300 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-900/20'}`}>
+              <div className={subExpired ? 'text-red-800 dark:text-red-200' : 'text-amber-800 dark:text-amber-200'}>
+                {subExpired
+                  ? (language === 'ar'
+                      ? (user?.is_trial ? 'انتهت الفترة التجريبية — فعّل اشتراكك لمواصلة استخدام المنصة' : 'انتهى اشتراكك — جدّد الآن لمواصلة استخدام المنصة')
+                      : (user?.is_trial ? 'Votre essai a expire — activez un abonnement pour continuer' : 'Votre abonnement a expire — renouvelez-le pour continuer'))
+                  : (language === 'ar'
+                      ? `⏳ تبقّى ${subDaysLeft} ${subDaysLeft === 1 ? 'يوم' : 'أيام'} على ${user?.is_trial ? 'نهاية الفترة التجريبية' : 'انتهاء اشتراكك'}`
+                      : `⏳ ${subDaysLeft} jour(s) restant(s) ${user?.is_trial ? "avant la fin de l'essai" : "avant l'expiration de votre abonnement"}`)}
+              </div>
             </div>
           )}
           {children}
