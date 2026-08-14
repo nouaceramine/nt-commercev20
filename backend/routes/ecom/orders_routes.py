@@ -20,7 +20,11 @@ from typing import Optional
 import uuid
 import re
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+logger = logging.getLogger(__name__)
 
 from config.database import db
 from utils.auth import require_tenant
@@ -270,6 +274,13 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
             doc["status"] = "awaiting_confirmation"
 
     await db.ecom_orders.insert_one(doc)
+
+    # p59: reserve stock the moment the order enters (status new = انتظار)
+    try:
+        from services.application.ecom_order_service import deduct_order_inventory
+        await deduct_order_inventory(db, doc, now)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("inventory reservation failed for new order %s: %s", order_id, exc)
     try:
         from services.smart_notifications import notify_new_order
         await notify_new_order(db, doc)
@@ -305,6 +316,39 @@ async def get_order_risk(order_id: str, user: dict = Depends(require_tenant)):
                                 customer_stats={"delivered": history_count, "cancelled": cancelled, "returned": returned})
     await db.ecom_orders.update_one({"id": order_id}, {"$set": {"cod_risk": risk}})
     return risk
+
+
+@router.get("/ecom/orders/{order_id}/financials")
+async def get_order_financials(order_id: str, user: dict = Depends(require_tenant)):
+    """p59: per-order accounting breakdown (revenue / COGS / shipping / profit / losses)."""
+    await require_ecom_feature(user)
+    fin = await db.ecom_order_financials.find_one({"id": order_id}, {"_id": 0})
+    if not fin:
+        raise HTTPException(status_code=404, detail="لا توجد قيود محاسبية لهذا الطلب بعد — تُنشأ عند التأكيد")
+    return fin
+
+
+@router.get("/ecom/financials/summary")
+async def financials_summary(user: dict = Depends(require_tenant)):
+    """p59: profit/loss rollup across all e-commerce orders."""
+    await require_ecom_feature(user)
+    rows = await db.ecom_order_financials.find({}, {"_id": 0}).to_list(5000)
+    agg = {"expected_profit": 0.0, "realized_profit": 0.0, "losses": 0.0,
+           "return_fees": 0.0, "counts": {"expected": 0, "realized": 0, "returned": 0, "cancelled": 0}}
+    for r in rows:
+        st = r.get("status")
+        agg["counts"][st] = agg["counts"].get(st, 0) + 1
+        if st == "expected":
+            agg["expected_profit"] += float(r.get("expected_profit") or 0)
+        elif st == "realized":
+            agg["realized_profit"] += float(r.get("realized_profit") or 0)
+        elif st == "returned":
+            agg["losses"] += float(r.get("losses") or 0)
+            agg["return_fees"] += float(r.get("return_fee") or 0)
+    for k in ("expected_profit", "realized_profit", "losses", "return_fees"):
+        agg[k] = round(agg[k], 2)
+    agg["net_profit"] = round(agg["realized_profit"] - agg["losses"], 2)
+    return agg
 
 
 @router.put("/ecom/orders/{order_id}/status")
@@ -364,4 +408,5 @@ async def delete_order(order_id: str, user: dict = Depends(require_tenant)):
             detail="يمكن حذف الطلب فقط بعد إلغائه أو استرداده — أوقفه أولاً.",
         )
     await db.ecom_orders.delete_one({"id": order_id})
+    await db.ecom_order_financials.delete_one({"id": order_id})  # p59: no orphan ledger rows
     return {"ok": True, "deleted": order_id}

@@ -13,6 +13,7 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const [busy, setBusy] = useState(false);
   const [shippingProvider, setShippingProvider] = useState('yalidine');
   const [storeName, setStoreName] = useState('متجر إلكتروني');
+  const [fin, setFin] = useState(null);  // p59: accounting ledger row
 
   // Fetch tenant store name once when the dialog first opens
   useEffect(() => {
@@ -25,6 +26,15 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
       })
       .catch(() => {/* keep default */});
   }, [open]);
+
+  // p59: fetch the order's accounting breakdown (exists after confirmation)
+  useEffect(() => {
+    setFin(null);
+    if (!open || !order?.id) return;
+    apiClient.get(`/ecom/orders/${order.id}/financials`)
+      .then(res => setFin(res.data))
+      .catch(() => setFin(null));
+  }, [open, order?.id]);
 
   if (!order) return null;
 
@@ -170,6 +180,27 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
             <div>الشحن: <span className="font-semibold">{Number(order.shipping_fee).toLocaleString()} دج</span></div>
             <div className="text-lg font-bold text-emerald-700">الإجمالي: {Number(order.total).toLocaleString()} دج</div>
           </div>
+
+          {/* p59: accounting breakdown — profit on confirm/delivery, losses on return */}
+          {fin && (
+            <div className="border rounded-lg p-3 mt-3 text-sm space-y-1 bg-slate-50" data-testid="order-financials">
+              <div className="font-semibold mb-1">💰 القيد المحاسبي</div>
+              <div className="flex justify-between"><span>الإيراد</span><span>{Number(fin.revenue).toLocaleString()} دج</span></div>
+              <div className="flex justify-between"><span>تكلفة البضاعة</span><span>-{Number(fin.cogs).toLocaleString()} دج</span></div>
+              <div className="flex justify-between"><span>الشحن</span><span>-{Number(fin.shipping_fee).toLocaleString()} دج</span></div>
+              {fin.status === 'returned' ? (
+                <>
+                  <div className="flex justify-between text-red-700"><span>سعر الإرجاع ({order.courier || 'الناقل'})</span><span>-{Number(fin.return_fee).toLocaleString()} دج</span></div>
+                  <div className="flex justify-between font-bold text-red-700 border-t pt-1"><span>الخسارة الإجمالية (شحن + إرجاع)</span><span>{Number(fin.losses).toLocaleString()} دج</span></div>
+                </>
+              ) : (
+                <div className="flex justify-between font-bold text-emerald-700 border-t pt-1">
+                  <span>{fin.status === 'realized' ? 'الفائدة المحققة' : 'الفائدة المتوقعة'}</span>
+                  <span>{Number(fin.status === 'realized' ? fin.realized_profit : fin.expected_profit).toLocaleString()} دج</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tracking */}

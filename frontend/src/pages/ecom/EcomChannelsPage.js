@@ -198,7 +198,7 @@ export default function EcomChannelsPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ channel: 'shopify', name: '', credentials: {}, is_active: true });
+  const [form, setForm] = useState({ channel: 'shopify', name: '', credentials: {}, is_active: true, return_fee: '' });
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -216,7 +216,7 @@ export default function EcomChannelsPage() {
 
   const openCreate = (channel) => {
     setEditing(null);
-    setForm({ channel, name: CHANNELS[channel]?.labelAr || channel, credentials: {}, is_active: true });
+    setForm({ channel, name: CHANNELS[channel]?.labelAr || channel, credentials: {}, is_active: true, return_fee: '' });
     setOpen(true);
   };
 
@@ -227,6 +227,7 @@ export default function EcomChannelsPage() {
       name: integration.name,
       credentials: {},   // empty inputs — leave blank to keep existing
       is_active: integration.is_active,
+      return_fee: integration.return_fee ?? '',
     });
     setOpen(true);
   };
@@ -242,6 +243,7 @@ export default function EcomChannelsPage() {
           Object.entries(form.credentials).filter(([, v]) => v && String(v).trim())
         );
         if (Object.keys(cleanCreds).length > 0) payload.credentials = cleanCreds;
+        if (CHANNELS[form.channel]?.kind === 'shipping' && form.return_fee !== '') payload.return_fee = Number(form.return_fee) || 0;  // p59
         await apiClient.put(`/ecom/integrations/${editing.id}`, payload);
         toast.success('تم تحديث التكامل');
       } else {
@@ -473,6 +475,19 @@ export default function EcomChannelsPage() {
                 />
               </div>
             ))}
+
+            {CHANNELS[form.channel]?.kind === 'shipping' && (
+              <div>
+                <Label>سعر الإرجاع (دج)</Label>
+                <Input
+                  type="number" min="0" placeholder="مثال: 400"
+                  value={form.return_fee}
+                  onChange={e => setForm({ ...form, return_fee: e.target.value })}
+                  data-testid="integration-return-fee"
+                />
+                <p className="text-xs text-muted-foreground mt-1">تُسجَّل كخسارة عند استرجاع الطلبات المشحونة عبر هذه الشركة</p>
+              </div>
+            )}
 
             <div className="flex items-center justify-between p-2 rounded border">
               <Label className="cursor-pointer">مُفعَّل</Label>

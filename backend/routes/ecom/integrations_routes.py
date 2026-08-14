@@ -82,6 +82,7 @@ async def create_integration(body: dict, user: dict = Depends(require_tenant)):
         "kind": kind,
         "name": name,
         "credentials": credentials,
+        "return_fee": max(0.0, float(body.get("return_fee") or 0)),  # p59: courier return price
         "is_active": bool(body.get("is_active", True)),
         "mode": "live" if has_real_creds else "mock",
         "last_sync_at": None,
@@ -109,6 +110,11 @@ async def update_integration(integration_id: str, body: dict, user: dict = Depen
         updates["name"] = (body["name"] or "").strip()
     if "is_active" in body:
         updates["is_active"] = bool(body["is_active"])
+    if "return_fee" in body:  # p59
+        try:
+            updates["return_fee"] = max(0.0, float(body["return_fee"] or 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="سعر الإرجاع يجب أن يكون رقماً")
     if "credentials" in body and isinstance(body["credentials"], dict):
         # Merge — clients can send {api_key: 'new'} without resending all keys.
         merged = {**(existing.get("credentials") or {}), **body["credentials"]}

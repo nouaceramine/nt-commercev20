@@ -43,6 +43,19 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
 
     inventory_result = await _sync_inventory_on_status_change(db, order, new_status, now)
 
+    # p59: accounting lifecycle — ledger entries on confirm/deliver/return/cancel
+    try:
+        if new_status == "confirmed":
+            await _record_confirmation_financials(db, order, now)
+        elif new_status == "delivered":
+            await _mark_financials_realized(db, order, now)
+        elif new_status == "refunded":
+            await _record_return_financials(db, order, now)
+        elif new_status == "cancelled":
+            await _void_financials(db, order, now)
+    except Exception as exc:  # noqa: BLE001 — never block a status change on a ledger failure
+        logger.warning("financials hook failed for order %s: %s", order_id, exc)
+
     # مزامنة عكسية لطلبات متجر الويب: عكس الحالة إلى store_orders
     # (المخزون أداره _sync_inventory أعلاه — نعلّم stock_restored لتفادي إعادة مزدوجة)
     if order.get("channel") == "webstore" and order.get("external_id"):
@@ -107,49 +120,61 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
     }
 
 
-async def _sync_inventory_on_status_change(db, order: dict, new_status: str, now_iso: str) -> dict:
-    """Atomically deduct/restore POS product stock based on the order status transition.
+async def deduct_order_inventory(db, order: dict, now_iso: str) -> dict:
+    """Atomically deduct POS product stock for an order (idempotent via flag).
 
-    Idempotent via the `inventory_deducted` flag on the order document.
+    p59: stock is reserved the moment the order enters the system (status
+    'new' / انتظار) — confirmation no longer performs the deduction.
     """
     result = {"deducted": [], "restored": [], "warnings": []}
-    items = order.get("items") or []
-    items_with_product = [it for it in items if it.get("product_id")]
+    items_with_product = [it for it in (order.get("items") or []) if it.get("product_id")]
     if not items_with_product:
         return result
+    order_id = order.get("id")
+    if order.get("inventory_deducted"):
+        return result
+    deductions = []
+    for it in items_with_product:
+        pid = it["product_id"]
+        qty = int(it.get("qty", 0) or 0)
+        if qty <= 0:
+            continue
+        product = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "quantity": 1})
+        if not product:
+            result["warnings"].append(f"⚠️ منتج غير موجود في المخزون: {it.get('name', pid)}")
+            continue
+        new_qty = (product.get("quantity") or 0) - qty
+        await db.products.update_one({"id": pid}, {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso}})
+        deductions.append({"product_id": pid, "qty": qty, "deducted_at": now_iso})
+        result["deducted"].append({
+            "product_id": pid,
+            "name": product.get("name_ar") or product.get("name_en") or it.get("name"),
+            "qty": qty,
+            "stock_after": new_qty,
+        })
+        if new_qty < 0:
+            result["warnings"].append(f"⚠️ المخزون أصبح سالباً للمنتج '{product.get('name_ar') or it.get('name')}' ({new_qty})")
+    if deductions:
+        await db.ecom_orders.update_one(
+            {"id": order_id},
+            {"$set": {"inventory_deducted": True, "inventory_deductions": deductions, "inventory_deducted_at": now_iso}},
+        )
+    return result
 
+
+async def _sync_inventory_on_status_change(db, order: dict, new_status: str, now_iso: str) -> dict:
+    """Deduct on first move to 'confirmed' (legacy path — p59 deducts at
+    creation so this is normally a no-op) / restore on cancelled|refunded."""
+    result = {"deducted": [], "restored": [], "warnings": []}
+    items_with_product = [it for it in (order.get("items") or []) if it.get("product_id")]
+    if not items_with_product:
+        return result
     order_id = order.get("id")
     already_deducted = bool(order.get("inventory_deducted"))
 
     # Deduct on first move to 'confirmed'
     if new_status == "confirmed" and not already_deducted:
-        deductions = []
-        for it in items_with_product:
-            pid = it["product_id"]
-            qty = int(it.get("qty", 0) or 0)
-            if qty <= 0:
-                continue
-            product = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "quantity": 1})
-            if not product:
-                result["warnings"].append(f"⚠️ منتج غير موجود في المخزون: {it.get('name', pid)}")
-                continue
-            new_qty = (product.get("quantity") or 0) - qty
-            await db.products.update_one({"id": pid}, {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso}})
-            deductions.append({"product_id": pid, "qty": qty, "deducted_at": now_iso})
-            result["deducted"].append({
-                "product_id": pid,
-                "name": product.get("name_ar") or product.get("name_en") or it.get("name"),
-                "qty": qty,
-                "stock_after": new_qty,
-            })
-            if new_qty < 0:
-                result["warnings"].append(f"⚠️ المخزون أصبح سالباً للمنتج '{product.get('name_ar') or it.get('name')}' ({new_qty})")
-        if deductions:
-            await db.ecom_orders.update_one(
-                {"id": order_id},
-                {"$set": {"inventory_deducted": True, "inventory_deductions": deductions, "inventory_deducted_at": now_iso}},
-            )
-        return result
+        return await deduct_order_inventory(db, order, now_iso)
 
     # Restore on transition to cancelled / refunded
     if new_status in ("cancelled", "refunded") and already_deducted:
@@ -173,6 +198,115 @@ async def _sync_inventory_on_status_change(db, order: dict, new_status: str, now
         return result
 
     return result
+
+
+# ─── p59: e-commerce accounting ledger (collection: ecom_order_financials) ───
+
+async def _compute_cogs(db, order: dict) -> float:
+    """Cost of goods from linked POS products' purchase_price."""
+    cogs = 0.0
+    for it in order.get("items") or []:
+        pid = it.get("product_id")
+        qty = int(it.get("qty", 0) or 0)
+        if not pid or qty <= 0:
+            continue
+        p = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
+        if p:
+            cogs += float(p.get("purchase_price") or 0) * qty
+    return round(cogs, 2)
+
+
+async def _courier_return_fee(db, order: dict) -> float:
+    """Return-shipping fee configured on the courier's integration (p59).
+    Each shipping company carries its own return price on its integration doc."""
+    courier = (order.get("courier") or "").strip().lower()
+    if not courier:
+        return 0.0
+    integ = await db.ecom_integrations.find_one({"channel": courier, "is_active": True}) \
+        or await db.ecom_integrations.find_one({"channel": courier})
+    if not integ:
+        return 0.0
+    try:
+        return max(0.0, float(integ.get("return_fee") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _record_confirmation_financials(db, order: dict, now: str) -> None:
+    """On confirmation: revenue − COGS − shipping = expected profit (upsert)."""
+    order_id = order.get("id")
+    cogs = await _compute_cogs(db, order)
+    revenue = round(float(order.get("total") or 0), 2)
+    shipping = round(float(order.get("shipping_fee") or 0), 2)
+    expected_profit = round(revenue - cogs - shipping, 2)
+    await db.ecom_order_financials.update_one(
+        {"id": order_id},
+        {"$set": {
+            "id": order_id,
+            "order_id": order_id,
+            "order_code": order.get("order_code"),
+            "revenue": revenue,
+            "cogs": cogs,
+            "shipping_fee": shipping,
+            "expected_profit": expected_profit,
+            "status": "expected",
+            "confirmed_at": now,
+            "updated_at": now,
+        }, "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+
+
+async def _mark_financials_realized(db, order: dict, now: str) -> None:
+    """On delivery: the expected profit becomes realized."""
+    fin = await db.ecom_order_financials.find_one({"id": order.get("id")})
+    if not fin or fin.get("status") != "expected":
+        return
+    await db.ecom_order_financials.update_one(
+        {"id": order.get("id")},
+        {"$set": {"status": "realized", "realized_at": now,
+                  "realized_profit": fin.get("expected_profit"), "updated_at": now}},
+    )
+
+
+async def _record_return_financials(db, order: dict, now: str) -> None:
+    """On refund/return: reverse the profit and book the losses —
+    outbound shipping (merchant-borne) + the courier's return fee."""
+    order_id = order.get("id")
+    return_fee = await _courier_return_fee(db, order)
+    shipping = round(float(order.get("shipping_fee") or 0), 2)
+    losses = round(shipping + return_fee, 2)
+    fin = await db.ecom_order_financials.find_one({"id": order_id})
+    if fin:
+        await db.ecom_order_financials.update_one(
+            {"id": order_id},
+            {"$set": {"status": "returned", "returned_at": now,
+                      "return_fee": return_fee, "losses": losses,
+                      "realized_profit": -losses, "updated_at": now}},
+        )
+    else:
+        # returned without a prior confirmation — still book the loss
+        cogs = await _compute_cogs(db, order)
+        revenue = round(float(order.get("total") or 0), 2)
+        await db.ecom_order_financials.insert_one({
+            "id": order_id, "order_id": order_id, "order_code": order.get("order_code"),
+            "revenue": revenue, "cogs": cogs, "shipping_fee": shipping,
+            "expected_profit": 0, "status": "returned", "returned_at": now,
+            "return_fee": return_fee, "losses": losses, "realized_profit": -losses,
+            "created_at": now, "updated_at": now,
+        })
+    await db.ecom_orders.update_one(
+        {"id": order_id},
+        {"$set": {"return_fee": return_fee, "return_losses": losses, "updated_at": now}},
+    )
+
+
+async def _void_financials(db, order: dict, now: str) -> None:
+    """On cancellation before delivery: void the expected profit (no loss)."""
+    await db.ecom_order_financials.update_one(
+        {"id": order.get("id"), "status": "expected"},
+        {"$set": {"status": "cancelled", "expected_profit": 0, "realized_profit": 0, "updated_at": now}},
+    )
 
 
 async def _maybe_notify_customer(db, order: dict, new_status: str) -> None:
