@@ -78,7 +78,10 @@ async def create_sale_op(db, s, user: dict) -> dict:
     if s.payment_type == "installment" and s.installment_plan:
         s.paid_amount = s.installment_plan.down_payment
     remaining = final_total - s.paid_amount
-    debt_amount = remaining if s.payment_type in ["credit", "partial", "installment"] else 0
+    # p58: mirror debt whenever the sale is under-paid AND has a customer,
+    # regardless of the payment_type label (a "cash" sale paid 100/3600
+    # previously recorded remaining=3500 on the invoice but 0 on the customer).
+    debt_amount = remaining if (s.payment_type in ["credit", "partial", "installment"] or (s.customer_id and remaining > 0)) else 0
     status = "paid" if remaining <= 0 else ("partial" if s.paid_amount > 0 else "unpaid")
 
     enriched_items = []

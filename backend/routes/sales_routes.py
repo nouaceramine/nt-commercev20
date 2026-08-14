@@ -129,7 +129,7 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
 
             cust_id = updates.get("customer_id", sale.get("customer_id"))
             if cust_id:
-                await adjust_customer_mirror(db, cust_id, balance=-payment_amount)
+                await adjust_customer_mirror(db, cust_id, balance=-payment_amount, total_debt=-payment_amount)  # p58
 
             cash_box_id = data.get("cash_box_id")
             if cash_box_id:
