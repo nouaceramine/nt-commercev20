@@ -8,7 +8,9 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Truck, Search, Settings, CheckCircle, AlertCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
+import { Label } from '../../components/ui/label';
+import { Switch } from '../../components/ui/switch';
 import { toast } from 'sonner';
 
 export default function EcomShippingTab() {
@@ -147,6 +149,53 @@ export default function EcomShippingTab() {
 
   useEffect(() => { fetchSettlements(); }, []);  // p90
 
+  // p94: courier API connections (moved here from /ecom-hub/channels)
+  const COURIER_SCHEMA = {
+    yalidine: { ar: 'يالدين', fr: 'Yalidine', fields: [['api_id', 'API ID'], ['api_token', 'API Token']] },
+    zr:       { ar: 'ZR Express', fr: 'ZR Express', fields: [['token', 'API Token'], ['client_key', 'Client Key']] },
+    maystro:  { ar: 'مايسترو (Maystro)', fr: 'Maystro Delivery', fields: [['api_key', 'API Key']] },
+  };
+  const [courierIntg, setCourierIntg] = useState({});    // channel -> integration
+  const [courierDlg, setCourierDlg] = useState(null);    // channel being edited
+  const [courierForm, setCourierForm] = useState({ credentials: {}, return_fee: '', is_active: true });
+  const [savingCourier, setSavingCourier] = useState(false);
+
+  const fetchCouriers = async () => {
+    try {
+      const r = await apiClient.get('/ecom/integrations');
+      const map = {};
+      (r.data?.items || []).forEach(i => { if (i.kind === 'shipping' && !map[i.channel]) map[i.channel] = i; });
+      setCourierIntg(map);
+    } catch (e) { /* silent */ }
+  };
+  useEffect(() => { fetchCouriers(); }, []);  // p94
+
+  const openCourier = (ch) => {
+    const ex = courierIntg[ch];
+    setCourierForm({ credentials: {}, return_fee: ex ? String(ex.return_fee ?? '') : '', is_active: ex ? !!ex.is_active : true });
+    setCourierDlg(ch);
+  };
+
+  const saveCourier = async () => {
+    const ch = courierDlg;
+    const meta = COURIER_SCHEMA[ch];
+    if (!meta) return;
+    const creds = {};
+    meta.fields.forEach(([k]) => { const v = (courierForm.credentials[k] || '').trim(); if (v) creds[k] = v; });
+    const ex = courierIntg[ch];
+    setSavingCourier(true);
+    try {
+      const payload = { name: meta.ar, credentials: creds, is_active: courierForm.is_active, return_fee: parseFloat(courierForm.return_fee) || 0 };
+      if (ex) await apiClient.put(`/ecom/integrations/${ex.id}`, payload);
+      else await apiClient.post('/ecom/integrations', { channel: ch, ...payload });
+      toast.success(ar ? 'تم حفظ الإعدادات' : 'Enregistré');
+      setCourierDlg(null);
+      fetchCouriers();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشل الحفظ' : 'Échec'));
+    } finally { setSavingCourier(false); }
+  };
+
   const openSettle = (s) => {  // p90
     setSettleRow(s.box_id);
     setSettleAmount(String(s.balance));
@@ -224,6 +273,48 @@ export default function EcomShippingTab() {
             </CardContent>
           </Card>
         )}
+        {/* p94: courier API connections */}
+        <Card data-testid="couriers-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              {ar ? 'ربط شركات الشحن' : 'Connexion des transporteurs'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {Object.keys(COURIER_SCHEMA).map(ch => {
+              const meta = COURIER_SCHEMA[ch];
+              const ex = courierIntg[ch];
+              return (
+                <div key={ch} className="flex items-center justify-between border rounded-lg p-3 flex-wrap gap-2" data-testid={`courier-row-${ch}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🚚</span>
+                    <div>
+                      <div className="font-semibold">{ar ? meta.ar : meta.fr}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {ex ? (ex.mode === 'live' ? (ar ? '✅ مفاتيح محفوظة' : '✅ Configuré') : (ar ? '🧪 بدون مفاتيح (محاكاة)' : '🧪 Simulation')) : (ar ? 'غير مربوط بعد' : 'Non connecté')}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ex && (
+                      <Badge variant={ex.is_active ? 'default' : 'outline'}>
+                        {ex.is_active ? (ar ? 'مُفعَّل' : 'Actif') : (ar ? 'مُوقَف' : 'Inactif')}
+                      </Badge>
+                    )}
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => openCourier(ch)} data-testid={`courier-settings-${ch}`}>
+                      <Settings className="h-4 w-4" />{ar ? 'الإعدادات' : 'Paramètres'}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-xs text-muted-foreground">
+              {ar ? 'أدخل مفاتيح API لكل شركة شحن من هنا. «سعر الإرجاع» يُسجَّل تلقائياً كخسارة عند استرجاع الطرود.' : 'Clés API des transporteurs — les frais de retour sont comptabilisés automatiquement.'}
+            </p>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="h-5 w-5" />{ar ? 'تكامل Yalidine' : 'Intégration Yalidine'}</CardTitle></CardHeader>
@@ -238,9 +329,7 @@ export default function EcomShippingTab() {
                     </p>
                   </div>
                 </div>
-                <Link to="/integrations/yalidine">
-                  <Button variant="outline" size="sm" className="gap-1"><Settings className="h-4 w-4" />{ar ? 'الإعدادات' : 'Paramètres'}</Button>
-                </Link>
+                <Button variant="outline" size="sm" className="gap-1" onClick={() => openCourier('yalidine')} data-testid="yalidine-settings-btn"><Settings className="h-4 w-4" />{ar ? 'الإعدادات' : 'Paramètres'}</Button>
               </div>
 
               <div className="border rounded-lg p-3 bg-cyan-50/50" data-testid="yalidine-sync-block">
@@ -360,6 +449,58 @@ export default function EcomShippingTab() {
           </CardContent>
         </Card>
       </div>
+
+      {/* p94: courier settings dialog */}
+      <Dialog open={!!courierDlg} onOpenChange={(v) => { if (!v) setCourierDlg(null); }}>
+        <DialogContent className="max-w-md" dir={ar ? 'rtl' : 'ltr'} data-testid="courier-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {courierDlg ? (ar ? `إعدادات ${COURIER_SCHEMA[courierDlg].ar}` : `${COURIER_SCHEMA[courierDlg].fr}`) : ''}
+            </DialogTitle>
+          </DialogHeader>
+          {courierDlg && (
+            <div className="space-y-3 py-2">
+              {COURIER_SCHEMA[courierDlg].fields.map(([k, label]) => (
+                <div key={k}>
+                  <Label>{label}</Label>
+                  <Input
+                    type="password"
+                    dir="ltr"
+                    placeholder={courierIntg[courierDlg] ? '••••••••  (اترك فارغاً للإبقاء)' : ''}
+                    value={courierForm.credentials[k] || ''}
+                    onChange={e => setCourierForm({ ...courierForm, credentials: { ...courierForm.credentials, [k]: e.target.value } })}
+                    data-testid={`courier-cred-${k}`}
+                  />
+                </div>
+              ))}
+              <div>
+                <Label>{ar ? 'سعر الإرجاع (دج)' : 'Frais de retour (DZD)'}</Label>
+                <Input
+                  type="number" min="0" dir="ltr" placeholder="400"
+                  value={courierForm.return_fee}
+                  onChange={e => setCourierForm({ ...courierForm, return_fee: e.target.value })}
+                  data-testid="courier-return-fee"
+                />
+                <p className="text-xs text-muted-foreground mt-1">{ar ? 'تُسجَّل كخسارة عند استرجاع الطلبات المشحونة عبر هذه الشركة' : ''}</p>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded border">
+                <Label className="cursor-pointer">{ar ? 'مُفعَّل' : 'Actif'}</Label>
+                <Switch
+                  checked={courierForm.is_active}
+                  onCheckedChange={(v) => setCourierForm({ ...courierForm, is_active: v })}
+                  data-testid="courier-active-switch"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCourierDlg(null)}>{ar ? 'إلغاء' : 'Annuler'}</Button>
+            <Button onClick={saveCourier} disabled={savingCourier} data-testid="courier-save-btn">
+              {savingCourier ? (ar ? 'جارٍ الحفظ...' : '...') : (ar ? 'حفظ' : 'Enregistrer')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

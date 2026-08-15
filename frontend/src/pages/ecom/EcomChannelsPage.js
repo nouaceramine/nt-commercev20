@@ -15,7 +15,7 @@ import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckC
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
 
-const SUPPORTED_CHANNELS = ['shopify', 'facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram', 'viber', 'yalidine', 'zr', 'maystro'];
+const SUPPORTED_CHANNELS = ['shopify', 'facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram', 'viber'];  // p94: couriers live under /ecom-hub/shipping
 
 // Per-channel credential field schemas — only used to render the right inputs in the dialog.
 const CREDENTIAL_SCHEMA = {
@@ -281,6 +281,9 @@ export default function EcomChannelsPage() {
 
   const schema = CREDENTIAL_SCHEMA[form.channel] || [];
 
+  // p94: courier integrations are managed in /ecom-hub/shipping — hide them here
+  const salesIntegrations = integrations.filter(i => CHANNELS[i.channel]?.kind !== 'shipping');
+
   return (
     <>
       <div className="space-y-6 p-4 md:p-6" dir="rtl" data-testid="ecom-channels-page">
@@ -353,18 +356,18 @@ export default function EcomChannelsPage() {
         {/* Connected integrations list */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">التكاملات المُعدَّة ({integrations.length})</CardTitle>
+            <CardTitle className="text-base">التكاملات المُعدَّة ({salesIntegrations.length})</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
               <div className="text-center py-8 text-muted-foreground">جارٍ التحميل...</div>
-            ) : integrations.length === 0 ? (
+            ) : salesIntegrations.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 لا توجد قنوات مرتبطة بعد. اختر قناة من الأعلى لبدء الربط.
               </div>
             ) : (
               <div className="space-y-2">
-                {integrations.map(i => {
+                {salesIntegrations.map(i => {
                   const meta = CHANNELS[i.channel] || CHANNELS.manual;
                   return (
                     <div key={i.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/20">

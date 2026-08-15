@@ -1626,3 +1626,18 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 - **سؤال المستخدم**: «إدارة ومراقبة جميع التكاملات الخارجية» في /ecom-hub/shipping/yalidine — ما الغرض وهل تعمل؟ هي تعمل لكنها صفحة مراقبة سلبية قديمة (5 شارات مُعد/غير مُعد لـ Stripe/SendGrid/WhatsApp/Yalidine/Push) بلا أي إدارة فعلية.
 - **بعد**: حُذف رابط «Yalidine» من القائمة الجانبية (الإدارة الحقيقية في «الشحن الموحَّد»)؛ المسار القديم /ecom-hub/shipping/yalidine يوجّه تلقائياً إلى /ecom-hub/shipping. صفحة حالة التكاملات تبقى في مكانها الصحيح /ecom-hub/channels/status.
 - **النشر**: main.986b67d7.js — backup: backups/p93_yalidine_menu/
+
+## p94 — نقل شركات الشحن من قنوات البيع إلى قسم الشحن (2026-08-15)
+
+**الطلب**: yalidine / zrexpress / maystro في /ecom-hub/channels ليست في مكانها — مكانها مع الشحن.
+
+**قبل**: SUPPORTED_CHANNELS في EcomChannelsPage.js خلط قنوات البيع بشركات الشحن (تظهر في شبكة الربط + قائمة التكاملات + قائمة الحوار). زر «الإعدادات» في بطاقة يالدين بصفحة الشحن كان يشير إلى /integrations/yalidine (مسار ميت بعد p93).
+
+**بعد**:
+- EcomChannelsPage.js: إزالة yalidine/zr/maystro من SUPPORTED_CHANNELS؛ قائمة التكاملات المُعدَّة تُرشّح kind===shipping (salesIntegrations) — لم يعد أي تكامل شحن يظهر في قنوات البيع.
+- EcomShippingTab.js: بطاقة جديدة «ربط شركات الشحن» (couriers-card) تعرض يالدين/ZR Express/Maystro مع حالة الربط (مفاتيح محفوظة/محاكاة/غير مربوط) وشارة مُفعَّل؛ حوار إعدادات لكل شركة (courier-dialog): حقول المفاتيح (password، تُركِ الحقل فارغاً للإبقاء) + سعر الإرجاع + مفتاح التفعيل؛ حفظ عبر POST/PUT /ecom/integrations (لا تغيير في الباك إند).
+- زر «الإعدادات» في بطاقة تكامل Yalidine يفتح الآن نفس الحوار (yalidine-settings-btn) بدل الرابط الميت؛ أُزيل استيراد Link غير المستخدم.
+- الحزمة: main.d2531b68.js (نُشرت عبر cp -r دون حذف الحزم القديمة).
+- اختبار حي: GET /ecom/integrations (NT-0011) → yalidine | kind=shipping | live | return_fee=0 → ستظهر في البطاقة الجديدة وتُخفى من قنوات البيع.
+
+Backup: /opt/ntcommerce/backups/p94_couriers_to_shipping/
