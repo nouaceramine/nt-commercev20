@@ -12,6 +12,7 @@ export default function ProductDetailPage() {
   const [relatedProducts, setRelatedProducts] = useState([]);
   const [store, setStore] = useState(null);
   const [quantity, setQuantity] = useState(1);
+  const [variantIdx, setVariantIdx] = useState(null);  // p73
   const [mainImage, setMainImage] = useState('');
   const [orderSuccess, setOrderSuccess] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -83,6 +84,12 @@ export default function ProductDetailPage() {
   }, [product]);
 
   const price = product ? (product.retail_price || product.selling_price || 0) : 0;
+  // p73: variant selection for has_variants products
+  const activeVariants = product?.has_variants
+    ? (product.variants || []).map((v, i) => ({ ...v, i })).filter(v => Number(v.quantity) > 0)
+    : [];
+  const selectedVariant = (variantIdx != null && product?.variants) ? product.variants[variantIdx] : null;
+  const maxQty = selectedVariant ? Number(selectedVariant.quantity) : (product?.quantity || 99);
   const oldPrice = product && product.purchase_price > 0 ? Math.round(price * 1.2) : 0;
   const savePercent = oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
   const selectedRate = deliveryRates.find(r => String(r.id || r.wilaya_id || '') === String(customerInfo.wilaya).padStart(2, '0'));
@@ -136,6 +143,10 @@ export default function ProductDetailPage() {
   const handleOrder = async (e) => {
     e.preventDefault();
     if (submitting) return;
+    if (product?.has_variants && activeVariants.length > 0 && variantIdx == null) {
+      toast.error('اختر اللون / الحجم أولاً');
+      return;
+    }
     setSubmitting(true);
     try {
       const orderData = {
@@ -150,7 +161,11 @@ export default function ProductDetailPage() {
           product_id: product.id,
           name: product.name_ar || product.name,
           quantity: quantity,
-          price: price
+          price: price,
+          ...(selectedVariant ? {
+            variant_index: variantIdx,
+            variant_label: [selectedVariant.color, selectedVariant.size].filter(Boolean).join(' / ')
+          } : {})
         }],
         subtotal: subtotal,
         total: finalTotal,
@@ -261,8 +276,32 @@ export default function ProductDetailPage() {
               </p>
             )}
 
+            {product.has_variants && (
+              <div style={{ marginBottom: '12px' }} data-testid="pdp-variant-block">
+                <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>اللون / الحجم *</label>
+                {activeVariants.length > 0 ? (
+                  <select
+                    value={variantIdx ?? ''}
+                    onChange={e => { setVariantIdx(e.target.value === '' ? null : parseInt(e.target.value)); setQuantity(1); }}
+                    style={{ ...inputStyle, cursor: 'pointer' }} data-testid="pdp-variant-select"
+                  >
+                    <option value="">اختر اللون / الحجم...</option>
+                    {activeVariants.map(v => (
+                      <option key={v.i} value={v.i}>
+                        {[v.color, v.size].filter(Boolean).join(' / ') || `متغير ${v.i + 1}`} — متوفر {v.quantity}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p style={{ fontSize: '13px', color: '#dc2626', fontWeight: 600 }}>✖ نفذت كل المتغيرات</p>
+                )}
+              </div>
+            )}
+
             <p style={{ fontSize: '13px', marginBottom: '16px', color: product.quantity > 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
-              {product.quantity > 0 ? `✔ متوفر في المخزون (${product.quantity})` : '✖ نفذت الكمية'}
+              {product.has_variants
+                ? (selectedVariant ? `✔ متوفر (${selectedVariant.quantity})` : (activeVariants.length > 0 ? 'اختر اللون / الحجم لمعرفة التوفر' : '✖ نفذت الكمية'))
+                : (product.quantity > 0 ? `✔ متوفر في المخزون (${product.quantity})` : '✖ نفذت الكمية')}
             </p>
 
             {/* ===== صندوق طلب COD المضمّن ===== */}
@@ -402,7 +441,7 @@ export default function ProductDetailPage() {
                   display: 'flex', alignItems: 'center', border: '1px solid #d1d5db',
                   borderRadius: '8px', overflow: 'hidden', height: '40px', background: '#fff', flexShrink: 0
                 }}>
-                  <button type="button" onClick={() => setQuantity(Math.min(product.quantity || 99, quantity + 1))}
+                  <button type="button" onClick={() => setQuantity(Math.min(maxQty, quantity + 1))}
                     style={{ width: '36px', height: '100%', background: '#f3f4f6', border: 'none', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Plus size={14} />
                   </button>

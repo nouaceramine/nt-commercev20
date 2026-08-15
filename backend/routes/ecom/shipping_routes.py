@@ -156,6 +156,43 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
     return label_doc
 
 
+@router.post("/ecom/shipping/sync-yalidine")
+async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
+    """p74: pull real parcel statuses from Yalidine for shipped orders and
+    advance them automatically (delivered → profit realized / returned →
+    losses + stock restored, via the standard status state machine)."""
+    await require_ecom_feature(user)
+    integration = await db.ecom_integrations.find_one({"channel": "yalidine", "is_active": True})
+    if not integration or not (integration.get("credentials") or {}).get("api_id"):
+        raise HTTPException(status_code=400, detail="تكامل يالدين غير مُعَدّ — أدخل المفاتيح من صفحة التكاملات أولاً")
+
+    orders = await db.ecom_orders.find(
+        {"status": "shipped", "courier": "yalidine", "tracking_number": {"$nin": [None, ""]}},
+        {"_id": 0},
+    ).to_list(500)
+
+    from services.application.ecom_order_service import change_order_status
+    from services.ecom.yalidine_service import fetch_parcel_status, map_yalidine_status
+
+    results = {"checked": 0, "delivered": 0, "returned": 0, "unchanged": 0, "errors": []}
+    for o in orders:
+        results["checked"] += 1
+        try:
+            st = await fetch_parcel_status(integration, o["tracking_number"])
+            target = map_yalidine_status(st.get("last_status"))
+            if target == "delivered":
+                await change_order_status(db, o["id"], "delivered", "مزامنة يالدين التلقائية", user)
+                results["delivered"] += 1
+            elif target == "refunded":
+                await change_order_status(db, o["id"], "refunded", "مزامنة يالدين — رفض الاستلام / إرجاع", user)
+                results["returned"] += 1
+            else:
+                results["unchanged"] += 1
+        except Exception as exc:  # noqa: BLE001 — keep syncing the rest
+            results["errors"].append({"order": o.get("order_code"), "error": str(exc)[:120]})
+    return results
+
+
 @router.get("/ecom/shipping/labels/{label_id}")
 async def get_label(label_id: str, user: dict = Depends(require_tenant)):
     await require_ecom_feature(user)

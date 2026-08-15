@@ -130,3 +130,43 @@ async def create_parcel(integration: dict, order: dict) -> dict:
         "label_url": label_url,
         "provider_response": data,
     }
+
+
+async def fetch_parcel_status(integration: dict, tracking: str) -> dict:
+    """Fetch a parcel's current status from Yalidine by tracking number.
+
+    Returns {tracking, last_status}. Raises YalidineCredentialsMissing /
+    YalidineAPIError on failure.
+    """
+    api_id, api_token = _extract_creds(integration)
+    headers = {"X-API-ID": api_id, "X-API-TOKEN": api_token}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{YALIDINE_BASE_URL}/parcels/{tracking}/", headers=headers)
+    except httpx.HTTPError as exc:
+        raise YalidineAPIError(f"Network error: {exc}") from exc
+
+    if resp.status_code >= 400:
+        raise YalidineAPIError(f"Yalidine returned HTTP {resp.status_code} for {tracking}")
+
+    data = resp.json()
+    parcel = data.get("data") if isinstance(data, dict) else data
+    if isinstance(parcel, list):
+        parcel = parcel[0] if parcel else {}
+    return {"tracking": tracking, "last_status": (parcel or {}).get("last_status", "") or ""}
+
+
+def map_yalidine_status(last_status: str):
+    """Map a Yalidine last_status string to an internal order status.
+
+    'Livrée' → delivered ; return/failure variants → refunded ; else None.
+    NB: 'En livraison' (out for delivery) is intentionally NOT delivered.
+    """
+    s = (last_status or "").strip().lower()
+    if not s:
+        return None
+    if "livrée" in s or "livre" in s and "en livraison" not in s or s == "delivered":
+        return "delivered"
+    if "retourn" in s or "retour" in s or "échec" in s or "echec" in s or "failed" in s:
+        return "refunded"
+    return None

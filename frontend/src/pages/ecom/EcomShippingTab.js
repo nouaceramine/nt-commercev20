@@ -21,6 +21,19 @@ export default function EcomShippingTab() {
   const [rates, setRates] = useState([]);
   const [ratesDefault, setRatesDefault] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
+  const [syncing, setSyncing] = useState(false);   // p74
+  const [syncResult, setSyncResult] = useState(null);
+
+  const syncYalidine = async () => {
+    setSyncing(true); setSyncResult(null);
+    try {
+      const r = await apiClient.post('/ecom/shipping/sync-yalidine');
+      setSyncResult(r.data);
+      toast.success(ar ? `تمت المزامنة: ${r.data.delivered} مُسلَّم، ${r.data.returned} مُسترد` : 'Synchronisé');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشلت المزامنة' : 'Échec'));
+    } finally { setSyncing(false); }
+  };
 
   const fetchRates = () => {
     apiClient.get('/store/delivery-rates').then(r => {
@@ -89,6 +102,22 @@ export default function EcomShippingTab() {
                 <Link to="/integrations/yalidine">
                   <Button variant="outline" size="sm" className="gap-1"><Settings className="h-4 w-4" />{ar ? 'الإعدادات' : 'Paramètres'}</Button>
                 </Link>
+              </div>
+
+              <div className="border rounded-lg p-3 bg-cyan-50/50" data-testid="yalidine-sync-block">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-sm">{ar ? 'مزامنة الحالات من يالدين' : 'Sync statuts Yalidine'}</p>
+                  <Button onClick={syncYalidine} disabled={syncing} size="sm" data-testid="yalidine-sync-btn">
+                    {syncing ? (ar ? 'جارٍ...' : '...') : (ar ? 'تحديث الطلبات المشحونة' : 'Synchroniser')}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{ar ? 'يجلب حالة كل طرد مشحون: المُسلَّم يصبح "تم التسليم" والمرفوض "مُستردّ" تلقائياً مع القيود المحاسبية.' : 'Met à jour les colis expédiés automatiquement.'}</p>
+                {syncResult && (
+                  <p className="text-xs mt-2 font-medium" data-testid="yalidine-sync-result">
+                    {ar ? `فُحص ${syncResult.checked} — مُسلَّم: ${syncResult.delivered} — مُسترد: ${syncResult.returned} — بلا تغيير: ${syncResult.unchanged}` : JSON.stringify(syncResult)}
+                    {syncResult.errors?.length > 0 ? ` — ${ar ? 'أخطاء' : 'erreurs'}: ${syncResult.errors.length}` : ''}
+                  </p>
+                )}
               </div>
 
               <div>

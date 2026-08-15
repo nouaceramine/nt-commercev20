@@ -1459,3 +1459,15 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
   - PublicStorePage (p69) كان سليماً — لا تغيير.
 - **اختبارات**: رفض اسم "NT" من حساب NT-0011 (400) ✓؛ اسم "BOB" الخاص يُحفظ ✓؛ rates العامة 58 ولاية (16: 500/350) ✓؛ p71 profitability حي ✓؛ p70 notifications حي ✓.
 - **النشر**: main.0f30d600.js — backup: backups/p72_storefix/
+
+## p73+p74 — متغيرات المنتج في البيع + مزامنة يالدين التلقائية (2026-08-15)
+- **p73 — اختيار المتغير عند الطلب من المتجر**:
+  - ProductDetailPage: قائمة اختيار اللون/الحجم للمنتجات ذات has_variants (المتغيرات النافدة تُخفى)، نص التوفر حسب المتغير المختار، حدّ الكمية = مخزون المتغير، إلزامية الاختيار.
+  - online_store_routes create_public_order: حسم ذري على مستوى المتغير (variant_index) مع فحص التوفر لكل متغير + تراجع كامل عند أي نقص؛ الطلب يخزّن variant_label ويظهر في صندوق الطلبات كـ "اسم (أحمر / L)".
+  - استعادة المخزون عند الإلغاء/الاسترداد تعيد كمية المتغير أيضاً (store cancel + ecom_order_service).
+- **p74 — مزامنة يالدين**:
+  - yalidine_service: fetch_parcel_status (GET /v1/parcels/{tracking}) + map_yalidine_status (Livrée→delivered، Retourné/Echec→refunded، En livraison→بلا تغيير).
+  - POST /ecom/shipping/sync-yalidine: يفحص الطلبات shipped بقناة يالدين ويقدّمها عبر آلة الحالات (القيود المحاسبية والمخزون تلقائياً).
+  - EcomShippingTab: زر "تحديث الطلبات المشحونة" + ملخص النتيجة.
+- **اختبارات حية**: منتج بمتغيرين (3+5=8) → طلب عام بمتغير L×2 → المنتج 6 والمتغير L=3 وM=3 ✓؛ محاولة 99 من متغير فيه 3 → 400 برسالة عربية ✓؛ إلغاء → استعادة كاملة (8، M:3، L:5) ✓؛ ترميز الحالات: Livrée→delivered، En livraison→None، Retourné/Echec→refunded ✓؛ sync حي: checked=0 (لا طرود مشحونة) ✓؛ تنظيف كامل + إيقاف متجر bob.
+- **النشر**: main.d950a057.js — backups: p73_variants/, p74_yalidine_sync/

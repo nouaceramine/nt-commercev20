@@ -180,13 +180,17 @@ async def _sync_inventory_on_status_change(db, order: dict, new_status: str, now
     if new_status in ("cancelled", "refunded") and already_deducted:
         deductions = order.get("inventory_deductions") or []
         if not deductions:
-            deductions = [{"product_id": it["product_id"], "qty": int(it.get("qty", 0) or 0)} for it in items_with_product]
+            deductions = [{"product_id": it["product_id"], "qty": int(it.get("qty", 0) or 0),
+                           "variant_index": it.get("variant_index")} for it in items_with_product]
         for d in deductions:
             pid = d.get("product_id")
             qty = int(d.get("qty", 0) or 0)
             if not pid or qty <= 0:
                 continue
             res = await db.products.update_one({"id": pid}, {"$inc": {"quantity": qty}, "$set": {"updated_at": now_iso}})
+            _vidx = d.get("variant_index")  # p73: restore variant stock too
+            if isinstance(_vidx, int):
+                await db.products.update_one({"id": pid}, {"$inc": {f"variants.{_vidx}.quantity": qty}})
             if res.matched_count == 0:
                 result["warnings"].append(f"⚠️ تعذَّرت إعادة المخزون لمنتج محذوف: {pid}")
                 continue

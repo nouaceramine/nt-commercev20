@@ -274,6 +274,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 qty = item.get("quantity", 1)
                 if pid:
                     await db.products.update_one({"id": pid}, {"$inc": {"quantity": qty}})
+                    _vidx = item.get("variant_index")  # p73
+                    if isinstance(_vidx, int):
+                        await db.products.update_one({"id": pid}, {"$inc": {f"variants.{_vidx}.quantity": qty}})
             await db.store_orders.update_one({"id": order_id}, {"$set": {"stock_restored": True}})
         await db.store_orders.update_one(
             {"id": order_id},
@@ -464,25 +467,46 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             pid = item.get("product_id")
             if not pid:
                 continue
-            _claim[pid] = _claim.get(pid, 0) + item.get("quantity", 1)
+            _vidx = item.get("variant_index")
+            key = (pid, _vidx if isinstance(_vidx, int) else None)
+            _claim[key] = _claim.get(key, 0) + item.get("quantity", 1)
             _names[pid] = item.get("name", "")
         _claimed = []
-        for pid, qty in _claim.items():
-            product = await tenant_db_inst.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1})
+
+        async def _rollback_claims():
+            for cid, cqty, cvidx in _claimed:
+                await tenant_db_inst.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
+                if cvidx is not None:
+                    await tenant_db_inst.products.update_one({"id": cid}, {"$inc": {f"variants.{cvidx}.quantity": cqty}})
+
+        for (pid, vidx), qty in _claim.items():
+            product = await tenant_db_inst.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1, "has_variants": 1, "variants": 1})
             if not product:
                 raise HTTPException(status_code=400, detail=f"Product {_names.get(pid, 'Unknown')} not found")
             if product.get("is_non_stockable"):
                 continue
+            pname = product.get("name_ar") or product.get("name_en") or _names.get(pid, pid)
+            # p73: variant-level availability check
+            if vidx is not None and product.get("has_variants"):
+                _variants = product.get("variants") or []
+                if not (0 <= vidx < len(_variants)):
+                    await _rollback_claims()
+                    raise HTTPException(status_code=400, detail=f"متغير غير صالح للمنتج '{pname}'")
+                _v = _variants[vidx]
+                if float(_v.get("quantity", 0) or 0) < qty:
+                    await _rollback_claims()
+                    _vlabel = " / ".join(x for x in [_v.get("color", ""), _v.get("size", "")] if x) or f"#{vidx + 1}"
+                    raise HTTPException(status_code=400, detail=f"المتغير '{_vlabel}' من '{pname}' غير متوفر بالكمية المطلوبة (المتاح {int(_v.get('quantity', 0))})")
             res = await tenant_db_inst.products.find_one_and_update(
                 {"id": pid, "quantity": {"$gte": qty}},
                 {"$inc": {"quantity": -qty}},
             )
             if res is None:
-                for cid, cqty in _claimed:
-                    await tenant_db_inst.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
-                pname = product.get("name_ar") or product.get("name_en") or _names.get(pid, pid)
+                await _rollback_claims()
                 raise HTTPException(status_code=400, detail=f"المنتج '{pname}' غير متوفر بالكمية المطلوبة (المتاح {product.get('quantity', 0)})")
-            _claimed.append((pid, qty))
+            if vidx is not None and product.get("has_variants"):
+                await tenant_db_inst.products.update_one({"id": pid}, {"$inc": {f"variants.{vidx}.quantity": -qty}})
+            _claimed.append((pid, qty, vidx))
         count = await tenant_db_inst.store_orders.count_documents({}) + 1
         order_number = f"WEB{count:06d}"
         order_data = {
@@ -501,8 +525,10 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             now = datetime.now(timezone.utc).isoformat()  # p45: was undefined -> every webstore order 500'd after insert
             ecom_items = [
                 {
-                    "name": it.get("name", ""), "sku": "",
+                    "name": (it.get("name", "") + (f" ({it.get('variant_label')})" if it.get("variant_label") else "")),
+                    "sku": "",
                     "product_id": it.get("product_id"),
+                    "variant_index": it.get("variant_index"),
                     "qty": int(it.get("quantity", 1) or 1),
                     "price": float(it.get("price", 0) or 0),
                     "total": round(int(it.get("quantity", 1) or 1) * float(it.get("price", 0) or 0), 2),
