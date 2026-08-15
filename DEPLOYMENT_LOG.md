@@ -1481,3 +1481,13 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
   - StoreManagementPage: بطاقة "بكسلات التتبع" بحقلي الإدخال (data-testid: fb-pixel-input / tiktok-pixel-input).
 - **اختبار**: حفظ/قراءة المعرفات عبر API ✓ (أُعيدت فارغة — المستأجر يملؤها من الواجهة)؛ الحزمة تحمل fbevents.js + analytics.tiktok.com + الأحداث ✓.
 - **النشر**: main.e242c395.js — backup: backups/p75_pixels/
+
+## p76 — سحب أسعار التوصيل الحقيقية من يالدين (2026-08-15)
+- **قبل**: delivery_rates أسعار افتراضية تقريبية؛ return_fee = 0؛ لا ربط بحساب يالدين الفعلي.
+- **بعد**:
+  - POST /api/ecom/shipping/yalidine/pull-rates {from_wilaya_id}: يسحب الرسوم الحقيقية (منزل/مكتب/إرجاع) لكل الولايات الـ58 من /v1/fees/ — تسلسلي مع مهلة 1.5ث وإعادة عند 429، upsert غير هدّام لكل ولاية؛ يحفظ return_fee (الأكثر شيوعاً) + sender_wilaya_id على التكامل.
+  - **وسيط IPv6 على المضيف** (ntcommerce-yalproxy.service، /opt/ntcommerce/yalidine_proxy.py على 172.20.0.1:8899): جدار يالدين حظر IPv4 الخادم (403 لكل الطلبات) بينما IPv6 سليم — الخدمة تجرّب httpx أولاً ثم تسقط تلقائياً على الوسيط (fetch_fees_for_wilaya + fetch_parcel_status). قاعدة ufw: سماح 8899 من 172.20.0.0/16 فقط.
+  - EcomShippingTab: صف السحب (sender-wilaya-input + pull-yalidine-rates-btn + pull-rates-msg) فوق جدول الأسعار.
+- **حوادث أثناء التنفيذ**: سحب موازٍ سابق أثار 429 جماعي ثم 403 لـ IPv4؛ استُعيدت delivery_rates كاملة (58) قبل إعادة السحب الآمن.
+- **اختبارات حية**: fetch_fees_for_wilaya عبر الوسيط ✓ (ولاية 09: 700/550)؛ سحبان كاملان متتاليان: saved=58, failed=[] ✓؛ الأسعار الفعلية في القاعدة (أدرار 1050/850، الشلف 900/650…) ✓؛ retour_fee=0 من حساب يالدين (مسجّل) ✓.
+- **النشر**: main.e0e089fa.js — backup: backups/p76_yalidine_rates/

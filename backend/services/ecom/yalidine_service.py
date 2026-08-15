@@ -12,6 +12,8 @@ When credentials are missing/blank, the service raises a typed exception that
 the caller catches to fall back to mock mode. This keeps the P1 mock path alive
 while P2 real integration is opt-in per tenant.
 """
+import asyncio
+import json
 import logging
 from typing import Optional
 import httpx
@@ -38,6 +40,27 @@ def _extract_creds(integration: Optional[dict]) -> tuple[str, str]:
     if not api_id or not api_token:
         raise YalidineCredentialsMissing("api_id and api_token are required")
     return api_id, api_token
+
+
+
+YALIDINE_PROXY = "http://172.20.0.1:8899"  # host-side IPv6 egress proxy (ntcommerce-yalproxy.service)
+
+
+async def _proxy_get_json(url: str, api_id: str, api_token: str) -> tuple[int, dict]:
+    """GET via the host IPv6 proxy — Yalidine's WAF blocks this server's IPv4."""
+    path = url[url.index("/v1/"):]
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.get(
+                YALIDINE_PROXY + path,
+                headers={"X-API-ID": api_id, "X-API-TOKEN": api_token},
+            )
+    except httpx.HTTPError as exc:
+        raise YalidineAPIError(f"proxy network error: {exc}") from exc
+    try:
+        return resp.status_code, resp.json()
+    except ValueError:
+        return resp.status_code, {}
 
 
 async def ping(integration: dict) -> dict:
@@ -147,9 +170,12 @@ async def fetch_parcel_status(integration: dict, tracking: str) -> dict:
         raise YalidineAPIError(f"Network error: {exc}") from exc
 
     if resp.status_code >= 400:
-        raise YalidineAPIError(f"Yalidine returned HTTP {resp.status_code} for {tracking}")
-
-    data = resp.json()
+        logger.warning("Yalidine parcel httpx %s for %s — retrying via IPv6 proxy", resp.status_code, tracking)
+        code, data = await _proxy_get_json(f"{YALIDINE_BASE_URL}/parcels/{tracking}/", api_id, api_token)
+        if code >= 400:
+            raise YalidineAPIError(f"Yalidine returned HTTP {code} for {tracking}")
+    else:
+        data = resp.json()
     parcel = data.get("data") if isinstance(data, dict) else data
     if isinstance(parcel, list):
         parcel = parcel[0] if parcel else {}
@@ -170,3 +196,43 @@ def map_yalidine_status(last_status: str):
     if "retourn" in s or "retour" in s or "échec" in s or "echec" in s or "failed" in s:
         return "refunded"
     return None
+
+
+async def fetch_fees_for_wilaya(integration: dict, from_wilaya_id: int, to_wilaya_id: int) -> dict:
+    """Fetch delivery fees from Yalidine for one destination wilaya.
+
+    Returns {home, desk, retour} — representative prices = the most common
+    commune price (fees are normally uniform inside a wilaya).
+    """
+    api_id, api_token = _extract_creds(integration)
+    headers = {
+        "X-API-ID": api_id, "X-API-TOKEN": api_token,
+        # Yalidine throttles/blocks the default httpx UA on /fees/ — send a browser UA
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+    url = f"{YALIDINE_BASE_URL}/fees/?from_wilaya_id={from_wilaya_id}&to_wilaya_id={to_wilaya_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise YalidineAPIError(f"Network error: {exc}") from exc
+    if resp.status_code >= 400:
+        logger.warning("Yalidine fees httpx %s for wilaya %s — retrying via IPv6 proxy", resp.status_code, to_wilaya_id)
+        code, data = await _proxy_get_json(url, api_id, api_token)
+        if code >= 400:
+            raise YalidineAPIError(f"Yalidine fees HTTP {code} for wilaya {to_wilaya_id}")
+    else:
+        data = resp.json() or {}
+    communes = (data.get("per_commune") or {}).values()
+
+    def _mode(values):
+        vals = [v for v in values if isinstance(v, (int, float)) and v > 0]
+        if not vals:
+            return 0
+        from collections import Counter
+        return Counter(vals).most_common(1)[0][0]
+
+    home = _mode([c.get("express_home") or c.get("economic_home") for c in communes])
+    desk = _mode([c.get("express_desk") or c.get("economic_desk") for c in communes])
+    return {"home": int(home), "desk": int(desk), "retour": int(data.get("retour_fee") or 0)}

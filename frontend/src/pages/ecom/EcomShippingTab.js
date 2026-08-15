@@ -22,6 +22,21 @@ export default function EcomShippingTab() {
   const [ratesDefault, setRatesDefault] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [syncing, setSyncing] = useState(false);   // p74
+  const [pulling, setPulling] = useState(false);   // p76
+  const [senderWilaya, setSenderWilaya] = useState('16');
+  const [pullMsg, setPullMsg] = useState('');
+
+  const pullYalidineRates = async () => {
+    setPulling(true); setPullMsg('');
+    try {
+      const r = await apiClient.post('/ecom/shipping/yalidine/pull-rates', { from_wilaya_id: parseInt(senderWilaya) || 16 });
+      setPullMsg(r.data.message || '');
+      toast.success(r.data.message);
+      fetchRates?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشل سحب الأسعار' : 'Échec'));
+    } finally { setPulling(false); }
+  };
   const [syncResult, setSyncResult] = useState(null);
 
   const syncYalidine = async () => {
@@ -165,9 +180,19 @@ export default function EcomShippingTab() {
           </CardHeader>
           <CardContent className="space-y-4">
             {ratesDefault && (
-              <p className="text-xs text-muted-foreground bg-muted/40 rounded p-2" data-testid="rates-default-note">
+              <>
+              <div className="flex flex-wrap items-center gap-2 mb-3 border rounded-lg p-2 bg-orange-50/50" data-testid="yalidine-pull-row">
+              <span className="text-sm">{ar ? 'ولاية الإرسال:' : 'Wilaya d\'envoi:'}</span>
+              <Input className="w-20 h-8" value={senderWilaya} onChange={e => setSenderWilaya(e.target.value)} data-testid="sender-wilaya-input" />
+              <Button size="sm" variant="outline" onClick={pullYalidineRates} disabled={pulling} data-testid="pull-yalidine-rates-btn">
+                {pulling ? (ar ? 'جارٍ السحب...' : '...') : (ar ? '🚚 سحب أسعار يالدين الحقيقية' : 'Importer tarifs Yalidine')}
+              </Button>
+              {pullMsg && <span className="text-xs text-emerald-700" data-testid="pull-rates-msg">{pullMsg}</span>}
+            </div>
+            <p className="text-xs text-muted-foreground bg-muted/40 rounded p-2" data-testid="rates-default-note">
                 {ar ? 'هذه أسعار افتراضية تقريبية — عدّلها حسب شركة الشحن ثم اضغط حفظ' : 'Tarifs approximatifs par défaut — modifiez puis enregistrez'}
               </p>
+              </>
             )}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm">{ar ? 'تعبئة الكل:' : 'Appliquer à tous:'}</span>

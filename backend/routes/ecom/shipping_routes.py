@@ -156,6 +156,84 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
     return label_doc
 
 
+@router.post("/ecom/shipping/yalidine/pull-rates")
+async def pull_yalidine_rates(body: dict, user: dict = Depends(require_tenant)):
+    """p76: pull real delivery fees (home + desk + return) for all 58 wilayas
+    from the tenant's Yalidine account and overwrite delivery_rates with them."""
+    await require_ecom_feature(user)
+    integration = await db.ecom_integrations.find_one({"channel": "yalidine", "is_active": True})
+    if not integration or not (integration.get("credentials") or {}).get("api_id"):
+        raise HTTPException(status_code=400, detail="تكامل يالدين غير مُعَدّ")
+
+    try:
+        from_wilaya = int(body.get("from_wilaya_id") or 16)
+    except (TypeError, ValueError):
+        from_wilaya = 16
+
+    from routes.online_store_routes import DEFAULT_DELIVERY_RATES  # names + ids
+    from services.ecom.yalidine_service import fetch_fees_for_wilaya
+    import asyncio
+
+    now = datetime.now(timezone.utc).isoformat()
+    saved = 0
+    failed = []
+    retour_fees = []
+
+    # Sequential with delay + one retry — Yalidine rate-limits parallel calls (429).
+    # Non-destructive: upsert per wilaya, never wipe the collection.
+    for rate_row in DEFAULT_DELIVERY_RATES:
+        to_id = int(rate_row["wilaya_id"])
+        fees = None
+        for attempt in range(3):
+            try:
+                fees = await fetch_fees_for_wilaya(integration, from_wilaya, to_id)
+                break
+            except Exception as exc:  # noqa: BLE001
+                if "429" in str(exc) and attempt < 2:
+                    await asyncio.sleep(8 + attempt * 12)
+                    continue
+                failed.append({"wilaya": to_id, "error": str(exc)[:80]})
+        if fees is None:
+            continue
+        await db.delivery_rates.update_one(
+            {"id": rate_row["wilaya_id"]},
+            {"$set": {
+                "id": rate_row["wilaya_id"],
+                "wilaya_name": rate_row.get("wilaya_name", ""),
+                "home_price": float(fees["home"]),
+                "office_price": float(fees["desk"]),
+                "source": "yalidine",
+                "updated_at": now,
+            }},
+            upsert=True,
+        )
+        saved += 1
+        if fees["retour"]:
+            retour_fees.append(fees["retour"])
+        await asyncio.sleep(1.5)
+
+    if saved == 0:
+        raise HTTPException(status_code=502, detail=f"فشل جلب الأسعار من يالدين: {failed[:2]}")
+
+    # return fee: the most common non-zero retour_fee across wilayas
+    retour = 0
+    if retour_fees:
+        from collections import Counter
+        retour = Counter(retour_fees).most_common(1)[0][0]
+    await db.ecom_integrations.update_one(
+        {"id": integration["id"]},
+        {"$set": {"return_fee": float(retour), "sender_wilaya_id": from_wilaya, "rates_pulled_at": now}},
+    )
+
+    return {
+        "saved": saved,
+        "failed": failed,
+        "return_fee": retour,
+        "from_wilaya_id": from_wilaya,
+        "message": f"تم سحب أسعار {saved} ولاية من يالدين (حق الإرجاع: {retour} دج)" + (f" — فشل {len(failed)}" if failed else ""),
+    }
+
+
 @router.post("/ecom/shipping/sync-yalidine")
 async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
     """p74: pull real parcel statuses from Yalidine for shipped orders and
