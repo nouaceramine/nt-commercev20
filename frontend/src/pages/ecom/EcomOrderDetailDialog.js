@@ -14,6 +14,9 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const [shippingProvider, setShippingProvider] = useState('yalidine');
   const [storeName, setStoreName] = useState('متجر إلكتروني');
   const [fin, setFin] = useState(null);  // p59: accounting ledger row
+  const [refundFee, setRefundFee] = useState('');    // p71: per-order return fee
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [packCost, setPackCost] = useState('');      // p71: packaging cost
 
   // Fetch tenant store name once when the dialog first opens
   useEffect(() => {
@@ -30,6 +33,8 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   // p59: fetch the order's accounting breakdown (exists after confirmation)
   useEffect(() => {
     setFin(null);
+    setRefundOpen(false); setRefundFee('');
+    setPackCost(order?.packaging_cost != null ? String(order.packaging_cost) : '');
     if (!open || !order?.id) return;
     apiClient.get(`/ecom/orders/${order.id}/financials`)
       .then(res => setFin(res.data))
@@ -42,10 +47,23 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const statusMeta = ORDER_STATUSES[order.status] || ORDER_STATUSES.new;
   const nextOptions = NEXT_STATUSES[order.status] || [];
 
+  const savePackaging = async () => {
+    setBusy(true);
+    try {
+      await apiClient.put(`/ecom/orders/${order.id}`, { packaging_cost: parseFloat(packCost) || 0 });
+      toast.success('تم حفظ تكلفة التغليف');
+      onUpdated?.();
+    } catch { toast.error('فشل حفظ تكلفة التغليف'); }
+    finally { setBusy(false); }
+  };
+
   const transition = async (toStatus) => {
     setBusy(true);
     try {
-      const res = await apiClient.put(`/ecom/orders/${order.id}/status`, { status: toStatus });
+      const body = { status: toStatus };
+      if (toStatus === 'refunded' && refundFee !== '') body.return_fee = parseFloat(refundFee) || 0;
+      const res = await apiClient.put(`/ecom/orders/${order.id}/status`, body);
+      setRefundOpen(false); setRefundFee('');
       toast.success(`تم تحديث الحالة إلى: ${ORDER_STATUSES[toStatus].labelAr}`);
 
       // ── Inventory feedback ──
@@ -178,6 +196,18 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
           <div className="flex justify-end mt-3 space-y-1 flex-col text-sm">
             <div>المجموع الفرعي: <span className="font-semibold">{Number(order.subtotal).toLocaleString()} دج</span></div>
             <div>الشحن: <span className="font-semibold">{Number(order.shipping_fee).toLocaleString()} دج</span></div>
+            <div className="flex items-center gap-2 mt-1" data-testid="packaging-cost-row">
+              <span>التغليف:</span>
+              {['new', 'confirmed', 'packed'].includes(order.status) ? (
+                <>
+                  <input type="number" min="0" className="border rounded px-2 py-0.5 w-24 text-sm" value={packCost} onChange={e => setPackCost(e.target.value)} data-testid="packaging-cost-input" />
+                  <span>دج</span>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={savePackaging} data-testid="packaging-cost-save">حفظ</Button>
+                </>
+              ) : (
+                <span className="font-semibold">{Number(order.packaging_cost || 0).toLocaleString()} دج</span>
+              )}
+            </div>
             <div className="text-lg font-bold text-emerald-700">الإجمالي: {Number(order.total).toLocaleString()} دج</div>
           </div>
 
@@ -188,6 +218,7 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
               <div className="flex justify-between"><span>الإيراد</span><span>{Number(fin.revenue).toLocaleString()} دج</span></div>
               <div className="flex justify-between"><span>تكلفة البضاعة</span><span>-{Number(fin.cogs).toLocaleString()} دج</span></div>
               <div className="flex justify-between"><span>الشحن</span><span>-{Number(fin.shipping_fee).toLocaleString()} دج</span></div>
+              {Number(fin.packaging_cost || 0) > 0 && <div className="flex justify-between"><span>التغليف</span><span>-{Number(fin.packaging_cost).toLocaleString()} دج</span></div>}
               {fin.status === 'returned' ? (
                 <>
                   <div className="flex justify-between text-red-700"><span>سعر الإرجاع ({order.courier || 'الناقل'})</span><span>-{Number(fin.return_fee).toLocaleString()} دج</span></div>
@@ -225,13 +256,21 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
                   size="sm"
                   variant={s === 'cancelled' || s === 'refunded' ? 'destructive' : 'default'}
                   disabled={busy}
-                  onClick={() => transition(s)}
+                  onClick={() => s === 'refunded' ? setRefundOpen(true) : transition(s)}
                   data-testid={`order-transition-${s}`}
                 >
                   <CheckCircle2 className="w-3 h-3 ml-1" />
                   {ORDER_STATUSES[s].labelAr}
                 </Button>
               ))}
+              {refundOpen && (
+                <div className="flex flex-wrap items-center gap-2 border border-red-200 bg-red-50 rounded-lg p-2 mt-2" data-testid="refund-fee-panel">
+                  <span className="text-sm text-red-800">حق الاسترداد لشركة الشحن (دج):</span>
+                  <input type="number" min="0" className="border rounded px-2 py-1 w-28 text-sm bg-white" value={refundFee} onChange={e => setRefundFee(e.target.value)} placeholder="0" data-testid="refund-fee-input" />
+                  <Button size="sm" variant="destructive" disabled={busy} onClick={() => transition('refunded')} data-testid="refund-confirm-btn">تأكيد الاسترداد</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRefundOpen(false)}>إلغاء</Button>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -35,17 +35,20 @@ export default function EcomAnalyticsPage() {
   const [funnel, setFunnel] = useState(null);
   const [topProducts, setTopProducts] = useState([]);
   const [digital, setDigital] = useState(null);
+  const [profit, setProfit] = useState(null);  // p71
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rev, fun, top, dig] = await Promise.all([
+      const [rev, fun, top, dig, pro] = await Promise.all([
         apiClient.get(`/ecom/analytics/revenue?days=${days}`),
         apiClient.get(`/ecom/analytics/funnel?days=${days}`),
         apiClient.get(`/ecom/analytics/top-products?days=${days}&limit=10`),
         apiClient.get('/digital/stats').catch(() => ({ data: null })),
+        apiClient.get(`/ecom/analytics/profitability?days=${days}`).catch(() => ({ data: null })),
       ]);
       setDigital(dig.data);
+      setProfit(pro.data);
       setRevenue(rev.data);
       setFunnel(fun.data);
       setTopProducts(top.data?.items || []);
@@ -172,6 +175,28 @@ export default function EcomAnalyticsPage() {
             </CardContent></Card>
           </div>
         )}
+
+        {/* p71: true COD profitability */}
+          {profit && (
+            <Card className="border-emerald-300" data-testid="profitability-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">💰 الربحية الحقيقية (COD) — آخر {days} يوم</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">صافي الربح الحقيقي</div><div className={`text-lg font-bold ${profit.net_profit >= 0 ? 'text-emerald-700' : 'text-red-700'}`} data-testid="net-profit-value">{Number(profit.net_profit).toLocaleString()} دج</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">الفائدة المحققة (مُسلَّم)</div><div className="text-lg font-bold text-emerald-700">{Number(profit.realized_profit).toLocaleString()} دج</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">خسائر الإرجاع (شحن+تغليف+استرداد)</div><div className="text-lg font-bold text-red-700">-{Number(profit.return_losses).toLocaleString()} دج</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">مصاريف الإعلانات الممولة</div><div className="text-lg font-bold text-amber-700">-{Number(profit.ad_spend).toLocaleString()} دج</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">نسبة التأكيد</div><div className="text-lg font-bold">{profit.confirmation_rate}%</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">نسبة التسليم</div><div className="text-lg font-bold">{profit.delivery_rate}%</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">نسبة الإرجاع</div><div className="text-lg font-bold">{profit.return_rate}%</div></div>
+                  <div className="border rounded-lg p-3"><div className="text-muted-foreground text-xs">ROAS الحقيقي / ROI على الإعلان</div><div className="text-lg font-bold">{profit.true_roas != null ? `${profit.true_roas}× / ${profit.roi_on_ads}%` : '—'}</div></div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">صافي الربح = فوائد الطلبات المُسلَّمة − خسائر المُستردَّة − مصاريف الإعلانات. سجّل مصاريف الإعلانات من تبويب الإعلانات، وتكلفة التغليف وحق الاسترداد من صفحة الطلب.</p>
+              </CardContent>
+            </Card>
+          )}
 
         {/* Digital services profit */}
         {digital && digital.completed_orders > 0 && (

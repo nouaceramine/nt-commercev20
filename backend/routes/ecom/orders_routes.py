@@ -233,6 +233,7 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         **totals,
         "notes": (body.get("notes") or "").strip(),
         "tags": list(body.get("tags") or []),
+        "packaging_cost": max(0.0, float(body.get("packaging_cost", 0) or 0)),
         "shipping_label_id": None,
         "tracking_number": None,
         "courier": None,
@@ -356,7 +357,8 @@ async def update_order_status(order_id: str, body: dict, user: dict = Depends(re
     """Transition an order to a new status — delegates to the application service."""
     await require_ecom_feature(user)
     from services.application.ecom_order_service import change_order_status
-    return await change_order_status(db, order_id, body.get("status"), body.get("note", ""), user)
+    return await change_order_status(db, order_id, body.get("status"), body.get("note", ""), user,
+                                     return_fee_override=body.get("return_fee"))
 
 @router.put("/ecom/orders/{order_id}")
 async def update_order(order_id: str, body: dict, user: dict = Depends(require_tenant)):
@@ -388,6 +390,11 @@ async def update_order(order_id: str, body: dict, user: dict = Depends(require_t
         updates["tags"] = list(body["tags"])
     if "payment_status" in body:
         updates["payment_status"] = (body["payment_status"] or "").strip()
+    if "packaging_cost" in body:
+        try:
+            updates["packaging_cost"] = max(0.0, float(body.get("packaging_cost") or 0))
+        except (TypeError, ValueError):
+            pass
 
     await db.ecom_orders.update_one({"id": order_id}, {"$set": updates})
     refreshed = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})

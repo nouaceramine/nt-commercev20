@@ -13,7 +13,7 @@ from routes.ecom.constants import ORDER_STATUS_KEYS, ORDER_STATUSES, STATUS_TRAN
 logger = logging.getLogger(__name__)
 
 
-async def change_order_status(db, order_id: str, new_status: str, note: str, user: dict) -> dict:
+async def change_order_status(db, order_id: str, new_status: str, note: str, user: dict, return_fee_override=None) -> dict:
     """Transition an order to a new status enforcing the state machine."""
     new_status = (new_status or "").strip().lower()
     if new_status not in ORDER_STATUS_KEYS:
@@ -50,7 +50,7 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
         elif new_status == "delivered":
             await _mark_financials_realized(db, order, now)
         elif new_status == "refunded":
-            await _record_return_financials(db, order, now)
+            await _record_return_financials(db, order, now, return_fee_override)
         elif new_status == "cancelled":
             await _void_financials(db, order, now)
     except Exception as exc:  # noqa: BLE001 — never block a status change on a ledger failure
@@ -238,7 +238,8 @@ async def _record_confirmation_financials(db, order: dict, now: str) -> None:
     cogs = await _compute_cogs(db, order)
     revenue = round(float(order.get("total") or 0), 2)
     shipping = round(float(order.get("shipping_fee") or 0), 2)
-    expected_profit = round(revenue - cogs - shipping, 2)
+    packaging = round(float(order.get("packaging_cost") or 0), 2)
+    expected_profit = round(revenue - cogs - shipping - packaging, 2)
     await db.ecom_order_financials.update_one(
         {"id": order_id},
         {"$set": {
@@ -248,6 +249,7 @@ async def _record_confirmation_financials(db, order: dict, now: str) -> None:
             "revenue": revenue,
             "cogs": cogs,
             "shipping_fee": shipping,
+            "packaging_cost": packaging,
             "expected_profit": expected_profit,
             "status": "expected",
             "confirmed_at": now,
@@ -269,19 +271,27 @@ async def _mark_financials_realized(db, order: dict, now: str) -> None:
     )
 
 
-async def _record_return_financials(db, order: dict, now: str) -> None:
+async def _record_return_financials(db, order: dict, now: str, return_fee_override=None) -> None:
     """On refund/return: reverse the profit and book the losses —
-    outbound shipping (merchant-borne) + the courier's return fee."""
+    outbound shipping (merchant-borne) + packaging + the return fee.
+    p71: return fee can be overridden per order (manual fee from the courier receipt)."""
     order_id = order.get("id")
-    return_fee = await _courier_return_fee(db, order)
+    if return_fee_override is not None:
+        try:
+            return_fee = max(0.0, float(return_fee_override))
+        except (TypeError, ValueError):
+            return_fee = await _courier_return_fee(db, order)
+    else:
+        return_fee = await _courier_return_fee(db, order)
     shipping = round(float(order.get("shipping_fee") or 0), 2)
-    losses = round(shipping + return_fee, 2)
+    packaging = round(float(order.get("packaging_cost") or 0), 2)
+    losses = round(shipping + return_fee + packaging, 2)
     fin = await db.ecom_order_financials.find_one({"id": order_id})
     if fin:
         await db.ecom_order_financials.update_one(
             {"id": order_id},
             {"$set": {"status": "returned", "returned_at": now,
-                      "return_fee": return_fee, "losses": losses,
+                      "return_fee": return_fee, "packaging_cost": packaging, "losses": losses,
                       "realized_profit": -losses, "updated_at": now}},
         )
     else:
@@ -292,7 +302,7 @@ async def _record_return_financials(db, order: dict, now: str) -> None:
             "id": order_id, "order_id": order_id, "order_code": order.get("order_code"),
             "revenue": revenue, "cogs": cogs, "shipping_fee": shipping,
             "expected_profit": 0, "status": "returned", "returned_at": now,
-            "return_fee": return_fee, "losses": losses, "realized_profit": -losses,
+            "return_fee": return_fee, "packaging_cost": packaging, "losses": losses, "realized_profit": -losses,
             "created_at": now, "updated_at": now,
         })
     await db.ecom_orders.update_one(

@@ -184,6 +184,90 @@ _LEAD_SYS_PROMPT = (
 )
 
 
+@router.get("/ecom/analytics/profitability")
+async def ecom_profitability(days: int = 30, user: dict = Depends(require_tenant)):
+    """p71: true COD profitability — funnel rates + realized profit − return losses − ad spend.
+
+    Answers the merchant's real question: after funded ads, confirmation,
+    packaging, shipping, deliveries and refused parcels with return fees —
+    how much did we actually earn?
+    """
+    await require_ecom_feature(user)
+    from datetime import datetime, timezone, timedelta
+    days = max(1, min(int(days or 30), 365))
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=days)).isoformat()
+    since_day = since[:10]
+
+    orders = await db.ecom_orders.find({"created_at": {"$gte": since}}, {"_id": 0}).to_list(10000)
+    fins = await db.ecom_order_financials.find({}, {"_id": 0}).to_list(10000)
+    fin_by_id = {f.get("id"): f for f in fins}
+
+    counts = {}
+    for o in orders:
+        counts[o.get("status", "new")] = counts.get(o.get("status", "new"), 0) + 1
+    total_orders = len(orders)
+    confirmed_plus = sum(counts.get(s, 0) for s in ("confirmed", "packed", "shipped", "delivered", "refunded"))
+    delivered = counts.get("delivered", 0)
+    refunded = counts.get("refunded", 0)
+    outcome = delivered + refunded  # orders that reached a final shipping outcome
+
+    realized_profit = losses = return_fees = 0.0
+    delivered_revenue = delivered_cogs = packaging_total = shipping_total = 0.0
+    for o in orders:
+        f = fin_by_id.get(o.get("id"))
+        if not f:
+            continue
+        st = f.get("status")
+        if st == "realized":
+            realized_profit += float(f.get("realized_profit") or 0)
+            delivered_revenue += float(f.get("revenue") or 0)
+            delivered_cogs += float(f.get("cogs") or 0)
+            shipping_total += float(f.get("shipping_fee") or 0)
+            packaging_total += float(f.get("packaging_cost") or 0)
+        elif st == "returned":
+            losses += float(f.get("losses") or 0)
+            return_fees += float(f.get("return_fee") or 0)
+            packaging_total += float(f.get("packaging_cost") or 0)
+
+    # Funded-ads spend: recorded as expenses under the ads category (p71)
+    AD_CATS = ["إعلانات ممولة", "إعلانات", "ads", "Ads", "ADs", "Publicité", "publicité"]
+    ad_rows = await db.expenses.find(
+        {"category": {"$in": AD_CATS},
+         "$or": [{"date": {"$gte": since_day}}, {"created_at": {"$gte": since}}]},
+        {"_id": 0, "amount": 1},
+    ).to_list(5000)
+    ad_spend = round(sum(float(e.get("amount") or 0) for e in ad_rows), 2)
+
+    realized_profit = round(realized_profit, 2)
+    losses = round(losses, 2)
+    net_profit = round(realized_profit - losses - ad_spend, 2)
+
+    def pct(a, b):
+        return round((a / b) * 100, 1) if b else 0.0
+
+    return {
+        "days": days,
+        "total_orders": total_orders,
+        "counts": counts,
+        "confirmation_rate": pct(confirmed_plus, total_orders),
+        "delivery_rate": pct(delivered, outcome),
+        "return_rate": pct(refunded, outcome),
+        "delivered_revenue": round(delivered_revenue, 2),
+        "delivered_cogs": round(delivered_cogs, 2),
+        "shipping_fees": round(shipping_total, 2),
+        "packaging_costs": round(packaging_total, 2),
+        "realized_profit": realized_profit,
+        "return_losses": losses,
+        "return_fees": round(return_fees, 2),
+        "ad_spend": ad_spend,
+        "net_profit": net_profit,
+        "ad_cost_per_delivered": round(ad_spend / delivered, 2) if delivered else 0.0,
+        "true_roas": round(delivered_revenue / ad_spend, 2) if ad_spend > 0 else None,
+        "roi_on_ads": round((net_profit / ad_spend) * 100, 1) if ad_spend > 0 else None,
+    }
+
+
 @router.post("/ecom/leads/{lead_id}/ai-categorize")
 async def categorize_lead(lead_id: str, user: dict = Depends(require_tenant)):
     """LLM classifies the lead message and stores the result on the lead doc.
