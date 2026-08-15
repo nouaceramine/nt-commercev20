@@ -201,6 +201,8 @@ export default function DebtsPage() {
                     <SelectItem value="cash">{t.cash}</SelectItem>
                     <SelectItem value="bank">{t.bank}</SelectItem>
                     <SelectItem value="wallet">{t.wallet}</SelectItem>
+                    <SelectItem value="safe">{t.safe}</SelectItem>
+                    <SelectItem value="personal">{t.personalMoney}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -1379,3 +1379,15 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 
 ### ملاحظة
 - مجموعة `spare_parts` الفارغة ومسارات /spare-parts القديمة بقيت كما هي (غير مستخدمة، لا ضرر منها) — لم تُحذف حفاظاً على الاستقرار.
+
+## p64 — إصلاح صفحة الديون /debts (2026-08-15)
+**المشكلة:** /debts تعرض مستحقات 0.00 وديون 0.00 رغم وجود دين 3500 على الزبون bob.
+**الجذر:** الصفحة تقرأ مجموعة debts (اليدوية الفارغة) فقط؛ ديون المبيعات/المشتريات الآجلة تعيش في أرصدة customers/suppliers. إضافةً: تجميع customer_debt_aggregates يقرأ debt_amount بينما المبيعات تكتب remaining؛ وpay_customer_debt لم يكن يحدّث الصناديق.
+**قبل:** GET /debts → []؛ summary → 0؛ pay_customer_debt → 400 رغم وجود دين.
+**التغييرات (backup: /opt/ntcommerce/backups/p64_debts_fix/):**
+- routes/debts_routes.py: دمج ديون افتراضية حية من أرصدة الزبائن/الموردين (virt-customer-/virt-supplier-) في GET /debts؛ دفعها يوزّع FIFO على الفواتير المفتوحة + يحدّث المرآة + الصندوق (personal لا يلمس الصناديق).
+- services/balances.py: إصلاح customer_debt_aggregates ليقرأ max(remaining, debt_amount)؛ إضافة allocate_customer_payment و allocate_supplier_payment.
+- routes/customer_debts_routes.py: pay_customer_debt يستخدم الموزّع الجديد + يودع المبلغ في الصندوق ويسجل معاملة؛ pay_supplier_debt يستخدم الموزّع + شكل معاملة قياسي (cash_box_id).
+- models/schemas/trading.py: DebtPaymentCreate يقبل safe و personal.
+- frontend DebtsPage.js: حوار الدفع يعرض الخزنة والمال الخاص.
+**بعد (curl على NT-0011):** /debts → bob 3500؛ دفع 500+500+200 → المرآة=الفاتورة=summary=القائمة=2300 ونقدي=1200؛ ثم استعادة كاملة للحالة الأصلية وكلمة مرور المستأجر.

@@ -13,8 +13,11 @@ from typing import Optional
 async def customer_debt_aggregates(db, limit: int = 1000):
     """Per-customer open debt derived from sales (authoritative source)."""
     pipeline = [
-        {"$match": {"debt_amount": {"$gt": 0}}},
-        {"$group": {"_id": "$customer_id", "total_debt": {"$sum": "$debt_amount"}, "sales_count": {"$sum": 1}}},
+        # p64: sales store open debt in `remaining` (legacy docs used `debt_amount`)
+        {"$match": {"$or": [{"remaining": {"$gt": 0}}, {"debt_amount": {"$gt": 0}}]}},
+        {"$group": {"_id": "$customer_id",
+                    "total_debt": {"$sum": {"$max": [{"$ifNull": ["$remaining", 0]}, {"$ifNull": ["$debt_amount", 0]}]}},
+                    "sales_count": {"$sum": 1}}},
     ]
     return await db.sales.aggregate(pipeline).to_list(limit)
 
@@ -46,3 +49,61 @@ async def adjust_supplier_mirror(db, supplier_id: str, *,
         inc["total_purchases"] = total_purchases
     if inc:
         await db.suppliers.update_one({"id": supplier_id}, {"$inc": inc})
+
+
+async def allocate_customer_payment(db, customer_id: str, amount: float):
+    """p64: FIFO-allocate a customer debt payment across open sales.
+
+    Sales may store open debt in `remaining` (current) or `debt_amount` (legacy);
+    both are synced to the same value after allocation. Oldest sale first.
+    Returns (applied_amount, sales_updated).
+    """
+    sales = await db.sales.find(
+        {"customer_id": customer_id, "$or": [{"remaining": {"$gt": 0}}, {"debt_amount": {"$gt": 0}}]}
+    ).sort("created_at", 1).to_list(100)
+    remaining_payment = float(amount)
+    sales_updated = []
+    for sale in sales:
+        if remaining_payment <= 0:
+            break
+        open_debt = max(float(sale.get("remaining") or 0), float(sale.get("debt_amount") or 0))
+        if open_debt <= 0:
+            continue
+        applied = min(remaining_payment, open_debt)
+        new_debt = round(open_debt - applied, 2)
+        new_paid = float(sale.get("paid_amount", 0)) + applied
+        await db.sales.update_one({"id": sale["id"]}, {"$set": {
+            "remaining": new_debt, "debt_amount": new_debt, "paid_amount": new_paid,
+            "payment_status": "paid" if new_debt <= 0.01 else "partial",
+        }})
+        remaining_payment -= applied
+        sales_updated.append({"sale_id": sale["id"], "payment_applied": applied, "remaining_debt": new_debt})
+    return round(float(amount) - remaining_payment, 2), sales_updated
+
+
+async def allocate_supplier_payment(db, supplier_id: str, amount: float):
+    """p64: FIFO-allocate a supplier debt payment across open purchases (`remaining`).
+
+    Oldest purchase first. Returns (applied_amount, purchases_updated).
+    """
+    purchases = await db.purchases.find({"supplier_id": supplier_id, "remaining": {"$gt": 0}}).sort("created_at", 1).to_list(100)
+    remaining_payment = float(amount)
+    purchases_updated = []
+    for purchase in purchases:
+        if remaining_payment <= 0:
+            break
+        open_debt = float(purchase.get("remaining") or 0)
+        if open_debt <= 0:
+            continue
+        applied = min(remaining_payment, open_debt)
+        new_debt = round(open_debt - applied, 2)
+        new_paid = float(purchase.get("paid_amount", 0)) + applied
+        from datetime import datetime, timezone
+        await db.purchases.update_one({"id": purchase["id"]}, {"$set": {
+            "paid_amount": new_paid, "remaining": new_debt,
+            "status": "paid" if new_debt <= 0 else "partial",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }})
+        remaining_payment -= applied
+        purchases_updated.append({"purchase_id": purchase["id"], "paid": applied, "payment_applied": applied, "remaining_debt": new_debt})
+    return round(float(amount) - remaining_payment, 2), purchases_updated

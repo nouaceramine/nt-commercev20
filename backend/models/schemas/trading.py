@@ -160,7 +160,7 @@ class DebtCreate(BaseModel):
 class DebtPaymentCreate(BaseModel):
     debt_id: str
     amount: float
-    payment_method: Literal["cash", "bank", "wallet"] = "cash"
+    payment_method: Literal["cash", "bank", "wallet", "safe", "personal"] = "cash"  # p64: +خزنة/مال خاص
     notes: Optional[str] = ""
 
 class DebtResponse(BaseModel):
