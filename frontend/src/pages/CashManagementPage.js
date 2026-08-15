@@ -31,7 +31,8 @@ import {
   TrendingDown,
   RefreshCw,
   Lock,
-  PiggyBank
+  PiggyBank,
+  ShoppingCart
 } from 'lucide-react';
 
 export default function CashManagementPage() {
@@ -88,6 +89,7 @@ export default function CashManagementPage() {
       case 'wallet': return Wallet;
       case 'safe': return Lock;
       case 'personal': return PiggyBank;
+      case 'ecom': return ShoppingCart;
       default: return Banknote;
     }
   };
@@ -99,6 +101,7 @@ export default function CashManagementPage() {
       case 'wallet': return 'bg-purple-100 text-purple-700';
       case 'safe': return 'bg-amber-100 text-amber-700';
       case 'personal': return 'bg-rose-100 text-rose-700';
+      case 'ecom': return 'bg-indigo-100 text-indigo-700';
       default: return 'bg-muted';
     }
   };
@@ -148,7 +151,7 @@ export default function CashManagementPage() {
             const Icon = getBoxIcon(box.type);
             return (
               <Card key={box.id} className="relative overflow-hidden" data-testid={`cash-box-${box.id}`}>
-                <div className={`absolute top-0 left-0 right-0 h-1 ${box.type === 'cash' ? 'bg-emerald-500' : box.type === 'bank' ? 'bg-blue-500' : box.type === 'safe' ? 'bg-amber-500' : box.type === 'personal' ? 'bg-rose-500' : 'bg-purple-500'}`} />
+                <div className={`absolute top-0 left-0 right-0 h-1 ${box.type === 'cash' ? 'bg-emerald-500' : box.type === 'bank' ? 'bg-blue-500' : box.type === 'safe' ? 'bg-amber-500' : box.type === 'personal' ? 'bg-rose-500' : box.type === 'ecom' ? 'bg-indigo-500' : 'bg-purple-500'}`} />
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div>

@@ -116,10 +116,29 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
         ]).to_list(1)
 
+        # p86: merge web-store orders (counted at creation, excluding cancelled)
+        async def _ecom_sum(gte):
+            rows = await db.ecom_orders.aggregate([
+                {"$match": {"created_at": {"$gte": gte}, "status": {"$ne": "cancelled"}}},
+                {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
+            ]).to_list(1)
+            return {"total": rows[0]["total"] if rows else 0, "count": rows[0]["count"] if rows else 0}
+
+        store_today = await _ecom_sum(today)
+        store_month = await _ecom_sum(month_start)
+        store_year = await _ecom_sum(year_start)
+        pos_today = {"total": today_result[0]["total"] if today_result else 0, "count": today_result[0]["count"] if today_result else 0}
+        pos_month = {"total": month_result[0]["total"] if month_result else 0, "count": month_result[0]["count"] if month_result else 0}
+        pos_year = {"total": year_result[0]["total"] if year_result else 0, "count": year_result[0]["count"] if year_result else 0}
+
+        def _merge(pos, store):
+            return {"total": round(pos["total"] + store["total"], 2), "count": pos["count"] + store["count"]}
+
         return {
-            "today": {"total": today_result[0]["total"] if today_result else 0, "count": today_result[0]["count"] if today_result else 0},
-            "month": {"total": month_result[0]["total"] if month_result else 0, "count": month_result[0]["count"] if month_result else 0},
-            "year": {"total": year_result[0]["total"] if year_result else 0, "count": year_result[0]["count"] if year_result else 0},
+            "today": _merge(pos_today, store_today),
+            "month": _merge(pos_month, store_month),
+            "year": _merge(pos_year, store_year),
+            "store": {"today": store_today, "month": store_month, "year": store_year},
         }
 
     # ── Profit Stats ──
@@ -152,11 +171,34 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         ]).to_list(1)
         monthly_expenses = expenses_result[0]["total"] if expenses_result else 0
 
+        # p86: add web-store revenue + COGS (orders created this month, not cancelled)
+        ecom_revenue = ecom_cogs = 0
+        try:
+            monthly_ecom = await db.ecom_orders.find(
+                {"created_at": {"$gte": month_start}, "status": {"$ne": "cancelled"}},
+                {"_id": 0, "total": 1, "items": 1},
+            ).to_list(5000)
+            ecom_revenue = round(sum(float(o.get("total") or 0) for o in monthly_ecom), 2)
+            ecom_pids = {it.get("product_id") for o in monthly_ecom for it in (o.get("items") or [])}
+            ecom_cache = await product_price_map(db, ecom_pids)
+            for o in monthly_ecom:
+                for it in (o.get("items") or []):
+                    price = it.get("purchase_price") or ecom_cache.get(it.get("product_id"), 0)
+                    ecom_cogs += int(it.get("qty", 0) or 0) * price
+            ecom_cogs = round(ecom_cogs, 2)
+        except Exception:
+            ecom_revenue = ecom_cogs = 0
+
+        monthly_revenue = round(monthly_revenue + ecom_revenue, 2)
+        monthly_purchase_cost = round(monthly_purchase_cost + ecom_cogs, 2)
+
         return {
             "monthly_revenue": monthly_revenue,
             "monthly_purchase_cost": monthly_purchase_cost,
             "monthly_expenses": monthly_expenses,
-            "monthly_profit": monthly_revenue - monthly_purchase_cost - monthly_expenses
+            "monthly_profit": round(monthly_revenue - monthly_purchase_cost - monthly_expenses, 2),
+            "ecom_revenue": ecom_revenue,
+            "ecom_cogs": ecom_cogs,
         }
 
     # ── Analytics: Sales Chart ──

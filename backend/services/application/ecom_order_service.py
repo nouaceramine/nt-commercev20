@@ -5,6 +5,7 @@ customer notification, and ecom_order.* event publishing.
 """
 from datetime import datetime, timezone
 import logging
+import uuid
 
 from fastapi import HTTPException
 
@@ -55,6 +56,13 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
             await _void_financials(db, order, now)
     except Exception as exc:  # noqa: BLE001 — never block a status change on a ledger failure
         logger.warning("financials hook failed for order %s: %s", order_id, exc)
+
+    # p86: cash wallet + auto expenses (separate guard — never blocks status change)
+    try:
+        if new_status in ("shipped", "delivered", "refunded"):
+            await _record_store_accounting(db, order_id, new_status, now, user)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("store accounting hook failed for order %s: %s", order_id, exc)
 
     # مزامنة عكسية لطلبات متجر الويب: عكس الحالة إلى store_orders
     # (المخزون أداره _sync_inventory أعلاه — نعلّم stock_restored لتفادي إعادة مزدوجة)
@@ -234,6 +242,98 @@ async def _courier_return_fee(db, order: dict) -> float:
         return max(0.0, float(integ.get("return_fee") or 0))
     except (TypeError, ValueError):
         return 0.0
+
+
+# --- p86: store accounting — COD wallet movements + auto expenses ---
+ECOM_BOX_ID = "ecom_store"
+
+
+async def _cash_tx(db, box_id, tx_type, amount, description, ref_type, ref_id, now, user):
+    """Move money in/out of a cash box and journal it (upserts the box —
+    self-heals when init_cash_boxes hasn't run for this tenant yet)."""
+    await db.cash_boxes.update_one(
+        {"id": box_id},
+        {"$inc": {"balance": amount if tx_type == "income" else -amount},
+         "$set": {"updated_at": now},
+         "$setOnInsert": {"name": "محفظة المتجر الإلكتروني", "name_fr": "Boutique en ligne", "type": "ecom"}},
+        upsert=True,
+    )
+    await db.transactions.insert_one({
+        "id": str(uuid.uuid4()), "cash_box_id": box_id, "type": tx_type,
+        "amount": amount, "description": description,
+        "reference_type": ref_type, "reference_id": ref_id,
+        "created_at": now, "created_by": user.get("name") or "المتجر الإلكتروني",
+    })
+
+
+async def _auto_expense(db, amount, category, title, now):
+    """Book a P&L expense without touching a cash box (courier deducts these
+    fees from the payout — wallet movement is done separately)."""
+    from services.code_generator import generate_code
+    code = await generate_code(db, "expenses", "CH", 5, with_year=True)
+    await db.expenses.insert_one({
+        "id": str(uuid.uuid4()), "title": title, "category": category,
+        "amount": amount, "payment_method": "", "date": now[:10], "created_at": now,
+        "code": code, "expense_number": code,  # unique index on expense_number
+    })
+
+
+async def _record_store_accounting(db, order_id: str, new_status: str, now: str, user: dict) -> None:
+    """p86: link store orders to the ecom wallet + expense ledger (idempotent).
+
+    Wallet = money the courier collects/holds on our behalf:
+      delivered -> + (total - shipping_fee)       (net COD the courier pays out)
+      refunded  -> reversal of that income + courier return charges
+    P&L expenses (no cash-box impact):
+      shipped   -> shipping_fee under شحن المتجر الإلكتروني
+      refunded  -> return_fee + packaging under مرتجعات المتجر
+    """
+    order = await db.ecom_orders.find_one({"id": order_id})
+    if not order:
+        return
+    code = order.get("order_code") or order_id
+    total = round(float(order.get("total") or 0), 2)
+    shipping = round(float(order.get("shipping_fee") or 0), 2)
+    packaging = round(float(order.get("packaging_cost") or 0), 2)
+    flags = {}
+
+    if new_status == "shipped" and not order.get("shipping_expensed") and shipping > 0:
+        await _auto_expense(db, shipping, "شحن المتجر الإلكتروني", f"رسوم شحن الطلب {code}", now)
+        flags["shipping_expensed"] = True
+
+    elif new_status == "delivered" and not order.get("wallet_booked"):
+        net = round(total - shipping, 2)
+        if net > 0:
+            await _cash_tx(db, ECOM_BOX_ID, "income", net,
+                           f"تحصيل طلب المتجر {code} (صافي بعد الشحن)", "ecom_delivery", order_id, now, user)
+        if not order.get("shipping_expensed") and shipping > 0:
+            await _auto_expense(db, shipping, "شحن المتجر الإلكتروني", f"رسوم شحن الطلب {code}", now)
+            flags["shipping_expensed"] = True
+        flags["wallet_booked"] = True
+
+    elif new_status == "refunded":
+        fee = round(float(order.get("return_fee") or 0), 2)
+        if order.get("wallet_booked") and not order.get("wallet_reversed"):
+            net = round(total - shipping, 2)
+            if net > 0:
+                await _cash_tx(db, ECOM_BOX_ID, "expense", net,
+                               f"عكس تحصيل الطلب المرتجع {code}", "ecom_return_reversal", order_id, now, user)
+            flags["wallet_reversed"] = True
+        if not order.get("return_deducted"):
+            courier_charge = round(shipping + fee, 2)
+            if courier_charge > 0:
+                await _cash_tx(db, ECOM_BOX_ID, "expense", courier_charge,
+                               f"رسوم شركة التوصيل للطلب المرتجع {code}", "ecom_return_fee", order_id, now, user)
+            flags["return_deducted"] = True
+        if not order.get("return_expensed"):
+            exp = round(fee + packaging + (0 if order.get("shipping_expensed") else shipping), 2)
+            if exp > 0:
+                await _auto_expense(db, exp, "مرتجعات المتجر",
+                                    f"خسائر إرجاع الطلب {code} (إرجاع {fee} + تغليف {packaging})", now)
+            flags["return_expensed"] = True
+
+    if flags:
+        await db.ecom_orders.update_one({"id": order_id}, {"$set": {**flags, "updated_at": now}})
 
 
 async def _record_confirmation_financials(db, order: dict, now: str) -> None:

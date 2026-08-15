@@ -219,6 +219,13 @@ export default function DashboardPage() {
                   <Badge className="mt-2 bg-emerald-500">
                     {salesStats.today.count} {language === 'ar' ? 'عملية' : 'ventes'}
                   </Badge>
+                  {salesStats.store?.today?.count > 0 && (
+                    <p className="text-xs text-emerald-600 mt-1" data-testid="store-share-today">
+                      {language === 'ar'
+                        ? `منها المتجر: ${salesStats.store.today.total.toFixed(2)} ${t.currency} (${salesStats.store.today.count})`
+                        : `dont boutique : ${salesStats.store.today.total.toFixed(2)} ${t.currency} (${salesStats.store.today.count})`}
+                    </p>
+                  )}
                 </div>
 
                 {/* This Month */}
@@ -236,6 +243,13 @@ export default function DashboardPage() {
                   <Badge className="mt-2 bg-blue-500">
                     {salesStats.month.count} {language === 'ar' ? 'عملية' : 'ventes'}
                   </Badge>
+                  {salesStats.store?.month?.count > 0 && (
+                    <p className="text-xs text-blue-600 mt-1" data-testid="store-share-month">
+                      {language === 'ar'
+                        ? `منها المتجر: ${salesStats.store.month.total.toFixed(2)} ${t.currency} (${salesStats.store.month.count})`
+                        : `dont boutique : ${salesStats.store.month.total.toFixed(2)} ${t.currency} (${salesStats.store.month.count})`}
+                    </p>
+                  )}
                 </div>
 
                 {/* This Year */}
@@ -253,6 +267,13 @@ export default function DashboardPage() {
                   <Badge className="mt-2 bg-purple-500">
                     {salesStats.year.count} {language === 'ar' ? 'عملية' : 'ventes'}
                   </Badge>
+                  {salesStats.store?.year?.count > 0 && (
+                    <p className="text-xs text-purple-600 mt-1" data-testid="store-share-year">
+                      {language === 'ar'
+                        ? `منها المتجر: ${salesStats.store.year.total.toFixed(2)} ${t.currency} (${salesStats.store.year.count})`
+                        : `dont boutique : ${salesStats.store.year.total.toFixed(2)} ${t.currency} (${salesStats.store.year.count})`}
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
