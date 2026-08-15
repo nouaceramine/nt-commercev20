@@ -689,6 +689,28 @@ export default function ExpensesPage() {
                 </div>
               </div>
 
+              {/* p66/p68: payment source — deducts from the chosen cash box */}
+              <div className="space-y-1" data-testid="expense-payment-source">
+                <Label className="text-xs">{language === 'ar' ? 'مصدر الدفع' : 'Source de paiement'}</Label>
+                <Select value={formData.payment_method} onValueChange={(v) => setFormData(p => ({ ...p, payment_method: v }))}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">{language === 'ar' ? 'الصندوق النقدي' : 'Caisse'}</SelectItem>
+                    <SelectItem value="bank">{language === 'ar' ? 'الحساب البنكي' : 'Compte bancaire'}</SelectItem>
+                    <SelectItem value="wallet">{language === 'ar' ? 'المحفظة الإلكترونية' : 'Portefeuille'}</SelectItem>
+                    <SelectItem value="safe">{language === 'ar' ? 'الخزنة' : 'Coffre'}</SelectItem>
+                    <SelectItem value="personal">{language === 'ar' ? 'مال خاص' : 'Personnel'}</SelectItem>
+                  </SelectContent>
+                </Select>
+                {formData.payment_method === 'personal' && (
+                  <p className="text-xs text-muted-foreground" data-testid="expense-personal-hint">
+                    {language === 'ar' ? 'سيُخصم من رصيد المال الخاص — رأس مال الشركة لا يتأثر' : 'Débité de l\'argent personnel — capital inchangé'}
+                  </p>
+                )}
+              </div>
+
               {/* Recurring Options - Compact */}
               <div className="p-3 border rounded-lg space-y-3">
                 <div className="flex items-center justify-between">

@@ -122,7 +122,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             total_purchases=p.total, balance=remaining)
 
         # p62: "personal" (مالي الخاص) lives outside business cash boxes — no deduction
-        if p.paid_amount > 0 and p.payment_method != "personal":
+        if p.paid_amount > 0:  # p68: personal box tracks it too
             await db.cash_boxes.update_one(
                 {"id": p.payment_method},
                 {"$inc": {"balance": -p.paid_amount}, "$set": {"updated_at": now}}
@@ -237,7 +237,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
             payment_diff = new_paid - old_paid
             # p62: personal money never touches cash boxes
-            if payment_diff > 0 and purchase.get("payment_method") != "personal":
+            if payment_diff > 0:  # p68
                 await db.cash_boxes.update_one(
                     {"id": purchase.get("payment_method", "cash")},
                     {"$inc": {"balance": -payment_diff}, "$set": {"updated_at": now}}
@@ -279,7 +279,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         if payments_log:
             for pay in payments_log:
                 m = pay.get("method", "cash")
-                if pay.get("amount", 0) > 0 and m != "personal":
+                if pay.get("amount", 0) > 0 and m:  # p68: refund personal box too
                     await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": pay["amount"]}, "$set": {"updated_at": now}})
                     await db.transactions.insert_one({
                         "id": str(uuid.uuid4()), "cash_box_id": m,

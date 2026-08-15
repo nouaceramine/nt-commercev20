@@ -46,7 +46,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         ]).to_list(1)
 
         cash_boxes = await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
-        total_cash = sum(b.get("balance", 0) for b in cash_boxes)
+        total_cash = sum(b.get("balance", 0) for b in cash_boxes if b.get("id") != "personal")  # p68: personal money is outside business capital
         unread_notifications = await db.notifications.count_documents({"read": False})
 
         total_receivables = await db.debts.aggregate([

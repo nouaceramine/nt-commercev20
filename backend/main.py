@@ -405,7 +405,8 @@ async def init_cash_boxes() -> dict:
         {"id": "cash", "name": "الصندوق النقدي", "name_fr": "Caisse", "type": "cash", "balance": 0},
         {"id": "bank", "name": "الحساب البنكي", "name_fr": "Compte bancaire", "type": "bank", "balance": 0},
         {"id": "wallet", "name": "المحفظة الإلكترونية", "name_fr": "Portefeuille électronique", "type": "wallet", "balance": 0},
-        {"id": "safe", "name": "الخزنة", "name_fr": "Coffre-fort", "type": "safe", "balance": 0}
+        {"id": "safe", "name": "الخزنة", "name_fr": "Coffre-fort", "type": "safe", "balance": 0},
+        {"id": "personal", "name": "المال الخاص", "name_fr": "Argent personnel", "type": "personal", "balance": 0}  # p68
     ]
     from services.code_generator import generate_code
     for box in boxes:

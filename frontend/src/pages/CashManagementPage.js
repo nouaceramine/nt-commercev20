@@ -30,7 +30,8 @@ import {
   TrendingUp,
   TrendingDown,
   RefreshCw,
-  Lock
+  Lock,
+  PiggyBank
 } from 'lucide-react';
 
 export default function CashManagementPage() {
@@ -86,6 +87,7 @@ export default function CashManagementPage() {
       case 'bank': return CreditCard;
       case 'wallet': return Wallet;
       case 'safe': return Lock;
+      case 'personal': return PiggyBank;
       default: return Banknote;
     }
   };
@@ -96,11 +98,12 @@ export default function CashManagementPage() {
       case 'bank': return 'bg-blue-100 text-blue-700';
       case 'wallet': return 'bg-purple-100 text-purple-700';
       case 'safe': return 'bg-amber-100 text-amber-700';
+      case 'personal': return 'bg-rose-100 text-rose-700';
       default: return 'bg-muted';
     }
   };
 
-  const totalBalance = cashBoxes.reduce((sum, box) => sum + box.balance, 0);
+  const totalBalance = cashBoxes.filter(b => b.id !== 'personal').reduce((sum, box) => sum + box.balance, 0);  // p68: personal money is outside business capital
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -145,13 +148,18 @@ export default function CashManagementPage() {
             const Icon = getBoxIcon(box.type);
             return (
               <Card key={box.id} className="relative overflow-hidden" data-testid={`cash-box-${box.id}`}>
-                <div className={`absolute top-0 left-0 right-0 h-1 ${box.type === 'cash' ? 'bg-emerald-500' : box.type === 'bank' ? 'bg-blue-500' : box.type === 'safe' ? 'bg-amber-500' : 'bg-purple-500'}`} />
+                <div className={`absolute top-0 left-0 right-0 h-1 ${box.type === 'cash' ? 'bg-emerald-500' : box.type === 'bank' ? 'bg-blue-500' : box.type === 'safe' ? 'bg-amber-500' : box.type === 'personal' ? 'bg-rose-500' : 'bg-purple-500'}`} />
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">{language === 'fr' ? (box.name_fr || box.name) : box.name}</p>
                       <p className="text-3xl font-bold mt-2">{box.balance.toFixed(2)}</p>
                       <p className="text-sm text-muted-foreground">{t.currency}</p>
+                      {box.id === 'personal' && (
+                        <p className="text-xs text-muted-foreground mt-1" data-testid="personal-box-hint">
+                          {language === 'ar' ? 'مال شخصي — خارج رأس المال الإجمالي' : 'Argent personnel — hors capital'}
+                        </p>
+                      )}
                     </div>
                     <div className={`p-4 rounded-xl ${getBoxColor(box.type)}`}>
                       <Icon className="h-8 w-8" />
@@ -255,6 +263,16 @@ export default function CashManagementPage() {
                   data-testid="transfer-amount-input"
                 />
               </div>
+              {transferData.to_box === 'personal' && (
+                <p className="text-xs text-muted-foreground p-2 bg-muted/40 rounded" data-testid="transfer-to-personal-hint">
+                  {language === 'ar' ? 'التحويل إلى المال الخاص سيُنقص رأس المال الإجمالي' : 'Vers l\'argent personnel : réduit le capital total'}
+                </p>
+              )}
+              {transferData.from_box === 'personal' && (
+                <p className="text-xs text-muted-foreground p-2 bg-muted/40 rounded" data-testid="transfer-from-personal-hint">
+                  {language === 'ar' ? 'التحويل من المال الخاص سيُضاف إلى رأس المال الإجمالي' : 'Depuis l\'argent personnel : augmente le capital total'}
+                </p>
+              )}
               <div className="flex justify-end gap-2 pt-4">
                 <Button type="button" variant="outline" onClick={() => setTransferDialogOpen(false)}>
                   {t.cancel}

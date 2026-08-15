@@ -123,7 +123,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
             data["code"] = await generate_code(db, "expenses", "CH", 5, with_year=True)
         await db.expenses.insert_one(data)
         # p66: an expense is money OUT of a cash box (personal money stays outside)
-        if data.get("payment_method") and data["payment_method"] != "personal":
+        if data.get("payment_method"):  # p68: personal box tracks it too
             now = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.update_one({"id": data["payment_method"]}, {"$inc": {"balance": -data["amount"]}, "$set": {"updated_at": now}})
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": data["payment_method"], "type": "expense", "amount": data["amount"], "description": f"مصروف - {data['title']}", "reference_type": "expense", "reference_id": data["id"], "created_at": now, "created_by": user.get("name", "")})
@@ -144,10 +144,10 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         new_amount = float(update_data.get("amount", old_amount))
         if old_method and (update_data.get("amount") is not None or update_data.get("payment_method") is not None):
             now = update_data["updated_at"]
-            if old_method != "personal" and old_amount:
+            if old_method and old_amount:  # p68
                 await db.cash_boxes.update_one({"id": old_method}, {"$inc": {"balance": old_amount}, "$set": {"updated_at": now}})
                 await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": old_method, "type": "income", "amount": old_amount, "description": f"تعديل مصروف (عكس) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
-            if new_method and new_method != "personal" and new_amount:
+            if new_method and new_amount:  # p68
                 await db.cash_boxes.update_one({"id": new_method}, {"$inc": {"balance": -new_amount}, "$set": {"updated_at": now}})
                 await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": new_method, "type": "expense", "amount": new_amount, "description": f"مصروف (معدّل) - {update_data.get('title', old.get('title', ''))}", "reference_type": "expense", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
         await db.expenses.update_one({"id": expense_id}, {"$set": update_data})
@@ -161,7 +161,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         result = await db.expenses.delete_one({"id": expense_id})
         # p66: refund the box only if this expense actually deducted (has payment_method)
         method = old.get("payment_method")
-        if method and method != "personal" and old.get("amount"):
+        if method and old.get("amount"):  # p68: refund personal box too
             now = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.update_one({"id": method}, {"$inc": {"balance": float(old["amount"])}, "$set": {"updated_at": now}})
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": method, "type": "income", "amount": float(old["amount"]), "description": f"حذف مصروف (استرجاع) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})

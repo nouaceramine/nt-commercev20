@@ -224,7 +224,7 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
         # p67: reverse each payment from the box it actually entered
         for pay in payments_log:
             m = pay.get("method")
-            if pay.get("amount", 0) > 0 and m and m != "personal":
+            if pay.get("amount", 0) > 0 and m:  # p68
                 await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": -pay["amount"]}, "$set": {"updated_at": now}})
                 await db.transactions.insert_one({
                     "id": str(uuid.uuid4()), "cash_box_id": m,

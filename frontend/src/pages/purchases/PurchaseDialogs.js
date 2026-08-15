@@ -201,7 +201,7 @@ export default function PurchaseDialogs({
                 )}
                 {paymentMethod === 'personal' && paymentType !== 'credit' && (
                   <div className="text-xs text-muted-foreground p-1.5 bg-muted/40 rounded" data-testid="personal-money-hint">
-                    {language === 'ar' ? 'مال خاص: لن يُخصم أي مبلغ من الصناديق في إدارة المال' : 'Argent personnel : aucune caisse ne sera débitée'}
+                    {language === 'ar' ? 'مال خاص: سيُخصم من رصيد المال الخاص ولن تتأثر صناديق الشركة' : 'Argent personnel : débité du solde personnel, caisses inchangées'}
                   </div>
                 )}
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={language === 'ar' ? 'ملاحظات...' : 'Notes...'} className="min-h-0 h-8 text-xs resize-none" rows={1} />

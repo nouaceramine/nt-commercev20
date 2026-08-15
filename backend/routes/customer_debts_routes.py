@@ -50,7 +50,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         await db.debt_payments.insert_one(payment_record)
         await adjust_customer_mirror(db, customer_id, total_debt=-actual_payment, balance=-actual_payment)
         # p64: money received must enter a cash box (personal money stays outside boxes)
-        if payment.payment_method != "personal":
+        if True:  # p68: personal box is a real ledger
             await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": actual_payment}, "$set": {"updated_at": now}})
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "income", "amount": actual_payment, "description": f"سداد دين زبون - {customer.get('name', '')}", "reference_type": "debt_payment", "reference_id": payment_record["id"], "created_at": now, "created_by": user.get("name", "")})
         return {"success": True, "payment_applied": actual_payment, "remaining_from_payment": remaining_payment, "sales_updated": sales_updated}
@@ -67,7 +67,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
             await adjust_supplier_mirror(db, payment.supplier_id, balance=-payment.amount)
         now = datetime.now(timezone.utc).isoformat()
         # p62: personal money lives outside business cash boxes — no box movement
-        if payment.payment_method != "personal":
+        if True:  # p68: personal box is a real ledger
             # p64: standard transaction shape (cash_box_id) so /cash ledger shows it
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "expense", "amount": payment.amount, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "reference_type": "debt_payment", "reference_id": payment.supplier_id, "created_at": now, "created_by": user.get("name", "")})
             await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}, "$set": {"updated_at": now}})
