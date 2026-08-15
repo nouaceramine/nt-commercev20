@@ -254,16 +254,34 @@ async def _courier_return_fee(db, order: dict) -> float:
 ECOM_BOX_ID = "ecom_store"
 
 
-async def _cash_tx(db, box_id, tx_type, amount, description, ref_type, ref_id, now, user):
+async def _cash_tx(db, box_id, tx_type, amount, description, ref_type, ref_id, now, user,
+                   box_name="محفظة المتجر الإلكتروني"):
     """Move money in/out of a cash box and journal it (upserts the box —
     self-heals when init_cash_boxes hasn't run for this tenant yet)."""
     await db.cash_boxes.update_one(
         {"id": box_id},
         {"$inc": {"balance": amount if tx_type == "income" else -amount},
          "$set": {"updated_at": now},
-         "$setOnInsert": {"name": "محفظة المتجر الإلكتروني", "name_fr": "Boutique en ligne", "type": "ecom"}},
+         "$setOnInsert": {"name": box_name, "name_fr": box_name, "type": "ecom"}},
         upsert=True,
     )
+
+
+async def _courier_box(db, order: dict):
+    """p88: one wallet per shipping company — its balance = what that courier
+    currently owes us (COD collected, not yet paid out). Orders without a
+    courier fall back to the generic store wallet."""
+    courier = (order.get("courier") or "").strip().lower()
+    if not courier:
+        return ECOM_BOX_ID, "محفظة المتجر الإلكتروني"
+    name = courier
+    try:
+        integ = await db.ecom_integrations.find_one({"channel": courier}, {"_id": 0, "name": 1})
+        if integ and integ.get("name"):
+            name = str(integ["name"]).replace("(شحن)", "").strip()
+    except Exception:
+        pass
+    return f"{ECOM_BOX_ID}_{courier}", f"محفظة {name}"
     await db.transactions.insert_one({
         "id": str(uuid.uuid4()), "cash_box_id": box_id, "type": tx_type,
         "amount": amount, "description": description,
@@ -297,6 +315,7 @@ async def _record_store_accounting(db, order_id: str, new_status: str, now: str,
     order = await db.ecom_orders.find_one({"id": order_id})
     if not order:
         return
+    box_id, box_name = await _courier_box(db, order)
     code = order.get("order_code") or order_id
     total = round(float(order.get("total") or 0), 2)
     shipping = round(float(order.get("shipping_fee") or 0), 2)
@@ -310,8 +329,8 @@ async def _record_store_accounting(db, order_id: str, new_status: str, now: str,
     elif new_status == "delivered" and not order.get("wallet_booked"):
         net = round(total - shipping, 2)
         if net > 0:
-            await _cash_tx(db, ECOM_BOX_ID, "income", net,
-                           f"تحصيل طلب المتجر {code} (صافي بعد الشحن)", "ecom_delivery", order_id, now, user)
+            await _cash_tx(db, box_id, "income", net,
+                           f"تحصيل طلب المتجر {code} (صافي بعد الشحن)", "ecom_delivery", order_id, now, user, box_name)
         if not order.get("shipping_expensed") and shipping > 0:
             await _auto_expense(db, shipping, "شحن المتجر الإلكتروني", f"رسوم شحن الطلب {code}", now)
             flags["shipping_expensed"] = True
@@ -322,14 +341,14 @@ async def _record_store_accounting(db, order_id: str, new_status: str, now: str,
         if order.get("wallet_booked") and not order.get("wallet_reversed"):
             net = round(total - shipping, 2)
             if net > 0:
-                await _cash_tx(db, ECOM_BOX_ID, "expense", net,
-                               f"عكس تحصيل الطلب المرتجع {code}", "ecom_return_reversal", order_id, now, user)
+                await _cash_tx(db, box_id, "expense", net,
+                               f"عكس تحصيل الطلب المرتجع {code}", "ecom_return_reversal", order_id, now, user, box_name)
             flags["wallet_reversed"] = True
         if not order.get("return_deducted"):
             courier_charge = round(shipping + fee, 2)
             if courier_charge > 0:
-                await _cash_tx(db, ECOM_BOX_ID, "expense", courier_charge,
-                               f"رسوم شركة التوصيل للطلب المرتجع {code}", "ecom_return_fee", order_id, now, user)
+                await _cash_tx(db, box_id, "expense", courier_charge,
+                               f"رسوم شركة التوصيل للطلب المرتجع {code}", "ecom_return_fee", order_id, now, user, box_name)
             flags["return_deducted"] = True
         if not order.get("return_expensed"):
             exp = round(fee + packaging + (0 if order.get("shipping_expensed") else shipping), 2)
