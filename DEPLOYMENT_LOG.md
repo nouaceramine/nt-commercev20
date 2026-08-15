@@ -1537,3 +1537,9 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
   - تبويب الشحن: ملاحظة «مزامنة تلقائية كل ساعتين» (p80, yalidine-autosync-note).
 - **اختبار حي**: PUT يحفظ التوكن ✓؛ طلب عام → سجل الخادم «Facebook CAPI Purchase: 400» (توكن تجريبي — يثبت وصول بيانات المستأجر لفيسبوك) ✓؛ /shop/bob العام نظيف من التوكنات ويُظهر fb_pixel_id ✓؛ إلغاء + تنظيف ✓.
 - **النشر**: main.68733380.js — backup: backups/p81_capi/
+
+## p85 — طباعة جماعية لبوليصات الشحن (2026-08-15)
+- **قبل**: طباعة كل بوليصة على حدة.
+- **بعد**: GET /api/ecom/shipping/labels-bulk?date=YYYY-MM-DD (افتراضياً اليوم بتوقيت الجزائر) يرجع بوليصات اليوم مع label_url وعلم real (يميّز mock://)؛ تبويب الشحن ← بطاقة الطرود: حقل تاريخ + زر «🖨 طباعة جماعية» (bulk-print-btn) يفتح نافذة RTL فيها جدول البوليصات وزر «فتح الكل» يفتح كل PDF في تبويب للطباعة.
+- **اختبار حي**: labels-bulk أرجع بوليصتي اليوم التجريبيتين مع real=false ✓.
+- **النشر**: main.a8099216.js — backup: backups/p85_bulk_labels/

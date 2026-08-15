@@ -22,7 +22,9 @@ export default function EcomShippingTab() {
   const [ratesDefault, setRatesDefault] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [syncing, setSyncing] = useState(false);   // p74
-  const [pulling, setPulling] = useState(false);   // p76
+  const [pulling, setPulling] = useState(false);
+  const [bulkDate, setBulkDate] = useState(() => new Date().toISOString().slice(0, 10));  // p85
+  const [bulkLoading, setBulkLoading] = useState(false);           // p85   // p76
   const [senderWilaya, setSenderWilaya] = useState('16');
   const [pullMsg, setPullMsg] = useState('');
 
@@ -97,6 +99,38 @@ export default function EcomShippingTab() {
     }
   };
 
+  // p85: bulk label print — opens a print window with today's (or chosen day's) labels
+  const bulkPrint = async () => {
+    setBulkLoading(true);
+    try {
+      const r = await apiClient.get(`/ecom/shipping/labels-bulk?date=${bulkDate}`);
+      const labels = r.data?.labels || [];
+      const w = window.open('', '_blank');
+      if (!w) { toast.error(ar ? 'اسمح بالنوافذ المنبثقة' : 'Autorisez les popups'); return; }
+      const rows = labels.map(l => `<tr>
+        <td style="padding:8px;border:1px solid #ddd;font-family:monospace">${l.tracking_number || '—'}</td>
+        <td style="padding:8px;border:1px solid #ddd">${l.provider || ''}</td>
+        <td style="padding:8px;border:1px solid #ddd">${l.real ? `<a href="${l.label_url}" target="_blank">فتح البوليصة ⬇</a>` : '<span style="color:#999">تجريبية — بلا ملف</span>'}</td>
+      </tr>`).join('');
+      w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>بوليصات ${bulkDate}</title></head>
+        <body style="font-family:sans-serif;padding:20px">
+        <h2>🖨 بوليصات الشحن — ${bulkDate} (${labels.length})</h2>
+        ${labels.length === 0 ? '<p>لا بوليصات في هذا اليوم.</p>' : `
+        <p style="color:#666;font-size:13px">اضغط «فتح الكل» ثم اطبع من كل تبويب (Ctrl+P). إن حجب المتصفح النوافذ، اسمح بها لهذا الموقع.</p>
+        <button onclick="document.querySelectorAll('a[data-pdf]').forEach((a,i)=>setTimeout(()=>window.open(a.href,'_blank'),i*400))" style="padding:8px 16px;font-size:14px;cursor:pointer">⬇ فتح الكل (${labels.filter(l=>l.real).length})</button>
+        <table style="border-collapse:collapse;margin-top:12px;width:100%">
+          <tr style="background:#f5f5f5"><th style="padding:8px;border:1px solid #ddd">التتبع</th><th style="padding:8px;border:1px solid #ddd">الناقل</th><th style="padding:8px;border:1px solid #ddd">البوليصة</th></tr>
+          ${rows}
+        </table>`}
+        </body></html>`);
+      // mark real links for the open-all button
+      w.document.querySelectorAll('a').forEach(a => a.setAttribute('data-pdf', '1'));
+      w.document.close();
+    } catch (e) {
+      toast.error(ar ? 'فشل جلب البوليصات' : 'Erreur étiquettes');
+    } finally { setBulkLoading(false); }
+  };
+
   return (
     <>
       <div className="space-y-6" data-testid="ecom-shipping-tab">
@@ -150,7 +184,17 @@ export default function EcomShippingTab() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>{ar ? 'آخر الطرود' : 'Derniers colis'}</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle>{ar ? 'آخر الطرود' : 'Derniers colis'}</CardTitle>
+                <div className="flex items-center gap-2" data-testid="bulk-print-row">
+                  <Input type="date" className="w-36 h-8 text-xs" value={bulkDate} onChange={e => setBulkDate(e.target.value)} data-testid="bulk-print-date" />
+                  <Button size="sm" variant="outline" onClick={bulkPrint} disabled={bulkLoading} data-testid="bulk-print-btn">
+                    {bulkLoading ? '...' : (ar ? '🖨 طباعة جماعية' : 'Imprimer tout')}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
             <CardContent>
               {parcels.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">{ar ? 'لا توجد طرود بعد' : 'Aucun colis'}</p>

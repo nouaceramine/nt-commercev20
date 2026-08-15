@@ -6,6 +6,7 @@ we fall back to the P1 mock so the UI flow never breaks.
 """
 from datetime import datetime, timezone
 from typing import Optional
+import re
 import uuid
 import logging
 
@@ -269,6 +270,30 @@ async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
         except Exception as exc:  # noqa: BLE001 — keep syncing the rest
             results["errors"].append({"order": o.get("order_code"), "error": str(exc)[:120]})
     return results
+
+
+@router.get("/ecom/shipping/labels-bulk")
+async def bulk_labels(date: Optional[str] = None, user: dict = Depends(require_tenant)):
+    """p85: كل بوليصات يوم معيّن (افتراضياً اليوم) للطباعة الجماعية."""
+    await require_ecom_feature(user)
+    if not date:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        date = (_dt.now(_tz.utc) + _td(hours=1)).date().isoformat()  # Africa/Algiers
+    q = {"created_at": {"$regex": f"^{re.escape(date)}"}}
+    rows = await db.ecom_shipping_labels.find(q, {"_id": 0}).sort("created_at", 1).to_list(500)
+    labels = []
+    for r in rows:
+        url = r.get("label_url") or ""
+        labels.append({
+            "label_id": r.get("id"),
+            "order_id": r.get("order_id"),
+            "tracking_number": r.get("tracking_number") or "",
+            "provider": r.get("provider") or "",
+            "label_url": url,
+            "real": bool(url) and not url.startswith("mock://"),
+            "created_at": r.get("created_at"),
+        })
+    return {"date": date, "count": len(labels), "labels": labels}
 
 
 @router.get("/ecom/shipping/labels/{label_id}")
