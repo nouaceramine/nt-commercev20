@@ -1427,3 +1427,13 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 - EcomShippingTab.js: بطاقة «أسعار التوصيل حسب الولاية» — جدول 58 ولاية بخانتي منزل/مكتب، تعبئة جماعية، حفظ جماعي، ملاحظة عند عرض الافتراضيات.
 **اختبار curl:** GET افتراضي 58 ولاية؛ PUT مخصص (ولاية 16: 600/400) saved=58؛ طلب عام مكتب بلا عنوان: العميل أرسل fee=9999 فخُزّن 400 (سعر الخادم) والعنوان فُرّغ، total=1600؛ طلب منزل: fee=600, total=1800؛ المخزون حُسم 7→5 ثم أُعيد بعد حذف الطلبين ومزامنة ecom_orders؛ أُعيد تعطيل متجر bob.
 **الواجهة:** main.f2ec69d1.js
+
+## p70 — خصائص المنتج: اللون/الأحجام/المتغيرات + تنبيهات انتهاء الصلاحية (2026-08-15)
+- **قبل**: لا توجد حقول لون/أحجام/متغيرات في المنتج؛ دُفعات انتهاء الصلاحية (lots) موجودة لكن غير مربوطة بصندوق التنبيهات.
+- **بعد**:
+  - backend/models/schemas/catalog.py: حقول جديدة في ProductCreate (color, sizes, has_variants, variants) و ProductUpdate.
+  - backend/routes/products_routes.py: POST يخزّن الحقول الجديدة ويحسب quantity = مجموع كميات المتغيرات عند has_variants=true؛ PUT يعيد التطبيع والحساب عند تعديل المتغيرات.
+  - backend/routes/notifications_routes.py: قسم 4 في /notifications/generate — مسح product_lots وتوليد تنبيه expiry_warning عند remaining_days <= alert_days (مع dedup لكل دُفعة غير مقروءة).
+  - frontend Add/EditProductPage: تبويب جديد "الخصائص" — لون، أحجام، مفتاح "مخزون مستقل لكل متغير" + محرر متغيرات (لون/حجم/كمية) مع الإجمالي التلقائي.
+- **اختبارات curl**: إنشاء منتج بمتغيرين → qty=8 تلقائياً ✓؛ PUT متغير واحد → qty=10 ✓؛ دُفعة تنتهي خلال 10 أيام → توليد تنبيه expiry_warning ✓؛ dedup (0 جديد عند إعادة التوليد) ✓؛ حذف منتج عليه مخزون مرفوض (حماية قائمة) ✓؛ تنظيف كامل للبيانات التجريبية.
+- **النشر**: main.f4dd0fe6.js — cp -r (الحزم القديمة محفوظة). backup: backups/p70_product_attributes/

@@ -25,7 +25,7 @@ import AiImagePicker from '../components/forms/AiImagePicker';
 import {
   ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree,
   Calculator, Trash2, Package, Tag, Warehouse, ShieldAlert, Barcode, CalendarDays,
-  Truck, Clock, AlertTriangle, Sparkles,
+  Truck, Clock, AlertTriangle, Sparkles, Palette,
 } from 'lucide-react';
 
 const UOM_OPTIONS = ['U', 'KG', 'G', 'L', 'ML', 'M', 'CM', 'BOX', 'PKT'];
@@ -100,6 +100,10 @@ export default function EditProductPage() {
     force_price_entry: false,
     serial_number_tracking: false,
     additional_barcodes: [],
+    color: '',
+    sizes_text: '',
+    has_variants: false,
+    variants: [],
   });
 
   // تحذير عند مغادرة الصفحة بتعديلات غير محفوظة
@@ -147,6 +151,10 @@ export default function EditProductPage() {
           force_price_entry: p.force_price_entry || false,
           serial_number_tracking: p.serial_number_tracking || false,
           additional_barcodes: Array.isArray(p.additional_barcodes) ? p.additional_barcodes : [],
+          color: p.color || '',
+          sizes_text: Array.isArray(p.sizes) ? p.sizes.join(', ') : '',
+          has_variants: p.has_variants || false,
+          variants: Array.isArray(p.variants) ? p.variants : [],
         });
         setUseAveragePrice(p.use_average_price || false);
       } catch {
@@ -392,6 +400,13 @@ export default function EditProductPage() {
     }
   };
 
+
+  // p70: variant stock helpers
+  const addVariantRow = () => setFormData(p => ({ ...p, variants: [...(p.variants || []), { color: '', size: '', quantity: '' }] }));
+  const updateVariantRow = (i, key, val) => setFormData(p => { const vs = [...(p.variants || [])]; vs[i] = { ...vs[i], [key]: val }; return { ...p, variants: vs }; });
+  const removeVariantRow = (i) => setFormData(p => ({ ...p, variants: (p.variants || []).filter((_, x) => x !== i) }));
+  const variantsTotal = (formData.variants || []).reduce((s, v) => s + (parseFloat(v.quantity) || 0), 0);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
@@ -432,6 +447,10 @@ export default function EditProductPage() {
         force_qty_entry: formData.force_qty_entry,
         force_price_entry: formData.force_price_entry,
         serial_number_tracking: formData.serial_number_tracking,
+        color: formData.color || '',
+        sizes: (formData.sizes_text || '').split(',').map(s => s.trim()).filter(s => s),
+        has_variants: formData.has_variants || false,
+        variants: formData.has_variants ? (formData.variants || []).filter(v => v.color || v.size).map(v => ({ color: v.color || '', size: v.size || '', quantity: parseFloat(v.quantity) || 0 })) : [],
         additional_barcodes: formData.additional_barcodes,
       };
       await apiClient.put(`/products/${id}`, payload);
@@ -477,6 +496,7 @@ export default function EditProductPage() {
                   <TabsTrigger value="tarifs" className="text-xs gap-1"><Tag className="h-3 w-3" />{isAr ? 'الأسعار' : 'Tarifs'}</TabsTrigger>
                   <TabsTrigger value="stock" className="text-xs gap-1"><Warehouse className="h-3 w-3" />{isAr ? 'المخزون' : 'Stock'}</TabsTrigger>
                   <TabsTrigger value="vente" className="text-xs gap-1"><ShieldAlert className="h-3 w-3" />{isAr ? 'البيع' : 'Vente'}</TabsTrigger>
+                  <TabsTrigger value="attrs" className="text-xs gap-1"><Palette className="h-3 w-3" />{isAr ? 'الخصائص' : 'Attributs'}</TabsTrigger>
                   <TabsTrigger value="multicodes" className="text-xs gap-1"><Barcode className="h-3 w-3" />Multi-codes</TabsTrigger>
                   <TabsTrigger value="lots" className="text-xs gap-1 relative">
                     <CalendarDays className="h-3 w-3" />Lots
@@ -690,6 +710,42 @@ export default function EditProductPage() {
                 </TabsContent>
 
                 {/* ── TAB: VENTE (POS options) ── */}
+                <TabsContent value="attrs" className="space-y-4 mt-0">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">{isAr ? 'لون المنتج' : 'Couleur'}</Label>
+                      <Input name="color" value={formData.color} onChange={handleChange} className="h-9" placeholder={isAr ? 'مثال: أزرق' : 'Ex: Bleu'} data-testid="product-color-input" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">{isAr ? 'الأحجام (افصل بينها بفاصلة)' : 'Tailles (séparées par virgule)'}</Label>
+                      <Input name="sizes_text" value={formData.sizes_text} onChange={handleChange} className="h-9" placeholder="S, M, L, XL" data-testid="product-sizes-input" />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <Label className="text-xs">{isAr ? 'مخزون مستقل لكل متغير' : 'Stock indépendant par variante'}</Label>
+                      <p className="text-xs text-muted-foreground">{isAr ? 'فعّل هذا الخيار لإدارة الكمية لكل لون/حجم على حدة — الكمية الإجمالية تُحسب تلقائياً من مجموع المتغيرات' : 'Gérez la quantité par couleur/taille — le total est calculé automatiquement'}</p>
+                    </div>
+                    <Switch checked={formData.has_variants} onCheckedChange={(v) => setFormData(p => ({ ...p, has_variants: v }))} data-testid="has-variants-toggle" />
+                  </div>
+                  {formData.has_variants && (
+                    <div className="space-y-2" data-testid="variants-editor">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">{isAr ? 'المتغيرات (لون / حجم / كمية)' : 'Variantes (couleur / taille / qté)'}</Label>
+                        <Button type="button" size="sm" variant="outline" onClick={addVariantRow} data-testid="add-variant-btn"><Plus className="h-3 w-3" />{isAr ? 'إضافة متغير' : 'Ajouter'}</Button>
+                      </div>
+                      {formData.variants.map((v, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                          <Input className="h-9" placeholder={isAr ? 'اللون' : 'Couleur'} value={v.color} onChange={e => updateVariantRow(i, 'color', e.target.value)} data-testid={`variant-color-${i}`} />
+                          <Input className="h-9" placeholder={isAr ? 'الحجم' : 'Taille'} value={v.size} onChange={e => updateVariantRow(i, 'size', e.target.value)} data-testid={`variant-size-${i}`} />
+                          <Input className="h-9" type="number" min="0" placeholder={isAr ? 'الكمية' : 'Qté'} value={v.quantity} onChange={e => updateVariantRow(i, 'quantity', e.target.value)} data-testid={`variant-qty-${i}`} />
+                          <Button type="button" size="sm" variant="ghost" onClick={() => removeVariantRow(i)} data-testid={`variant-remove-${i}`}>×</Button>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-foreground" data-testid="variants-total">{isAr ? 'الكمية الإجمالية:' : 'Quantité totale:'} {variantsTotal}</p>
+                    </div>
+                  )}
+                </TabsContent>
                 <TabsContent value="vente" className="space-y-4 mt-0">
                   <div className="space-y-3">
                     {[

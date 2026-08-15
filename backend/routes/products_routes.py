@@ -123,8 +123,18 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "tax_rate": p.tax_rate or 0,
             "internal_notes": p.internal_notes or "",
             "additional_barcodes": p.additional_barcodes or [],
+            "color": p.color or "",
+            "sizes": p.sizes or [],
+            "has_variants": p.has_variants or False,
+            "variants": [
+                {"color": (v or {}).get("color", ""), "size": (v or {}).get("size", ""),
+                 "quantity": float((v or {}).get("quantity", 0) or 0)}
+                for v in (p.variants or [])
+            ] if p.has_variants else [],
             "created_at": now, "updated_at": now
         }
+        if product_doc["has_variants"]:
+            product_doc["quantity"] = sum(v["quantity"] for v in product_doc["variants"])
         try:
             await db.products.insert_one(product_doc)
         except Exception as e:
@@ -431,6 +441,23 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             })
             if bc_clash:
                 raise HTTPException(status_code=409, detail=f"الباركود مستعمل مسبقاً في المنتج: {bc_clash.get('name_ar') or bc_clash.get('name_en')}")
+
+        # p70: variant stock — normalize + recompute total quantity
+        if "variants" in update_data or "has_variants" in update_data:
+            eff_has = update_data.get("has_variants", product.get("has_variants", False))
+            if eff_has:
+                raw_variants = update_data.get("variants", product.get("variants", [])) or []
+                norm = [
+                    {"color": (v or {}).get("color", ""), "size": (v or {}).get("size", ""),
+                     "quantity": float((v or {}).get("quantity", 0) or 0)}
+                    for v in raw_variants
+                ]
+                update_data["variants"] = norm
+                update_data["has_variants"] = True
+                update_data["quantity"] = sum(v["quantity"] for v in norm)
+            else:
+                update_data["has_variants"] = False
+                update_data["variants"] = []
 
         old_price = product.get("retail_price", 0)
         new_price = update_data.get("retail_price", old_price)

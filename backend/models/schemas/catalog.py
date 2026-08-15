@@ -39,6 +39,10 @@ class ProductCreate(BaseModel):
     tax_rate: Optional[float] = 0
     internal_notes: Optional[str] = ""
     additional_barcodes: Optional[List[str]] = []
+    color: Optional[str] = ""
+    sizes: Optional[List[str]] = []
+    has_variants: Optional[bool] = False
+    variants: Optional[List[dict]] = []
     
     @field_validator('name_en')
     @classmethod
@@ -104,6 +108,10 @@ class ProductUpdate(BaseModel):
     article_code: Optional[str] = None  # كود المنتج
     family_id: Optional[str] = None
     use_average_price: Optional[bool] = None
+    color: Optional[str] = None
+    sizes: Optional[List[str]] = None
+    has_variants: Optional[bool] = None
+    variants: Optional[List[dict]] = None
 
     @field_validator('name_en')
     @classmethod

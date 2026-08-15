@@ -197,6 +197,47 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                 await db.notifications.insert_one(notif)
                 notifications_created.append(notif["id"])
 
+        # 4. Expiry notifications (product lots) — p70
+        from datetime import date as _date_cls
+        _today = _date_cls.today()
+        exp_lots = await db.product_lots.find({"expiry_date": {"$ne": ""}}).to_list(1000)
+
+        for lot in exp_lots:
+            try:
+                _exp = datetime.fromisoformat(lot["expiry_date"]).date()
+            except Exception:
+                continue
+            _remaining = (_exp - _today).days
+            _alert = int(lot.get("alert_days", 30) or 30)
+            if _remaining > _alert:
+                continue
+            existing = await db.notifications.find_one({
+                "type": "expiry_warning",
+                "reference_id": lot.get("id"),
+                "read": False
+            })
+            if not existing:
+                _prod = await db.products.find_one({"id": lot.get("product_id")}, {"_id": 0, "name_ar": 1, "name_en": 1})
+                _pname = (_prod.get("name_ar") or _prod.get("name_en")) if _prod else "منتج"
+                _lot_no = lot.get("lot_number", "") or "-"
+                if _remaining < 0:
+                    _msg_ar = f"انتهت صلاحية الدُفعة '{_lot_no}' من المنتج '{_pname}' منذ {-_remaining} يوم"
+                    _msg_en = f"Lot '{_lot_no}' of product '{_pname}' expired {-_remaining} days ago"
+                else:
+                    _msg_ar = f"تنبيه: الدُفعة '{_lot_no}' من المنتج '{_pname}' تنتهي صلاحيتها خلال {_remaining} يوم"
+                    _msg_en = f"Alert: Lot '{_lot_no}' of product '{_pname}' expires in {_remaining} days"
+                notif = {
+                    "id": str(uuid.uuid4()),
+                    "type": "expiry_warning",
+                    "reference_id": lot.get("id"),
+                    "message_ar": _msg_ar,
+                    "message_en": _msg_en,
+                    "read": False,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.notifications.insert_one(notif)
+                notifications_created.append(notif["id"])
+
         return {
             "message": f"Generated {len(notifications_created)} notifications",
             "notification_ids": notifications_created
