@@ -94,6 +94,7 @@ export default function StoreManagementPage() {
   const [storeProducts, setStoreProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cartLeads, setCartLeads] = useState([]);  // p83
+  const [tgTesting, setTgTesting] = useState(false);  // p84
   const [saving, setSaving] = useState(false);
   const [showProductDialog, setShowProductDialog] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
@@ -114,6 +115,16 @@ export default function StoreManagementPage() {
     fetchCartLeads();
     return () => clearInterval(tick);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const testTelegram = async () => {  // p84
+    setTgTesting(true);
+    try {
+      await apiClient.post('/store/telegram/test', {});
+      toast.success('أُرسلت رسالة الاختبار — تحقق من تيليجرام ✅');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل إرسال الاختبار');
+    } finally { setTgTesting(false); }
+  };
 
   const fetchCartLeads = async () => {  // p83
     try {
@@ -481,6 +492,45 @@ export default function StoreManagementPage() {
                     <p className="text-xs text-muted-foreground">
                       التوكنات تفعّل إرسال الأحداث من الخادم (Conversions API) — أدق ضد حاجب الإعلانات. تُحفظ بسرّية ولا تظهر للزوار.
                     </p>
+
+                    {/* p84: Telegram daily summary */}
+                    <div className="border-t pt-3 mt-3 space-y-2" data-testid="telegram-daily-card">
+                      <Label className="font-semibold">📊 الملخص اليومي عبر تيليجرام (21:00)</Label>
+                      <div className="space-y-2">
+                        <Input
+                          type="password"
+                          value={storeSettings.telegram_bot_token || ''}
+                          onChange={(e) => setStoreSettings(prev => ({ ...prev, telegram_bot_token: e.target.value.trim() }))}
+                          placeholder="توكن البوت (من BotFather)"
+                          dir="ltr"
+                          data-testid="tg-token-input"
+                        />
+                        <Input
+                          value={storeSettings.telegram_chat_id || ''}
+                          onChange={(e) => setStoreSettings(prev => ({ ...prev, telegram_chat_id: e.target.value.trim() }))}
+                          placeholder="معرف المحادثة (Chat ID)"
+                          dir="ltr"
+                          data-testid="tg-chat-input"
+                        />
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={!!storeSettings.telegram_daily_enabled}
+                              onChange={(e) => setStoreSettings(prev => ({ ...prev, telegram_daily_enabled: e.target.checked }))}
+                              data-testid="tg-enabled-toggle"
+                            />
+                            تفعيل الملخص اليومي
+                          </label>
+                          <Button type="button" size="sm" variant="outline" onClick={testTelegram} disabled={tgTesting} data-testid="tg-test-btn">
+                            {tgTesting ? '...' : 'إرسال اختبار'}
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          أنشئ بوتاً من @BotFather، أرسل له أي رسالة، ثم احفظ التوكن والمعرف هنا واضغط حفظ — يصلك كل مساء: طلبات اليوم والمُسلَّم والمُرجع وصافي الربح.
+                        </p>
+                      </div>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {language === 'ar'
                         ? 'تُفعَّل تلقائياً في متجرك العام: مشاهدة المنتج (ViewContent)، الإضافة للسلة، بدء الطلب، وإتمام الشراء (Purchase).'

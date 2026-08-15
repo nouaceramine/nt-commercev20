@@ -101,6 +101,7 @@ def _public_settings(settings: dict) -> dict:
     if isinstance(settings, dict):
         settings.pop("fb_access_token", None)
         settings.pop("tiktok_access_token", None)
+        settings.pop("telegram_bot_token", None)
     return settings
 
 def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_tenant_db) -> dict:
@@ -129,6 +130,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tiktok_pixel_id: str = ""  # p75: TikTok Pixel ID
         fb_access_token: str = ""      # p81: Meta CAPI token (secret — never public)
         tiktok_access_token: str = ""  # p81: TikTok Events API token (secret)
+        telegram_bot_token: str = ""       # p84: daily summary bot (secret)
+        telegram_chat_id: str = ""         # p84: target chat
+        telegram_daily_enabled: bool = False  # p84
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -270,6 +274,21 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             rates = DEFAULT_DELIVERY_RATES
         return [{"wilaya_id": r.get("id") or r.get("wilaya_id"), "wilaya_name": r.get("wilaya_name", ""),
                  "home_price": r.get("home_price", 0), "office_price": r.get("office_price", 0)} for r in rates]
+
+    @router.post("/store/telegram/test")
+    async def test_telegram(data: dict = None, admin: dict = Depends(get_tenant_admin)):
+        """p84: إرسال رسالة اختبار بالمفاتيح المرسلة أو المحفوظة."""
+        data = data or {}
+        st = await db.store_settings.find_one({}, {"_id": 0}) or {}
+        token = (data.get("bot_token") or st.get("telegram_bot_token") or "").strip()
+        chat = (data.get("chat_id") or st.get("telegram_chat_id") or "").strip()
+        if not token or not chat:
+            raise HTTPException(status_code=400, detail="أدخل توكن البوت ومعرف المحادثة أولاً")
+        from services.telegram_daily import send_telegram
+        ok, err = await send_telegram(token, chat, "✅ NT Commerce: تم ربط الملخص اليومي بنجاح")
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"فشل الإرسال: {err}")
+        return {"ok": True}
 
     @router.get("/store/cart-leads")
     async def get_cart_leads(admin: dict = Depends(get_tenant_admin)):

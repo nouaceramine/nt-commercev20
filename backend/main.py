@@ -510,6 +510,14 @@ async def startup_event():
     except Exception as e:
         logger.warning("Yalidine scheduler start: %s", e)
 
+    # p84: Telegram daily summary (21:00 Africa/Algiers, per-tenant opt-in)
+    try:
+        from config.database import get_tenant_db as _tg_get_tenant_db, main_db as _tg_main_db
+        from services.telegram_daily import start_telegram_daily
+        start_telegram_daily(_tg_main_db, _tg_get_tenant_db)
+    except Exception as e:
+        logger.warning("Telegram daily scheduler start: %s", e)
+
     # p54: AutoHeal self-healing scanner (scheduled every 5 min)
     try:
         from services.autoheal_service import start_autoheal_scheduler
