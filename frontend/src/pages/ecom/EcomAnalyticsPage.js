@@ -198,7 +198,44 @@ export default function EcomAnalyticsPage() {
             </Card>
           )}
 
-        {/* Digital services profit */}
+                {/* p78: UTM campaign breakdown */}
+        {profit && (profit.utm_sources || []).length > 0 && (
+          <Card className="border-sky-200" data-testid="utm-sources-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">📣 الأداء حسب مصدر الحملة (UTM) — آخر {days} يوم</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-lg overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs">
+                    <tr>
+                      <th className="text-right p-2">المصدر</th>
+                      <th className="p-2">الطلبات</th>
+                      <th className="p-2">سُلّمت</th>
+                      <th className="p-2">مُرجعة</th>
+                      <th className="p-2">الإيراد المُسلَّم</th>
+                      <th className="p-2">الربح المحقق</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profit.utm_sources.map(s => (
+                      <tr key={s.source} className="border-t" data-testid={`utm-row-${s.source}`}>
+                        <td className="p-2 font-medium">{s.source === 'direct' ? 'مباشر / بدون حملة' : s.source}</td>
+                        <td className="p-2 text-center">{s.orders}</td>
+                        <td className="p-2 text-center text-emerald-700">{s.delivered}</td>
+                        <td className="p-2 text-center text-red-600">{s.refunded}</td>
+                        <td className="p-2 text-center">{Number(s.revenue).toLocaleString()} دج</td>
+                        <td className={`p-2 text-center font-semibold ${s.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{Number(s.profit).toLocaleString()} دج</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+{/* Digital services profit */}
         {digital && digital.completed_orders > 0 && (
           <Card className="border-indigo-200">
             <CardHeader className="pb-2">

@@ -155,6 +155,11 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
           <DialogDescription>
             <Calendar className="inline w-3 h-3 ml-1" />
             {new Date(order.created_at).toLocaleString('ar-DZ')}
+            {order.utm_source && (
+              <span className="mr-2 text-xs" data-testid="utm-source-line">
+                · المصدر: {order.utm_source}{(order.utm?.utm_campaign) ? ` / ${order.utm.utm_campaign}` : ''}
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 

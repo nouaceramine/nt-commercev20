@@ -246,8 +246,27 @@ async def ecom_profitability(days: int = 30, user: dict = Depends(require_tenant
     def pct(a, b):
         return round((a / b) * 100, 1) if b else 0.0
 
+    # p78: per-UTM-source breakdown (which campaign actually delivers?)
+    sources: dict = {}
+    for o in orders:
+        key = (o.get("utm") or {}).get("utm_source") or o.get("utm_source") or "direct"
+        s = sources.setdefault(key, {"source": key, "orders": 0, "delivered": 0,
+                                     "refunded": 0, "revenue": 0.0, "profit": 0.0})
+        s["orders"] += 1
+        st = o.get("status")
+        if st == "delivered":
+            s["delivered"] += 1
+            s["revenue"] = round(s["revenue"] + float(o.get("total") or 0), 2)
+            f = fin_by_id.get(o.get("id"))
+            if f and f.get("status") == "realized":
+                s["profit"] = round(s["profit"] + float(f.get("realized_profit") or 0), 2)
+        elif st == "refunded":
+            s["refunded"] += 1
+    utm_sources = sorted(sources.values(), key=lambda r: -r["revenue"])
+
     return {
         "days": days,
+        "utm_sources": utm_sources,
         "total_orders": total_orders,
         "counts": counts,
         "confirmation_rate": pct(confirmed_plus, total_orders),

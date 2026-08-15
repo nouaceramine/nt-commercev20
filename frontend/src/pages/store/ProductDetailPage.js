@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { initPixels, trackPixel } from '../../lib/pixel';
+import { captureUtm, getUtm } from '../../lib/utm';
 import { toast } from 'sonner';
 import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin, Minus, Plus, CheckCircle } from 'lucide-react';
 
@@ -34,6 +35,7 @@ export default function ProductDetailPage() {
   const [availableCommunes, setAvailableCommunes] = useState([]);
 
   useEffect(() => {
+    captureUtm();  // p78: capture campaign params from landing URL
     fetch('/algeria-wilayas.json')
       .then(r => r.json())
       .then(data => setWilayasData(data))
@@ -175,7 +177,8 @@ export default function ProductDetailPage() {
         coupon_code: couponCode || undefined,
         coupon_discount: couponDiscount || undefined,
         notes: customerInfo.notes,
-        payment_method: 'cod'
+        payment_method: 'cod',
+        utm: getUtm()
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
       trackPixel('Purchase', { value: finalTotal, currency: 'DZD' });

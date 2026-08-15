@@ -84,6 +84,16 @@ DEFAULT_DELIVERY_RATES = [
 ]
 
 
+UTM_KEYS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+
+
+def _sanitize_utm(raw) -> dict:
+    """p78: keep only known utm_* keys, trimmed — never trust client input."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: str(raw[k])[:100] for k in UTM_KEYS if raw.get(k)}
+
+
 def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_tenant_db) -> dict:
     router = APIRouter(tags=["online-store"])
 
@@ -123,6 +133,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         total: float
         notes: str = ""
         payment_method: str = "cod"
+        utm: Optional[dict] = None  # p78: campaign attribution
 
     class WooCommerceSettings(BaseModel):
         enabled: bool = False
@@ -522,6 +533,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             "payment_status": "unpaid",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        order_data["utm"] = _sanitize_utm(getattr(order, "utm", None))
+        order_data["utm_source"] = order_data["utm"].get("utm_source", "")
         await tenant_db_inst.store_orders.insert_one(order_data)
         # مزامنة فورية إلى صندوق الطلبات الموحَّد (قناة webstore)
         # inventory_deducted=True: المخزون حُسم أعلاه لحظة الإنشاء — يمنع الحسم المزدوج عند التأكيد من الصندوق
@@ -562,6 +575,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 "tags": [],
                 "shipping_label_id": None, "tracking_number": None, "courier": None,
                 "inventory_deducted": True,
+                "utm": order_data["utm"], "utm_source": order_data["utm_source"],
                 "status_history": [{"status": "new", "at": now, "by": "webstore"}],
                 "created_at": now, "updated_at": now, "created_by": "webstore",
             }

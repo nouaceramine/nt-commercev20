@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { initPixels, trackPixel } from '../../lib/pixel';
+import { captureUtm, getUtm } from '../../lib/utm';
 import { toast, Toaster } from 'sonner';
 import {
   ShoppingCart, Search, X, Plus, Minus, Trash2,
@@ -1040,6 +1041,7 @@ export default function PublicStorePage() {
 
   // Load cart from localStorage
   useEffect(() => {
+    captureUtm();  // p78: capture campaign params from landing URL
     fetchStore();
     const saved = localStorage.getItem(`cart_${slug}`);
     if (saved) {
@@ -1140,7 +1142,8 @@ export default function PublicStorePage() {
         delivery_fee: deliveryFee,
         total: grandTotal,
         notes: customerInfo.notes,
-        payment_method: 'cod'
+        payment_method: 'cod',
+        utm: getUtm()
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
       trackPixel('Purchase', { value: grandTotal, currency: 'DZD' });

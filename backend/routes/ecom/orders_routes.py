@@ -360,6 +360,14 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         return stats
 
     payment_method = (body.get("payment_method") or ("cod" if doc["payment_status"] == "unpaid" else "prepaid")).strip().lower()
+    # p78: optional UTM attribution for manual/box entries
+    try:
+        from routes.online_store_routes import _sanitize_utm
+        doc["utm"] = _sanitize_utm(body.get("utm"))
+        doc["utm_source"] = doc["utm"].get("utm_source", "")
+    except Exception:  # noqa: BLE001
+        doc["utm"] = {}
+        doc["utm_source"] = ""
     doc["payment_method"] = payment_method
     if payment_method == "cod":
         from services.cod_risk import calculate_risk_score
