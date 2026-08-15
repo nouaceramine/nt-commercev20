@@ -290,6 +290,61 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             raise HTTPException(status_code=400, detail=f"فشل الإرسال: {err}")
         return {"ok": True}
 
+    _LANDING_DEFAULTS = {
+        "enabled": False, "headline": "", "offer_text": "", "video_url": "",
+        "old_price": 0, "fb_pixel_id": "", "tiktok_pixel_id": "",
+    }
+
+    @router.get("/store/landing/{product_id}")
+    async def get_landing_config(product_id: str, admin: dict = Depends(get_tenant_admin)):
+        """p82: إعدادات صفحة الهبوط لمنتج."""
+        cfg = await db.store_landing_pages.find_one({"product_id": product_id}, {"_id": 0}) or {}
+        merged = dict(_LANDING_DEFAULTS)
+        merged.update({k: v for k, v in cfg.items() if k in _LANDING_DEFAULTS})
+        merged["product_id"] = product_id
+        return merged
+
+    @router.put("/store/landing/{product_id}")
+    async def save_landing_config(product_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+        """p82: حفظ إعدادات صفحة الهبوط."""
+        product = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1})
+        if not product:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        cfg = {k: data.get(k, v) for k, v in _LANDING_DEFAULTS.items()}
+        cfg["enabled"] = bool(cfg.get("enabled"))
+        cfg["old_price"] = max(0.0, float(cfg.get("old_price") or 0))
+        for k in ("headline", "offer_text", "video_url", "fb_pixel_id", "tiktok_pixel_id"):
+            cfg[k] = str(cfg.get(k) or "")[:500]
+        cfg["product_id"] = product_id
+        cfg["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.store_landing_pages.update_one({"product_id": product_id}, {"$set": cfg}, upsert=True)
+        return {"ok": True, "config": cfg}
+
+    @router.get("/shop/{store_slug}/lp/{product_id}")
+    async def get_landing_page(store_slug: str, product_id: str):
+        """p82: صفحة الهبوط العامة — منتج + إعدادات عامة + إعدادات الهبوط."""
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Store not configured")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+
+        cfg = await tenant_db_inst.store_landing_pages.find_one({"product_id": product_id}, {"_id": 0})
+        if not cfg or not cfg.get("enabled"):
+            raise HTTPException(status_code=404, detail="Landing page not available")
+        product = await tenant_db_inst.products.find_one({"id": product_id}, {"_id": 0})
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not available")
+        settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0}) or {}
+        return {
+            "success": True,
+            "product": _pub_product(store_slug, product),
+            "settings": _public_settings(settings),
+            "landing": {k: cfg.get(k, v) for k, v in _LANDING_DEFAULTS.items()},
+        }
+
     @router.get("/store/cart-leads")
     async def get_cart_leads(admin: dict = Depends(get_tenant_admin)):
         """p83: السلات المهجورة — هواتف بدأت الطلب ولم تكمله."""

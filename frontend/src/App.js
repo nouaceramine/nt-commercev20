@@ -31,6 +31,7 @@ const CASHIER_ALLOWED_PATHS = defaultMenuSections.flatMap(section =>
 import DashboardPage from "./pages/DashboardPage";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/store/ProductDetailPage";
+import StoreLandingPage from "./pages/store/StoreLandingPage";
 import OrderTrackingPage from "./pages/store/OrderTrackingPage";
 import AddProductPage from "./pages/AddProductPage";
 import EditProductPage from "./pages/EditProductPage";
@@ -313,6 +314,7 @@ function AppRoutes() {
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/shop/:slug" element={<PublicStorePage />} />
       <Route path="/shop/:slug/product/:productId" element={<ProductDetailPage />} />
+      <Route path="/shop/:slug/lp/:productId" element={<StoreLandingPage />} />
       <Route path="/shop/:slug/track/:orderId" element={<OrderTrackingPage />} />
       
       {/* Unified Login - Single Entry Point for ALL users */}

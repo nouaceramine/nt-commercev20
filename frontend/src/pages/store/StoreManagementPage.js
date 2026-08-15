@@ -97,6 +97,9 @@ export default function StoreManagementPage() {
   const [tgTesting, setTgTesting] = useState(false);  // p84
   const [saving, setSaving] = useState(false);
   const [showProductDialog, setShowProductDialog] = useState(false);
+  const [landingDialog, setLandingDialog] = useState(null);
+  const [landingCfg, setLandingCfg] = useState(null);
+  const [landingSaving, setLandingSaving] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [activeTab, setActiveTab] = useState('settings');
   
@@ -183,6 +186,48 @@ export default function StoreManagementPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openLanding = async (product) => {
+    try {
+      const headers = getAuthHeaders();
+      const res = await apiClient.get(`/store/landing/${product.id}`, { headers });
+      setLandingCfg(res.data);
+      setLandingDialog(product);
+    } catch (e) {
+      toast.error(language === 'ar' ? 'تعذر تحميل إعدادات صفحة الهبوط' : 'Erreur');
+    }
+  };
+
+  const saveLanding = async () => {
+    if (!landingDialog || !landingCfg) return;
+    setLandingSaving(true);
+    try {
+      const headers = getAuthHeaders();
+      const payload = {
+        enabled: !!landingCfg.enabled,
+        headline: landingCfg.headline || '',
+        offer_text: landingCfg.offer_text || '',
+        video_url: landingCfg.video_url || '',
+        old_price: Number(landingCfg.old_price) || 0,
+        fb_pixel_id: landingCfg.fb_pixel_id || '',
+        tiktok_pixel_id: landingCfg.tiktok_pixel_id || '',
+      };
+      await apiClient.put(`/store/landing/${landingDialog.id}`, payload, { headers });
+      toast.success(language === 'ar' ? 'تم حفظ صفحة الهبوط' : 'Sauvegardé');
+      setLandingDialog(null);
+    } catch (e) {
+      toast.error(language === 'ar' ? 'فشل الحفظ' : 'Erreur');
+    } finally {
+      setLandingSaving(false);
+    }
+  };
+
+  const landingUrl = () => {
+    if (!landingDialog) return '';
+    const base = window.location.origin;
+    const slug = storeSettings?.store_slug || '';
+    return `${base}/shop/${slug}/lp/${landingDialog.id}`;
   };
 
   const toggleProductInStore = async (productId, add) => {
@@ -685,6 +730,7 @@ export default function StoreManagementPage() {
                         <TableHead>{language === 'ar' ? 'المنتج' : 'Product'}</TableHead>
                         <TableHead>{language === 'ar' ? 'السعر' : 'Price'}</TableHead>
                         <TableHead>{language === 'ar' ? 'المخزون' : 'Stock'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'صفحة هبوط' : 'Landing'}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -719,6 +765,14 @@ export default function StoreManagementPage() {
                                 {product.quantity}
                               </Badge>
                             </TableCell>
+                            <TableCell>
+                              {isSelected && (
+                                <Button size="sm" variant="outline" className="gap-1" data-testid="landing-config-btn" onClick={() => openLanding(product)}>
+                                  <Globe className="h-4 w-4" />
+                                  {language === 'ar' ? 'صفحة هبوط' : 'LP'}
+                                </Button>
+                              )}
+                            </TableCell>
                           </TableRow>
                         );
                       })}
@@ -729,7 +783,62 @@ export default function StoreManagementPage() {
             </Card>
           </TabsContent>
 
-          {/* Orders Tab */}
+          {/* p82: landing page config dialog */}
+      <Dialog open={!!landingDialog} onOpenChange={(o) => !o && setLandingDialog(null)}>
+        <DialogContent className="max-w-lg" data-testid="landing-dialog">
+          <DialogHeader>
+            <DialogTitle>{language === 'ar' ? `صفحة هبوط: ${landingDialog ? (language === 'ar' ? landingDialog.name_ar : landingDialog.name_en) : ''}` : 'Landing page'}</DialogTitle>
+          </DialogHeader>
+          {landingCfg && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border rounded-lg p-3">
+                <Label>{language === 'ar' ? 'تفعيل صفحة الهبوط' : 'Enable'}</Label>
+                <Switch data-testid="lp-enabled-toggle" checked={!!landingCfg.enabled} onCheckedChange={(v) => setLandingCfg({ ...landingCfg, enabled: v })} />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'العنوان الرئيسي (اختياري — افتراضياً اسم المنتج)' : 'Headline'}</Label>
+                <Input data-testid="lp-headline-input" value={landingCfg.headline || ''} onChange={(e) => setLandingCfg({ ...landingCfg, headline: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'نص العرض (مثال: توصيل مجاني اليوم فقط)' : 'Offer text'}</Label>
+                <Input data-testid="lp-offer-input" value={landingCfg.offer_text || ''} onChange={(e) => setLandingCfg({ ...landingCfg, offer_text: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'رابط فيديو (يوتيوب أو mp4)' : 'Video URL'}</Label>
+                <Input data-testid="lp-video-input" dir="ltr" value={landingCfg.video_url || ''} onChange={(e) => setLandingCfg({ ...landingCfg, video_url: e.target.value })} placeholder="https://youtube.com/watch?v=..." />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'السعر قبل التخفيض (0 = إخفاء)' : 'Old price'}</Label>
+                <Input data-testid="lp-oldprice-input" type="number" dir="ltr" value={landingCfg.old_price || 0} onChange={(e) => setLandingCfg({ ...landingCfg, old_price: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'بكسل فيسبوك خاص (اختياري)' : 'FB Pixel'}</Label>
+                  <Input data-testid="lp-fbpixel-input" dir="ltr" value={landingCfg.fb_pixel_id || ''} onChange={(e) => setLandingCfg({ ...landingCfg, fb_pixel_id: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'بكسل تيك توك خاص (اختياري)' : 'TikTok Pixel'}</Label>
+                  <Input data-testid="lp-ttpixel-input" dir="ltr" value={landingCfg.tiktok_pixel_id || ''} onChange={(e) => setLandingCfg({ ...landingCfg, tiktok_pixel_id: e.target.value })} />
+                </div>
+              </div>
+              {landingCfg.enabled && (
+                <div className="flex items-center gap-2 border rounded-lg p-2 bg-muted/50">
+                  <Input readOnly dir="ltr" className="text-xs" value={landingUrl()} data-testid="lp-url" />
+                  <Button size="sm" variant="outline" data-testid="lp-copy-btn" onClick={() => { navigator.clipboard.writeText(landingUrl()); toast.success(language === 'ar' ? 'تم النسخ' : 'Copié'); }}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              <Button className="w-full" data-testid="lp-save-btn" disabled={landingSaving} onClick={saveLanding}>
+                <Save className="h-4 w-4 ml-2" />
+                {landingSaving ? (language === 'ar' ? 'جارٍ الحفظ...' : '...') : (language === 'ar' ? 'حفظ' : 'Save')}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Orders Tab */}
           <TabsContent value="orders" className="space-y-6">
       {/* p83: abandoned carts */}
       {cartLeads.length > 0 && (
