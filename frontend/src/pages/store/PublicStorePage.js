@@ -1030,10 +1030,11 @@ export default function PublicStorePage() {
   const [showCart, setShowCart] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null);
+  const [deliveryRates, setDeliveryRates] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   const [customerInfo, setCustomerInfo] = useState({
-    name: '', phone: '', email: '', wilaya: '', commune: '', address: '', notes: ''
+    name: '', phone: '', email: '', wilaya: '', commune: '', address: '', notes: '', delivery_type: 'home'
   });
 
   // Load cart from localStorage
@@ -1058,6 +1059,11 @@ export default function PublicStorePage() {
       setProducts(Array.isArray(data.products) ? data.products : []);
       setFamilies(Array.isArray(data.families) ? data.families : []);
       setProductsByFamily(data.products_by_family || {});
+      // p69: delivery rates for this store (wilaya prices home/office)
+      try {
+        const ratesRes = await apiClient.get(`/shop/${slug}/delivery-rates`);
+        setDeliveryRates(Array.isArray(ratesRes.data) ? ratesRes.data : []);
+      } catch { setDeliveryRates([]); }
     } catch (error) {
       console.error('Error fetching store:', error);
       toast.error('تعذر تحميل المتجر');
@@ -1102,6 +1108,11 @@ export default function PublicStorePage() {
 
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  // p69: selected wilaya rate + computed fee
+  const wilayaList = deliveryRates.length > 0 ? deliveryRates : WILAYAS.map(w => ({ wilaya_id: w.id, wilaya_name: w.name }));
+  const selectedRate = deliveryRates.find(r => String(r.wilaya_id) === String(customerInfo.wilaya)) || null;
+  const deliveryFee = selectedRate ? (customerInfo.delivery_type === 'office' ? Number(selectedRate.office_price || 0) : Number(selectedRate.home_price || 0)) : 0;
+  const grandTotal = cartTotal + deliveryFee;
 
   const handleSubmitOrder = async (e) => {
     e.preventDefault();
@@ -1112,9 +1123,10 @@ export default function PublicStorePage() {
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,
         customer_email: customerInfo.email,
-        delivery_address: customerInfo.address,
+        delivery_address: customerInfo.delivery_type === 'office' ? '' : customerInfo.address,
         delivery_city: customerInfo.commune,
         delivery_wilaya: customerInfo.wilaya,
+        delivery_type: customerInfo.delivery_type,
         items: cart.map(item => ({
           product_id: item.product_id,
           name: item.name,
@@ -1122,7 +1134,8 @@ export default function PublicStorePage() {
           price: item.price
         })),
         subtotal: cartTotal,
-        total: cartTotal,
+        delivery_fee: deliveryFee,
+        total: grandTotal,
         notes: customerInfo.notes,
         payment_method: 'cod'
       };
@@ -1511,7 +1524,7 @@ export default function PublicStorePage() {
                     <label>الولاية *</label>
                     <select required value={customerInfo.wilaya} onChange={e => setCustomerInfo({...customerInfo, wilaya: e.target.value})}>
                       <option value="">اختر الولاية</option>
-                      {WILAYAS.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                      {wilayaList.map(w => <option key={w.wilaya_id} value={w.wilaya_id}>{w.wilaya_id} - {w.wilaya_name}</option>)}
                     </select>
                   </div>
                   <div className="nc-form-group">
@@ -1519,10 +1532,27 @@ export default function PublicStorePage() {
                     <input required value={customerInfo.commune} onChange={e => setCustomerInfo({...customerInfo, commune: e.target.value})} placeholder="باب الزوار" />
                   </div>
                 </div>
-                <div className="nc-form-group">
-                  <label>العنوان التفصيلي *</label>
-                  <input required value={customerInfo.address} onChange={e => setCustomerInfo({...customerInfo, address: e.target.value})} placeholder="حي ..., شارع ..., عمارة ..." />
-                </div>
+                {selectedRate && (
+                  <div className="nc-form-group" data-testid="delivery-type-select">
+                    <label>طريقة التوصيل *</label>
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', border: `2px solid ${customerInfo.delivery_type === 'office' ? '#059669' : '#e5e7eb'}`, borderRadius: '0.5rem', cursor: 'pointer' }}>
+                        <input type="radio" name="delivery_type" checked={customerInfo.delivery_type === 'office'} onChange={() => setCustomerInfo({...customerInfo, delivery_type: 'office'})} />
+                        <span>🏢 توصيل للمكتب — {Number(selectedRate.office_price || 0).toLocaleString()} دج</span>
+                      </label>
+                      <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', border: `2px solid ${customerInfo.delivery_type === 'home' ? '#059669' : '#e5e7eb'}`, borderRadius: '0.5rem', cursor: 'pointer' }}>
+                        <input type="radio" name="delivery_type" checked={customerInfo.delivery_type === 'home'} onChange={() => setCustomerInfo({...customerInfo, delivery_type: 'home'})} />
+                        <span>🏠 لباب المنزل — {Number(selectedRate.home_price || 0).toLocaleString()} دج</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+                {customerInfo.delivery_type !== 'office' && (
+                  <div className="nc-form-group">
+                    <label>العنوان التفصيلي *</label>
+                    <input required value={customerInfo.address} onChange={e => setCustomerInfo({...customerInfo, address: e.target.value})} placeholder="حي ..., شارع ..., عمارة ..." />
+                  </div>
+                )}
                 <div className="nc-form-group">
                   <label>ملاحظات</label>
                   <textarea rows={3} value={customerInfo.notes} onChange={e => setCustomerInfo({...customerInfo, notes: e.target.value})} placeholder="أي ملاحظات خاصة..." />
@@ -1536,9 +1566,15 @@ export default function PublicStorePage() {
                       <span>{(item.price * item.quantity).toLocaleString()} دج</span>
                     </div>
                   ))}
+                  {deliveryFee > 0 && (
+                    <div className="nc-order-item" data-testid="delivery-fee-line">
+                      <span>🚚 رسوم التوصيل {customerInfo.delivery_type === 'office' ? '(للمكتب)' : '(للمنزل)'}</span>
+                      <span>{deliveryFee.toLocaleString()} دج</span>
+                    </div>
+                  )}
                   <div className="nc-order-total">
-                    <span>الإجمالي:</span>
-                    <span>{cartTotal.toLocaleString()} دج</span>
+                    <span>الإجمالي{deliveryFee > 0 ? ' مع التوصيل' : ''}:</span>
+                    <span>{grandTotal.toLocaleString()} دج</span>
                   </div>
                 </div>
 

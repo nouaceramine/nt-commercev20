@@ -18,8 +18,39 @@ export default function EcomShippingTab() {
   const [parcels, setParcels] = useState([]);
   const [tracking, setTracking] = useState('');
   const [trackResult, setTrackResult] = useState(null);
+  const [rates, setRates] = useState([]);
+  const [ratesDefault, setRatesDefault] = useState(false);
+  const [savingRates, setSavingRates] = useState(false);
+
+  const fetchRates = () => {
+    apiClient.get('/store/delivery-rates').then(r => {
+      setRates(r.data?.rates || []);
+      setRatesDefault(!!r.data?.is_default);
+    }).catch(() => {});
+  };
+
+  const saveRates = async () => {
+    setSavingRates(true);
+    try {
+      await apiClient.put('/store/delivery-rates', { rates });
+      setRatesDefault(false);
+      toast.success(ar ? 'تم حفظ أسعار التوصيل' : 'Tarifs enregistrés');
+    } catch {
+      toast.error(ar ? 'فشل الحفظ' : 'Échec');
+    } finally { setSavingRates(false); }
+  };
+
+  const setRate = (wid, field, val) => {
+    setRates(rates.map(r => r.wilaya_id === wid ? { ...r, [field]: val === '' ? 0 : Number(val) } : r));
+  };
+
+  const applyToAll = (field, val) => {
+    const n = val === '' ? 0 : Number(val);
+    setRates(rates.map(r => ({ ...r, [field]: n })));
+  };
 
   useEffect(() => {
+    fetchRates();
     apiClient.get('/integrations/yalidine/status').then(r => setStatus(r.data)).catch(() => {});
     apiClient.get('/integrations/yalidine/parcels').then(r => {
       const d = r.data;
@@ -94,6 +125,51 @@ export default function EcomShippingTab() {
             </CardContent>
           </Card>
         </div>
+
+        {/* p69: delivery rates per wilaya */}
+        <Card data-testid="delivery-rates-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Truck className="h-5 w-5" />
+              {ar ? 'أسعار التوصيل حسب الولاية' : 'Tarifs de livraison par wilaya'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {ratesDefault && (
+              <p className="text-xs text-muted-foreground bg-muted/40 rounded p-2" data-testid="rates-default-note">
+                {ar ? 'هذه أسعار افتراضية تقريبية — عدّلها حسب شركة الشحن ثم اضغط حفظ' : 'Tarifs approximatifs par défaut — modifiez puis enregistrez'}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm">{ar ? 'تعبئة الكل:' : 'Appliquer à tous:'}</span>
+              <Input type="number" min="0" placeholder={ar ? 'سعر المنزل' : 'Domicile'} className="w-28 h-8" onChange={e => e.target.value !== '' && applyToAll('home_price', e.target.value)} data-testid="bulk-home-price" />
+              <Input type="number" min="0" placeholder={ar ? 'سعر المكتب' : 'Bureau'} className="w-28 h-8" onChange={e => e.target.value !== '' && applyToAll('office_price', e.target.value)} data-testid="bulk-office-price" />
+              <Button onClick={saveRates} disabled={savingRates} className="mr-auto" data-testid="save-rates-btn">
+                {savingRates ? (ar ? 'جاري الحفظ...' : 'Enregistrement...') : (ar ? 'حفظ الأسعار' : 'Enregistrer')}
+              </Button>
+            </div>
+            <div className="border rounded-lg overflow-auto max-h-[420px]">
+              <table className="w-full text-sm">
+                <thead className="bg-muted sticky top-0">
+                  <tr>
+                    <th className="p-2 text-right">{ar ? 'الولاية' : 'Wilaya'}</th>
+                    <th className="p-2">{ar ? '🏠 للمنزل (دج)' : '🏠 Domicile'}</th>
+                    <th className="p-2">{ar ? '🏢 للمكتب (دج)' : '🏢 Bureau'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rates.map(r => (
+                    <tr key={r.wilaya_id} className="border-t">
+                      <td className="p-2">{r.wilaya_id} - {r.wilaya_name}</td>
+                      <td className="p-2"><Input type="number" min="0" value={r.home_price} onChange={e => setRate(r.wilaya_id, 'home_price', e.target.value)} className="h-8 w-24 mx-auto" data-testid={`rate-home-${r.wilaya_id}`} /></td>
+                      <td className="p-2"><Input type="number" min="0" value={r.office_price} onChange={e => setRate(r.wilaya_id, 'office_price', e.target.value)} className="h-8 w-24 mx-auto" data-testid={`rate-office-${r.wilaya_id}`} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </>
   );

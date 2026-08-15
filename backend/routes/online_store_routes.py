@@ -48,9 +48,10 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         customer_name: str
         customer_phone: str
         customer_email: str = ""
-        delivery_address: str
+        delivery_address: str = ""  # p69: optional for office (desk) delivery
         delivery_city: str = ""
         delivery_wilaya: str = ""
+        delivery_type: str = "home"  # p69: home | office
         items: List[dict]
         subtotal: float
         delivery_fee: float = 0
@@ -125,6 +126,114 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
     async def remove_store_product(product_id: str, admin: dict = Depends(get_tenant_admin)):
         await db.store_products.delete_one({"product_id": product_id})
         return {"message": "تمت إزالة المنتج من المتجر"}
+
+    # ── p69: delivery rates per wilaya (home/office) ──
+    DEFAULT_DELIVERY_RATES = [
+        {"wilaya_id": "01", "wilaya_name": "أدرار", "home_price": 1400, "office_price": 900},
+        {"wilaya_id": "02", "wilaya_name": "الشلف", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "03", "wilaya_name": "الأغواط", "home_price": 900, "office_price": 600},
+        {"wilaya_id": "04", "wilaya_name": "أم البواقي", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "05", "wilaya_name": "باتنة", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "06", "wilaya_name": "بجاية", "home_price": 650, "office_price": 450},
+        {"wilaya_id": "07", "wilaya_name": "بسكرة", "home_price": 900, "office_price": 600},
+        {"wilaya_id": "08", "wilaya_name": "بشار", "home_price": 1200, "office_price": 800},
+        {"wilaya_id": "09", "wilaya_name": "البليدة", "home_price": 550, "office_price": 400},
+        {"wilaya_id": "10", "wilaya_name": "البويرة", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "11", "wilaya_name": "تمنراست", "home_price": 1600, "office_price": 1000},
+        {"wilaya_id": "12", "wilaya_name": "تبسة", "home_price": 900, "office_price": 600},
+        {"wilaya_id": "13", "wilaya_name": "تلمسان", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "14", "wilaya_name": "تيارت", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "15", "wilaya_name": "تيزي وزو", "home_price": 600, "office_price": 400},
+        {"wilaya_id": "16", "wilaya_name": "الجزائر", "home_price": 500, "office_price": 350},
+        {"wilaya_id": "17", "wilaya_name": "الجلفة", "home_price": 950, "office_price": 650},
+        {"wilaya_id": "18", "wilaya_name": "جيجل", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "19", "wilaya_name": "سطيف", "home_price": 650, "office_price": 450},
+        {"wilaya_id": "20", "wilaya_name": "سعيدة", "home_price": 800, "office_price": 550},
+        {"wilaya_id": "21", "wilaya_name": "سكيكدة", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "22", "wilaya_name": "سيدي بلعباس", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "23", "wilaya_name": "عنابة", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "24", "wilaya_name": "قالمة", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "25", "wilaya_name": "قسنطينة", "home_price": 650, "office_price": 450},
+        {"wilaya_id": "26", "wilaya_name": "المدية", "home_price": 650, "office_price": 450},
+        {"wilaya_id": "27", "wilaya_name": "مستغانم", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "28", "wilaya_name": "المسيلة", "home_price": 800, "office_price": 550},
+        {"wilaya_id": "29", "wilaya_name": "معسكر", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "30", "wilaya_name": "ورقلة", "home_price": 1100, "office_price": 750},
+        {"wilaya_id": "31", "wilaya_name": "وهران", "home_price": 600, "office_price": 400},
+        {"wilaya_id": "32", "wilaya_name": "البيض", "home_price": 1000, "office_price": 700},
+        {"wilaya_id": "33", "wilaya_name": "إليزي", "home_price": 1600, "office_price": 1100},
+        {"wilaya_id": "34", "wilaya_name": "برج بوعريريج", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "35", "wilaya_name": "بومرداس", "home_price": 550, "office_price": 400},
+        {"wilaya_id": "36", "wilaya_name": "الطارف", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "37", "wilaya_name": "تندوف", "home_price": 1400, "office_price": 900},
+        {"wilaya_id": "38", "wilaya_name": "تيسمسيلت", "home_price": 850, "office_price": 550},
+        {"wilaya_id": "39", "wilaya_name": "الوادي", "home_price": 1000, "office_price": 700},
+        {"wilaya_id": "40", "wilaya_name": "خنشلة", "home_price": 850, "office_price": 550},
+        {"wilaya_id": "41", "wilaya_name": "سوق أهراس", "home_price": 800, "office_price": 550},
+        {"wilaya_id": "42", "wilaya_name": "تيبازة", "home_price": 550, "office_price": 400},
+        {"wilaya_id": "43", "wilaya_name": "ميلة", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "44", "wilaya_name": "عين الدفلى", "home_price": 650, "office_price": 450},
+        {"wilaya_id": "45", "wilaya_name": "النعامة", "home_price": 1000, "office_price": 700},
+        {"wilaya_id": "46", "wilaya_name": "عين تموشنت", "home_price": 750, "office_price": 500},
+        {"wilaya_id": "47", "wilaya_name": "غرداية", "home_price": 1000, "office_price": 700},
+        {"wilaya_id": "48", "wilaya_name": "غليزان", "home_price": 700, "office_price": 450},
+        {"wilaya_id": "49", "wilaya_name": "تيميمون", "home_price": 1400, "office_price": 900},
+        {"wilaya_id": "50", "wilaya_name": "برج باجي مختار", "home_price": 1800, "office_price": 1200},
+        {"wilaya_id": "51", "wilaya_name": "أولاد جلال", "home_price": 950, "office_price": 650},
+        {"wilaya_id": "52", "wilaya_name": "بني عباس", "home_price": 1300, "office_price": 850},
+        {"wilaya_id": "53", "wilaya_name": "عين صالح", "home_price": 1500, "office_price": 950},
+        {"wilaya_id": "54", "wilaya_name": "عين قزام", "home_price": 1700, "office_price": 1100},
+        {"wilaya_id": "55", "wilaya_name": "تقرت", "home_price": 1000, "office_price": 700},
+        {"wilaya_id": "56", "wilaya_name": "جانت", "home_price": 1500, "office_price": 950},
+        {"wilaya_id": "57", "wilaya_name": "المغير", "home_price": 1000, "office_price": 700},
+        {"wilaya_id": "58", "wilaya_name": "المنيعة", "home_price": 1100, "office_price": 750},
+    ]
+
+    @router.get("/store/delivery-rates")
+    async def get_delivery_rates(admin: dict = Depends(get_tenant_admin)):
+        rates = await db.delivery_rates.find({}, {"_id": 0}).sort("id", 1).to_list(100)
+        if not rates:
+            return {"is_default": True, "rates": DEFAULT_DELIVERY_RATES}
+        return {"is_default": False, "rates": [
+            {"wilaya_id": r["id"], "wilaya_name": r.get("wilaya_name", ""), "home_price": r.get("home_price", 0), "office_price": r.get("office_price", 0)}
+            for r in rates
+        ]}
+
+    @router.put("/store/delivery-rates")
+    async def save_delivery_rates(data: dict, admin: dict = Depends(get_tenant_admin)):
+        rates = data.get("rates", [])
+        now = datetime.now(timezone.utc).isoformat()
+        docs = []
+        seen = set()
+        for r in rates:
+            wid = str(r.get("wilaya_id", "")).zfill(2)
+            if not wid or wid in seen:
+                continue
+            seen.add(wid)
+            docs.append({
+                "id": wid,
+                "wilaya_name": str(r.get("wilaya_name", "")),
+                "home_price": max(0.0, float(r.get("home_price", 0) or 0)),
+                "office_price": max(0.0, float(r.get("office_price", 0) or 0)),
+                "updated_at": now,
+            })
+        await db.delivery_rates.delete_many({})
+        if docs:
+            await db.delivery_rates.insert_many(docs)
+        return {"saved": len(docs)}
+
+    @router.get("/shop/{store_slug}/delivery-rates")
+    async def public_delivery_rates(store_slug: str):
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+        rates = await tenant_db_inst.delivery_rates.find({}, {"_id": 0}).to_list(100)
+        if not rates:
+            rates = DEFAULT_DELIVERY_RATES
+        return [{"wilaya_id": r.get("id") or r.get("wilaya_id"), "wilaya_name": r.get("wilaya_name", ""),
+                 "home_price": r.get("home_price", 0), "office_price": r.get("office_price", 0)} for r in rates]
 
     @router.get("/store/orders")
     async def get_store_orders(status: Optional[str] = None, admin: dict = Depends(get_tenant_admin)):
@@ -326,6 +435,16 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             raise HTTPException(status_code=404, detail="Store not available")
         if settings.get("min_order_amount", 0) > 0 and order.subtotal < settings["min_order_amount"]:
             raise HTTPException(status_code=400, detail=f"Minimum order amount is {settings['min_order_amount']}")
+        # p69: server-side delivery fee from tenant rates — never trust the client
+        _rates = {r["id"]: r for r in await tenant_db_inst.delivery_rates.find({}, {"_id": 0}).to_list(100)}
+        _rate = _rates.get(str(order.delivery_wilaya).zfill(2))
+        _fee = 0.0
+        if _rate:
+            _fee = float(_rate.get("office_price", 0) if order.delivery_type == "office" else _rate.get("home_price", 0))
+        order.delivery_fee = _fee
+        order.total = round(float(order.subtotal) + _fee, 2)
+        if order.delivery_type == "office":
+            order.delivery_address = ""  # desk delivery: no detailed address needed
         # Atomic stock claim per product (merged duplicates), all-or-nothing —
         # same pattern as POS create_sale_op: conditional find_one_and_update,
         # rollback prior claims on any shortfall
