@@ -22,7 +22,6 @@ const SUB_TABS = {
   shipping: [
     { path: '/ecom-hub/shipping', ar: 'الشحن الموحَّد', fr: 'Livraison unifiée' },
     { path: '/ecom-hub/shipping/companies', ar: 'شركات الشحن', fr: 'Transporteurs' },
-    { path: '/ecom-hub/shipping/yalidine', ar: 'Yalidine', fr: 'Yalidine' },
   ],
 };
 

@@ -376,7 +376,7 @@ function AppRoutes() {
         <Route path="ads" element={<EcomAdsTab />} />
         <Route path="shipping" element={<EcomShippingTab />} />
         <Route path="shipping/companies" element={<ProtectedRoute adminOnly><ShippingPage /></ProtectedRoute>} />
-        <Route path="shipping/yalidine" element={<IntegrationStatusPage />} />
+        <Route path="shipping/yalidine" element={<Navigate to="/ecom-hub/shipping" replace />} />  {/* p93: legacy status page removed — real Yalidine management lives in الشحن الموحَّد */}
         <Route path="analytics" element={<EcomAnalyticsPage />} />
         <Route path="guide" element={<Navigate to="/ecom-hub/channels/guide" replace />} />
       </Route>
