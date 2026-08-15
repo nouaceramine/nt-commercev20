@@ -160,50 +160,45 @@ export default function SparePartsPage() {
     notes: '',
   });
 
-  // Fetch spare parts from API
+  // p63: full unification — spare parts ARE the main products inventory.
+  // One stock, one search: the page reads/writes /products directly.
   const fetchParts = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get(`/spare-parts`);
+      const response = await apiClient.get(`/products`);
       const data = response.data || [];
-      // Map API fields to frontend fields
+      // Map product fields to the page's part shape (same UI, unified stock)
       const mappedData = data.map(p => ({
         ...p,
-        name_fr: p.name_ar || p.name,
-        brand: p.compatible_brands?.[0] || 'Universal',
-        compatible_models: Array.isArray(p.compatible_models) ? p.compatible_models : 
-          (p.compatible_models ? p.compatible_models.split(',').map(m => m.trim()) : []),
-        purchase_price: p.buy_price || 0,
-        sell_price: p.sell_price || 0,
-        low_stock_threshold: p.min_stock || 5,
+        name: p.name_ar || p.name_en || p.name || '',
+        name_fr: p.name_en || p.name_ar || '',
+        brand: (Array.isArray(p.compatible_brands) && p.compatible_brands[0]) || '',
+        category: p.part_category || p.family_name || '',
+        compatible_models: Array.isArray(p.compatible_models) ? p.compatible_models :
+          (p.compatible_models ? String(p.compatible_models).split(',').map(m => m.trim()) : []),
+        purchase_price: p.purchase_price || 0,
+        sell_price: p.retail_price || 0,
+        low_stock_threshold: p.low_stock_threshold ?? 5,
+        supplier: p.supplier || p.supplier_name || '',
+        notes: p.description_ar || p.internal_notes || '',
       }));
       setParts(mappedData);
+      // Stats from the unified inventory (old /spare-parts/stats keys never matched)
+      setStats({
+        total: mappedData.length,
+        lowStock: mappedData.filter(p => (p.quantity || 0) <= (p.low_stock_threshold ?? 5)).length,
+        totalValue: mappedData.reduce((sum, p) => sum + (p.sell_price || 0) * (p.quantity || 0), 0)
+      });
     } catch (error) {
-      console.error('Error fetching spare parts:', error);
+      console.error('Error fetching parts inventory:', error);
       toast.error(language === 'ar' ? 'فشل في تحميل البيانات' : 'Échec du chargement');
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch stats from API
-  const fetchStats = async () => {
-    try {
-      const response = await apiClient.get(`/spare-parts/stats`);
-      const data = response.data;
-      setStats({
-        total: data.total || 0,
-        lowStock: data.low_stock || 0,
-        totalValue: data.total_sell_value || 0
-      });
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
-
   useEffect(() => {
     fetchParts();
-    fetchStats();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -285,48 +280,57 @@ export default function SparePartsPage() {
       return;
     }
 
-    const partData = {
-      name: formData.name,
+    // p63: write straight to the unified products inventory
+    const productPayload = {
+      name_en: formData.name,  // إلزامي في مخطط المنتجات
       name_ar: formData.name_ar || formData.name,
-      category: formData.category,
-      compatible_brands: formData.compatible_brands || [],
-      compatible_models: formData.compatible_models,
-      buy_price: parseFloat(formData.buy_price) || 0,
-      sell_price: parseFloat(formData.sell_price) || 0,
+      description_ar: formData.notes || '',
+      purchase_price: parseFloat(formData.buy_price) || 0,
+      retail_price: parseFloat(formData.sell_price) || 0,
       quantity: parseInt(formData.quantity) || 0,
-      min_stock: parseInt(formData.min_stock) || 5,
+      low_stock_threshold: parseInt(formData.min_stock) || 5,
+      compatible_models: formData.compatible_models
+        ? String(formData.compatible_models).split(',').map(m => m.trim()).filter(Boolean)
+        : [],
+    };
+    // حقول القطع غير المغطاة بمخطط المنتجات تمر عبر PUT (pass-through)
+    const extras = {
+      part_category: formData.category || '',
+      compatible_brands: formData.compatible_brands || [],
       supplier: formData.supplier || '',
-      notes: formData.notes || '',
     };
 
     try {
       if (editingPart) {
-        await apiClient.put(`/spare-parts/${editingPart.id}`, partData);
+        await apiClient.put(`/products/${editingPart.id}`, { ...productPayload, ...extras });
         toast.success(language === 'ar' ? 'تم تحديث القطعة' : 'Pièce mise à jour');
       } else {
-        await apiClient.post(`/spare-parts`, partData);
+        const res = await apiClient.post(`/products`, productPayload);
+        const newId = res.data?.id;
+        if (newId) await apiClient.put(`/products/${newId}`, extras);
         toast.success(language === 'ar' ? 'تمت إضافة القطعة' : 'Pièce ajoutée');
       }
 
       // Refresh data
       await fetchParts();
-      await fetchStats();
       setShowAddDialog(false);
     } catch (error) {
       console.error('Error saving spare part:', error);
-      toast.error(language === 'ar' ? 'فشل في حفظ القطعة' : 'Échec de l\'enregistrement');
+      const detail = error.response?.data?.detail;
+      toast.error(detail || (language === 'ar' ? 'فشل في حفظ القطعة' : 'Échec de l\'enregistrement'));
     }
   };
 
   const handleDelete = async (partId) => {
     try {
-      await apiClient.delete(`/spare-parts/${partId}`);
+      // p63: unified inventory — delete via products API (soft-delete + stock protection)
+      await apiClient.delete(`/products/${partId}`);
       await fetchParts();
-      await fetchStats();
       toast.success(language === 'ar' ? 'تم حذف القطعة' : 'Pièce supprimée');
     } catch (error) {
       console.error('Error deleting spare part:', error);
-      toast.error(language === 'ar' ? 'فشل في حذف القطعة' : 'Échec de la suppression');
+      const detail = error.response?.data?.detail;
+      toast.error(detail || (language === 'ar' ? 'فشل في حذف القطعة' : 'Échec de la suppression'));
     }
   };
 
