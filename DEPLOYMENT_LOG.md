@@ -1512,3 +1512,12 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
   - الواجهة: جدول «الأداء حسب مصدر الحملة» في صفحة التحليلات (utm-sources-card)؛ سطر المصدر في نافذة الطلب (utm-source-line).
 - **اختبار حي**: طلب WEB000009 بـ utm facebook/cpc/p78-test + مفاتيح خبيثة → حُفظ معقّماً في المجموعتين ✓؛ utm_sources أظهر facebook ✓؛ إلغاء + حذف + استعادة المخزون (9) ✓؛ المتجر أُعيد موقّفاً ✓.
 - **النشر**: main.0c0358af.js — backup: backups/p78_utm/
+
+## p79 — سجل محاولات التأكيد بالاتصال (2026-08-15)
+- **قبل**: موظف التأكيد يتصل بالزبون ولا يُترك أي أثر — لا معرفة بعدد المحاولات أو نتائجها.
+- **بعد**:
+  - POST /api/ecom/orders/{id}/call-attempt {result, note}: النتائج no_answer/confirmed/postponed/wrong_number/cancelled_by_phone؛ تُدفع إلى confirmation_attempts على الطلب {at, result, result_ar, note, by, by_name}.
+  - تحويل تلقائي عبر آلة الحالات: confirmed → الطلب يتأكد (قيود الربح المتوقع تُسجَّل)؛ cancelled_by_phone → إلغاء (استعادة المخزون) — والمحاولة تبقى مسجلة حتى لو فشل التحويل.
+  - الواجهة (EcomOrderDetailDialog): قسم «📞 محاولات التأكيد بالاتصال» (call-log-section) — سجل زمني بالشارات الملوّنة + قائمة نتيجة (call-result-select) + ملاحظة + زر تسجيل (call-log-submit)؛ النموذج يظهر فقط للحالات القابلة للتأكيد.
+- **اختبار حي**: نتيجة غير صالحة → 400 ✓؛ no_answer يُسجَّل بلا تحويل ✓؛ confirmed → status=confirmed + قيد expected ✓؛ إلغاء + حذف + تنظيف ✓.
+- **النشر**: main.40d0cd9b.js — backup: backups/p79_calllog/

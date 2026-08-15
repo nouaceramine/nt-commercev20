@@ -16,6 +16,8 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const [fin, setFin] = useState(null);  // p59: accounting ledger row
   const [refundFee, setRefundFee] = useState('');    // p71: per-order return fee
   const [refundOpen, setRefundOpen] = useState(false);
+  const [callResult, setCallResult] = useState('');  // p79
+  const [callNote, setCallNote] = useState('');      // p79
   const [packCost, setPackCost] = useState('');      // p71: packaging cost
 
   // Fetch tenant store name once when the dialog first opens
@@ -73,6 +75,22 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
       onUpdated?.();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'فشل تحديث القائمة السوداء');
+    } finally { setBusy(false); }
+  };
+
+  // p79: log a confirmation call attempt (confirmed auto-confirms the order)
+  const logCallAttempt = async () => {
+    if (!callResult) { toast.error('اختر نتيجة المكالمة'); return; }
+    setBusy(true);
+    try {
+      const r = await apiClient.post(`/ecom/orders/${order.id}/call-attempt`, { result: callResult, note: callNote });
+      toast.success(r.data?.new_status === 'confirmed' ? 'سُجّلت المحاولة وتأكّد الطلب ✅'
+        : r.data?.new_status === 'cancelled' ? 'سُجّلت المحاولة وأُلغي الطلب'
+        : 'سُجّلت المحاولة');
+      setCallResult(''); setCallNote('');
+      onUpdated?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل تسجيل المحاولة');
     } finally { setBusy(false); }
   };
 
@@ -282,6 +300,39 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
             </div>
           </div>
         )}
+
+        {/* p79: confirmation call log */}
+        <div className="border rounded-lg p-3 space-y-2" data-testid="call-log-section">
+          <div className="text-xs font-semibold text-muted-foreground">📞 محاولات التأكيد بالاتصال ({(order.confirmation_attempts || []).length})</div>
+          {(order.confirmation_attempts || []).length > 0 && (
+            <div className="space-y-1 max-h-28 overflow-auto">
+              {[...(order.confirmation_attempts || [])].reverse().map((a, i) => (
+                <div key={i} className="text-xs flex items-center gap-2 border-b last:border-0 pb-1">
+                  <span className="text-muted-foreground whitespace-nowrap">{new Date(a.at).toLocaleString('ar-DZ')}</span>
+                  <Badge className={a.result === 'confirmed' ? 'bg-emerald-100 text-emerald-700' : (a.result === 'cancelled_by_phone' || a.result === 'wrong_number') ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}>{a.result_ar}</Badge>
+                  {a.note && <span className="truncate">{a.note}</span>}
+                  {a.by_name && <span className="text-muted-foreground">· {a.by_name}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {['new', 'awaiting_confirmation', 'needs_review'].includes(order.status) && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={callResult} onValueChange={setCallResult}>
+                <SelectTrigger className="w-40 h-8 text-xs" data-testid="call-result-select"><SelectValue placeholder="نتيجة المكالمة" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no_answer">لم يردّ</SelectItem>
+                  <SelectItem value="confirmed">أكّد الطلب ✅</SelectItem>
+                  <SelectItem value="postponed">أجّل التأكيد</SelectItem>
+                  <SelectItem value="wrong_number">رقم خاطئ</SelectItem>
+                  <SelectItem value="cancelled_by_phone">ألغى هاتفياً ❌</SelectItem>
+                </SelectContent>
+              </Select>
+              <input className="border rounded px-2 py-1 text-xs flex-1 min-w-[120px]" placeholder="ملاحظة (اختياري)" value={callNote} onChange={e => setCallNote(e.target.value)} data-testid="call-note-input" />
+              <Button size="sm" variant="outline" onClick={logCallAttempt} disabled={busy || !callResult} data-testid="call-log-submit">تسجيل</Button>
+            </div>
+          )}
+        </div>
 
         {/* Status transitions */}
         {nextOptions.length > 0 && (

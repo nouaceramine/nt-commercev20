@@ -463,6 +463,58 @@ async def financials_summary(user: dict = Depends(require_tenant)):
     return agg
 
 
+@router.post("/ecom/orders/{order_id}/call-attempt")
+async def log_call_attempt(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+    """p79: سجل محاولة اتصال لتأكيد الطلب. النتيجة confirmed تؤكد الطلب تلقائياً
+    و cancelled_by_phone تلغيه (عبر آلة الحالات — القيود والمخزون تلقائياً)."""
+    await require_ecom_feature(user)
+    order = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    RESULTS = {
+        "no_answer": "لم يردّ",
+        "confirmed": "أكّد الطلب",
+        "postponed": "أجّل التأكيد",
+        "wrong_number": "رقم خاطئ",
+        "cancelled_by_phone": "ألغى هاتفياً",
+    }
+    result = (body.get("result") or "").strip()
+    if result not in RESULTS:
+        raise HTTPException(status_code=400, detail="نتيجة المحاولة غير صالحة")
+    now = datetime.now(timezone.utc).isoformat()
+    attempt = {
+        "at": now,
+        "result": result,
+        "result_ar": RESULTS[result],
+        "note": (body.get("note") or "").strip()[:300],
+        "by": user.get("id"),
+        "by_name": user.get("name") or user.get("full_name") or user.get("email") or "",
+    }
+    await db.ecom_orders.update_one(
+        {"id": order_id},
+        {"$push": {"confirmation_attempts": attempt}, "$set": {"updated_at": now}},
+    )
+    # auto state transitions (attempt stays logged even if the transition fails)
+    new_status = None
+    try:
+        from services.application.ecom_order_service import change_order_status
+        cur = order.get("status")
+        if result == "confirmed" and cur in ("new", "awaiting_confirmation", "needs_review"):
+            await change_order_status(db, order_id, "confirmed", note="تأكيد هاتفي", user=user)
+            new_status = "confirmed"
+        elif result == "cancelled_by_phone" and cur in ("new", "awaiting_confirmation", "needs_review", "confirmed"):
+            await change_order_status(db, order_id, "cancelled", note="إلغاء هاتفي", user=user)
+            new_status = "cancelled"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("call-attempt auto transition failed for %s: %s", order_id, exc)
+    return {
+        "ok": True,
+        "attempt": attempt,
+        "attempts_count": len(order.get("confirmation_attempts") or []) + 1,
+        "new_status": new_status,
+    }
+
+
 @router.put("/ecom/orders/{order_id}/status")
 async def update_order_status(order_id: str, body: dict, user: dict = Depends(require_tenant)):
     """Transition an order to a new status — delegates to the application service."""
