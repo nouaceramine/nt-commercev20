@@ -258,20 +258,121 @@ def create_ai_routes(db, get_current_user) -> dict:
         result = await llm.extract_invoice_data(ocr_text)
         return result
     
+    def _build_math_fallback(forecast_type: str, historical_data: list, periods: int) -> dict:
+        """p61: deterministic linear-trend fallback used when the LLM is too slow."""
+        if forecast_type == "revenue":
+            vals = [h.get("revenue", 0) for h in historical_data]
+        else:
+            vals = [h.get("net_cash", 0) for h in historical_data]
+        n = len(vals)
+        if n >= 2:
+            slope = (vals[-1] - vals[0]) / (n - 1)
+            base = vals[-1]
+        else:
+            slope, base = 0.0, (vals[0] if vals else 0.0)
+        last_period = historical_data[-1]["period"] if historical_data else datetime.now(timezone.utc).strftime("%Y-%m")
+        try:
+            y, m = int(last_period[:4]), int(last_period[5:7])
+        except Exception:
+            now = datetime.now(timezone.utc)
+            y, m = now.year, now.month
+        forecasts = []
+        for i in range(1, periods + 1):
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+            forecasts.append({
+                "period": f"{y:04d}-{m:02d}",
+                "value": max(0.0, round(base + slope * i, 2)),
+                "confidence": 0.4,
+            })
+        trend = "up" if slope > 0 else ("down" if slope < 0 else "stable")
+        return {
+            "forecast_type": forecast_type,
+            "historical_data": historical_data,
+            "forecast": forecasts,
+            "trend": trend,
+            "confidence": 0.4,
+            "insights": ["تنبؤ إحصائي مبسّط (اتجاه خطي) — نموذج الذكاء الاصطناعي بطيء حالياً"],
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def _historical_for(forecast_type: str) -> list:
+        """p61: same aggregations the forecaster agent runs (kept in sync)."""
+        if forecast_type == "revenue":
+            hist = await db.sales.aggregate([
+                {"$group": {
+                    "_id": {"$substr": ["$created_at", 0, 7]},
+                    "total": {"$sum": "$total"},
+                    "count": {"$sum": 1}
+                }},
+                {"$sort": {"_id": 1}},
+                {"$limit": 12}
+            ]).to_list(12)
+            return [{"period": h["_id"], "revenue": h["total"], "sales_count": h["count"]} for h in hist]
+        cash_in = await db.sales.aggregate([
+            {"$group": {"_id": {"$substr": ["$created_at", 0, 7]}, "total": {"$sum": "$paid_amount"}}},
+            {"$sort": {"_id": 1}},
+            {"$limit": 12}
+        ]).to_list(12)
+        cash_out = await db.expenses.aggregate([
+            {"$group": {"_id": {"$substr": ["$expense_date", 0, 7]}, "total": {"$sum": "$amount"}}},
+            {"$sort": {"_id": 1}},
+            {"$limit": 12}
+        ]).to_list(12)
+        out = []
+        for ci in cash_in:
+            co = next((c for c in cash_out if c["_id"] == ci["_id"]), {"total": 0})
+            out.append({
+                "period": ci["_id"],
+                "cash_in": ci["total"],
+                "cash_out": co["total"],
+                "net_cash": ci["total"] - co["total"]
+            })
+        return out
+
     @router.get("/forecast/{forecast_type}")
     async def get_forecast(forecast_type: str, periods: int = 3, user=Depends(get_current_user)):
         """Get financial forecast"""
         if forecast_type not in ["revenue", "cash_flow"]:
             raise HTTPException(status_code=400, detail="Invalid forecast type")
-        
+
+        # p61: this endpoint calls the LLM synchronously (measured 2.6-6.2s) which
+        # blocked the whole smart-dashboard. Cache per tenant+type+periods for 30 min
+        # and cap the LLM wait at 12s with a deterministic fallback.
+        import asyncio as _asyncio
+        from services.cache_service import CacheManager
+        _tenant_key = user.get("tenant_id") or user.get("id") or "anon"
+        _cache_key = f"forecast:{_tenant_key}:{forecast_type}:{periods}"
+        _cache = CacheManager()
+        _cached = _cache.get(_cache_key)
+        if _cached is not None:
+            _cached["cached"] = True
+            return _cached
+
         manager = AIAgentsManager(db)
         agent = manager.get_agent("forecaster")
-        
-        if forecast_type == "revenue":
-            result = await agent.forecast_revenue(periods)
-        else:
-            result = await agent.forecast_cash_flow(periods)
-        
+
+        async def _llm_run():
+            if forecast_type == "revenue":
+                return await agent.forecast_revenue(periods)
+            return await agent.forecast_cash_flow(periods)
+
+        try:
+            result = await _asyncio.wait_for(_llm_run(), timeout=12.0)
+        except Exception as exc:  # timeout or LLM failure -> math fallback
+            logger.warning("forecast LLM slow/failed (%s %s): %s — using math fallback",
+                           forecast_type, periods, exc)
+            try:
+                hist = await _historical_for(forecast_type)
+            except Exception:
+                hist = []
+            result = _build_math_fallback(forecast_type, hist, periods)
+
+        # cache only meaningful results (never cache an empty failure)
+        if result and result.get("forecast"):
+            _cache.set(_cache_key, result, ttl=1800)
         return result
     
     @router.get("/daily-summary")
