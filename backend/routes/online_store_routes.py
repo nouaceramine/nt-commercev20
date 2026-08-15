@@ -43,6 +43,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         min_order_amount: float = 0
         delivery_fee: float = 0
         free_delivery_threshold: float = 0
+        fb_pixel_id: str = ""      # p75: Meta (Facebook) Pixel ID
+        tiktok_pixel_id: str = ""  # p75: TikTok Pixel ID
 
     class StoreOrder(BaseModel):
         customer_name: str

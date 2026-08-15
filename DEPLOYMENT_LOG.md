@@ -1471,3 +1471,13 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
   - EcomShippingTab: زر "تحديث الطلبات المشحونة" + ملخص النتيجة.
 - **اختبارات حية**: منتج بمتغيرين (3+5=8) → طلب عام بمتغير L×2 → المنتج 6 والمتغير L=3 وM=3 ✓؛ محاولة 99 من متغير فيه 3 → 400 برسالة عربية ✓؛ إلغاء → استعادة كاملة (8، M:3، L:5) ✓؛ ترميز الحالات: Livrée→delivered، En livraison→None، Retourné/Echec→refunded ✓؛ sync حي: checked=0 (لا طرود مشحونة) ✓؛ تنظيف كامل + إيقاف متجر bob.
 - **النشر**: main.d950a057.js — backups: p73_variants/, p74_yalidine_sync/
+
+## p75 — بكسلات التتبع للإعلانات الممولة (2026-08-15)
+- **قبل**: لا تتبع إعلاني في المتجر العام — الإعلانات الممولة تعمل عمياء.
+- **بعد**:
+  - StoreSettings: حقلا fb_pixel_id و tiktok_pixel_id؛ يُكشفان تلقائياً في /shop/{slug} العام.
+  - ملف جديد frontend/src/lib/pixel.js: تحميل fbq/ttq عند وجود المعرفات فقط + trackPixel موحّد (Purchase → CompletePayment لتيك توك)؛ أخطاء التتبع لا تكسر المتجر.
+  - الأحداث: PublicStorePage — PageView عند الفتح، AddToCart، InitiateCheckout عند فتح فورم الطلب، Purchase عند نجاح الطلب (بالقيمة دج)؛ ProductDetailPage — ViewContent عند فتح المنتج + Purchase عند الطلب.
+  - StoreManagementPage: بطاقة "بكسلات التتبع" بحقلي الإدخال (data-testid: fb-pixel-input / tiktok-pixel-input).
+- **اختبار**: حفظ/قراءة المعرفات عبر API ✓ (أُعيدت فارغة — المستأجر يملؤها من الواجهة)؛ الحزمة تحمل fbevents.js + analytics.tiktok.com + الأحداث ✓.
+- **النشر**: main.e242c395.js — backup: backups/p75_pixels/

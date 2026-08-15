@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
+import { initPixels, trackPixel } from '../../lib/pixel';
 import { toast, Toaster } from 'sonner';
 import {
   ShoppingCart, Search, X, Plus, Minus, Trash2,
@@ -1056,6 +1057,7 @@ export default function PublicStorePage() {
       const response = await apiClient.get(`/shop/${slug}`);
       const data = response.data;
       setStore(data.settings);
+      initPixels(data.settings);
       setProducts(Array.isArray(data.products) ? data.products : []);
       setFamilies(Array.isArray(data.families) ? data.families : []);
       setProductsByFamily(data.products_by_family || {});
@@ -1089,6 +1091,7 @@ export default function PublicStorePage() {
         quantity: 1
       }]);
     }
+    trackPixel('AddToCart', { content_name: product.name_ar || product.name, value: product.retail_price || product.selling_price || 0, currency: 'DZD' });
     toast.success('تمت الإضافة للسلة');
   };
 
@@ -1140,6 +1143,7 @@ export default function PublicStorePage() {
         payment_method: 'cod'
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
+      trackPixel('Purchase', { value: grandTotal, currency: 'DZD' });
       setOrderSuccess(response.data);
       setCart([]);
       localStorage.removeItem(`cart_${slug}`);
@@ -1489,7 +1493,7 @@ export default function PublicStorePage() {
               <span>الإجمالي:</span>
               <span>{cartTotal.toLocaleString()} دج</span>
             </div>
-            <button className="nc-cart-checkout-btn" onClick={() => { setShowCart(false); setShowCheckout(true); }}>
+            <button className="nc-cart-checkout-btn" onClick={() => { trackPixel('InitiateCheckout', { value: cartTotal, currency: 'DZD' }); setShowCart(false); setShowCheckout(true); }}>
               إتمام الطلب ←
             </button>
           </div>

@@ -63,7 +63,8 @@ import {
   Clock,
   Truck,
   CreditCard,
-  Banknote
+  Banknote,
+  Megaphone
 } from 'lucide-react';
 
 export default function StoreManagementPage() {
@@ -72,6 +73,8 @@ export default function StoreManagementPage() {
   const [storeSettings, setStoreSettings] = useState({
     enabled: false,
     store_name: '',
+    fb_pixel_id: '',
+    tiktok_pixel_id: '',
     store_slug: '',
     description: '',
     logo_url: '',
@@ -412,6 +415,43 @@ export default function StoreManagementPage() {
                         </div>
                       </div>
                     </div>
+                  </CardContent>
+                </Card>
+
+                {/* Tracking Pixels — p75 */}
+                <Card data-testid="pixels-card">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Megaphone className="h-5 w-5" />
+                      {language === 'ar' ? 'بكسلات التتبع (للإعلانات الممولة)' : 'Pixels de suivi'}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Facebook Pixel ID</Label>
+                      <Input
+                        value={storeSettings.fb_pixel_id || ''}
+                        onChange={(e) => setStoreSettings(prev => ({ ...prev, fb_pixel_id: e.target.value.trim() }))}
+                        placeholder="1234567890123456"
+                        dir="ltr"
+                        data-testid="fb-pixel-input"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>TikTok Pixel ID</Label>
+                      <Input
+                        value={storeSettings.tiktok_pixel_id || ''}
+                        onChange={(e) => setStoreSettings(prev => ({ ...prev, tiktok_pixel_id: e.target.value.trim() }))}
+                        placeholder="C4AB1C2D3E4F5G6H7I8J"
+                        dir="ltr"
+                        data-testid="tiktok-pixel-input"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {language === 'ar'
+                        ? 'تُفعَّل تلقائياً في متجرك العام: مشاهدة المنتج (ViewContent)، الإضافة للسلة، بدء الطلب، وإتمام الشراء (Purchase).'
+                        : 'Activés automatiquement sur la boutique: ViewContent, AddToCart, InitiateCheckout, Purchase.'}
+                    </p>
                   </CardContent>
                 </Card>
 

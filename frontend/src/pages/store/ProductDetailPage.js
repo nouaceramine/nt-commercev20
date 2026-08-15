@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
+import { initPixels, trackPixel } from '../../lib/pixel';
 import { toast } from 'sonner';
 import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin, Minus, Plus, CheckCircle } from 'lucide-react';
 
@@ -65,6 +66,8 @@ export default function ProductDetailPage() {
       apiClient.get(`/shop/${slug}/delivery-rates`)
         .then(r => setDeliveryRates(Array.isArray(r.data) ? r.data : ((r.data && r.data.rates) || [])))
         .catch(() => {});
+      initPixels(response.data.settings);
+      trackPixel('ViewContent', { content_name: response.data.product.name_ar || response.data.product.name_en || '', value: response.data.product.retail_price || response.data.product.selling_price || 0, currency: 'DZD' });
       const p = response.data.product;
       setMainImage(p.image_url || (p.images && p.images[0]) || '');
       window.scrollTo(0, 0);
@@ -175,6 +178,7 @@ export default function ProductDetailPage() {
         payment_method: 'cod'
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
+      trackPixel('Purchase', { value: finalTotal, currency: 'DZD' });
       setOrderSuccess(response.data);
     } catch (error) {
       toast.error(error?.response?.data?.detail || 'فشل إرسال الطلب');
