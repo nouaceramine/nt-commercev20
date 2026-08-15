@@ -155,6 +155,9 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
     # ── Delete Sale (permission-gated, with audit log) ──
     @router.delete("/{sale_id}")
     async def delete_sale(sale_id: str, data: dict, user: dict = Depends(require_permission("sales.delete"))):
+        sale = await db.sales.find_one({"id": sale_id}, {"_id": 0, "source": 1})
+        if sale and sale.get("source") == "webstore":  # p87: stock is managed by the ecom state machine
+            raise HTTPException(status_code=400, detail="طلبات المتجر الإلكتروني تُدار من مركز التجارة الإلكترونية")
         reason = (data.get("reason") or "").strip()
         await delete_sale_op(db, sale_id, reason, user)
         return {"message": "Sale deleted successfully"}
@@ -162,6 +165,9 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
     # ── Return Sale ──
     @router.post("/{sale_id}/return")
     async def return_sale(sale_id: str, user: dict = Depends(require_permission("sales.refund"))):
+        sale = await db.sales.find_one({"id": sale_id}, {"_id": 0, "source": 1})
+        if sale and sale.get("source") == "webstore":  # p87
+            raise HTTPException(status_code=400, detail="طلبات المتجر الإلكتروني تُدار من مركز التجارة الإلكترونية — استخدم حالة الطلب هناك")
         await return_sale_op(db, sale_id, user)
         return {"message": "Sale returned successfully"}
 

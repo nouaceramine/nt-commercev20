@@ -64,6 +64,12 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
     except Exception as exc:  # noqa: BLE001
         logger.warning("store accounting hook failed for order %s: %s", order_id, exc)
 
+    # p87: mirror into the POS sales ledger (/sales + dashboard + reports)
+    try:
+        await sync_sale_doc(db, {**order, "status": new_status, "updated_at": now})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("sale doc sync failed for order %s: %s", order_id, exc)
+
     # مزامنة عكسية لطلبات متجر الويب: عكس الحالة إلى store_orders
     # (المخزون أداره _sync_inventory أعلاه — نعلّم stock_restored لتفادي إعادة مزدوجة)
     if order.get("channel") == "webstore" and order.get("external_id"):
@@ -334,6 +340,70 @@ async def _record_store_accounting(db, order_id: str, new_status: str, now: str,
 
     if flags:
         await db.ecom_orders.update_one({"id": order_id}, {"$set": {**flags, "updated_at": now}})
+
+
+async def sync_sale_doc(db, order: dict) -> None:
+    """p87: mirror an ecom order into the POS sales ledger so /sales, dashboard
+    stats and daily reports see it. Idempotent upsert keyed ecom-{order_id}.
+    Status mapping: cancelled/refunded -> returned (excluded from stats),
+    delivered -> paid (money collected), otherwise -> unpaid (COD pending)."""
+    order_id = order.get("id")
+    if not order_id:
+        return
+    sale_id = f"ecom-{order_id}"
+    st = order.get("status", "new")
+    sale_status = "returned" if st in ("cancelled", "refunded") else ("paid" if st == "delivered" else "unpaid")
+    now = datetime.now(timezone.utc).isoformat()
+    items = []
+    for it in (order.get("items") or []):
+        pid = it.get("product_id")
+        pp = it.get("purchase_price")
+        if pp is None and pid:
+            p = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
+            pp = (p or {}).get("purchase_price", 0)
+        qty = int(it.get("qty", 0) or 0)
+        price = float(it.get("price", 0) or 0)
+        items.append({
+            "product_id": pid, "product_name": it.get("name") or "",
+            "barcode": it.get("sku") or "", "quantity": qty,
+            "unit_price": price, "discount": 0,
+            "purchase_price": float(pp or 0),
+            "total": float(it.get("total") or round(price * qty, 2)),
+        })
+    total = round(float(order.get("total") or 0), 2)
+    shipping = round(float(order.get("shipping_fee") or 0), 2)
+    subtotal = round(float(order.get("subtotal") or (total - shipping)), 2)
+    customer = order.get("customer") or {}
+    delivered = st == "delivered"
+    doc = {
+        "invoice_number": order.get("order_code") or "",
+        "code": order.get("order_code") or "",
+        "customer_id": None,
+        "customer_name": customer.get("name") or "زبون المتجر",
+        "items": items,
+        "subtotal": subtotal, "discount": 0,
+        "delivery_fee": shipping, "delivery": None,
+        "total": total,
+        "paid_amount": total if delivered else 0,
+        "debt_amount": 0, "remaining": 0,
+        "payment_method": "ecom_store" if delivered else "",
+        "payment_type": "cod",
+        "payments": ([{"amount": total, "method": "ecom_store", "at": now}] if delivered else []),
+        "installment_plan": None,
+        "status": sale_status,
+        "notes": order.get("notes") or "",
+        "source": "webstore",
+        "ecom_order_id": order_id,
+        "channel": order.get("channel"),
+        "updated_at": now,
+    }
+    await db.sales.update_one(
+        {"id": sale_id},
+        {"$set": doc,
+         "$setOnInsert": {"id": sale_id, "created_at": order.get("created_at") or now,
+                          "created_by": "المتجر الإلكتروني"}},
+        upsert=True,
+    )
 
 
 async def _record_confirmation_financials(db, order: dict, now: str) -> None:

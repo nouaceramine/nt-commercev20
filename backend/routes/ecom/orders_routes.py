@@ -387,6 +387,13 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
 
     await db.ecom_orders.insert_one(doc)
 
+    # p87: mirror into the POS sales ledger
+    try:
+        from services.application.ecom_order_service import sync_sale_doc
+        await sync_sale_doc(db, doc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("sale doc sync failed for new order %s: %s", order_id, exc)
+
     # p59: reserve stock the moment the order enters (status new = انتظار)
     try:
         from services.application.ecom_order_service import deduct_order_inventory

@@ -713,6 +713,11 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 "created_at": now, "updated_at": now, "created_by": "webstore",
             }
             await tenant_db_inst.ecom_orders.insert_one(ecom_doc)
+            try:  # p87: mirror into the POS sales ledger
+                from services.application.ecom_order_service import sync_sale_doc
+                await sync_sale_doc(tenant_db_inst, ecom_doc)
+            except Exception as _se:
+                logger.warning(f"p87 sale doc sync failed: {_se}")
         except Exception as e:
             logger.error(f"ecom webstore sync error: {e}")
         # NEW: Send Conversions API Purchase Event

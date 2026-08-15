@@ -199,7 +199,12 @@ export default function SalesHistoryPage() {
                   <tbody>
                     {sales.map(sale => (
                       <tr key={sale.id}>
-                        <td className="font-medium">{sale.invoice_number}</td>
+                        <td className="font-medium">
+                          {sale.invoice_number}
+                          {sale.source === 'webstore' && (
+                            <Badge className="mr-1 bg-indigo-100 text-indigo-700" data-testid="webstore-badge">{language === 'ar' ? 'متجر' : 'Boutique'}</Badge>
+                          )}
+                        </td>
                         <td><span style={{fontFamily:'monospace',fontSize:'0.75rem',background:'var(--primary-foreground)',color:'var(--primary)',border:'1px solid var(--border)',borderRadius:'4px',padding:'1px 6px'}}>{sale.code || '—'}</span></td>
                         <td>{sale.customer_name}</td>
                         <td className="font-semibold">{sale.total.toFixed(2)} {t.currency}</td>
@@ -226,7 +231,7 @@ export default function SalesHistoryPage() {
                               {language === 'ar' ? 'عرض' : 'Voir'}
                             </Button>
                             <PrintButton docType="sale" record={sale} size="sm" />
-                            {sale.status !== 'returned' && (
+                            {sale.status !== 'returned' && sale.source !== 'webstore' && (
                               <Button
                                 variant="ghost"
                                 size="sm"

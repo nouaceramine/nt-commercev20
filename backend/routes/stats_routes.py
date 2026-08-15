@@ -103,23 +103,25 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         month_start = now.strftime("%Y-%m-01")
         year_start = now.strftime("%Y-01-01")
 
+        POS_MATCH = {"source": {"$ne": "webstore"}}  # p87: split POS vs webstore halves
         today_result = await db.sales.aggregate([
-            {"$match": {"created_at": {"$gte": today}, "status": {"$ne": "returned"}}},
+            {"$match": {"created_at": {"$gte": today}, "status": {"$ne": "returned"}, **POS_MATCH}},
             {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
         ]).to_list(1)
         month_result = await db.sales.aggregate([
-            {"$match": {"created_at": {"$gte": month_start}, "status": {"$ne": "returned"}}},
+            {"$match": {"created_at": {"$gte": month_start}, "status": {"$ne": "returned"}, **POS_MATCH}},
             {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
         ]).to_list(1)
         year_result = await db.sales.aggregate([
-            {"$match": {"created_at": {"$gte": year_start}, "status": {"$ne": "returned"}}},
+            {"$match": {"created_at": {"$gte": year_start}, "status": {"$ne": "returned"}, **POS_MATCH}},
             {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}}
         ]).to_list(1)
 
         # p86: merge web-store orders (counted at creation, excluding cancelled)
         async def _ecom_sum(gte):
-            rows = await db.ecom_orders.aggregate([
-                {"$match": {"created_at": {"$gte": gte}, "status": {"$ne": "cancelled"}}},
+            # p87: web-store orders live in sales as source=webstore docs
+            rows = await db.sales.aggregate([
+                {"$match": {"created_at": {"$gte": gte}, "source": "webstore", "status": {"$ne": "returned"}}},
                 {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
             ]).to_list(1)
             return {"total": rows[0]["total"] if rows else 0, "count": rows[0]["count"] if rows else 0}
@@ -171,26 +173,21 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         ]).to_list(1)
         monthly_expenses = expenses_result[0]["total"] if expenses_result else 0
 
-        # p86: add web-store revenue + COGS (orders created this month, not cancelled)
+        # p87: web-store orders are already inside `sales` (source=webstore),
+        # so revenue/COGS above include them — just expose the breakdown.
         ecom_revenue = ecom_cogs = 0
         try:
-            monthly_ecom = await db.ecom_orders.find(
-                {"created_at": {"$gte": month_start}, "status": {"$ne": "cancelled"}},
+            ecom_sales = await db.sales.find(
+                {"created_at": {"$gte": month_start}, "status": {"$ne": "returned"}, "source": "webstore"},
                 {"_id": 0, "total": 1, "items": 1},
             ).to_list(5000)
-            ecom_revenue = round(sum(float(o.get("total") or 0) for o in monthly_ecom), 2)
-            ecom_pids = {it.get("product_id") for o in monthly_ecom for it in (o.get("items") or [])}
-            ecom_cache = await product_price_map(db, ecom_pids)
-            for o in monthly_ecom:
-                for it in (o.get("items") or []):
-                    price = it.get("purchase_price") or ecom_cache.get(it.get("product_id"), 0)
-                    ecom_cogs += int(it.get("qty", 0) or 0) * price
+            ecom_revenue = round(sum(float(s.get("total") or 0) for s in ecom_sales), 2)
+            for s in ecom_sales:
+                for it in (s.get("items") or []):
+                    ecom_cogs += int(it.get("quantity", 0) or 0) * float(it.get("purchase_price") or 0)
             ecom_cogs = round(ecom_cogs, 2)
         except Exception:
             ecom_revenue = ecom_cogs = 0
-
-        monthly_revenue = round(monthly_revenue + ecom_revenue, 2)
-        monthly_purchase_cost = round(monthly_purchase_cost + ecom_cogs, 2)
 
         return {
             "monthly_revenue": monthly_revenue,
