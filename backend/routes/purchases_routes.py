@@ -120,7 +120,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         await adjust_supplier_mirror(db, p.supplier_id,
             total_purchases=p.total, balance=remaining)
 
-        if p.paid_amount > 0:
+        # p62: "personal" (مالي الخاص) lives outside business cash boxes — no deduction
+        if p.paid_amount > 0 and p.payment_method != "personal":
             await db.cash_boxes.update_one(
                 {"id": p.payment_method},
                 {"$inc": {"balance": -p.paid_amount}, "$set": {"updated_at": now}}
@@ -234,7 +235,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 await adjust_supplier_mirror(db, purchase["supplier_id"], balance=-balance_diff)
 
             payment_diff = new_paid - old_paid
-            if payment_diff > 0:
+            # p62: personal money never touches cash boxes
+            if payment_diff > 0 and purchase.get("payment_method") != "personal":
                 await db.cash_boxes.update_one(
                     {"id": purchase.get("payment_method", "cash")},
                     {"$inc": {"balance": -payment_diff}, "$set": {"updated_at": now}}
@@ -271,7 +273,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             await adjust_supplier_mirror(db, purchase["supplier_id"],
                 total_purchases=-purchase.get("total", 0), balance=-purchase.get("remaining", 0))
 
-        if purchase.get("paid_amount", 0) > 0:
+        # p62: refund only if the payment actually came from a business box
+        if purchase.get("paid_amount", 0) > 0 and purchase.get("payment_method", "cash") != "personal":
             await db.cash_boxes.update_one(
                 {"id": purchase.get("payment_method", "cash")},
                 {"$inc": {"balance": purchase["paid_amount"]}, "$set": {"updated_at": now}}

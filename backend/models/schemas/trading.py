@@ -91,7 +91,7 @@ class PurchaseCreate(BaseModel):
     items: List[PurchaseItem]
     total: float
     paid_amount: float = 0
-    payment_method: Literal["cash", "bank", "wallet"] = "cash"
+    payment_method: Literal["cash", "bank", "wallet", "safe", "personal"] = "cash"  # p62: +خزنة/مال خاص
     payment_type: Optional[str] = "cash"
     notes: Optional[str] = ""
     code: Optional[str] = ""

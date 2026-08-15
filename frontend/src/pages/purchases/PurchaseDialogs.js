@@ -23,7 +23,7 @@ import {
 } from '../../components/ui/alert-dialog';
 import {
   ShoppingBag, Search, Plus, Minus, Trash2, Package, Truck, Warehouse,
-  CreditCard, Banknote, Wallet, TrendingUp, TrendingDown, Calculator,
+  CreditCard, Banknote, Wallet, Vault, PiggyBank, TrendingUp, TrendingDown, Calculator,
   DollarSign, AlertCircle, PlusCircle, Save, Edit, Image, Check,
   RefreshCw, Percent, Tag, Eye,
 } from 'lucide-react';
@@ -190,11 +190,18 @@ export default function PurchaseDialogs({
                 {(paymentType === 'cash' || paymentType === 'partial') && (
                   <div className="flex items-center gap-2">
                     <Label className="text-xs shrink-0">{t.paymentMethod}</Label>
-                    <div className="flex gap-1.5 flex-1">
-                      <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="flex-1 h-8 text-xs"><Banknote className="h-3.5 w-3.5 me-1" />{t.cash}</Button>
-                      <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="flex-1 h-8 text-xs"><CreditCard className="h-3.5 w-3.5 me-1" />{t.bank}</Button>
-                      <Button type="button" variant={paymentMethod === 'wallet' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('wallet')} className="flex-1 h-8 text-xs"><Wallet className="h-3.5 w-3.5" /></Button>
+                    <div className="grid grid-cols-5 gap-1.5 flex-1" data-testid="purchase-payment-source">
+                      <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="h-8 text-xs px-1"><Banknote className="h-3.5 w-3.5 me-1" />{t.cash}</Button>
+                      <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="h-8 text-xs px-1"><CreditCard className="h-3.5 w-3.5 me-1" />{t.bank}</Button>
+                      <Button type="button" variant={paymentMethod === 'wallet' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('wallet')} className="h-8 text-xs px-1"><Wallet className="h-3.5 w-3.5 me-1" />{t.wallet}</Button>
+                      <Button type="button" variant={paymentMethod === 'safe' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('safe')} className="h-8 text-xs px-1" data-testid="pay-source-safe"><Vault className="h-3.5 w-3.5 me-1" />{t.safe}</Button>
+                      <Button type="button" variant={paymentMethod === 'personal' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('personal')} className="h-8 text-xs px-1" data-testid="pay-source-personal"><PiggyBank className="h-3.5 w-3.5 me-1" />{t.personalMoney}</Button>
                     </div>
+                  </div>
+                )}
+                {paymentMethod === 'personal' && paymentType !== 'credit' && (
+                  <div className="text-xs text-muted-foreground p-1.5 bg-muted/40 rounded" data-testid="personal-money-hint">
+                    {language === 'ar' ? 'مال خاص: لن يُخصم أي مبلغ من الصناديق في إدارة المال' : 'Argent personnel : aucune caisse ne sera débitée'}
                   </div>
                 )}
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={language === 'ar' ? 'ملاحظات...' : 'Notes...'} className="min-h-0 h-8 text-xs resize-none" rows={1} />
@@ -227,9 +234,12 @@ export default function PurchaseDialogs({
               </div>
               <div><Label>{language === 'ar' ? 'المبلغ المدفوع' : 'Montant à payer'}</Label><Input type="number" value={debtPaymentAmount} onChange={(e) => setDebtPaymentAmount(Math.min(parseFloat(e.target.value) || 0, selectedDebt.total_debt))} className="mt-1" max={selectedDebt.total_debt} /></div>
               <div><Label>{t.paymentMethod}</Label>
-                <div className="flex gap-2 mt-2">
-                  <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="flex-1"><Banknote className="h-4 w-4 me-1" />{t.cash}</Button>
-                  <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="flex-1"><CreditCard className="h-4 w-4 me-1" />{t.bank}</Button>
+                <div className="grid grid-cols-5 gap-1.5 mt-2" data-testid="debt-payment-source">
+                  <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="h-8 text-xs px-1"><Banknote className="h-3.5 w-3.5 me-1" />{t.cash}</Button>
+                  <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="h-8 text-xs px-1"><CreditCard className="h-3.5 w-3.5 me-1" />{t.bank}</Button>
+                  <Button type="button" variant={paymentMethod === 'wallet' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('wallet')} className="h-8 text-xs px-1"><Wallet className="h-3.5 w-3.5 me-1" />{t.wallet}</Button>
+                  <Button type="button" variant={paymentMethod === 'safe' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('safe')} className="h-8 text-xs px-1"><Vault className="h-3.5 w-3.5 me-1" />{t.safe}</Button>
+                  <Button type="button" variant={paymentMethod === 'personal' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('personal')} className="h-8 text-xs px-1"><PiggyBank className="h-3.5 w-3.5 me-1" />{t.personalMoney}</Button>
                 </div>
               </div>
               {debtPaymentAmount < selectedDebt.total_debt && (<div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">{language === 'ar' ? 'سيتبقى' : 'Restera'}: {(selectedDebt.total_debt - debtPaymentAmount).toFixed(2)} {t.currency}</div>)}

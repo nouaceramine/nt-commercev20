@@ -84,10 +84,13 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
             remaining_payment -= payment_for_this
         supplier = await db.suppliers.find_one({"id": payment.supplier_id})
         if supplier:
-            await adjust_supplier_mirror(db, payment.supplier_id, total_purchases=-payment.amount)
+            # p62 fix: paying debt reduces what we OWE (balance) — lifetime purchases must not shrink
+            await adjust_supplier_mirror(db, payment.supplier_id, balance=-payment.amount)
         now = datetime.now(timezone.utc).isoformat()
-        await db.transactions.insert_one({"id": str(uuid.uuid4()), "type": "expense", "box": payment.payment_method, "amount": -payment.amount, "balance_after": 0, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "created_at": now})
-        await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}})
+        # p62: personal money lives outside business cash boxes — no box movement
+        if payment.payment_method != "personal":
+            await db.transactions.insert_one({"id": str(uuid.uuid4()), "type": "expense", "box": payment.payment_method, "amount": -payment.amount, "balance_after": 0, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "created_at": now})
+            await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}})
         return {"message": "Payment recorded successfully", "amount_paid": payment.amount, "updated_purchases": updated_purchases}
 
     @router.get("/debts/summary")
