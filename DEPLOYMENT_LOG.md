@@ -1491,3 +1491,13 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 - **حوادث أثناء التنفيذ**: سحب موازٍ سابق أثار 429 جماعي ثم 403 لـ IPv4؛ استُعيدت delivery_rates كاملة (58) قبل إعادة السحب الآمن.
 - **اختبارات حية**: fetch_fees_for_wilaya عبر الوسيط ✓ (ولاية 09: 700/550)؛ سحبان كاملان متتاليان: saved=58, failed=[] ✓؛ الأسعار الفعلية في القاعدة (أدرار 1050/850، الشلف 900/650…) ✓؛ retour_fee=0 من حساب يالدين (مسجّل) ✓.
 - **النشر**: main.e0e089fa.js — backup: backups/p76_yalidine_rates/
+
+## p77 — القائمة السوداء للمشاغبين (2026-08-15)
+- **قبل**: لا تنبيه ضد الزبائن كثيري الإرجاع — نفس الرقم المشاغب يطلب مجدداً بلا أي تحذير.
+- **بعد**:
+  - تمييز تلقائي: هاتف لديه طلبان مُستردّان (refunded/returned) أو أكثر يُعلَّم تلقائياً في كل القوائم.
+  - قائمة يدوية: مجموعة ecom_blacklist — POST /api/ecom/blacklist {phone, reason}، DELETE /api/ecom/blacklist/{phone}، GET /api/ecom/blacklist (auto + manual + threshold).
+  - الطلبات تُبَوَّب بـ blacklist {flagged, returned_count, manual, reason} في GET /ecom/orders و /ecom/orders/{id} — يشمل طلبات المتجر الإلكتروني تلقائياً (لا حاجة لوسم عند الإنشاء).
+  - الواجهة: شارة حمراء «⚠ مُرجِع ×N / محظور» في جدول الطلبات (blacklist-badge)؛ لافتة تحذير حمراء في نافذة الطلب قبل التأكيد (blacklist-warning)؛ زر «🚫 حظر هذا الرقم / إزالة» تحت الهاتف (blacklist-toggle-btn).
+- **اختبارات حية**: طلبان مسترجعان لرقم تجريبي → ظهر في auto وفي التبويب للقائمة والطلب المفرد ✓؛ إضافة يدوية ✓؛ رفض رقم قصير (400) ✓؛ حذف ✓ وحذف المفقود 404 ✓؛ حذف بيانات الاختبار ✓.
+- **النشر**: main.dd0781e5.js — backup: backups/p77_blacklist/

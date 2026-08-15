@@ -41,6 +41,51 @@ def _generate_order_code() -> str:
     return f"ECO-{uuid.uuid4().hex[:8].upper()}"
 
 
+
+# ── p77: troublemaker blacklist (القائمة السوداء للمشاغبين) ─────────────
+def _norm_phone(p: str) -> str:
+    return re.sub(r"[^\d+]", "", (p or "").strip())
+
+
+async def _flagged_phones() -> dict:
+    """Phones flagged as troublemakers: >=2 refunded/returned orders (auto)
+    or manually blacklisted (ecom_blacklist). {phone: {returned, manual, reason}}"""
+    flagged: dict = {}
+    try:
+        pipeline = [
+            {"$match": {"status": {"$in": ["refunded", "returned"]},
+                        "customer.phone": {"$nin": [None, ""]}}},
+            {"$group": {"_id": "$customer.phone", "n": {"$sum": 1}}},
+            {"$match": {"n": {"$gte": 2}}},
+        ]
+        async for row in db.ecom_orders.aggregate(pipeline):
+            ph = _norm_phone(row["_id"])
+            if ph:
+                flagged[ph] = {"returned": row["n"], "manual": False, "reason": ""}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("blacklist auto aggregation failed: %s", exc)
+    try:
+        async for row in db.ecom_blacklist.find({}, {"_id": 0}):
+            ph = _norm_phone(row.get("phone"))
+            if not ph:
+                continue
+            entry = flagged.setdefault(ph, {"returned": 0, "manual": False, "reason": ""})
+            entry["manual"] = True
+            entry["reason"] = row.get("reason") or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("blacklist manual fetch failed: %s", exc)
+    return flagged
+
+
+def _blacklist_annotation(order: dict, flagged: dict):
+    ph = _norm_phone((order.get("customer") or {}).get("phone"))
+    hit = flagged.get(ph) if ph else None
+    if not hit:
+        return None
+    return {"flagged": True, "returned_count": hit["returned"],
+            "manual": hit["manual"], "reason": hit["reason"]}
+
+
 def _validate_items(items_raw) -> list:
     """Coerce + validate items array."""
     if not isinstance(items_raw, list) or not items_raw:
@@ -121,6 +166,16 @@ async def list_orders(
         .limit(limit)
     )
     items = await cursor.to_list(length=limit)
+    # p77: annotate troublemaker-flagged phones
+    try:
+        flagged = await _flagged_phones()
+        if flagged:
+            for it in items:
+                bl = _blacklist_annotation(it, flagged)
+                if bl:
+                    it["blacklist"] = bl
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("blacklist annotation failed: %s", exc)
     return {
         "items": items,
         "total": total,
@@ -175,12 +230,60 @@ async def orders_summary(user: dict = Depends(require_tenant)):
     }
 
 
+@router.get("/ecom/blacklist")
+async def get_blacklist(user: dict = Depends(require_tenant)):
+    """p77: القائمة السوداء — تلقائي (هاتف لديه مرتجعان أو أكثر) + يدوي."""
+    await require_ecom_feature(user)
+    flagged = await _flagged_phones()
+    auto = [{"phone": ph, "returned_count": i["returned"]}
+            for ph, i in flagged.items() if i["returned"] >= 2]
+    manual = [{"phone": ph, "reason": i["reason"], "also_auto": i["returned"] >= 2}
+              for ph, i in flagged.items() if i["manual"]]
+    auto.sort(key=lambda r: -r["returned_count"])
+    return {"auto": auto, "manual": manual, "threshold": 2}
+
+
+@router.post("/ecom/blacklist")
+async def add_blacklist_entry(body: dict, user: dict = Depends(require_tenant)):
+    """p77: إضافة رقم يدوياً للقائمة السوداء."""
+    await require_ecom_feature(user)
+    phone = _norm_phone(body.get("phone"))
+    if not phone or len(phone) < 8:
+        raise HTTPException(status_code=400, detail="رقم هاتف غير صالح")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.ecom_blacklist.update_one(
+        {"phone": phone},
+        {"$set": {"phone": phone, "reason": (body.get("reason") or "").strip(),
+                  "updated_at": now, "by": user.get("id")},
+         "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now}},
+        upsert=True,
+    )
+    return {"ok": True, "phone": phone}
+
+
+@router.delete("/ecom/blacklist/{phone}")
+async def remove_blacklist_entry(phone: str, user: dict = Depends(require_tenant)):
+    """p77: إزالة رقم من القائمة اليدوية (العلم التلقائي يبقى ما دامت المرتجعات موجودة)."""
+    await require_ecom_feature(user)
+    res = await db.ecom_blacklist.delete_one({"phone": _norm_phone(phone)})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="الرقم غير موجود في القائمة اليدوية")
+    return {"ok": True}
+
+
 @router.get("/ecom/orders/{order_id}")
 async def get_order(order_id: str, user: dict = Depends(require_tenant)):
     await require_ecom_feature(user)
     order = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    # p77: blacklist annotation
+    try:
+        bl = _blacklist_annotation(order, await _flagged_phones())
+        if bl:
+            order["blacklist"] = bl
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("blacklist annotation failed: %s", exc)
     return order
 
 

@@ -57,6 +57,25 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
     finally { setBusy(false); }
   };
 
+  // p77: manual blacklist toggle
+  const toggleBlacklist = async () => {
+    const phone = order.customer?.phone;
+    if (!phone) return;
+    setBusy(true);
+    try {
+      if (order.blacklist?.manual) {
+        await apiClient.delete(`/ecom/blacklist/${encodeURIComponent(phone)}`);
+        toast.success('أُزيل الرقم من القائمة السوداء');
+      } else {
+        await apiClient.post('/ecom/blacklist', { phone, reason: '' });
+        toast.success('أُضيف الرقم للقائمة السوداء');
+      }
+      onUpdated?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل تحديث القائمة السوداء');
+    } finally { setBusy(false); }
+  };
+
   const transition = async (toStatus) => {
     setBusy(true);
     try {
@@ -143,6 +162,11 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
         <div className="bg-muted/30 p-3 rounded-lg space-y-1 border">
           <div className="font-semibold flex items-center gap-2"><User className="w-4 h-4" /> {order.customer?.name || '—'}</div>
           {order.customer?.phone && <div className="text-sm text-muted-foreground flex items-center gap-2"><Phone className="w-3 h-3" /> {order.customer.phone}</div>}
+          {order.customer?.phone && (
+            <button type="button" onClick={toggleBlacklist} disabled={busy} className="text-xs text-red-600 underline underline-offset-2" data-testid="blacklist-toggle-btn">
+              {order.blacklist?.manual ? 'إزالة من القائمة السوداء' : '🚫 حظر هذا الرقم'}
+            </button>
+          )}
           {(order.customer?.address || order.customer?.city || order.customer?.wilaya) && (
             <div className="text-sm text-muted-foreground flex items-center gap-2">
               <MapPin className="w-3 h-3" />
@@ -150,6 +174,15 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
             </div>
           )}
         </div>
+
+        {/* p77: blacklist warning */}
+        {order.blacklist?.flagged && (
+          <div className="bg-red-50 border border-red-300 text-red-800 rounded-lg p-3 text-sm space-y-1" data-testid="blacklist-warning">
+            <div className="font-bold">⚠️ زبون مشاغب — {order.blacklist.manual ? 'موجود في القائمة السوداء يدوياً' : `لديه ${order.blacklist.returned_count} طلبات مُرجعة`}</div>
+            {order.blacklist.reason && <div>السبب: {order.blacklist.reason}</div>}
+            <div className="text-xs">يُنصح بالتأكيد هاتفياً قبل أي شحن.</div>
+          </div>
+        )}
 
         {/* Items */}
         <div>

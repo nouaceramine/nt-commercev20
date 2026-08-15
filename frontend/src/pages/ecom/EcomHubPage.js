@@ -305,6 +305,11 @@ export default function EcomHubPage() {
                           <td className="p-2">
                             <div className="font-medium">{o.customer?.name || '—'}</div>
                             {o.customer?.phone && <div className="text-xs text-muted-foreground">{o.customer.phone}</div>}
+                            {o.blacklist?.flagged && (
+                              <Badge className="bg-red-100 text-red-700 mt-1" data-testid="blacklist-badge">
+                                ⚠ {o.blacklist.manual ? 'محظور' : `مُرجِع ×${o.blacklist.returned_count}`}
+                              </Badge>
+                            )}
                           </td>
                           <td className="p-2 text-center">{o.items?.length || 0}</td>
                           <td className="p-2 font-semibold">{Number(o.total).toLocaleString()} دج</td>
