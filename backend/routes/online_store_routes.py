@@ -133,6 +133,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         telegram_bot_token: str = ""       # p84: daily summary bot (secret)
         telegram_chat_id: str = ""         # p84: target chat
         telegram_daily_enabled: bool = False  # p84
+        telegram_notify_new_order: bool = False  # p91: instant new-order alert
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -718,6 +719,12 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 await sync_sale_doc(tenant_db_inst, ecom_doc)
             except Exception as _se:
                 logger.warning(f"p87 sale doc sync failed: {_se}")
+            try:  # p91: instant Telegram alert (fire-and-forget)
+                import asyncio as _aio
+                from services.telegram_daily import notify_new_order as _tg_new
+                _aio.create_task(_tg_new(tenant_db_inst, ecom_doc))
+            except Exception as _te:
+                logger.warning(f"p91 telegram hook failed: {_te}")
         except Exception as e:
             logger.error(f"ecom webstore sync error: {e}")
         # NEW: Send Conversions API Purchase Event

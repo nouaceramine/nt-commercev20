@@ -119,3 +119,28 @@ def start_telegram_daily(main_db, get_tenant_db) -> None:
 
     asyncio.create_task(_loop())
     logger.info("Telegram daily-summary scheduler started (21:00 Algiers, check every %ss)", CHECK_INTERVAL)
+
+
+async def notify_new_order(db, order: dict) -> None:
+    """p91: instant Telegram alert when a new order enters (webstore or hub)."""
+    try:
+        st = await db.store_settings.find_one(
+            {}, {"_id": 0, "telegram_bot_token": 1, "telegram_chat_id": 1, "telegram_notify_new_order": 1})
+        if not st or not st.get("telegram_notify_new_order"):
+            return
+        token = (st.get("telegram_bot_token") or "").strip()
+        chat = (st.get("telegram_chat_id") or "").strip()
+        if not token or not chat:
+            return
+        cust = order.get("customer") or {}
+        items = "، ".join(f"{i.get('name')}×{i.get('qty')}" for i in (order.get("items") or [])[:5])
+        text = (
+            f"🛒 طلب جديد! {order.get('order_code') or ''}\n"
+            f"💰 الإجمالي: {order.get('total')} دج\n"
+            f"👤 {cust.get('name', '')} — {cust.get('phone', '')}\n"
+            f"📍 {cust.get('wilaya', '')} {cust.get('city', '')}\n"
+            f"📦 {items}"
+        )
+        await send_telegram(token, chat, text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("p91 instant telegram notify failed: %s", exc)

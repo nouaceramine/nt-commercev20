@@ -1,39 +1,31 @@
 #!/bin/bash
-# NT Commerce — daily MongoDB backup with 14-day retention
-# Dumps every tenant DB + platform DB to a dated archive.
+# p89: NT Commerce daily backup — mongodump (gzip) + env/compose configs, 14-day retention.
 set -u
-BACKUP_DIR="/opt/ntcommerce/backups/daily"
-LOG="/var/log/ntcommerce_backup.log"
-RETENTION_DAYS=14
-DATE=$(date +%Y%m%d_%H%M%S)
-mkdir -p "$BACKUP_DIR"
+BASE="/opt/ntcommerce/backups/daily"
+STAMP="$(date +%Y-%m-%d_%H%M)"
+DEST="$BASE/$STAMP"
+LOG="$BASE/backup.log"
+mkdir -p "$DEST"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
+echo "[$(date -Is)] start $STAMP" >> "$LOG"
 
-DBS=$(docker exec ntcommerce-mongodb mongosh --quiet --eval \
-  'db.adminCommand({listDatabases:1}).databases.map(d=>d.name).filter(n=>n==="ntcommerce"||n.startsWith("tenant_")).join(" ")' 2>/dev/null)
-
-if [ -z "$DBS" ]; then
-  log "ERROR: could not list databases — mongod unreachable?"
-  exit 1
+# 1) Mongo dump inside the container, then copy out
+if docker exec ntcommerce-mongodb mongodump --archive=/tmp/ntc_backup.archive --gzip >/dev/null 2>>"$LOG"; then
+  docker cp ntcommerce-mongodb:/tmp/ntc_backup.archive "$DEST/mongo.archive.gz" 2>>"$LOG"
+  docker exec ntcommerce-mongodb rm -f /tmp/ntc_backup.archive >/dev/null 2>&1
+  SIZE=$(du -h "$DEST/mongo.archive.gz" | cut -f1)
+  echo "[$(date -Is)] mongo OK ($SIZE)" >> "$LOG"
+else
+  echo "[$(date -Is)] MONGO DUMP FAILED" >> "$LOG"
 fi
 
-FAIL=0
-for DB in $DBS; do
-  OUT="$BACKUP_DIR/${DB}_${DATE}.archive"
-  if docker exec ntcommerce-mongodb mongodump --db "$DB" --archive > "$OUT" 2>>"$LOG"; then
-    SIZE=$(du -h "$OUT" | cut -f1)
-    log "OK $DB ($SIZE)"
-  else
-    log "FAIL $DB"
-    FAIL=1
-  fi
-done
+# 2) Configs + secrets (small, critical for a full restore)
+cp /opt/ntcommerce/backend/.env "$DEST/backend.env" 2>/dev/null
+cp /opt/ntcommerce/frontend/.env "$DEST/frontend.env" 2>/dev/null
+cp /opt/ntcommerce/docker-compose.yml "$DEST/docker-compose.yml" 2>/dev/null
+[ -f /opt/ntcommerce/yalidine_proxy.py ] && cp /opt/ntcommerce/yalidine_proxy.py "$DEST/yalidine_proxy.py"
 
-# retention
-DELETED=$(find "$BACKUP_DIR" -name "*.archive" -mtime +$RETENTION_DAYS -delete -print | wc -l)
-[ "$DELETED" -gt 0 ] && log "rotated $DELETED archives older than ${RETENTION_DAYS}d"
+# 3) Retention: drop backups older than 14 days
+find "$BASE" -maxdepth 1 -type d -name '20*' -mtime +14 -exec rm -rf {} \; 2>>"$LOG"
 
-DISK=$(df -h / | awk 'NR==2{print $5}')
-log "done (fail=$FAIL) disk=$DISK"
-exit $FAIL
+echo "[$(date -Is)] done $STAMP" >> "$LOG"

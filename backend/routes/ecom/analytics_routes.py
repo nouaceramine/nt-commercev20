@@ -287,6 +287,45 @@ async def ecom_profitability(days: int = 30, user: dict = Depends(require_tenant
     }
 
 
+@router.get("/ecom/analytics/wilaya-risk")
+async def wilaya_risk(days: int = 90, user: dict = Depends(require_tenant)):
+    """p92: return-rate risk per wilaya — know where parcels come back before you ship."""
+    await require_ecom_feature(user)
+    from datetime import datetime, timezone, timedelta
+    days = max(7, min(int(days or 90), 365))
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    orders = await db.ecom_orders.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "status": 1, "customer": 1},
+    ).to_list(20000)
+    agg: dict = {}
+    for o in orders:
+        w = ((o.get("customer") or {}).get("wilaya") or "").strip() or "غير محددة"
+        a = agg.setdefault(w, {"wilaya": w, "orders": 0, "delivered": 0, "refunded": 0})
+        a["orders"] += 1
+        if o.get("status") == "delivered":
+            a["delivered"] += 1
+        elif o.get("status") == "refunded":
+            a["refunded"] += 1
+    rows = []
+    for a in agg.values():
+        outcome = a["delivered"] + a["refunded"]
+        rate = round((a["refunded"] / outcome) * 100, 1) if outcome else 0.0
+        a["outcome"] = outcome
+        a["return_rate"] = rate
+        if outcome < 3:
+            a["risk"] = "insufficient"
+        elif rate >= 40:
+            a["risk"] = "high"
+        elif rate >= 20:
+            a["risk"] = "medium"
+        else:
+            a["risk"] = "low"
+        rows.append(a)
+    rows.sort(key=lambda r: (-r["return_rate"], -r["orders"]))
+    return {"days": days, "wilayas": rows}
+
+
 @router.post("/ecom/leads/{lead_id}/ai-categorize")
 async def categorize_lead(lead_id: str, user: dict = Depends(require_tenant)):
     """LLM classifies the lead message and stores the result on the lead doc.

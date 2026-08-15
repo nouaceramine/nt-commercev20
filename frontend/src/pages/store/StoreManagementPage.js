@@ -567,6 +567,15 @@ export default function StoreManagementPage() {
                             />
                             تفعيل الملخص اليومي
                           </label>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={!!storeSettings.telegram_notify_new_order}
+                              onChange={(e) => setStoreSettings(prev => ({ ...prev, telegram_notify_new_order: e.target.checked }))}
+                              data-testid="tg-instant-toggle"
+                            />
+                            إشعار فوري عند كل طلب جديد
+                          </label>
                           <Button type="button" size="sm" variant="outline" onClick={testTelegram} disabled={tgTesting} data-testid="tg-test-btn">
                             {tgTesting ? '...' : 'إرسال اختبار'}
                           </Button>

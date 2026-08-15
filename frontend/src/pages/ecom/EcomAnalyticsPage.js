@@ -36,19 +36,22 @@ export default function EcomAnalyticsPage() {
   const [topProducts, setTopProducts] = useState([]);
   const [digital, setDigital] = useState(null);
   const [profit, setProfit] = useState(null);  // p71
+  const [wilayaRisk, setWilayaRisk] = useState([]);  // p92
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rev, fun, top, dig, pro] = await Promise.all([
+      const [rev, fun, top, dig, pro, wr] = await Promise.all([
         apiClient.get(`/ecom/analytics/revenue?days=${days}`),
         apiClient.get(`/ecom/analytics/funnel?days=${days}`),
         apiClient.get(`/ecom/analytics/top-products?days=${days}&limit=10`),
         apiClient.get('/digital/stats').catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/profitability?days=${days}`).catch(() => ({ data: null })),
+        apiClient.get(`/ecom/analytics/wilaya-risk?days=${days}`).catch(() => ({ data: null })),
       ]);
       setDigital(dig.data);
       setProfit(pro.data);
+      setWilayaRisk(wr?.data?.wilayas || []);
       setRevenue(rev.data);
       setFunnel(fun.data);
       setTopProducts(top.data?.items || []);
@@ -235,7 +238,55 @@ export default function EcomAnalyticsPage() {
           </Card>
         )}
 
-{/* Digital services profit */}
+{/* p92: wilaya risk map */}
+          {wilayaRisk.length > 0 && (
+            <Card data-testid="wilaya-risk-card">
+              <CardHeader>
+                <CardTitle>🗺️ خريطة مخاطر الولايات — معدل الإرجاع حسب الولاية</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="p-2 text-right">الولاية</th>
+                        <th className="p-2 text-center">الطلبات</th>
+                        <th className="p-2 text-center">مُسلَّم</th>
+                        <th className="p-2 text-center">مرتجع</th>
+                        <th className="p-2 text-center">نسبة الإرجاع</th>
+                        <th className="p-2 text-center">الخطر</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {wilayaRisk.map(w => (
+                        <tr key={w.wilaya} className="border-t" data-testid="wilaya-risk-row">
+                          <td className="p-2 font-medium">{w.wilaya}</td>
+                          <td className="p-2 text-center">{w.orders}</td>
+                          <td className="p-2 text-center text-emerald-700">{w.delivered}</td>
+                          <td className="p-2 text-center text-red-700">{w.refunded}</td>
+                          <td className="p-2 text-center font-semibold">{w.return_rate}%</td>
+                          <td className="p-2 text-center">
+                            <Badge className={
+                              w.risk === 'high' ? 'bg-red-100 text-red-700' :
+                              w.risk === 'medium' ? 'bg-amber-100 text-amber-700' :
+                              w.risk === 'low' ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'
+                            }>
+                              {w.risk === 'high' ? 'مرتفع' : w.risk === 'medium' ? 'متوسط' : w.risk === 'low' ? 'منخفض' : 'بيانات قليلة'}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  الولايات ذات الإرجاع المرتفع: فعّل التأكيد الهاتفي المسبق أو قلّل الإعلانات الموجهة إليها.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Digital services profit */}
         {digital && digital.completed_orders > 0 && (
           <Card className="border-indigo-200">
             <CardHeader className="pb-2">

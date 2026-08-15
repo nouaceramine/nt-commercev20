@@ -296,6 +296,37 @@ async def bulk_labels(date: Optional[str] = None, user: dict = Depends(require_t
     return {"date": date, "count": len(labels), "labels": labels}
 
 
+@router.get("/ecom/shipping/settlements")
+async def shipping_settlements(user: dict = Depends(require_tenant)):
+    """p90: per-courier payout reconciliation.
+    Wallet balance = what that courier owes us right now (COD collected, not paid out)."""
+    await require_ecom_feature(user)
+    boxes = await db.cash_boxes.find({"type": "ecom"}, {"_id": 0}).to_list(50)
+    out = []
+    for b in boxes:
+        box_id = b.get("id") or ""
+        courier = box_id.replace("ecom_store_", "", 1) if box_id.startswith("ecom_store_") else ""
+        q = {"status": "delivered"}
+        if courier:
+            q["courier"] = courier
+        else:
+            q["$or"] = [{"courier": None}, {"courier": ""}]
+        orders = await db.ecom_orders.find(q, {"_id": 0, "total": 1, "shipping_fee": 1}).to_list(5000)
+        delivered_total = round(sum(float(o.get("total") or 0) - float(o.get("shipping_fee") or 0) for o in orders), 2)
+        ret_q = dict(q)
+        ret_q["status"] = "refunded"
+        returned = await db.ecom_orders.count_documents(ret_q)
+        out.append({
+            "box_id": box_id, "courier": courier or "manual", "name": b.get("name") or box_id,
+            "balance": round(float(b.get("balance") or 0), 2),
+            "delivered_count": len(orders), "delivered_total": delivered_total,
+            "returned_count": returned,
+        })
+    targets = [{"id": t.get("id"), "name": t.get("name")}
+               for t in await db.cash_boxes.find({"type": {"$ne": "ecom"}}, {"_id": 0, "id": 1, "name": 1}).to_list(20)]
+    return {"settlements": out, "targets": targets}
+
+
 @router.get("/ecom/shipping/labels/{label_id}")
 async def get_label(label_id: str, user: dict = Depends(require_tenant)):
     await require_ecom_feature(user)

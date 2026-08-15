@@ -40,6 +40,12 @@ export default function EcomShippingTab() {
     } finally { setPulling(false); }
   };
   const [syncResult, setSyncResult] = useState(null);
+  const [settlements, setSettlements] = useState([]);      // p90
+  const [settleTargets, setSettleTargets] = useState([]);  // p90
+  const [settleRow, setSettleRow] = useState(null);        // p90 expanded courier
+  const [settleAmount, setSettleAmount] = useState('');    // p90
+  const [settleTarget, setSettleTarget] = useState('');    // p90
+  const [settling, setSettling] = useState(false);         // p90
 
   const syncYalidine = async () => {
     setSyncing(true); setSyncResult(null);
@@ -131,9 +137,93 @@ export default function EcomShippingTab() {
     } finally { setBulkLoading(false); }
   };
 
+  const fetchSettlements = async () => {  // p90
+    try {
+      const res = await apiClient.get('/ecom/shipping/settlements');
+      setSettlements(res.data?.settlements || []);
+      setSettleTargets(res.data?.targets || []);
+    } catch (e) { /* silent */ }
+  };
+
+  useEffect(() => { fetchSettlements(); }, []);  // p90
+
+  const openSettle = (s) => {  // p90
+    setSettleRow(s.box_id);
+    setSettleAmount(String(s.balance));
+    setSettleTarget(settleTargets[0]?.id || '');
+  };
+
+  const confirmSettle = async (s) => {  // p90
+    const amount = parseFloat(settleAmount) || 0;
+    if (amount <= 0 || !settleTarget) { toast.error(ar ? 'أدخل مبلغاً وصندوقاً وجيهَين' : 'Montant invalide'); return; }
+    if (amount > s.balance) { toast.error(ar ? 'المبلغ أكبر من المستحق' : 'Montant > solde'); return; }
+    setSettling(true);
+    try {
+      await apiClient.post('/cash-boxes/transfer', { from_box: s.box_id, to_box: settleTarget, amount });
+      toast.success(ar ? 'تمت التسوية والتحويل بنجاح' : 'Transfert effectué');
+      setSettleRow(null);
+      fetchSettlements();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشل التحويل' : 'Erreur'));
+    } finally { setSettling(false); }
+  };
+
   return (
     <>
       <div className="space-y-6" data-testid="ecom-shipping-tab">
+        {/* p90: courier payout settlement */}
+        {settlements.length > 0 && (
+          <Card data-testid="settlements-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                {ar ? 'تسوية مستحقات شركات الشحن' : 'Règlement des transporteurs'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {settlements.map(s => (
+                <div key={s.box_id} className="border rounded-lg p-3" data-testid={`settle-row-${s.courier}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <span className="font-semibold">{s.name}</span>
+                      <span className="text-xs text-muted-foreground mr-2">
+                        {ar ? `${s.delivered_count} طرد مسلّم · ${s.returned_count} مرتجع` : `${s.delivered_count} livrés · ${s.returned_count} retours`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge className={s.balance > 0 ? 'bg-indigo-100 text-indigo-700' : ''} data-testid={`settle-balance-${s.courier}`}>
+                        {Number(s.balance).toLocaleString()} {ar ? 'دج' : 'DZD'}
+                      </Badge>
+                      {s.balance > 0 && (
+                        <Button size="sm" variant="outline" data-testid={`settle-btn-${s.courier}`} onClick={() => settleRow === s.box_id ? setSettleRow(null) : openSettle(s)}>
+                          {ar ? 'تم الصرف' : 'Encaissé'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {settleRow === s.box_id && (
+                    <div className="flex items-center gap-2 mt-3 flex-wrap" data-testid="settle-form">
+                      <Input type="number" className="w-32" value={settleAmount} onChange={(e) => setSettleAmount(e.target.value)} data-testid="settle-amount-input" dir="ltr" />
+                      <div className="flex gap-1 flex-wrap">
+                        {settleTargets.map(t => (
+                          <Button key={t.id} size="sm" variant={settleTarget === t.id ? 'default' : 'outline'} onClick={() => setSettleTarget(t.id)} data-testid={`settle-target-${t.id}`}>
+                            {t.name}
+                          </Button>
+                        ))}
+                      </div>
+                      <Button size="sm" disabled={settling} onClick={() => confirmSettle(s)} data-testid="settle-confirm-btn">
+                        {settling ? (ar ? '...' : '...') : (ar ? 'تأكيد التحويل' : 'Confirmer')}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                {ar ? 'رصيد كل شركة = ما تدين لك به الآن. عند صرف المستحقات اضغط «تم الصرف» لتحويله إلى الصندوق — وقارن الكشف مع الرصيد لتكشف أي نقص.' : ''}
+              </p>
+            </CardContent>
+          </Card>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="h-5 w-5" />{ar ? 'تكامل Yalidine' : 'Intégration Yalidine'}</CardTitle></CardHeader>

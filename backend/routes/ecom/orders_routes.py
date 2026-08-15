@@ -394,6 +394,14 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
     except Exception as exc:  # noqa: BLE001
         logger.warning("sale doc sync failed for new order %s: %s", order_id, exc)
 
+    # p91: instant Telegram alert (fire-and-forget)
+    try:
+        import asyncio as _aio
+        from services.telegram_daily import notify_new_order as _tg_new
+        _aio.create_task(_tg_new(db, doc))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("p91 telegram hook failed for order %s: %s", order_id, exc)
+
     # p59: reserve stock the moment the order enters (status new = انتظار)
     try:
         from services.application.ecom_order_service import deduct_order_inventory
