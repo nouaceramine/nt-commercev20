@@ -50,9 +50,13 @@ export function initPixels(settings) {
 }
 
 // event: standard Meta event name. TikTok uses its own naming (Purchase → CompletePayment).
-export function trackPixel(event, params = {}) {
+// p81: options.eventID dedupes browser Purchase against server-side CAPI Purchase.
+export function trackPixel(event, params = {}, options = {}) {
   try {
-    if (fbReady && window.fbq) window.fbq('track', event, params);
+    if (fbReady && window.fbq) {
+      if (options.eventID) window.fbq('track', event, params, { eventID: String(options.eventID) });
+      else window.fbq('track', event, params);
+    }
   } catch (e) { /* never break the storefront on tracking errors */ }
   try {
     if (ttReady && window.ttq) {

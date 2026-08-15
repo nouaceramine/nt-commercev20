@@ -447,6 +447,31 @@ export default function StoreManagementPage() {
                         data-testid="tiktok-pixel-input"
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label>Facebook Access Token (Conversions API)</Label>
+                      <Input
+                        type="password"
+                        value={storeSettings.fb_access_token || ''}
+                        onChange={(e) => setStoreSettings(prev => ({ ...prev, fb_access_token: e.target.value.trim() }))}
+                        placeholder="EAA..."
+                        dir="ltr"
+                        data-testid="fb-token-input"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>TikTok Access Token (Events API)</Label>
+                      <Input
+                        type="password"
+                        value={storeSettings.tiktok_access_token || ''}
+                        onChange={(e) => setStoreSettings(prev => ({ ...prev, tiktok_access_token: e.target.value.trim() }))}
+                        placeholder="توكن الأحداث"
+                        dir="ltr"
+                        data-testid="tiktok-token-input"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      التوكنات تفعّل إرسال الأحداث من الخادم (Conversions API) — أدق ضد حاجب الإعلانات. تُحفظ بسرّية ولا تظهر للزوار.
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {language === 'ar'
                         ? 'تُفعَّل تلقائياً في متجرك العام: مشاهدة المنتج (ViewContent)، الإضافة للسلة، بدء الطلب، وإتمام الشراء (Purchase).'

@@ -94,6 +94,15 @@ def _sanitize_utm(raw) -> dict:
     return {k: str(raw[k])[:100] for k in UTM_KEYS if raw.get(k)}
 
 
+
+
+def _public_settings(settings: dict) -> dict:
+    """p81: strip server-side secrets (CAPI tokens) before public exposure."""
+    if isinstance(settings, dict):
+        settings.pop("fb_access_token", None)
+        settings.pop("tiktok_access_token", None)
+    return settings
+
 def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_tenant_db) -> dict:
     router = APIRouter(tags=["online-store"])
 
@@ -118,6 +127,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         free_delivery_threshold: float = 0
         fb_pixel_id: str = ""      # p75: Meta (Facebook) Pixel ID
         tiktok_pixel_id: str = ""  # p75: TikTok Pixel ID
+        fb_access_token: str = ""      # p81: Meta CAPI token (secret — never public)
+        tiktok_access_token: str = ""  # p81: TikTok Events API token (secret)
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -430,7 +441,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         uncategorized = [_pub_product(store_slug, p) for p in uncategorized]
         return {
             "success": True,
-            "settings": settings,
+            "settings": _public_settings(settings),
             "products": products,
             "families": families,
             "products_by_family": products_by_family,
@@ -584,6 +595,12 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             logger.error(f"ecom webstore sync error: {e}")
         # NEW: Send Conversions API Purchase Event
         try:
+            _pixels = {
+                "fb_pixel_id": settings.get("fb_pixel_id", ""),
+                "fb_access_token": settings.get("fb_access_token", ""),
+                "tiktok_pixel_id": settings.get("tiktok_pixel_id", ""),
+                "tiktok_access_token": settings.get("tiktok_access_token", ""),
+            }
             await conversions_service.send_purchase(
                 order_data["id"],
                 order.items,
@@ -593,7 +610,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                     "email": order.customer_email,
                     "phone": order.customer_phone
                 },
-                tenant_id
+                tenant_id,
+                pixels=_pixels,
+                event_id=order_number,
             )
         except Exception as e:
             logger.error(f"Conversions API error: {e}")
@@ -774,7 +793,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             "success": True,
             "product": _pub_product(store_slug, product),
             "related_products": [_pub_product(store_slug, p) for p in related_products],
-            "settings": settings
+            "settings": _public_settings(settings)
         }
 
     # ── NEW: Coupon Management ──
@@ -915,13 +934,23 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not slug_mapping:
             return {"tracked": False}
 
+        _tid = slug_mapping.get("tenant_id", "")
+        _pixels = None
+        try:
+            _tdb = main_db if _tid == "platform" else get_tenant_db(_tid)
+            _s = await _tdb.store_settings.find_one({}, {"_id": 0, "fb_pixel_id": 1, "fb_access_token": 1, "tiktok_pixel_id": 1, "tiktok_access_token": 1})
+            if _s:
+                _pixels = _s
+        except Exception:  # noqa: BLE001
+            pass
         await conversions_service.send_page_view(
             data.get("url", ""),
             {
                 "email": data.get("email", ""),
                 "phone": data.get("phone", "")
             },
-            slug_mapping.get("tenant_id", "")
+            _tid,
+            pixels=_pixels,
         )
         return {"tracked": True}
 

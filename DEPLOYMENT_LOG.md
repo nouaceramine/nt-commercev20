@@ -1527,3 +1527,13 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 - **بعد**: خدمة خلفية services/ecom/yalidine_scheduler.py تُقلع مع التطبيق: كل ساعتين تمرّ على كل المستأجرين النشطين، ومن لديه تكامل يالدين فعّال تسحب حالات الطرود المشحونة وتقدّمها عبر آلة الحالات (delivered → ربح محقق / refunded → خسائر + استعادة مخزون)، مع إشعار في صندوق الإشعارات عند كل تسليم/إرجاع. مهلة 1ث بين الطرود و2ث بين المستأجرين رفقاً بحدود يالدين. الزر اليدوي يبقى للفحص الفوري.
 - **اختبار حي**: المجدول بدأ مع الإقلاع (log) ✓؛ دورة يدوية كاملة على كل المستأجرين بلا أخطاء ✓ (لا طرود مشحونة حالياً).
 - **النشر**: backend فقط — backup: backups/p80_yalidine_autosync/
+
+## p81 — Conversions API لكل متجر (2026-08-15)
+- **قبل**: خدمة CAPI موجودة لكنها تقرأ مفاتيح من متغيرات بيئة عامة فارغة — معطّلة فعلياً لكل المستأجرين.
+- **بعد**:
+  - store_settings: fb_access_token + tiktok_access_token (سرّيان) بجانب معرّفي البكسل (p75)؛ إدخالهما من بطاقة البكسلات (fb-token-input / tiktok-token-input، نوع password).
+  - conversions_api_service: send_event/send_purchase/send_page_view تقبل pixels لكل مستأجر مع رجوع لمتغيرات البيئة؛ event_id لإلغاء الازدواج مع بكسل المتصفح (Purchase يرسل eventID=order_number من الجهتين).
+  - حماية: _public_settings يجرد التوكنات من /shop/{slug} و /shop/{slug}/product/{id} العامين (المعرّفات تبقى — عامة بطبيعتها).
+  - تبويب الشحن: ملاحظة «مزامنة تلقائية كل ساعتين» (p80, yalidine-autosync-note).
+- **اختبار حي**: PUT يحفظ التوكن ✓؛ طلب عام → سجل الخادم «Facebook CAPI Purchase: 400» (توكن تجريبي — يثبت وصول بيانات المستأجر لفيسبوك) ✓؛ /shop/bob العام نظيف من التوكنات ويُظهر fb_pixel_id ✓؛ إلغاء + تنظيف ✓.
+- **النشر**: main.68733380.js — backup: backups/p81_capi/

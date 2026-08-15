@@ -32,13 +32,25 @@ class ConversionsAPIService:
     def _get_tiktok_url(self) -> str:
         return "https://business-api.tiktok.com/open_api/v1.3/event/track/"
 
-    async def send_event(self, event_name: str, event_data: Dict[str, Any], 
-                         user_data: Dict[str, str], tenant_id: str = "") -> Dict[str, Any]:
-        """Send event to both Facebook and TikTok"""
+    async def send_event(self, event_name: str, event_data: Dict[str, Any],
+                         user_data: Dict[str, str], tenant_id: str = "",
+                         pixels: Optional[Dict[str, str]] = None, event_id: str = "") -> Dict[str, Any]:
+        """Send event to both Facebook and TikTok.
+
+        p81: `pixels` carries per-tenant credentials from the tenant's store
+        settings (fb_pixel_id/fb_access_token/tiktok_pixel_id/tiktok_access_token);
+        env vars remain as a global fallback. `event_id` dedupes against the
+        browser pixel firing the same event.
+        """
         results = {"facebook": None, "tiktok": None}
+        px = pixels or {}
+        fb_pixel_id = (px.get("fb_pixel_id") or "").strip() or self.fb_pixel_id
+        fb_access_token = (px.get("fb_access_token") or "").strip() or self.fb_access_token
+        tiktok_pixel_id = (px.get("tiktok_pixel_id") or "").strip() or self.tiktok_pixel_id
+        tiktok_access_token = (px.get("tiktok_access_token") or "").strip() or self.tiktok_access_token
 
         # Facebook CAPI
-        if self.fb_pixel_id and self.fb_access_token:
+        if fb_pixel_id and fb_access_token:
             try:
                 fb_payload = {
                     "data": [{
@@ -63,10 +75,11 @@ class ConversionsAPIService:
                     }]
                 }
 
-                fb_url = self._get_fb_url()
+                if event_id:
+                    fb_payload["data"][0]["event_id"] = event_id
                 fb_response = requests.post(
-                    fb_url,
-                    params={"access_token": self.fb_access_token},
+                    f"https://graph.facebook.com/v18.0/{fb_pixel_id}/events",
+                    params={"access_token": fb_access_token},
                     json=fb_payload,
                     timeout=10
                 )
@@ -80,13 +93,14 @@ class ConversionsAPIService:
                 results["facebook"] = {"error": str(e)}
 
         # TikTok Events API
-        if self.tiktok_pixel_id and self.tiktok_access_token:
+        if tiktok_pixel_id and tiktok_access_token:
             try:
                 tiktok_payload = {
                     "event_source": "web",
-                    "event_source_id": self.tiktok_pixel_id,
+                    "event_source_id": tiktok_pixel_id,
                     "data": [{
                         "event": event_name,
+                        "event_id": event_id or None,
                         "event_time": int(datetime.now(timezone.utc).timestamp()),
                         "user": {
                             "email": self._hash(user_data.get("email", "")),
@@ -104,7 +118,7 @@ class ConversionsAPIService:
 
                 tiktok_response = requests.post(
                     self._get_tiktok_url(),
-                    headers={"Access-Token": self.tiktok_access_token, "Content-Type": "application/json"},
+                    headers={"Access-Token": tiktok_access_token, "Content-Type": "application/json"},
                     json=tiktok_payload,
                     timeout=10
                 )
@@ -119,13 +133,13 @@ class ConversionsAPIService:
 
         return results
 
-    async def send_page_view(self, url: str, user_data: Dict[str, str], 
-                           tenant_id: str = "") -> Dict[str, Any]:
+    async def send_page_view(self, url: str, user_data: Dict[str, str],
+                           tenant_id: str = "", pixels: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """PageView event"""
         return await self.send_event("PageView", {
             "event_source_url": url,
             "value": 0
-        }, user_data, tenant_id)
+        }, user_data, tenant_id, pixels=pixels)
 
     async def send_view_content(self, product_id: str, product_name: str, 
                                 price: float, url: str, 
@@ -151,9 +165,10 @@ class ConversionsAPIService:
             "contents": [{"id": product_id, "quantity": quantity, "item_price": price}]
         }, user_data, tenant_id)
 
-    async def send_purchase(self, order_id: str, products: list, total: float, 
-                            url: str, user_data: Dict[str, str], 
-                            tenant_id: str = "") -> Dict[str, Any]:
+    async def send_purchase(self, order_id: str, products: list, total: float,
+                            url: str, user_data: Dict[str, str],
+                            tenant_id: str = "", pixels: Optional[Dict[str, str]] = None,
+                            event_id: str = "") -> Dict[str, Any]:
         """Purchase event (COD)"""
         content_ids = [p.get("product_id", "") for p in products]
         contents = [{"id": p.get("product_id", ""), "quantity": p.get("quantity", 1), 
@@ -165,7 +180,7 @@ class ConversionsAPIService:
             "content_ids": content_ids,
             "content_name": f"Order {order_id}",
             "contents": contents
-        }, user_data, tenant_id)
+        }, user_data, tenant_id, pixels=pixels, event_id=event_id)
 
     async def send_lead(self, form_id: str, url: str, 
                         user_data: Dict[str, str], tenant_id: str = "") -> Dict[str, Any]:

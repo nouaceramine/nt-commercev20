@@ -1146,7 +1146,7 @@ export default function PublicStorePage() {
         utm: getUtm()
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
-      trackPixel('Purchase', { value: grandTotal, currency: 'DZD' });
+      trackPixel('Purchase', { value: grandTotal, currency: 'DZD' }, { eventID: response.data?.order_number });
       setOrderSuccess(response.data);
       setCart([]);
       localStorage.removeItem(`cart_${slug}`);

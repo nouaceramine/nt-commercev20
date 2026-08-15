@@ -127,6 +127,7 @@ export default function EcomShippingTab() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{ar ? 'يجلب حالة كل طرد مشحون: المُسلَّم يصبح "تم التسليم" والمرفوض "مُستردّ" تلقائياً مع القيود المحاسبية.' : 'Met à jour les colis expédiés automatiquement.'}</p>
+                <p className="text-xs text-emerald-700 mt-1" data-testid="yalidine-autosync-note">{ar ? '⚡ مزامنة تلقائية كل ساعتين — مع إشعار عند كل تسليم أو إرجاع.' : 'Sync automatique toutes les 2h.'}</p>
                 {syncResult && (
                   <p className="text-xs mt-2 font-medium" data-testid="yalidine-sync-result">
                     {ar ? `فُحص ${syncResult.checked} — مُسلَّم: ${syncResult.delivered} — مُسترد: ${syncResult.returned} — بلا تغيير: ${syncResult.unchanged}` : JSON.stringify(syncResult)}

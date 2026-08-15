@@ -181,7 +181,7 @@ export default function ProductDetailPage() {
         utm: getUtm()
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
-      trackPixel('Purchase', { value: finalTotal, currency: 'DZD' });
+      trackPixel('Purchase', { value: finalTotal, currency: 'DZD' }, { eventID: response.data?.order_number });
       setOrderSuccess(response.data);
     } catch (error) {
       toast.error(error?.response?.data?.detail || 'فشل إرسال الطلب');
