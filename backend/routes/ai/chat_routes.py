@@ -48,6 +48,140 @@ def create_ai_routes(db, get_current_user) -> dict:
     from services.ai.llm_service import get_llm_service
     from services.ai.agents import AIAgentsManager
     
+    # ---------- p65: real data execution for chat queries ----------
+    def _detect_query_type(message: str) -> str:
+        m = message or ""
+        if any(k in m for k in ["مصروف", "مصاريف", "مصارف"]):
+            return "get_expenses"
+        if any(k in m for k in ["ربح", "أرباح"]):
+            return "get_profit"
+        if any(k in m for k in ["إيراد", "ايراد", "مداخيل", "مدخول", "مبيعات"]):
+            return "get_revenue"
+        if any(k in m for k in ["رصيد", "نقدية", "نقد", "صندوق", "صناديق", "خزنة"]):
+            return "get_cash_balance"
+        if any(k in m for k in ["أفضل العملاء", "أفضل الزبائن", "افضل العملاء", "افضل الزبائن"]):
+            return "get_top_customers"
+        if any(k in m for k in ["أفضل المنتجات", "افضل المنتجات", "الأكثر مبيع"]):
+            return "get_top_products"
+        if any(k in m for k in ["متأخر", "مستحقات", "ديون"]):
+            return "get_overdue_invoices"
+        return "general_query"
+
+    async def _sum_coll(coll: str, field: str, match: dict = None):
+        pipeline = []
+        if match:
+            pipeline.append({"$match": match})
+        pipeline.append({"$group": {"_id": None, "total": {"$sum": f"${field}"}, "count": {"$sum": 1}}})
+        rows = await db[coll].aggregate(pipeline).to_list(1)
+        if not rows:
+            return 0.0, 0
+        return float(rows[0]["total"] or 0), rows[0]["count"]
+
+    async def _execute_ai_query(query_type: str):
+        """Run the named query against real tenant data. Returns dict or None."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        month_start = today[:7] + "-01"
+        try:
+            if query_type == "get_revenue":
+                m_total, m_count = await _sum_coll("sales", "total", {"created_at": {"$regex": f"^{month_start}"}})
+                a_total, a_count = await _sum_coll("sales", "total")
+                return {"kind": query_type, "month": today[:7], "month_revenue": m_total, "month_count": m_count,
+                        "total_revenue": a_total, "total_count": a_count}
+            if query_type == "get_expenses":
+                m_total, m_count = await _sum_coll("expenses", "amount", {"date": {"$regex": f"^{month_start}"}})
+                a_total, a_count = await _sum_coll("expenses", "amount")
+                return {"kind": query_type, "month": today[:7], "month_expenses": m_total, "month_count": m_count,
+                        "total_expenses": a_total, "total_count": a_count}
+            if query_type == "get_profit":
+                m_rev, _ = await _sum_coll("sales", "total", {"created_at": {"$regex": f"^{month_start}"}})
+                m_exp, _ = await _sum_coll("expenses", "amount", {"date": {"$regex": f"^{month_start}"}})
+                a_rev, _ = await _sum_coll("sales", "total")
+                a_exp, _ = await _sum_coll("expenses", "amount")
+                return {"kind": query_type, "month": today[:7],
+                        "month_revenue": m_rev, "month_expenses": m_exp, "month_profit": m_rev - m_exp,
+                        "total_revenue": a_rev, "total_expenses": a_exp, "total_profit": a_rev - a_exp}
+            if query_type == "get_top_customers":
+                rows = await db.sales.aggregate([
+                    {"$match": {"customer_name": {"$nin": [None, ""]}}},
+                    {"$group": {"_id": "$customer_name", "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
+                    {"$sort": {"total": -1}}, {"$limit": 5}
+                ]).to_list(5)
+                return {"kind": query_type,
+                        "top_customers": [{"name": r["_id"], "total": r["total"], "count": r["count"]} for r in rows]}
+            if query_type == "get_top_products":
+                rows = await db.sales.aggregate([
+                    {"$unwind": "$items"},
+                    {"$group": {"_id": "$items.product_name", "qty": {"$sum": "$items.quantity"}, "revenue": {"$sum": "$items.total"}}},
+                    {"$sort": {"revenue": -1}}, {"$limit": 5}
+                ]).to_list(5)
+                return {"kind": query_type,
+                        "top_products": [{"name": r["_id"], "qty": r["qty"], "revenue": r["revenue"]} for r in rows]}
+            if query_type == "get_overdue_invoices":
+                open_sales = await db.sales.find({"remaining": {"$gt": 0}},
+                    {"_id": 0, "customer_name": 1, "total": 1, "remaining": 1, "created_at": 1}).sort("created_at", 1).to_list(20)
+                overdue_debts = await db.debts.find({"status": "overdue"},
+                    {"_id": 0, "party_name": 1, "remaining_amount": 1, "due_date": 1, "type": 1}).to_list(20)
+                return {"kind": query_type, "open_sales": open_sales, "overdue_debts": overdue_debts,
+                        "total_open": sum(float(s.get("remaining", 0)) for s in open_sales)}
+            if query_type == "get_cash_balance":
+                boxes = await db.cash_boxes.find({}, {"_id": 0, "id": 1, "name": 1, "balance": 1}).to_list(20)
+                business_total = sum(float(b.get("balance", 0)) for b in boxes if b.get("id") != "personal")
+                return {"kind": query_type, "boxes": boxes, "business_total": business_total}
+            return None
+        except Exception as e:
+            logger.warning(f"p65 ai query exec failed ({query_type}): {e}")
+            return None
+
+    def _fmt(x: float) -> str:
+        return f"{float(x):,.2f}"
+
+    def _format_answer(query_type: str, data: dict) -> str:
+        kind = data.get("kind", query_type)
+        if kind == "get_expenses":
+            return (f"إجمالي المصروفات المسجلة لهذا الشهر ({data['month']}): **{_fmt(data['month_expenses'])} دج** "
+                    f"عبر {data['month_count']} عملية.\n"
+                    f"إجمالي المصروفات منذ البداية: {_fmt(data['total_expenses'])} دج ({data['total_count']} عملية).")
+        if kind == "get_revenue":
+            return (f"إجمالي الإيرادات (المبيعات) لهذا الشهر ({data['month']}): **{_fmt(data['month_revenue'])} دج** "
+                    f"عبر {data['month_count']} عملية بيع.\n"
+                    f"إجمالي الإيرادات منذ البداية: {_fmt(data['total_revenue'])} دج ({data['total_count']} عملية).")
+        if kind == "get_profit":
+            return (f"هذا الشهر ({data['month']}): الإيرادات {_fmt(data['month_revenue'])} دج − المصروفات "
+                    f"{_fmt(data['month_expenses'])} دج = **صافي {_fmt(data['month_profit'])} دج**.\n"
+                    f"منذ البداية: إيرادات {_fmt(data['total_revenue'])} دج − مصروفات {_fmt(data['total_expenses'])} دج "
+                    f"= صافي {_fmt(data['total_profit'])} دج.")
+        if kind == "get_top_customers":
+            items = data.get("top_customers") or []
+            if not items:
+                return "لا توجد مبيعات مسجلة بأسماء زبائن بعد."
+            lines = [f"{i+1}. {c['name']}: {_fmt(c['total'])} دج ({c['count']} عملية)" for i, c in enumerate(items)]
+            return "أفضل الزبائن حسب إجمالي المشتريات:\n" + "\n".join(lines)
+        if kind == "get_top_products":
+            items = data.get("top_products") or []
+            if not items:
+                return "لا توجد مبيعات منتجات مسجلة بعد."
+            lines = [f"{i+1}. {p['name']}: {p['qty']} قطعة — {_fmt(p['revenue'])} دج" for i, p in enumerate(items)]
+            return "أفضل المنتجات حسب الإيراد:\n" + "\n".join(lines)
+        if kind == "get_overdue_invoices":
+            sales = data.get("open_sales") or []
+            debts = data.get("overdue_debts") or []
+            if not sales and not debts:
+                return "لا توجد فواتير مفتوحة أو ديون متأخرة. كل شيء مسدد."
+            lines = [f"إجمالي المبالغ غير المسددة من الفواتير: **{_fmt(data.get('total_open', 0))} دج**."]
+            for s in sales:
+                lines.append(f"- فاتورة {s.get('customer_name') or 'زبون نقدي'}: متبقّي {_fmt(s.get('remaining', 0))} دج من {_fmt(s.get('total', 0))} دج")
+            for d in debts:
+                lines.append(f"- دين متأخر ({d.get('party_name', '')}): {_fmt(d.get('remaining_amount', 0))} دج — استحقاق {d.get('due_date', '')}")
+            return "\n".join(lines)
+        if kind == "get_cash_balance":
+            boxes = data.get("boxes") or []
+            if not boxes:
+                return "لا توجد صناديق نقدية مهيأة بعد."
+            lines = [f"- {b.get('name', b.get('id'))}: {_fmt(b.get('balance', 0))} دج" for b in boxes]
+            lines.append(f"**إجمالي رأس المال في الصناديق: {_fmt(data.get('business_total', 0))} دج**")
+            return "أرصدة الصناديق الحالية:\n" + "\n".join(lines)
+        return ""
+
     @router.post("/chat", response_model=ChatResponse)
     async def chat_with_accountant(request: ChatRequest, user=Depends(get_current_user)):
         """Chat with AI accountant"""
@@ -78,6 +212,18 @@ def create_ai_routes(db, get_current_user) -> dict:
             
             # Process query
             result = await llm.process_chat_query(request.message, context)
+
+            # p65: actually execute the query the LLM named (it only describes it otherwise)
+            query_type = result.get("query_type") or ""
+            if query_type in ("", "general_query", "error"):
+                query_type = _detect_query_type(request.message)
+            if query_type and query_type not in ("general_query", "error"):
+                data = await _execute_ai_query(query_type)
+                if data is not None:
+                    result["data"] = data
+                    answer = _format_answer(query_type, data)
+                    if answer:
+                        result["response"] = answer
             
             # Store chat message
             chat_id = request.session_id if request.session_id else f"chat_{user['id']}_{datetime.now(timezone.utc).timestamp()}"

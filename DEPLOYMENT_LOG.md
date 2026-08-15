@@ -1391,3 +1391,9 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 - models/schemas/trading.py: DebtPaymentCreate يقبل safe و personal.
 - frontend DebtsPage.js: حوار الدفع يعرض الخزنة والمال الخاص.
 **بعد (curl على NT-0011):** /debts → bob 3500؛ دفع 500+500+200 → المرآة=الفاتورة=summary=القائمة=2300 ونقدي=1200؛ ثم استعادة كاملة للحالة الأصلية وكلمة مرور المستأجر.
+
+## p65 — إصلاح /ai-chat: تنفيذ فعلي للاستعلامات (2026-08-15)
+**المشكلة:** المحادثة تكتفي بنص "سأقوم بتنفيذ استعلام..." دون جلب أي بيانات — الـ LLM يسمّي query_type لكن لا أحد ينفّذه.
+**التغيير (backup: /opt/ntcommerce/backups/p65_aichat/):** routes/ai/chat_routes.py — إضافة _execute_ai_query (تنفيذ حقيقي على MongoDB لأنواع: get_revenue/get_expenses/get_profit/get_top_customers/get_top_products/get_overdue_invoices/get_cash_balance)، _detect_query_type (كشف بالكلمات المفتاحية العربية عندما لا يسمّي الـ LLM النوع)، _format_answer (صياغة عربية حتمية بالأرقام الحقيقية). المال الخاص مستثنى من إجمالي رأس المال.
+**اختبار curl:** مصروفات الشهر → 0.00 دج (صحيح، لا مصروفات)؛ أرصدة الصناديق → 4,800 دج بالتفصيل؛ أفضل المنتجات → قائمة حقيقية.
+**ملاحظة:** كسر مؤقت في المسار أثناء الترقيع (indentation) اكتُشف وأُصلح في نفس المرحلة؛ openapi يؤكد تسجيل /api/ai/chat.
