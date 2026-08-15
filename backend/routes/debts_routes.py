@@ -112,11 +112,11 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
             from services.balances import adjust_customer_mirror, adjust_supplier_mirror, allocate_customer_payment, allocate_supplier_payment
             payment_id = str(uuid.uuid4())
             if v_party_type == "customer":
-                await allocate_customer_payment(db, v_party_id, p.amount)
+                await allocate_customer_payment(db, v_party_id, p.amount, method=p.payment_method)
                 await adjust_customer_mirror(db, v_party_id, balance=-p.amount, total_debt=-p.amount)
                 tx_type, signed = "income", p.amount
             else:
-                await allocate_supplier_payment(db, v_party_id, p.amount)
+                await allocate_supplier_payment(db, v_party_id, p.amount, method=p.payment_method)
                 await adjust_supplier_mirror(db, v_party_id, balance=-p.amount)
                 tx_type, signed = "expense", -p.amount
             if p.payment_method != "personal":

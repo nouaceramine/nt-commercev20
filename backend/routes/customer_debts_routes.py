@@ -41,7 +41,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
         # p64: allocate across open sales via `remaining` (legacy `debt_amount` synced too)
-        actual_payment, sales_updated = await allocate_customer_payment(db, customer_id, payment.amount)
+        actual_payment, sales_updated = await allocate_customer_payment(db, customer_id, payment.amount, method=payment.payment_method)
         if actual_payment <= 0:
             raise HTTPException(status_code=400, detail="Customer has no debt")
         remaining_payment = payment.amount - actual_payment
@@ -58,7 +58,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
     @router.post("/supplier-debts/pay")
     async def pay_supplier_debt(payment: SupplierDebtPayment, user: dict = Depends(require_tenant)):
         # p64: shared FIFO allocator (same semantics as before)
-        amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount)
+        amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method)
         if amount_applied <= 0:
             raise HTTPException(status_code=400, detail="No outstanding debt for this supplier")
         supplier = await db.suppliers.find_one({"id": payment.supplier_id})

@@ -71,6 +71,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             "items": [item.model_dump() for item in p.items],
             "total": p.total, "paid_amount": p.paid_amount,
             "remaining": max(0, remaining), "payment_method": p.payment_method,
+            "payments": ([{"amount": p.paid_amount, "method": p.payment_method, "at": now}] if p.paid_amount > 0 else []),  # p67
             "status": status, "notes": p.notes or "",
             "created_at": now, "created_by": admin["name"]
         }
@@ -273,8 +274,22 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             await adjust_supplier_mirror(db, purchase["supplier_id"],
                 total_purchases=-purchase.get("total", 0), balance=-purchase.get("remaining", 0))
 
-        # p62: refund only if the payment actually came from a business box
-        if purchase.get("paid_amount", 0) > 0 and purchase.get("payment_method", "cash") != "personal":
+        # p67: refund each payment to the box it actually came from (debt payments may use other boxes)
+        payments_log = purchase.get("payments") or []
+        if payments_log:
+            for pay in payments_log:
+                m = pay.get("method", "cash")
+                if pay.get("amount", 0) > 0 and m != "personal":
+                    await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": pay["amount"]}, "$set": {"updated_at": now}})
+                    await db.transactions.insert_one({
+                        "id": str(uuid.uuid4()), "cash_box_id": m,
+                        "type": "income", "amount": pay["amount"],
+                        "description": f"إلغاء مشتريات - فاتورة {purchase.get('invoice_number', '')}",
+                        "reference_type": "purchase_reversal", "reference_id": purchase_id,
+                        "created_at": now, "created_by": admin["name"]
+                    })
+        # p62: refund only if the payment actually came from a business box (legacy docs without payments log)
+        elif purchase.get("paid_amount", 0) > 0 and purchase.get("payment_method", "cash") != "personal":
             await db.cash_boxes.update_one(
                 {"id": purchase.get("payment_method", "cash")},
                 {"$inc": {"balance": purchase["paid_amount"]}, "$set": {"updated_at": now}}

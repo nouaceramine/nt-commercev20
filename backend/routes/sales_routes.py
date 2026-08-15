@@ -133,6 +133,8 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
 
             cash_box_id = data.get("cash_box_id")
             if cash_box_id:
+                # p67: log which box this additional payment used
+                await db.sales.update_one({"id": sale_id}, {"$push": {"payments": {"amount": payment_amount, "method": cash_box_id, "at": now}}})
                 await db.cash_boxes.update_one(
                     {"id": cash_box_id},
                     {"$inc": {"balance": payment_amount}, "$set": {"updated_at": now}}

@@ -121,6 +121,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
         "paid_amount": s.paid_amount, "debt_amount": debt_amount,
         "remaining": max(0, remaining),
         "payment_method": s.payment_method, "payment_type": s.payment_type,
+        "payments": ([{"amount": s.paid_amount, "method": s.payment_method, "at": now}] if s.paid_amount > 0 else []),  # p67
         "installment_plan": installment_info,
         "status": status,
         "notes": s.notes or "", "created_at": now, "created_by": user["name"]
@@ -218,7 +219,21 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
             {"id": sale["customer_id"]},
             {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}}
         )
-    if sale.get("paid_amount", 0) > 0:
+    payments_log = sale.get("payments") or []
+    if payments_log:
+        # p67: reverse each payment from the box it actually entered
+        for pay in payments_log:
+            m = pay.get("method")
+            if pay.get("amount", 0) > 0 and m and m != "personal":
+                await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": -pay["amount"]}, "$set": {"updated_at": now}})
+                await db.transactions.insert_one({
+                    "id": str(uuid.uuid4()), "cash_box_id": m,
+                    "type": "expense", "amount": pay["amount"],
+                    "description": f"حذف مبيعات - فاتورة {sale.get('invoice_number', '')}",
+                    "reference_type": "sale_delete", "reference_id": sale_id,
+                    "created_at": now, "created_by": user.get("name", "")
+                })
+    elif sale.get("paid_amount", 0) > 0:
         cash_box_id = sale.get("cash_box_id") or sale.get("payment_method")
         if cash_box_id:
             await db.cash_boxes.update_one(

@@ -80,6 +80,7 @@ export default function ExpensesPage() {
     title: '',
     category: '',
     amount: '',
+    payment_method: 'cash',
     date: new Date().toISOString().split('T')[0],
     notes: '',
     code: '',  // كود التكلفة
@@ -198,6 +199,7 @@ export default function ExpensesPage() {
         title: '',
         category: '',
         amount: '',
+        payment_method: 'cash',
         date: new Date().toISOString().split('T')[0],
         notes: '',
         code: response.data.code,  // كود التكلفة التلقائي
@@ -206,7 +208,7 @@ export default function ExpensesPage() {
       });
     } catch (error) {
       setFormData({
-        title: '', category: '', amount: '', date: new Date().toISOString().split('T')[0],
+        title: '', category: '', amount: '', payment_method: 'cash', date: new Date().toISOString().split('T')[0],
         notes: '', code: '', recurring: false, recurring_period: 'monthly'
       });
     }
@@ -222,6 +224,7 @@ export default function ExpensesPage() {
       date: expense.date?.split('T')[0] || new Date().toISOString().split('T')[0],
       notes: expense.notes || '',
       code: expense.code || '',
+      payment_method: expense.payment_method || 'cash',
       recurring: expense.recurring || false,
       recurring_period: expense.recurring_period || 'monthly'
     });

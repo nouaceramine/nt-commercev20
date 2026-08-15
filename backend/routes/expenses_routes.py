@@ -18,6 +18,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         title: str
         category: str
         amount: float
+        payment_method: str = "cash"  # p66: cash/bank/wallet/safe/personal — personal stays outside boxes
         date: Optional[str] = None
         notes: Optional[str] = ""
         recurring: bool = False
@@ -29,6 +30,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         title: Optional[str] = None
         category: Optional[str] = None
         amount: Optional[float] = None
+        payment_method: Optional[str] = None  # p66
         date: Optional[str] = None
         notes: Optional[str] = None
         recurring: Optional[bool] = None
@@ -120,23 +122,49 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         if not data.get("code"):
             data["code"] = await generate_code(db, "expenses", "CH", 5, with_year=True)
         await db.expenses.insert_one(data)
+        # p66: an expense is money OUT of a cash box (personal money stays outside)
+        if data.get("payment_method") and data["payment_method"] != "personal":
+            now = datetime.now(timezone.utc).isoformat()
+            await db.cash_boxes.update_one({"id": data["payment_method"]}, {"$inc": {"balance": -data["amount"]}, "$set": {"updated_at": now}})
+            await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": data["payment_method"], "type": "expense", "amount": data["amount"], "description": f"مصروف - {data['title']}", "reference_type": "expense", "reference_id": data["id"], "created_at": now, "created_by": user.get("name", "")})
         data.pop("_id", None)
         return data
 
     @router.put("/{expense_id}")
     async def update_expense(expense_id: str, expense: ExpenseUpdate, user: dict = Depends(require_permission("expenses.edit"))):
-        if not await db.expenses.find_one({"id": expense_id}):
+        old = await db.expenses.find_one({"id": expense_id})
+        if not old:
             raise HTTPException(status_code=404, detail="التكلفة غير موجودة")
         update_data = {k: v for k, v in expense.model_dump().items() if v is not None}
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # p66: keep cash boxes in sync when amount/method changes (only for expenses that deducted)
+        old_method = old.get("payment_method")
+        old_amount = float(old.get("amount", 0))
+        new_method = update_data.get("payment_method", old_method)
+        new_amount = float(update_data.get("amount", old_amount))
+        if old_method and (update_data.get("amount") is not None or update_data.get("payment_method") is not None):
+            now = update_data["updated_at"]
+            if old_method != "personal" and old_amount:
+                await db.cash_boxes.update_one({"id": old_method}, {"$inc": {"balance": old_amount}, "$set": {"updated_at": now}})
+                await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": old_method, "type": "income", "amount": old_amount, "description": f"تعديل مصروف (عكس) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
+            if new_method and new_method != "personal" and new_amount:
+                await db.cash_boxes.update_one({"id": new_method}, {"$inc": {"balance": -new_amount}, "$set": {"updated_at": now}})
+                await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": new_method, "type": "expense", "amount": new_amount, "description": f"مصروف (معدّل) - {update_data.get('title', old.get('title', ''))}", "reference_type": "expense", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
         await db.expenses.update_one({"id": expense_id}, {"$set": update_data})
         return await db.expenses.find_one({"id": expense_id}, {"_id": 0})
 
     @router.delete("/{expense_id}")
     async def delete_expense(expense_id: str, user: dict = Depends(require_permission("expenses.delete"))):
-        result = await db.expenses.delete_one({"id": expense_id})
-        if result.deleted_count == 0:
+        old = await db.expenses.find_one({"id": expense_id})
+        if not old:
             raise HTTPException(status_code=404, detail="التكلفة غير موجودة")
+        result = await db.expenses.delete_one({"id": expense_id})
+        # p66: refund the box only if this expense actually deducted (has payment_method)
+        method = old.get("payment_method")
+        if method and method != "personal" and old.get("amount"):
+            now = datetime.now(timezone.utc).isoformat()
+            await db.cash_boxes.update_one({"id": method}, {"$inc": {"balance": float(old["amount"])}, "$set": {"updated_at": now}})
+            await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": method, "type": "income", "amount": float(old["amount"]), "description": f"حذف مصروف (استرجاع) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
         return {"message": "تم حذف التكلفة بنجاح"}
 
     @router.post("/{expense_id}/mark-paid")

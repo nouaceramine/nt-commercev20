@@ -80,7 +80,7 @@ def create_ai_routes(db, get_current_user) -> dict:
     async def _execute_ai_query(query_type: str):
         """Run the named query against real tenant data. Returns dict or None."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        month_start = today[:7] + "-01"
+        month_start = today[:7]  # p65 fix: regex needs the YYYY-MM prefix, not first-day date
         try:
             if query_type == "get_revenue":
                 m_total, m_count = await _sum_coll("sales", "total", {"created_at": {"$regex": f"^{month_start}"}})

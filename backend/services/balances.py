@@ -51,7 +51,7 @@ async def adjust_supplier_mirror(db, supplier_id: str, *,
         await db.suppliers.update_one({"id": supplier_id}, {"$inc": inc})
 
 
-async def allocate_customer_payment(db, customer_id: str, amount: float):
+async def allocate_customer_payment(db, customer_id: str, amount: float, method: str = None):
     """p64: FIFO-allocate a customer debt payment across open sales.
 
     Sales may store open debt in `remaining` (current) or `debt_amount` (legacy);
@@ -72,16 +72,20 @@ async def allocate_customer_payment(db, customer_id: str, amount: float):
         applied = min(remaining_payment, open_debt)
         new_debt = round(open_debt - applied, 2)
         new_paid = float(sale.get("paid_amount", 0)) + applied
-        await db.sales.update_one({"id": sale["id"]}, {"$set": {
+        _upd = {"$set": {
             "remaining": new_debt, "debt_amount": new_debt, "paid_amount": new_paid,
             "payment_status": "paid" if new_debt <= 0.01 else "partial",
-        }})
+        }}
+        if method:  # p67: track which box this payment used
+            from datetime import datetime as _dt, timezone as _tz
+            _upd["$push"] = {"payments": {"amount": applied, "method": method, "at": _dt.now(_tz.utc).isoformat()}}
+        await db.sales.update_one({"id": sale["id"]}, _upd)
         remaining_payment -= applied
         sales_updated.append({"sale_id": sale["id"], "payment_applied": applied, "remaining_debt": new_debt})
     return round(float(amount) - remaining_payment, 2), sales_updated
 
 
-async def allocate_supplier_payment(db, supplier_id: str, amount: float):
+async def allocate_supplier_payment(db, supplier_id: str, amount: float, method: str = None):
     """p64: FIFO-allocate a supplier debt payment across open purchases (`remaining`).
 
     Oldest purchase first. Returns (applied_amount, purchases_updated).
@@ -99,11 +103,14 @@ async def allocate_supplier_payment(db, supplier_id: str, amount: float):
         new_debt = round(open_debt - applied, 2)
         new_paid = float(purchase.get("paid_amount", 0)) + applied
         from datetime import datetime, timezone
-        await db.purchases.update_one({"id": purchase["id"]}, {"$set": {
+        _upd = {"$set": {
             "paid_amount": new_paid, "remaining": new_debt,
             "status": "paid" if new_debt <= 0 else "partial",
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        }})
+        }}
+        if method:  # p67: track which box this payment used
+            _upd["$push"] = {"payments": {"amount": applied, "method": method, "at": datetime.now(timezone.utc).isoformat()}}
+        await db.purchases.update_one({"id": purchase["id"]}, _upd)
         remaining_payment -= applied
         purchases_updated.append({"purchase_id": purchase["id"], "paid": applied, "payment_applied": applied, "remaining_debt": new_debt})
     return round(float(amount) - remaining_payment, 2), purchases_updated

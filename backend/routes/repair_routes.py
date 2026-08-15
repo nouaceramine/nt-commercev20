@@ -310,14 +310,17 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
         available = part.get("quantity", part.get("stock", 0)) or 0
         if available < qty:
             raise HTTPException(status_code=400, detail="الكمية غير كافية")
+        # p66: unified products use retail_price/name_en — fall back so price is never lost
+        _unit_price = part.get("selling_price") or part.get("retail_price") or part.get("sell_price") or 0
+        _part_name = part.get("name_ar") or part.get("name_en") or part.get("name") or ""
         usage = {
             "id": str(uuid.uuid4()),
             "repair_ticket_id": ticket_id,
             "part_id": part_id,
-            "part_name": part.get("name_ar", ""),
+            "part_name": _part_name,
             "quantity": qty,
-            "unit_price": part.get("selling_price", 0),
-            "total_price": part.get("selling_price", 0) * qty,
+            "unit_price": _unit_price,
+            "total_price": _unit_price * qty,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.part_usage.insert_one(usage)
