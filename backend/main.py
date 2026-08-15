@@ -502,6 +502,14 @@ async def startup_event():
     except Exception as e:
         logger.warning("Robots start: %s", e)
 
+    # p80: Yalidine periodic auto-sync (every 2h, all tenants with active integration)
+    try:
+        from config.database import get_tenant_db as _yal_get_tenant_db, main_db as _yal_main_db
+        from services.ecom.yalidine_scheduler import start_yalidine_scheduler
+        start_yalidine_scheduler(_yal_main_db, _yal_get_tenant_db)
+    except Exception as e:
+        logger.warning("Yalidine scheduler start: %s", e)
+
     # p54: AutoHeal self-healing scanner (scheduled every 5 min)
     try:
         from services.autoheal_service import start_autoheal_scheduler
