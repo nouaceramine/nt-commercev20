@@ -79,6 +79,16 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
     @router.put("/store/settings")
     async def update_store_settings(settings: StoreSettings, admin: dict = Depends(get_tenant_admin)):
         tenant_id = admin.get("tenant_id") or "platform"
+        # p72: store NAME must be unique across tenants too (case-insensitive)
+        if settings.store_name and settings.store_name.strip():
+            import re as _re
+            _name = settings.store_name.strip()
+            _clash = await main_db.store_slugs.find_one({
+                "store_name": {"$regex": f"^{_re.escape(_name)}$", "$options": "i"},
+                "tenant_id": {"$ne": tenant_id},
+            })
+            if _clash:
+                raise HTTPException(status_code=400, detail=f"اسم المتجر '{_name}' مستخدم من متجر آخر — اختر اسماً مختلفاً")
         await db.store_settings.update_one({}, {"$set": settings.model_dump()}, upsert=True)
         if settings.store_slug:
             # Ownership check must look up the SLUG, not the tenant —

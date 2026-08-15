@@ -17,7 +17,7 @@ export default function ProductDetailPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [customerInfo, setCustomerInfo] = useState({
-    name: '', phone: '', wilaya: '', commune: '', address: '', notes: ''
+    name: '', phone: '', wilaya: '', commune: '', address: '', notes: '', delivery_type: 'home'
   });
 
   const [couponCode, setCouponCode] = useState('');
@@ -28,6 +28,7 @@ export default function ProductDetailPage() {
   const [loyaltyPoints, setLoyaltyPoints] = useState(null);
 
   const [wilayasData, setWilayasData] = useState([]);
+  const [deliveryRates, setDeliveryRates] = useState([]);  // p72
   const [availableCommunes, setAvailableCommunes] = useState([]);
 
   useEffect(() => {
@@ -60,6 +61,9 @@ export default function ProductDetailPage() {
       setProduct(response.data.product);
       setRelatedProducts(response.data.related_products || []);
       setStore(response.data.settings);
+      apiClient.get(`/shop/${slug}/delivery-rates`)
+        .then(r => setDeliveryRates(Array.isArray(r.data) ? r.data : ((r.data && r.data.rates) || [])))
+        .catch(() => {});
       const p = response.data.product;
       setMainImage(p.image_url || (p.images && p.images[0]) || '');
       window.scrollTo(0, 0);
@@ -81,7 +85,9 @@ export default function ProductDetailPage() {
   const price = product ? (product.retail_price || product.selling_price || 0) : 0;
   const oldPrice = product && product.purchase_price > 0 ? Math.round(price * 1.2) : 0;
   const savePercent = oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
-  const deliveryFee = store?.delivery_enabled === false ? 0 : (store?.delivery_fee || 0);
+  const selectedRate = deliveryRates.find(r => String(r.id || r.wilaya_id || '') === String(customerInfo.wilaya).padStart(2, '0'));
+  const rateFee = selectedRate ? (customerInfo.delivery_type === 'office' ? selectedRate.office_price : selectedRate.home_price) : null;
+  const deliveryFee = store?.delivery_enabled === false ? 0 : (rateFee != null ? rateFee : (store?.delivery_fee || 0));
   const freeDelivery = store?.free_delivery_threshold > 0 && (price * quantity) >= store.free_delivery_threshold;
   const effectiveDelivery = freeDelivery ? 0 : deliveryFee;
   const subtotal = price * quantity;
@@ -135,7 +141,8 @@ export default function ProductDetailPage() {
       const orderData = {
         customer_name: customerInfo.name,
         customer_phone: customerInfo.phone,
-        delivery_address: customerInfo.address,
+        delivery_type: customerInfo.delivery_type,
+        delivery_address: customerInfo.delivery_type === 'office' ? '' : customerInfo.address,
         delivery_city: customerInfo.commune,
         delivery_wilaya: customerInfo.wilaya,
         delivery_fee: effectiveDelivery,
@@ -309,12 +316,27 @@ export default function ProductDetailPage() {
                 </select>
               </div>
 
-              <input
-                required type="text" placeholder="العنوان التفصيلي *"
-                value={customerInfo.address}
-                onChange={e => setCustomerInfo({ ...customerInfo, address: e.target.value })}
-                style={{ ...inputStyle, marginBottom: '10px' }} data-testid="cod-address"
-              />
+              {selectedRate && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }} data-testid="pdp-delivery-type">
+                  <label style={{ ...inputStyle, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', border: customerInfo.delivery_type === 'home' ? '2px solid #f7941d' : '1px solid #d1d5db' }}>
+                    <input type="radio" name="pdp_dtype" checked={customerInfo.delivery_type === 'home'} onChange={() => setCustomerInfo({ ...customerInfo, delivery_type: 'home' })} data-testid="pdp-type-home" />
+                    🏠 للمنزل — {Number(selectedRate.home_price).toLocaleString()} دج
+                  </label>
+                  <label style={{ ...inputStyle, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', border: customerInfo.delivery_type === 'office' ? '2px solid #f7941d' : '1px solid #d1d5db' }}>
+                    <input type="radio" name="pdp_dtype" checked={customerInfo.delivery_type === 'office'} onChange={() => setCustomerInfo({ ...customerInfo, delivery_type: 'office' })} data-testid="pdp-type-office" />
+                    🏢 مكتب التوصيل — {Number(selectedRate.office_price).toLocaleString()} دج
+                  </label>
+                </div>
+              )}
+
+              {customerInfo.delivery_type !== 'office' && (
+                <input
+                  required type="text" placeholder="العنوان التفصيلي *"
+                  value={customerInfo.address}
+                  onChange={e => setCustomerInfo({ ...customerInfo, address: e.target.value })}
+                  style={{ ...inputStyle, marginBottom: '10px' }} data-testid="cod-address"
+                />
+              )}
 
               {/* الكوبون */}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
