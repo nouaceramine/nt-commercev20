@@ -58,6 +58,22 @@ export default function ProductDetailPage() {
     fetchProduct();
   }, [slug, productId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // p83: abandoned-cart capture for the single-product page
+  useEffect(() => {
+    const phone = (customerInfo.phone || '').replace(/[^0-9+]/g, '');
+    if (phone.length < 9 || !product) return;
+    const key = `lead_${slug}_${productId}_${phone}`;
+    if (sessionStorage.getItem(key)) return;
+    const t = setTimeout(() => {
+      apiClient.post(`/shop/${slug}/cart-lead`, {
+        phone, name: customerInfo.name || '',
+        items: [{ name: product.name_ar || product.name, quantity: quantity, price: price }],
+        total: price * quantity,
+      }).then(() => sessionStorage.setItem(key, '1')).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [customerInfo.phone, customerInfo.name, quantity, product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const fetchProduct = async () => {
     setLoading(true);
     try {

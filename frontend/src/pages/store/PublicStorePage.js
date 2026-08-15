@@ -1053,6 +1053,22 @@ export default function PublicStorePage() {
     localStorage.setItem(`cart_${slug}`, JSON.stringify(cart));
   }, [cart, slug]);
 
+  // p83: abandoned-cart capture — debounced phone watcher during checkout
+  useEffect(() => {
+    const phone = (customerInfo.phone || '').replace(/[^0-9+]/g, '');
+    if (phone.length < 9 || cart.length === 0) return;
+    const key = `lead_${slug}_${phone}_${cartTotal}`;
+    if (sessionStorage.getItem(key)) return;
+    const t = setTimeout(() => {
+      apiClient.post(`/shop/${slug}/cart-lead`, {
+        phone, name: customerInfo.name || '',
+        items: cart.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
+        total: grandTotal || cartTotal,
+      }).then(() => sessionStorage.setItem(key, '1')).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [customerInfo.phone, customerInfo.name, cart]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const fetchStore = async () => {
     setLoading(true);
     try {

@@ -271,6 +271,14 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         return [{"wilaya_id": r.get("id") or r.get("wilaya_id"), "wilaya_name": r.get("wilaya_name", ""),
                  "home_price": r.get("home_price", 0), "office_price": r.get("office_price", 0)} for r in rates]
 
+    @router.get("/store/cart-leads")
+    async def get_cart_leads(admin: dict = Depends(get_tenant_admin)):
+        """p83: السلات المهجورة — هواتف بدأت الطلب ولم تكمله."""
+        rows = await db.store_cart_leads.find(
+            {"converted": False}, {"_id": 0}
+        ).sort("last_seen", -1).limit(100).to_list(100)
+        return {"leads": rows, "count": len(rows)}
+
     @router.get("/store/orders")
     async def get_store_orders(status: Optional[str] = None, admin: dict = Depends(get_tenant_admin)):
         query = {}
@@ -460,6 +468,36 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         families = await tenant_db_inst.product_families.find({}, {"_id": 0}).to_list(100)
         return {"success": True, "families": families}
 
+    @router.post("/shop/{store_slug}/cart-lead")
+    async def capture_cart_lead(store_slug: str, data: dict):
+        """p83: السلة المهجورة — التقاط هاتف من بدأ الطلب ولم يكمله."""
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Store not configured")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+
+        phone = re.sub(r"[^0-9+]", "", str(data.get("phone") or ""))
+        if len(phone) < 8 or len(phone) > 20:
+            raise HTTPException(status_code=400, detail="invalid phone")
+        name = str(data.get("name") or "")[:80]
+        items_in = data.get("items") or []
+        items = [{"name": str(i.get("name", ""))[:80],
+                  "quantity": max(1, min(int(i.get("quantity", 1) or 1), 99)),
+                  "price": max(0.0, float(i.get("price", 0) or 0))}
+                 for i in items_in[:10] if isinstance(i, dict)]
+        total = max(0.0, float(data.get("total", 0) or 0))
+        now = datetime.now(timezone.utc).isoformat()
+        await tenant_db_inst.store_cart_leads.update_one(
+            {"phone": phone, "converted": False},
+            {"$set": {"name": name, "items": items, "total": total, "last_seen": now},
+             "$setOnInsert": {"id": str(uuid.uuid4()), "first_seen": now, "store_slug": store_slug}},
+            upsert=True,
+        )
+        return {"ok": True}
+
     @router.post("/shop/{store_slug}/order")
     async def create_public_order(store_slug: str, order: StoreOrder):
         slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
@@ -547,6 +585,16 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         order_data["utm"] = _sanitize_utm(getattr(order, "utm", None))
         order_data["utm_source"] = order_data["utm"].get("utm_source", "")
         await tenant_db_inst.store_orders.insert_one(order_data)
+        # p83: close any open abandoned-cart lead for this phone
+        try:
+            _ph = re.sub(r"[^0-9+]", "", order.customer_phone or "")
+            if _ph:
+                await tenant_db_inst.store_cart_leads.update_many(
+                    {"phone": _ph, "converted": False},
+                    {"$set": {"converted": True, "order_number": order_number, "converted_at": datetime.now(timezone.utc).isoformat()}},
+                )
+        except Exception as _e:  # noqa: BLE001
+            logger.warning("cart-lead conversion mark failed: %s", _e)
         # مزامنة فورية إلى صندوق الطلبات الموحَّد (قناة webstore)
         # inventory_deducted=True: المخزون حُسم أعلاه لحظة الإنشاء — يمنع الحسم المزدوج عند التأكيد من الصندوق
         try:

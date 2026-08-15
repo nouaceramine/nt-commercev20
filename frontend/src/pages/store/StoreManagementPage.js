@@ -93,6 +93,7 @@ export default function StoreManagementPage() {
   const [products, setProducts] = useState([]);
   const [storeProducts, setStoreProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [cartLeads, setCartLeads] = useState([]);  // p83
   const [saving, setSaving] = useState(false);
   const [showProductDialog, setShowProductDialog] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
@@ -109,9 +110,17 @@ export default function StoreManagementPage() {
 
   // تحديث تلقائي للطلبات كل 20 ثانية (صامت — بدون مؤشر تحميل)
   useEffect(() => {
-    const tick = setInterval(() => { fetchOrdersOnly(); }, 20000);
+    const tick = setInterval(() => { fetchOrdersOnly(); fetchCartLeads(); }, 20000);
+    fetchCartLeads();
     return () => clearInterval(tick);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchCartLeads = async () => {  // p83
+    try {
+      const r = await apiClient.get('/store/cart-leads');
+      setCartLeads(r.data?.leads || []);
+    } catch (e) { /* optional */ }
+  };
 
   const fetchOrdersOnly = async () => {
     try {
@@ -672,6 +681,34 @@ export default function StoreManagementPage() {
 
           {/* Orders Tab */}
           <TabsContent value="orders" className="space-y-6">
+      {/* p83: abandoned carts */}
+      {cartLeads.length > 0 && (
+        <Card className="mb-4" data-testid="abandoned-carts-card">
+          <CardHeader>
+            <CardTitle>{language === 'ar' ? `🛒 سلات مهجورة (${cartLeads.length}) — بدأوا الطلب ولم يكملوه` : 'Paniers abandonnés'}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {cartLeads.slice(0, 10).map(l => (
+                <div key={l.id} className="flex items-center justify-between border rounded-lg p-2 text-sm" data-testid="cart-lead-row">
+                  <div>
+                    <a href={`tel:${l.phone}`} className="font-semibold text-emerald-700 underline" dir="ltr">{l.phone}</a>
+                    {l.name && <span className="mr-2 text-muted-foreground">{l.name}</span>}
+                    <div className="text-xs text-muted-foreground">
+                      {(l.items || []).map(i => `${i.name}×${i.quantity}`).join('، ')}
+                    </div>
+                  </div>
+                  <div className="text-left">
+                    <div className="font-semibold">{Number(l.total || 0).toLocaleString()} {language === 'ar' ? 'دج' : 'DZD'}</div>
+                    <div className="text-xs text-muted-foreground">{l.last_seen ? new Date(l.last_seen).toLocaleString('ar-DZ') : ''}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
