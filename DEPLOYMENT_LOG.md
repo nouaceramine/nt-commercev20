@@ -1783,3 +1783,22 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 
 ### نشر
 - main.bc5a6374.js — cp -r فقط — backup: /opt/ntcommerce/backups/p106_smart_pricing/
+
+---
+
+## p107 — استرجاع السلات المتروكة (2026-08-16)
+
+### قبل
+- نظام p83 يلتقط هواتف من بدأوا الطلب لكن: (1) السلات الملتقطة لا تحمل حقل converted فلا تظهر إطلاقاً في القائمة ولا تُلغى تكرارها — خلل كامن؛ (2) لا يوجد أي إجراء استرجاع.
+
+### بعد
+- **إصلاح**: capture_cart_lead يضبط converted:false + reminder_sent:false عند الإدراج — السلات تظهر الآن وتُزال تكراراتها.
+- **Backend**: GET /store/cart-leads يعيد أيضاً recovered (عدد السلات المسترجعة) · StoreSettings يضيف cart_recovery_enabled (افتراضي true) + cart_recovery_delay_hours (3).
+- **سكربت cron جديد** scripts/cart_recovery.py (كل ساعة :25): لكل مستأجر فعّل الاسترجاع ولديه تكامل واتساب نشط → تذكير تلقائي بالسلات الأقدم من المهلة وغير المُذكَّرة، مع رابط المتجر، ثم reminder_sent=true.
+- **Frontend** (StoreManagementPage): زر «💬 ذكّره واتساب» (wa.me جاهز برسالة معبأة — يعمل بدون API) + شارة «✓ ذُكّر تلقائياً» + عداد «استُرجعت X» في العنوان.
+
+### اختبار
+- التقاط سلة ×2 بنفس الهاتف → وثيقة واحدة (dedupe ✓) وتظهر في القائمة (الإصلاح ✓) · سكربت cron يعمل (tenants=2، تخطّى بلا واتساب) ✓ · تنبيه: ظهرت سلة حقيقية لزائر فعلي كانت مخفية قبل الإصلاح ✓ · بيانات الاختبار نُظّفت ✓
+
+### نشر
+- main.7748d550.js — cp -r فقط — backup: /opt/ntcommerce/backups/p107_cart_recovery/

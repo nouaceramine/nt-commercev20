@@ -94,6 +94,7 @@ export default function StoreManagementPage() {
   const [storeProducts, setStoreProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cartLeads, setCartLeads] = useState([]);  // p83
+  const [cartRecovered, setCartRecovered] = useState(0);  // p107
   const [tgTesting, setTgTesting] = useState(false);  // p84
   const [saving, setSaving] = useState(false);
   const [showProductDialog, setShowProductDialog] = useState(false);
@@ -133,6 +134,7 @@ export default function StoreManagementPage() {
     try {
       const r = await apiClient.get('/store/cart-leads');
       setCartLeads(r.data?.leads || []);
+      setCartRecovered(r.data?.recovered || 0);  // p107
     } catch (e) { /* optional */ }
   };
 
@@ -862,7 +864,7 @@ export default function StoreManagementPage() {
       {cartLeads.length > 0 && (
         <Card className="mb-4" data-testid="abandoned-carts-card">
           <CardHeader>
-            <CardTitle>{language === 'ar' ? `🛒 سلات مهجورة (${cartLeads.length}) — بدأوا الطلب ولم يكملوه` : 'Paniers abandonnés'}</CardTitle>
+            <CardTitle>{language === 'ar' ? `🛒 سلات مهجورة (${cartLeads.length}) — بدأوا الطلب ولم يكملوه${cartRecovered > 0 ? ` · ✅ استُرجعت ${cartRecovered}` : ''}` : 'Paniers abandonnés'}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -875,9 +877,16 @@ export default function StoreManagementPage() {
                       {(l.items || []).map(i => `${i.name}×${i.quantity}`).join('، ')}
                     </div>
                   </div>
-                  <div className="text-left">
+                  <div className="text-left space-y-1">
                     <div className="font-semibold">{Number(l.total || 0).toLocaleString()} {language === 'ar' ? 'دج' : 'DZD'}</div>
                     <div className="text-xs text-muted-foreground">{l.last_seen ? new Date(l.last_seen).toLocaleString('ar-DZ') : ''}</div>
+                    {l.reminder_sent && <div className="text-xs text-emerald-700" data-testid="cart-reminded-badge">{language === 'ar' ? '✓ ذُكّر تلقائياً' : 'Relancé'}</div>}
+                    <a
+                      href={`https://wa.me/${String(l.phone || '').replace(/\D/g, '').replace(/^0+/, '213')}?text=${encodeURIComponent(`مرحباً ${l.name || ''} 👋 لاحظنا اهتمامك بـ ${(l.items || []).map(i => i.name).join('، ')} — سلتك بقيمة ${Number(l.total || 0).toLocaleString()} دج بانتظارك. هل تريد إتمام طلبك؟`)}`}
+                      target="_blank" rel="noreferrer"
+                    >
+                      <Button size="sm" variant="outline" className="h-7 text-xs mt-1" data-testid="cart-wa-btn">{language === 'ar' ? '💬 ذكّره واتساب' : 'WhatsApp'}</Button>
+                    </a>
                   </div>
                 </div>
               ))}

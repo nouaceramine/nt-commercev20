@@ -135,6 +135,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         telegram_daily_enabled: bool = False  # p84
         telegram_notify_new_order: bool = False  # p91: instant new-order alert
         wa_confirm_enabled: bool = False  # p101: WhatsApp auto-confirmation before shipping
+        cart_recovery_enabled: bool = True    # p107: auto WhatsApp reminder for abandoned carts (needs active WhatsApp integration)
+        cart_recovery_delay_hours: int = 3    # p107: send reminder after this many hours
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -353,7 +355,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         rows = await db.store_cart_leads.find(
             {"converted": False}, {"_id": 0}
         ).sort("last_seen", -1).limit(100).to_list(100)
-        return {"leads": rows, "count": len(rows)}
+        recovered = await db.store_cart_leads.count_documents({"converted": True})  # p107
+        return {"leads": rows, "count": len(rows), "recovered": recovered}
 
     @router.get("/store/orders")
     async def get_store_orders(status: Optional[str] = None, admin: dict = Depends(get_tenant_admin)):
@@ -569,7 +572,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         await tenant_db_inst.store_cart_leads.update_one(
             {"phone": phone, "converted": False},
             {"$set": {"name": name, "items": items, "total": total, "last_seen": now},
-             "$setOnInsert": {"id": str(uuid.uuid4()), "first_seen": now, "store_slug": store_slug}},
+             "$setOnInsert": {"id": str(uuid.uuid4()), "first_seen": now, "store_slug": store_slug,
+                              "converted": False, "reminder_sent": False}},  # p107: fields required for listing + recovery
             upsert=True,
         )
         return {"ok": True}
