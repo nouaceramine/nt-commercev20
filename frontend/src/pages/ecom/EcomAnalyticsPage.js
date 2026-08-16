@@ -39,11 +39,12 @@ export default function EcomAnalyticsPage() {
   const [wilayaRisk, setWilayaRisk] = useState([]);  // p92
   const [campaignRoas, setCampaignRoas] = useState([]);  // p102
   const [productPnl, setProductPnl] = useState([]);  // p105
+  const [pricing, setPricing] = useState([]);  // p106
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rev, fun, top, dig, pro, wr, ro, pnl] = await Promise.all([
+      const [rev, fun, top, dig, pro, wr, ro, pnl, pr] = await Promise.all([
         apiClient.get(`/ecom/analytics/revenue?days=${days}`),
         apiClient.get(`/ecom/analytics/funnel?days=${days}`),
         apiClient.get(`/ecom/analytics/top-products?days=${days}&limit=10`),
@@ -52,12 +53,14 @@ export default function EcomAnalyticsPage() {
         apiClient.get(`/ecom/analytics/wilaya-risk?days=${days}`).catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/campaign-roas?days=${days}`).catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/product-pnl?days=${days}`).catch(() => ({ data: null })),
+        apiClient.get(`/ecom/analytics/pricing-suggestions?days=${days}`).catch(() => ({ data: null })),
       ]);
       setDigital(dig.data);
       setProfit(pro.data);
       setWilayaRisk(wr?.data?.wilayas || []);
       setCampaignRoas(ro?.data?.rows || []);
       setProductPnl(pnl?.data?.rows || []);
+      setPricing(pr?.data?.rows || []);
       setRevenue(rev.data);
       setFunnel(fun.data);
       setTopProducts(top.data?.items || []);
@@ -383,6 +386,51 @@ export default function EcomAnalyticsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   الإيراد من الطلبات المُسلَّمة فعلاً فقط. التكلفة = سعر شراء المنتج × الكمية. الإنفاق الإعلاني يُوزَّع على المنتجات بنسبة إيراد كل منتج. المنتج بالهامش السالب يأكل أرباح الباقين — أوقف إعلانه أو ارفع سعره.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* p106: smart pricing suggestions */}
+          {pricing.length > 0 && (
+            <Card data-testid="pricing-card">
+              <CardHeader>
+                <CardTitle>🏷️ التسعير الذكي — السعر المقترح بناءً على الكلفة الحقيقية للمُسلَّم</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border overflow-x-auto">
+                  <table className="w-full text-sm min-w-[560px]">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="p-2 text-right">المنتج</th>
+                        <th className="p-2 text-center">السعر الحالي</th>
+                        <th className="p-2 text-center">معدل التسليم</th>
+                        <th className="p-2 text-center">الكلفة الحقيقية</th>
+                        <th className="p-2 text-center">السعر المقترح</th>
+                        <th className="p-2 text-center">القرار</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pricing.map(r => (
+                        <tr key={r.product_id} className="border-t" data-testid={`pricing-row-${r.product_id}`}>
+                          <td className="p-2 font-medium">{r.product}</td>
+                          <td className="p-2 text-center">{Number(r.current_price).toLocaleString()} دج</td>
+                          <td className={`p-2 text-center ${r.delivery_rate < 70 ? 'text-red-700 font-semibold' : ''}`}>{r.delivery_rate}%</td>
+                          <td className="p-2 text-center text-muted-foreground">{Number(r.real_cost).toLocaleString()} دج</td>
+                          <td className="p-2 text-center font-bold text-indigo-700" data-testid={`pricing-suggested-${r.product_id}`}>{Number(r.suggested_price).toLocaleString()} دج</td>
+                          <td className="p-2 text-center">
+                            {r.verdict === 'losing' && <Badge className="bg-red-100 text-red-700">🔴 خاسر — ارفع فوراً</Badge>}
+                            {r.verdict === 'raise' && <Badge className="bg-amber-100 text-amber-700">🟡 ارفع نحو المقترح</Badge>}
+                            {r.verdict === 'ok' && <Badge className="bg-emerald-100 text-emerald-700">🟢 سليم</Badge>}
+                            {r.verdict === 'no_price' && <Badge variant="outline">لا سعر مسجّل</Badge>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  الكلفة الحقيقية = سعر الشراء + (متوسط الشحن ÷ معدل التسليم) + حصة الإعلان لكل قطعة — كل قطعة مُسلَّمة تحمل شحن المرتجعات. المقترح = الكلفة × 1.30 مقرَّباً لأقرب 50 دج. يحتاج ≥3 طلبات مشحونة للمنتج.
                 </p>
               </CardContent>
             </Card>

@@ -544,3 +544,106 @@ async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(
         })
     out.sort(key=lambda r: r["net"], reverse=True)
     return {"days": days, "rows": out, "ad_spend_total": round(ad_spend, 2)}
+
+
+# ============ p106: التسعير الذكي المقترح ============
+
+def _round50(x: float) -> int:
+    return int(round(x / 50.0) * 50)
+
+
+@router.get("/ecom/analytics/pricing-suggestions")
+async def pricing_suggestions(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
+    """p106: سعر مقترح لكل منتج بناءً على الكلفة الحقيقية للقطعة المُسلَّمة:
+    سعر الشراء + (متوسط الشحن ÷ معدل التسليم)  ← كل قطعة مُسلَّمة تحمل شحن المرتجعات
+    + حصة الإعلان لكل قطعة. السعر المقترح = الكلفة الحقيقية × 1.30 (هامش 30%) مقرَّباً لأقرب 50."""
+    await require_ecom_feature(user)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    orders = await db.ecom_orders.find(
+        {"created_at": {"$gte": since},
+         "status": {"$in": ["delivered", "refunded", "returned"]}},
+        {"_id": 0, "status": 1, "shipping_fee": 1, "items": 1},
+    ).to_list(20000)
+
+    prod_cost, prod_name = {}, {}
+    async for p in db.products.find({}, {"_id": 0, "id": 1, "name": 1, "purchase_price": 1}):
+        prod_cost[p.get("id")] = float(p.get("purchase_price") or 0)
+        prod_name[p.get("id")] = p.get("name") or ""
+
+    stats: dict = {}
+
+    def _s(key: str, name: str) -> dict:
+        return stats.setdefault(key, {"product": name, "delivered_qty": 0, "outcomes": 0,
+                                      "returned": 0, "ship_sum": 0.0, "rev": 0.0, "price_sum": 0.0})
+
+    def _item_total(i: dict) -> float:
+        t = float(i.get("total") or 0)
+        return t if t > 0 else float(i.get("price") or 0) * float(i.get("qty") or 1)
+
+    for o in orders:
+        status = o.get("status")
+        ship_fee = float(o.get("shipping_fee") or 0)
+        items = o.get("items") or []
+        if not items:
+            continue
+        items_total = sum(_item_total(i) for i in items) or 1.0
+        for i in items:
+            pid = i.get("product_id")
+            if not pid:
+                continue
+            qty = float(i.get("qty") or 1)
+            s = _s(pid, i.get("name") or prod_name.get(pid) or "منتج")
+            share = _item_total(i) / items_total
+            s["outcomes"] += 1
+            s["ship_sum"] += ship_fee * share
+            if status == "delivered":
+                s["delivered_qty"] += qty
+                s["rev"] += _item_total(i)
+                s["price_sum"] += float(i.get("price") or 0) * qty
+            else:
+                s["returned"] += 1
+
+    expenses = await db.expenses.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "category": 1, "title": 1, "amount": 1},
+    ).to_list(5000)
+    ad_spend = 0.0
+    for e in expenses:
+        blob = f"{e.get('category') or ''} {e.get('title') or ''}".lower()
+        if any(k in blob for k in AD_CATEGORY_KEYS):
+            ad_spend += float(e.get("amount") or 0)
+
+    total_rev = sum(s["rev"] for s in stats.values())
+    out = []
+    for pid, s in stats.items():
+        if s["outcomes"] < 3 or s["delivered_qty"] == 0:
+            continue  # لا بيانات كافية
+        delivery_rate = 1.0 - (s["returned"] / s["outcomes"])
+        delivery_rate = max(delivery_rate, 0.05)
+        ship_avg = s["ship_sum"] / s["outcomes"]
+        logistics_per_unit = ship_avg / delivery_rate
+        ad_per_unit = (ad_spend * (s["rev"] / total_rev) / s["delivered_qty"]) if total_rev > 0 else 0.0
+        real_cost = prod_cost.get(pid, 0.0) + logistics_per_unit + ad_per_unit
+        current_price = s["price_sum"] / s["delivered_qty"] if s["delivered_qty"] else 0.0
+        suggested = _round50(real_cost * 1.30)
+        if current_price <= 0:
+            verdict = "no_price"
+        elif current_price < real_cost:
+            verdict = "losing"
+        elif current_price < suggested:
+            verdict = "raise"
+        else:
+            verdict = "ok"
+        out.append({
+            "product_id": pid,
+            "product": s["product"],
+            "current_price": round(current_price, 2),
+            "delivery_rate": round(delivery_rate * 100, 1),
+            "real_cost": round(real_cost, 2),
+            "suggested_price": suggested,
+            "verdict": verdict,
+        })
+    order = {"losing": 0, "raise": 1, "ok": 2, "no_price": 3}
+    out.sort(key=lambda r: (order.get(r["verdict"], 9), -r["real_cost"]))
+    return {"days": days, "rows": out}
