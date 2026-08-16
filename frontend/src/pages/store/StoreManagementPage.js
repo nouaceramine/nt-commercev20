@@ -576,12 +576,21 @@ export default function StoreManagementPage() {
                             />
                             إشعار فوري عند كل طلب جديد
                           </label>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={!!storeSettings.wa_confirm_enabled}
+                              onChange={(e) => setStoreSettings(prev => ({ ...prev, wa_confirm_enabled: e.target.checked }))}
+                              data-testid="wa-confirm-toggle"
+                            />
+                            تأكيد طلبات المتجر تلقائياً عبر واتساب قبل الشحن
+                          </label>
                           <Button type="button" size="sm" variant="outline" onClick={testTelegram} disabled={tgTesting} data-testid="tg-test-btn">
                             {tgTesting ? '...' : 'إرسال اختبار'}
                           </Button>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          أنشئ بوتاً من @BotFather، أرسل له أي رسالة، ثم احفظ التوكن والمعرف هنا واضغط حفظ — يصلك كل مساء: طلبات اليوم والمُسلَّم والمُرجع وصافي الربح.
+                          أنشئ بوتاً من @BotFather، أرسل له أي رسالة، ثم احفظ التوكن والمعرف هنا واضغط حفظ — يصلك كل مساء: طلبات اليوم والمُسلَّم والمُرجع وصافي الربح. تأكيد واتساب يتطلب تكامل واتساب مضبوطاً (مركز التجارة ← القنوات) — يصل الزبون رسالة «رد بـ 1 للتأكيد أو 2 للإلغاء» ويُحجز الطلب حتى يرد.
                         </p>
                       </div>
                     </div>

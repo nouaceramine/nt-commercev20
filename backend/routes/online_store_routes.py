@@ -134,6 +134,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         telegram_chat_id: str = ""         # p84: target chat
         telegram_daily_enabled: bool = False  # p84
         telegram_notify_new_order: bool = False  # p91: instant new-order alert
+        wa_confirm_enabled: bool = False  # p101: WhatsApp auto-confirmation before shipping
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -713,6 +714,29 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 "status_history": [{"status": "new", "at": now, "by": "webstore"}],
                 "created_at": now, "updated_at": now, "created_by": "webstore",
             }
+            # p101: WhatsApp auto-confirmation — hold the order until the customer replies
+            try:
+                if settings.get("wa_confirm_enabled"):
+                    _wa = await tenant_db_inst.ecom_integrations.find_one({"channel": "whatsapp", "is_active": True})
+                    _creds = (_wa or {}).get("credentials") or {}
+                    _phone = (ecom_doc.get("customer") or {}).get("phone", "")
+                    if _wa and _creds.get("phone_number_id") and _creds.get("access_token") and _phone:
+                        ecom_doc["status"] = "awaiting_confirmation"
+                        ecom_doc["status_history"] = [{"status": "awaiting_confirmation", "at": now, "by": "whatsapp-auto"}]
+                        _store = settings.get("store_name") or store_slug
+                        _cust = (ecom_doc.get("customer") or {}).get("name", "")
+                        _msg = (
+                            f"مرحباً {_cust} 👋\n"
+                            f"استلمنا طلبك {ecom_doc.get('order_code')} بقيمة {ecom_doc.get('total')} دج من متجر {_store}.\n"
+                            "✅ للتأكيد: ردّ بـ «1» أو «نعم»\n"
+                            "❌ للإلغاء: ردّ بـ «2» أو «لا»"
+                        )
+                        import asyncio as _a2
+                        from services.ecom.whatsapp_service import send_text_message as _wa_send
+                        _a2.create_task(_wa_send(_wa, _phone, _msg))
+            except Exception as _we:  # noqa: BLE001
+                logger.warning(f"p101 wa confirm hook failed: {_we}")
+
             # p100: cross-tenant reputation — attach trust badge (no auto-escalation for webstore)
             try:
                 from services.application.ecom_order_service import get_network_trust, reputation_on_create

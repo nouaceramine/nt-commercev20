@@ -181,6 +181,34 @@ async def whatsapp_webhook(tenant_id: str, integration_id: str, request: Request
     parsed = parse_incoming_message(payload)
     if not parsed:
         return {"ok": True, "skipped": "not_a_message"}
+
+    # p101: order confirmation replies — «1/نعم» confirms, «2/لا» cancels the latest awaiting order.
+    # The status change itself triggers the WhatsApp template reply via _maybe_notify_customer.
+    try:
+        from services.application.ecom_order_service import normalize_phone, change_order_status
+        phone_norm = normalize_phone(parsed.get("from_phone", ""))
+        txt = (parsed.get("text") or "").strip().lower()
+        confirm_words = {"1", "نعم", "اكد", "أكد", "اوكي", "أوكي", "ok", "okay", "yes", "oui", "تأكيد", "تم", "موافق"}
+        cancel_words = {"2", "لا", "الغاء", "إلغاء", "الغي", "ألغي", "non", "no", "annuler", "cancel"}
+        if phone_norm and txt in (confirm_words | cancel_words):
+            pendings = await db.ecom_orders.find(
+                {"status": "awaiting_confirmation"}, {"_id": 0}
+            ).sort("created_at", -1).to_list(100)
+            target = next(
+                (o for o in pendings
+                 if normalize_phone((o.get("customer") or {}).get("phone", "")) == phone_norm),
+                None,
+            )
+            if target:
+                sys_user = {"id": "whatsapp-auto", "name": "تأكيد واتساب التلقائي", "role": "system"}
+                if txt in confirm_words:
+                    await change_order_status(db, target["id"], "confirmed", "تأكيد الزبون عبر واتساب", sys_user)
+                    return {"ok": True, "order_confirmed": target.get("order_code")}
+                await change_order_status(db, target["id"], "cancelled", "إلغاء الزبون عبر واتساب", sys_user)
+                return {"ok": True, "order_cancelled": target.get("order_code")}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("p101 wa confirmation handling failed: %s", exc)
+
     await _upsert_lead(db, channel="whatsapp", integration_id=integration_id, parsed=parsed)
     return {"ok": True, "lead_created": True}
 
