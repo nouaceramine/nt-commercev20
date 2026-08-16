@@ -63,9 +63,12 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         product_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        dup_conditions = [{"name_en": p.name_en}]
-        if p.name_ar:
-            dup_conditions.append({"name_ar": p.name_ar})
+        import re as _re
+        def _ci_exact(v):
+            return {"$regex": f"^{_re.escape(v.strip())}$", "$options": "i"}
+        dup_conditions = [{"name_en": _ci_exact(p.name_en)}]
+        if p.name_ar and p.name_ar.strip():
+            dup_conditions.append({"name_ar": _ci_exact(p.name_ar)})
         existing = await db.products.find_one({"$or": dup_conditions})
         if existing:
             raise HTTPException(status_code=409, detail=f"منتج بنفس الاسم موجود مسبقاً: {existing.get('name_ar') or existing.get('name_en')}")
@@ -333,40 +336,44 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     # ── Generate Barcode ──
     @router.get("/generate-barcode")
-    async def generate_barcode(article_code: Optional[str] = None):
+    async def generate_barcode(article_code: Optional[str] = None, admin: dict = Depends(get_current_user)):
         import random
+
+        def _mk(num: int) -> str:
+            prefix = "213"
+            company = "0001"
+            product_num = str(num % 100000).zfill(5)
+            code = prefix + company + product_num
+            odd_sum = sum(int(code[i]) for i in range(0, 12, 2))
+            even_sum = sum(int(code[i]) for i in range(1, 12, 2))
+            check_digit = (10 - ((odd_sum + even_sum * 3) % 10)) % 10
+            return code + str(check_digit)
+
+        async def _is_free(bc: str) -> bool:
+            clash = await db.products.find_one({"$or": [{"barcode": bc}, {"additional_barcodes": bc}]})
+            return clash is None
+
         if article_code:
             try:
-                num = article_code.replace("AR", "").lstrip("0") or "1"
-                num = int(num)
+                num = int(article_code.replace("AR", "").lstrip("0") or "1") % 100000
             except (ValueError, AttributeError):
                 num = random.randint(1, 99999)
-            prefix = "213"
-            company = "0001"
-            product_num = str(num).zfill(5)
-            code = prefix + company + product_num
-            odd_sum = sum(int(code[i]) for i in range(0, 12, 2))
-            even_sum = sum(int(code[i]) for i in range(1, 12, 2))
-            check_digit = (10 - ((odd_sum + even_sum * 3) % 10)) % 10
-            return {"barcode": code + str(check_digit)}
+            # deterministic base, but NEVER return a barcode that already exists:
+            # increment until a free one is found
+            for _ in range(100000):
+                barcode = _mk(num)
+                if await _is_free(barcode):
+                    return {"barcode": barcode}
+                num = (num + 1) % 100000
 
         while True:
-            import random
-            prefix = "213"
-            company = "0001"
-            product_num = str(random.randint(10000, 99999))
-            code = prefix + company + product_num
-            odd_sum = sum(int(code[i]) for i in range(0, 12, 2))
-            even_sum = sum(int(code[i]) for i in range(1, 12, 2))
-            check_digit = (10 - ((odd_sum + even_sum * 3) % 10)) % 10
-            barcode = code + str(check_digit)
-            existing = await db.products.find_one({"barcode": barcode})
-            if not existing:
+            barcode = _mk(random.randint(10000, 99999))
+            if await _is_free(barcode):
                 return {"barcode": barcode}
 
     # ── Generate SKU ──
     @router.get("/generate-sku")
-    async def generate_sku(family_id: Optional[str] = None):
+    async def generate_sku(family_id: Optional[str] = None, admin: dict = Depends(get_current_user)):
         prefix = "SG"
         if family_id:
             family = await db.product_families.find_one({"id": family_id}, {"_id": 0, "name_en": 1})
@@ -377,7 +384,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     # ── Generate Article Code ──
     @router.get("/generate-article-code")
-    async def generate_article_code():
+    async def generate_article_code(admin: dict = Depends(get_current_user)):
         pipeline = [
             {"$match": {"article_code": {"$regex": "^AR\\d{4}$"}}},
             {"$project": {"num": {"$toInt": {"$substr": ["$article_code", 2, 4]}}}},

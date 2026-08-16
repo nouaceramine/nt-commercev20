@@ -676,8 +676,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     detail="لا يمكن إنشاء حساب بصلاحية سوبر أدمين - Creating super_admin accounts is not allowed"
                 )
 
-        # Check if email already exists
-        existing = await db.users.find_one({"email": user_data.email})
+        # Check if email already exists (case-insensitive, stored normalized)
+        norm_email = user_data.email.strip().lower()
+        existing = await db.users.find_one({"email": email_ci(norm_email)})
         if existing:
             raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
 
@@ -688,7 +689,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         new_user = {
             "id": str(uuid.uuid4()),
             "name": user_data.name,
-            "email": user_data.email,
+            "email": norm_email,
             "password": hash_password(user_data.password),
             "role": user_data.role,
             "tenant_id": admin.get("tenant_id"),

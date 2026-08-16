@@ -1894,3 +1894,32 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 
 ### نشر
 - main.30f07df8.js — cp -r فقط — backup: /opt/ntcommerce/backups/p112_ads_usd/
+
+## p113 — منع تكرار الإيميل/اسم المنتج + إصلاح توليد الباركود (2026-08-16)
+
+**الطلب**: منع تكرار الإيميل عند التسجيل، منع تكرار اسم المنتج، إصلاح مشكلة توليد الباركود.
+
+### قبل
+- `/auth/register` (simple_auth_routes) و `POST /users` (auth_users_routes): فحص تكرار حساس لحالة الأحرف + تخزين الإيميل كما كُتب → `Admin@x.com` و`admin@x.com` حسابان مختلفان
+- `create_product`: فحص تكرار الاسم exact case-sensitive → التكرار يتسلل عبر اختلاف الحالة/الفراغات
+- `GET /products/generate-barcode`: مسار article_code حتمي **بدون فحص uniqueness** → بيانات الإنتاج الفعلية: منتجان بنفس الباركود `2130001000032` + باركودات 14 خانة مشوهة — والمسار العشوائي يفحص `barcode` فقط دون `additional_barcodes`
+- **جذر خفي**: endpoints التوليد الثلاثة (barcode/sku/article-code) **بدون أي auth dependency** → وسيط سياق المستأجر لا يعمل → الاستعلامات تضرب main_db بدل قاعدة المستأجر (الفحص كان يبحث في القاعدة الخاطئة أصلاً)
+
+### بعد
+- `services/auth_service.py`: `get_user_by_email` → `email_ci` (غير حساس للحالة) — يصلح login+register معاً
+- `simple_auth_routes.py` register: تطبيع `strip().lower()` قبل الفحص والتخزين
+- `auth_users_routes.py` POST /users: فحص `email_ci` + تخزين lowercase
+- `products_routes.py` create_product: فحص تكرار مُطبَّع (trim + regex case-insensitive) على name_en و name_ar
+- `generate-barcode`: دالة `_mk(num)` موحدة + `_is_free` يفحص `barcode` و`additional_barcodes`؛ مسار article_code يتدرّج (+1) حتى إيجاد باركود حر؛ تقييد num بـ 5 خانات (mod 100000) يمنع الباركودات المشوهة
+- إضافة `Depends(get_current_user)` للمولدات الثلاثة → تفعيل سياق المستأجر + حماية
+
+### اختبارات curl (كلها ✓)
+- T1: `generate-barcode?article_code=AR0003` → `2130001000049` (تخطّى المكرر) | T2: عشوائي `2130001961005`
+- T3: اسم منتج بحالة مختلفة → 409 | T4/T8b: إيميل موظف بحالة مختلفة → 400
+- T5: SKU `SG-00006` (عدّ المستأجر) | T6: `AR0004` | T7: بلا توكن → 403
+- T8: `Test.P113@Example.COM` خُزّن `test.p113@example.com` | T9: register بنسخة حالة من admin@ntcommerce.com → 400
+
+### ملفات
+- backend: services/auth_service.py, routes/simple_auth_routes.py, routes/auth_users_routes.py, routes/products_routes.py
+- backup: /opt/ntcommerce/backups/p113_dedup_barcode/
+- لا تغيير واجهة (backend فقط)

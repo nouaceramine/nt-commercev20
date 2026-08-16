@@ -36,7 +36,8 @@ class AuthService:
             return None
 
     async def get_user_by_email(self, email: str) -> Optional[dict]:
-        return await self.db.users.find_one({"email": email})
+        from utils.auth import email_ci
+        return await self.db.users.find_one({"email": email_ci(email)})
 
     async def authenticate(self, email: str, password: str) -> Optional[dict]:
         user = await self.get_user_by_email(email)
