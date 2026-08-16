@@ -83,6 +83,10 @@ app = FastAPI(title="NT API")
 # Request Context Middleware
 from middleware.request_context import RequestContextMiddleware
 app.add_middleware(RequestContextMiddleware)
+
+# p135: APM-lite middleware
+from middleware.apm import APMMiddleware
+app.add_middleware(APMMiddleware)
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -109,6 +113,19 @@ from middleware.input_sanitization import InputSanitizationMiddleware
 from audit.middleware import AuditMiddleware
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# p135: APM stats router
+from middleware.apm import create_apm_router, flush_apm
+try:
+    from routes.saas.helpers import get_super_admin as _apm_admin
+    app.include_router(create_apm_router(main_db, _apm_admin), prefix="/api")
+except Exception as _apm_exc:
+    logger.warning(f"APM router not registered: {_apm_exc}")
+
+@app.on_event("startup")
+async def _apm_flush_task():
+    import asyncio
+    asyncio.create_task(flush_apm(main_db))
 
 # Error handlers
 from utils.errors import AppException, app_exception_handler, general_exception_handler

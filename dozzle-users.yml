@@ -1,0 +1,7 @@
+users:
+    admin:
+        email: ""
+        name: ""
+        password: $2a$11$XX7mfoyFNMxxrT879YQKbeKzD8STZDhMzs3Hn1AEM8y7OLAEzY3py
+        filter: ""
+        roles: ""
