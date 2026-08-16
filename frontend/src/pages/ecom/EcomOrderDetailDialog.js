@@ -219,9 +219,12 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
             </div>
           )}
           {order.customer?.phone && (
-            <button type="button" onClick={toggleBlacklist} disabled={busy} className="text-xs text-red-600 underline underline-offset-2" data-testid="blacklist-toggle-btn">
-              {order.blacklist?.manual ? 'إزالة من القائمة السوداء' : '🚫 حظر هذا الرقم'}
-            </button>
+            <div>
+              <button type="button" onClick={toggleBlacklist} disabled={busy} className="text-xs text-red-600 underline underline-offset-2" data-testid="blacklist-toggle-btn">
+                {order.blacklist?.manual ? 'إزالة من القائمة السوداء' : '🚫 حظر هذا الرقم'}
+              </button>
+              <p className="text-[11px] text-muted-foreground mt-0.5" data-testid="blacklist-hint">الحظر (أو مرتجعان فأكثر، أو خطر عبر الشبكة) يمنع إنشاء بوليصة الشحن تلقائياً.</p>
+            </div>
           )}
           {(order.customer?.address || order.customer?.city || order.customer?.wilaya) && (
             <div className="text-sm text-muted-foreground flex items-center gap-2">

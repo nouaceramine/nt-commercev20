@@ -74,6 +74,40 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
     if not order:
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
 
+    # ── p109: قاعدة «لا تشحن» — منع آلي قبل إنشاء البوليصة ──────────────
+    if not body.get("force"):
+        try:
+            from services.application.ecom_order_service import normalize_phone as _np
+            raw_phone = ((order.get("customer") or {}).get("phone") or "")
+            variants = list({re.sub(r"[^\d+]", "", raw_phone), _np(raw_phone)} - {""})
+            if variants:
+                manual = await db.ecom_blacklist.find_one({"phone": {"$in": variants}})
+                if manual:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"⛔ لا تشحن: هذا الرقم في القائمة السوداء ({manual.get('reason') or 'محظور يدوياً'}). أزل الحظر أولاً إن أردت الشحن.",
+                    )
+                returned = await db.ecom_orders.count_documents({
+                    "status": {"$in": ["refunded", "returned"]},
+                    "customer.phone": {"$in": variants + [raw_phone]},
+                })
+                if returned >= 2:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"⛔ لا تشحن: للزبون {returned} مرتجعات في متجرك. راجع القائمة السوداء للاستثناء.",
+                    )
+                from services.application.ecom_order_service import get_network_trust as _gnt
+                net = await _gnt(_np(raw_phone))
+                if net.get("trust") == "risk":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"⛔ لا تشحن: مُرجِع متسلسل عبر شبكة المتاجر (أرجع {net.get('returned')} من {net.get('orders')} طلباً).",
+                    )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("p109 do-not-ship check failed (non-blocking): %s", exc)
+
     now = datetime.now(timezone.utc).isoformat()
     label_id = str(uuid.uuid4())
     mode = "mock"
