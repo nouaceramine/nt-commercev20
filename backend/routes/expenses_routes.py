@@ -25,6 +25,8 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         recurring_period: Optional[str] = "monthly"
         reminder_days_before: int = 3
         code: Optional[str] = ""
+        currency: str = "DZD"                      # p111: DZD or USD (ads bought at black-market rate)
+        exchange_rate: Optional[float] = None      # p111: DZD paid per 1 USD
 
     class ExpenseUpdate(BaseModel):
         title: Optional[str] = None
@@ -115,6 +117,19 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
     async def create_expense(expense: ExpenseCreate, user: dict = Depends(require_permission("expenses.add"))):
         from services.code_generator import generate_code
         data = expense.model_dump()
+        # p111: USD expense — entered in dollars, STORED in DZD at the real purchase rate,
+        # so every downstream analytic (ROAS, product P&L, pricing) uses the true DZD cost.
+        if (data.get("currency") or "DZD").upper() == "USD":
+            rate = float(data.get("exchange_rate") or 0)
+            if rate <= 0:
+                raise HTTPException(status_code=400, detail="أدخل سعر صرف الدولار (دج لكل 1$)")
+            data["currency"] = "USD"
+            data["amount_usd"] = round(float(data["amount"]), 2)
+            data["exchange_rate"] = round(rate, 2)
+            data["amount"] = round(data["amount_usd"] * rate, 2)
+        else:
+            data["currency"] = "DZD"
+            data["exchange_rate"] = None
         data["id"] = str(uuid.uuid4())
         data["date"] = data["date"] or datetime.now(timezone.utc).isoformat()
         data["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -174,5 +189,68 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         now = datetime.now(timezone.utc).isoformat()
         await db.expenses.update_one({"id": expense_id}, {"$set": {"date": now, "last_paid_at": now, "updated_at": now}})
         return {"message": "تم تسجيل الدفع بنجاح"}
+
+    @router.post("/usd-purchase")
+    async def usd_purchase(body: dict, user: dict = Depends(require_permission("expenses.add"))):
+        """p111: شراء دولارات (السوق) — يُقيَّد بالسعر الحقيقي ويُخصم من الصندوق المختار."""
+        usd = float(body.get("usd_amount") or 0)
+        rate = float(body.get("rate") or 0)
+        if usd <= 0 or rate <= 0:
+            raise HTTPException(status_code=400, detail="أدخل كمية الدولار وسعر الصرف")
+        now = datetime.now(timezone.utc).isoformat()
+        doc = {
+            "id": str(uuid.uuid4()),
+            "usd_amount": round(usd, 2),
+            "rate": round(rate, 2),
+            "dzd_total": round(usd * rate, 2),
+            "note": (body.get("note") or "").strip()[:200],
+            "date": body.get("date") or now,
+            "created_at": now,
+            "created_by": user.get("id"),
+        }
+        await db.usd_purchases.insert_one(doc)
+        pm = body.get("payment_method")
+        if pm:
+            await db.cash_boxes.update_one({"id": pm}, {"$inc": {"balance": -doc["dzd_total"]}, "$set": {"updated_at": now}})
+            await db.transactions.insert_one({
+                "id": str(uuid.uuid4()), "cash_box_id": pm, "type": "expense",
+                "amount": doc["dzd_total"],
+                "description": f"شراء {doc['usd_amount']}$ بسعر {doc['rate']} دج/$",
+                "reference_type": "usd_purchase", "reference_id": doc["id"],
+                "created_at": now, "created_by": user.get("name", ""),
+            })
+        doc.pop("_id", None)
+        return doc
+
+    @router.get("/usd-wallet")
+    async def usd_wallet(user: dict = Depends(require_permission("expenses.view"))):
+        """p111: محفظة الدولار — مشترى/مصروف (إعلانات USD)/متبقٍّ + متوسط سعر المتبقي (FIFO)."""
+        purchases = await db.usd_purchases.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+        usd_expenses = await db.expenses.find(
+            {"currency": "USD"}, {"_id": 0, "amount_usd": 1}
+        ).to_list(5000)
+        bought = round(sum(float(p.get("usd_amount") or 0) for p in purchases), 2)
+        spent = round(sum(float(e.get("amount_usd") or 0) for e in usd_expenses), 2)
+        # FIFO: consume oldest purchase layers first
+        remaining, remaining_cost, to_consume = 0.0, 0.0, spent
+        for p in purchases:
+            layer = float(p.get("usd_amount") or 0)
+            rate = float(p.get("rate") or 0)
+            use = min(layer, max(to_consume, 0.0))
+            to_consume -= use
+            left = layer - use
+            remaining += left
+            remaining_cost += left * rate
+        avg_rate = round(remaining_cost / remaining, 2) if remaining > 0 else None
+        last_rate = float(purchases[-1].get("rate") or 0) if purchases else None
+        return {
+            "bought_usd": bought,
+            "spent_usd": spent,
+            "remaining_usd": round(remaining, 2),
+            "avg_rate": avg_rate,
+            "last_rate": last_rate,
+            "suggested_rate": avg_rate or last_rate,
+            "purchases": list(reversed(purchases[-20:])),
+        }
 
     return router

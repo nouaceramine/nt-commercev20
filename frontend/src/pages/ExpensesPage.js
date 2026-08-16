@@ -76,10 +76,15 @@ export default function ExpensesPage() {
   const [stats, setStats] = useState({ total: 0, thisMonth: 0, lastMonth: 0, byCategory: [] });
   const [reminders, setReminders] = useState([]);
   
+  const [usdWallet, setUsdWallet] = useState(null);            // p111
+  const [showUsdDialog, setShowUsdDialog] = useState(false);   // p111
+  const [usdForm, setUsdForm] = useState({ usd_amount: '', rate: '', note: '', payment_method: 'cash' });  // p111
   const [formData, setFormData] = useState({
     title: '',
     category: '',
     amount: '',
+    currency: 'DZD',       // p111
+    exchange_rate: '',     // p111
     payment_method: 'cash',
     date: new Date().toISOString().split('T')[0],
     notes: '',
@@ -89,11 +94,40 @@ export default function ExpensesPage() {
     reminder_days_before: 3
   });
 
+  const fetchUsdWallet = async () => {  // p111
+    try {
+      const r = await apiClient.get('/expenses/usd-wallet');
+      setUsdWallet(r.data);
+    } catch (e) { /* optional */ }
+  };
+
+  const buyUsd = async () => {  // p111
+    if (!usdForm.usd_amount || !usdForm.rate) {
+      toast.error(language === 'ar' ? 'أدخل الكمية والسعر' : 'Montant et taux requis');
+      return;
+    }
+    try {
+      await apiClient.post('/expenses/usd-purchase', {
+        usd_amount: parseFloat(usdForm.usd_amount),
+        rate: parseFloat(usdForm.rate),
+        note: usdForm.note,
+        payment_method: usdForm.payment_method,
+      });
+      toast.success(language === 'ar' ? 'سُجّل شراء الدولار' : 'Achat enregistré');
+      setShowUsdDialog(false);
+      setUsdForm({ usd_amount: '', rate: '', note: '', payment_method: 'cash' });
+      fetchUsdWallet();
+    } catch (error) {
+      toast.error(errText(error) || t.somethingWentWrong);
+    }
+  };
+
   useEffect(() => {
     fetchExpenses();
     fetchStats();
     fetchReminders();
     fetchExpenseCode();
+    fetchUsdWallet();  // p111
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchExpenseCode = async () => {
@@ -147,6 +181,9 @@ export default function ExpensesPage() {
         ...formData,
         amount: parseFloat(formData.amount)
       };
+      if (expenseData.currency === 'USD') {  // p111
+        expenseData.exchange_rate = parseFloat(formData.exchange_rate) || 0;
+      }
 
       if (editingExpense) {
         await apiClient.put(`/expenses/${editingExpense.id}`, expenseData);
@@ -160,6 +197,7 @@ export default function ExpensesPage() {
       resetForm();
       fetchExpenses();
       fetchStats();
+      fetchUsdWallet();  // p111
     } catch (error) {
       toast.error(errText(error) ||  t.somethingWentWrong);
     }
@@ -199,6 +237,8 @@ export default function ExpensesPage() {
         title: '',
         category: '',
         amount: '',
+        currency: 'DZD',
+        exchange_rate: '',
         payment_method: 'cash',
         date: new Date().toISOString().split('T')[0],
         notes: '',
@@ -208,7 +248,7 @@ export default function ExpensesPage() {
       });
     } catch (error) {
       setFormData({
-        title: '', category: '', amount: '', payment_method: 'cash', date: new Date().toISOString().split('T')[0],
+        title: '', category: '', amount: '', currency: 'DZD', exchange_rate: '', payment_method: 'cash', date: new Date().toISOString().split('T')[0],
         notes: '', code: '', recurring: false, recurring_period: 'monthly'
       });
     }
@@ -220,7 +260,9 @@ export default function ExpensesPage() {
     setFormData({
       title: expense.title,
       category: expense.category,
-      amount: expense.amount.toString(),
+      amount: expense.currency === 'USD' ? String(expense.amount_usd ?? expense.amount) : expense.amount.toString(),
+      currency: expense.currency || 'DZD',
+      exchange_rate: expense.exchange_rate ? String(expense.exchange_rate) : '',
       date: expense.date?.split('T')[0] || new Date().toISOString().split('T')[0],
       notes: expense.notes || '',
       code: expense.code || '',
@@ -368,6 +410,31 @@ export default function ExpensesPage() {
             </Button>
           </div>
         </div>
+
+        {/* p111: USD wallet for ad spend (black-market dollars) */}
+        <Card data-testid="usd-wallet-card">
+          <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg">
+                <DollarSign className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">{language === 'ar' ? '💵 محفظة الدولار (للإعلانات)' : 'Portefeuille USD'}</p>
+                <p className="text-xl font-bold text-emerald-700" data-testid="usd-remaining">{usdWallet ? `${Number(usdWallet.remaining_usd).toLocaleString()} $` : '—'}</p>
+                <p className="text-xs text-muted-foreground" data-testid="usd-wallet-line">
+                  {usdWallet
+                    ? (language === 'ar'
+                        ? `مشترى: ${Number(usdWallet.bought_usd).toLocaleString()}$ · مصروف: ${Number(usdWallet.spent_usd).toLocaleString()}$${usdWallet.avg_rate ? ` · متوسط المتبقي: ${Number(usdWallet.avg_rate).toLocaleString()} دج/$` : ''}`
+                        : `Reste: ${Number(usdWallet.remaining_usd).toLocaleString()} $`)
+                    : (language === 'ar' ? 'سجّل مشترياتك من الدولار لتُحسب كلفة الإعلان الحقيقية' : '')}
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowUsdDialog(true)} data-testid="usd-buy-btn">
+              <Plus className="h-4 w-4 me-1" />{language === 'ar' ? 'شراء دولار' : 'Acheter USD'}
+            </Button>
+          </CardContent>
+        </Card>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -570,6 +637,9 @@ export default function ExpensesPage() {
                         </TableCell>
                         <TableCell>
                           <span className="font-bold text-red-600">{formatCurrency(expense.amount)} {t.currency}</span>
+                          {expense.currency === 'USD' && (
+                            <p className="text-xs text-muted-foreground" data-testid="usd-expense-note" dir="ltr">{Number(expense.amount_usd).toLocaleString()}$ × {Number(expense.exchange_rate).toLocaleString()}</p>
+                          )}
                         </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>
@@ -664,10 +734,16 @@ export default function ExpensesPage() {
                 </div>
               </div>
 
+              {/* p111: currency selector */}
+              <div className="flex gap-2" data-testid="expense-currency-row">
+                <Button type="button" size="sm" variant={formData.currency !== 'USD' ? 'default' : 'outline'} onClick={() => setFormData(p => ({ ...p, currency: 'DZD' }))} data-testid="currency-dzd-btn">دج DZD</Button>
+                <Button type="button" size="sm" variant={formData.currency === 'USD' ? 'default' : 'outline'} onClick={() => setFormData(p => ({ ...p, currency: 'USD', exchange_rate: p.exchange_rate || (usdWallet?.suggested_rate ? String(usdWallet.suggested_rate) : '') }))} data-testid="currency-usd-btn">$ دولار (إعلانات)</Button>
+              </div>
+
               {/* Amount & Date */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">{language === 'ar' ? 'المبلغ *' : 'Montant *'}</Label>
+                  <Label className="text-xs">{formData.currency === 'USD' ? (language === 'ar' ? 'المبلغ بالدولار $ *' : 'Montant $ *') : (language === 'ar' ? 'المبلغ *' : 'Montant *')}</Label>
                   <Input
                     type="number"
                     min="0"
@@ -688,6 +764,24 @@ export default function ExpensesPage() {
                   />
                 </div>
               </div>
+
+              {/* p111: USD exchange rate */}
+              {formData.currency === 'USD' && (
+                <div className="p-3 border rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10 space-y-2" data-testid="usd-rate-block">
+                  <div className="space-y-1">
+                    <Label className="text-xs">{language === 'ar' ? 'سعر الصرف (دج لكل 1$) *' : 'Taux (DZD/USD) *'}</Label>
+                    <Input type="number" min="0" step="0.01" dir="ltr" className="h-9" value={formData.exchange_rate} onChange={(e) => setFormData(p => ({ ...p, exchange_rate: e.target.value }))} placeholder={usdWallet?.suggested_rate ? String(usdWallet.suggested_rate) : '245'} data-testid="usd-rate-input" />
+                  </div>
+                  {formData.amount && formData.exchange_rate ? (
+                    <p className="text-sm font-semibold text-emerald-700" data-testid="usd-dzd-preview">
+                      = {formatCurrency(parseFloat(formData.amount) * parseFloat(formData.exchange_rate))} {language === 'ar' ? 'دج تُسجَّل كلفةً حقيقية' : 'DZD'}
+                    </p>
+                  ) : null}
+                  {usdWallet && (
+                    <p className="text-xs text-muted-foreground">{language === 'ar' ? `رصيدك الحالي: ${Number(usdWallet.remaining_usd).toLocaleString()}$ (متوسط ${usdWallet.avg_rate || '—'} دج/$)` : ''}</p>
+                  )}
+                </div>
+              )}
 
               {/* p66/p68: payment source — deducts from the chosen cash box */}
               <div className="space-y-1" data-testid="expense-payment-source">
@@ -772,6 +866,45 @@ export default function ExpensesPage() {
                     : (language === 'ar' ? 'إضافة' : 'Ajouter')}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p111: buy dollars dialog */}
+        <Dialog open={showUsdDialog} onOpenChange={setShowUsdDialog}>
+          <DialogContent className="max-w-sm" data-testid="usd-buy-dialog">
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? '💵 شراء دولار (السوق)' : 'Acheter USD'}</DialogTitle>
+              <DialogDescription>{language === 'ar' ? 'سجّل كل عملية شراء بسعرها الحقيقي — المصاريف الإعلانية بالدولار ستُحوَّل بهذا السعر' : ''}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">{language === 'ar' ? 'كمية الدولار *' : 'Montant USD *'}</Label>
+                <Input type="number" min="0" step="0.01" dir="ltr" value={usdForm.usd_amount} onChange={(e) => setUsdForm(p => ({ ...p, usd_amount: e.target.value }))} placeholder="100" data-testid="usd-amount-input" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">{language === 'ar' ? 'سعر الصرف (دج لكل 1$) *' : 'Taux *'}</Label>
+                <Input type="number" min="0" step="0.01" dir="ltr" value={usdForm.rate} onChange={(e) => setUsdForm(p => ({ ...p, rate: e.target.value }))} placeholder="245" data-testid="usd-rate-buy-input" />
+              </div>
+              {usdForm.usd_amount && usdForm.rate ? (
+                <p className="text-sm font-semibold text-emerald-700" data-testid="usd-buy-preview">= {formatCurrency(parseFloat(usdForm.usd_amount) * parseFloat(usdForm.rate))} {language === 'ar' ? 'دج ستُخصم من الصندوق' : 'DZD'}</p>
+              ) : null}
+              <div className="space-y-1">
+                <Label className="text-xs">{language === 'ar' ? 'مصدر الدفع' : 'Source'}</Label>
+                <Select value={usdForm.payment_method} onValueChange={(v) => setUsdForm(p => ({ ...p, payment_method: v }))}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">{language === 'ar' ? 'الصندوق النقدي' : 'Caisse'}</SelectItem>
+                    <SelectItem value="bank">{language === 'ar' ? 'الحساب البنكي' : 'Compte'}</SelectItem>
+                    <SelectItem value="personal">{language === 'ar' ? 'مال خاص' : 'Personnel'}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">{language === 'ar' ? 'ملاحظة' : 'Note'}</Label>
+                <Input value={usdForm.note} onChange={(e) => setUsdForm(p => ({ ...p, note: e.target.value }))} placeholder={language === 'ar' ? 'من أين اشتريت...' : ''} data-testid="usd-note-input" />
+              </div>
+              <Button className="w-full" onClick={buyUsd} data-testid="usd-buy-confirm">{language === 'ar' ? 'تسجيل الشراء' : 'Enregistrer'}</Button>
             </div>
           </DialogContent>
         </Dialog>
