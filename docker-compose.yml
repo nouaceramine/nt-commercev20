@@ -9,7 +9,7 @@ services:
     env_file:
       - .env
     environment:
-      - MONGO_URL=mongodb://mongodb:27017/ntcommerce
+      - MONGO_URL=mongodb://mongodb:27017/ntcommerce?replicaSet=rs0
       - DB_NAME=ntcommerce
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -23,6 +23,7 @@ services:
   mongodb:
     image: mongo:7.0
     container_name: ntcommerce-mongodb
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ulimits:
       nofile:
         soft: 65536
