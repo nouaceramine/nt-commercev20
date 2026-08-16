@@ -138,7 +138,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
             data["code"] = await generate_code(db, "expenses", "CH", 5, with_year=True)
         await db.expenses.insert_one(data)
         # p66: an expense is money OUT of a cash box (personal money stays outside)
-        if data.get("payment_method"):  # p68: personal box tracks it too
+        if data.get("payment_method") and data.get("currency") != "USD":  # p68 + p112: مصروف USD خُصم من الصندوق لحظة شراء الدولار — لا خصم مزدوج
             now = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.update_one({"id": data["payment_method"]}, {"$inc": {"balance": -data["amount"]}, "$set": {"updated_at": now}})
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": data["payment_method"], "type": "expense", "amount": data["amount"], "description": f"مصروف - {data['title']}", "reference_type": "expense", "reference_id": data["id"], "created_at": now, "created_by": user.get("name", "")})
@@ -157,7 +157,7 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         old_amount = float(old.get("amount", 0))
         new_method = update_data.get("payment_method", old_method)
         new_amount = float(update_data.get("amount", old_amount))
-        if old_method and (update_data.get("amount") is not None or update_data.get("payment_method") is not None):
+        if old_method and old.get("currency") != "USD" and (update_data.get("amount") is not None or update_data.get("payment_method") is not None):  # p112: USD لا يُزامَن مع الصناديق
             now = update_data["updated_at"]
             if old_method and old_amount:  # p68
                 await db.cash_boxes.update_one({"id": old_method}, {"$inc": {"balance": old_amount}, "$set": {"updated_at": now}})

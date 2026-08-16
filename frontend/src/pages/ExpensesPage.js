@@ -784,6 +784,7 @@ export default function ExpensesPage() {
               )}
 
               {/* p66/p68: payment source — deducts from the chosen cash box */}
+              {formData.currency !== 'USD' ? (
               <div className="space-y-1" data-testid="expense-payment-source">
                 <Label className="text-xs">{language === 'ar' ? 'مصدر الدفع' : 'Source de paiement'}</Label>
                 <Select value={formData.payment_method} onValueChange={(v) => setFormData(p => ({ ...p, payment_method: v }))}>
@@ -804,6 +805,9 @@ export default function ExpensesPage() {
                   </p>
                 )}
               </div>
+              ) : (
+              <p className="text-xs text-muted-foreground border rounded-lg p-2" data-testid="usd-nodeduct-hint">{language === 'ar' ? '💵 مصروف بالدولار — الخصم من الصندوق تم عند شراء الدولار، لا خصم مزدوج' : 'USD — pas de double déduction'}</p>
+              )}
 
               {/* Recurring Options - Compact */}
               <div className="p-3 border rounded-lg space-y-3">

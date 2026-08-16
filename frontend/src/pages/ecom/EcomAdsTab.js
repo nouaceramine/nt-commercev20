@@ -25,6 +25,9 @@ export default function EcomAdsTab() {
   const [adPlatform, setAdPlatform] = useState('facebook');
   const [adDate, setAdDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [adMethod, setAdMethod] = useState('cash');
+  const [adCurrency, setAdCurrency] = useState('USD');  // p112
+  const [adRate, setAdRate] = useState('');             // p112
+  const [usdWallet, setUsdWallet] = useState(null);     // p112
   const [adSpends, setAdSpends] = useState([]);
   const [adBusy, setAdBusy] = useState(false);
 
@@ -36,23 +39,32 @@ export default function EcomAdsTab() {
       })
       .catch(() => {});
   };
-  useEffect(() => { loadAdSpends(); }, []);
+  const loadUsdWallet = () => {  // p112
+    apiClient.get('/expenses/usd-wallet')
+      .then(r => { setUsdWallet(r.data); if (r.data?.suggested_rate) setAdRate(prev => prev || String(r.data.suggested_rate)); })
+      .catch(() => {});
+  };
+  useEffect(() => { loadAdSpends(); loadUsdWallet(); }, []);
 
   const saveAdSpend = async () => {
     const amount = parseFloat(adAmount) || 0;
     if (amount <= 0) { toast.error(ar ? 'أدخل مبلغاً صحيحاً' : 'Montant invalide'); return; }
+    if (adCurrency === 'USD' && !(parseFloat(adRate) > 0)) { toast.error(ar ? 'أدخل سعر صرف الدولار' : 'Taux requis'); return; }  // p112
     setAdBusy(true);
     try {
-      await apiClient.post('/expenses', {
+      const payload = {
         title: `إعلان ممول — ${adPlatform}`,
         category: 'إعلانات ممولة',
         amount,
-        payment_method: adMethod,
+        payment_method: adCurrency === 'USD' ? '' : adMethod,  // p112: الدولار خُصم من الصندوق عند شرائه
         date: adDate,
-      });
-      toast.success(ar ? 'سُجّل الصرف الإعلاني وخُصم من الصندوق' : 'Dépense publicitaire enregistrée');
+      };
+      if (adCurrency === 'USD') { payload.currency = 'USD'; payload.exchange_rate = parseFloat(adRate); }  // p112
+      await apiClient.post('/expenses', payload);
+      toast.success(ar ? (adCurrency === 'USD' ? 'سُجّل الصرف بالدولار بسعره الحقيقي' : 'سُجّل الصرف الإعلاني وخُصم من الصندوق') : 'Dépense publicitaire enregistrée');
       setAdAmount('');
       loadAdSpends();
+      loadUsdWallet();  // p112
     } catch (e) { toast.error(e?.response?.data?.detail || (ar ? 'فشل التسجيل' : 'Échec')); }
     finally { setAdBusy(false); }
   };
@@ -80,27 +92,49 @@ export default function EcomAdsTab() {
           <Card data-testid="ad-spend-card">
             <CardHeader><CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5" />{ar ? 'تسجيل صرف إعلاني (يُخصم من الصندوق)' : 'Enregistrer une dépense pub'}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
+              <div className="flex gap-2" data-testid="ad-currency-row">
+                <Button type="button" size="sm" variant={adCurrency === 'USD' ? 'default' : 'outline'} onClick={() => setAdCurrency('USD')} data-testid="ad-currency-usd">$ دولار (سكوار)</Button>
+                <Button type="button" size="sm" variant={adCurrency !== 'USD' ? 'default' : 'outline'} onClick={() => setAdCurrency('DZD')} data-testid="ad-currency-dzd">دج DZD</Button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>{ar ? 'المنصة' : 'Plateforme'}</Label>
                   <select className="w-full border rounded-md h-9 px-2 mt-1 bg-background" value={adPlatform} onChange={e => setAdPlatform(e.target.value)} data-testid="ad-platform-select">
                     <option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="google">Google</option><option value="other">{ar ? 'أخرى' : 'Autre'}</option>
                   </select>
                 </div>
-                <div><Label>{ar ? 'المبلغ (دج)' : 'Montant (DA)'}</Label><Input type="number" min="0" value={adAmount} onChange={e => setAdAmount(e.target.value)} className="mt-1" data-testid="ad-amount-input" /></div>
+                <div><Label>{adCurrency === 'USD' ? (ar ? 'المبلغ ($)' : 'Montant ($)') : (ar ? 'المبلغ (دج)' : 'Montant (DA)')}</Label><Input type="number" min="0" value={adAmount} onChange={e => setAdAmount(e.target.value)} className="mt-1" data-testid="ad-amount-input" /></div>
                 <div><Label>{ar ? 'التاريخ' : 'Date'}</Label><Input type="date" value={adDate} onChange={e => setAdDate(e.target.value)} className="mt-1" data-testid="ad-date-input" /></div>
+                {adCurrency !== 'USD' && (
                 <div><Label>{ar ? 'الدفع من' : 'Payé depuis'}</Label>
                   <select className="w-full border rounded-md h-9 px-2 mt-1 bg-background" value={adMethod} onChange={e => setAdMethod(e.target.value)} data-testid="ad-method-select">
                     <option value="cash">{ar ? 'الصندوق النقدي' : 'Caisse'}</option><option value="bank">{ar ? 'الحساب البنكي' : 'Banque'}</option><option value="wallet">{ar ? 'المحفظة الإلكترونية' : 'Wallet'}</option><option value="safe">{ar ? 'الخزنة' : 'Coffre'}</option><option value="personal">{ar ? 'المال الخاص' : 'Argent personnel'}</option>
                   </select>
                 </div>
+                )}
               </div>
+              {adCurrency === 'USD' && (
+                <div className="border rounded-lg p-3 bg-emerald-50/50 dark:bg-emerald-900/10 space-y-2" data-testid="ad-usd-block">
+                  <div><Label>{ar ? 'سعر الصرف (دج لكل 1$)' : 'Taux (DZD/USD)'}</Label>
+                    <Input type="number" min="0" step="0.01" dir="ltr" value={adRate} onChange={e => setAdRate(e.target.value)} className="mt-1" data-testid="ad-rate-input" /></div>
+                  {adAmount && adRate ? (
+                    <p className="text-sm font-semibold text-emerald-700" data-testid="ad-dzd-preview">= {Number(parseFloat(adAmount) * parseFloat(adRate)).toLocaleString()} {ar ? 'دج كلفة حقيقية' : 'DZD'}</p>
+                  ) : null}
+                  {usdWallet && (
+                    <p className="text-xs text-muted-foreground" data-testid="ad-usd-balance">
+                      {ar ? `رصيد محفظة الدولار: ${Number(usdWallet.remaining_usd).toLocaleString()}$` : ''}
+                      {usdWallet.remaining_usd < (parseFloat(adAmount) || 0) ? (ar ? ' — ⚠️ أقل من المبلغ! سجّل شراء دولار أولاً في صفحة التكاليف' : '') : ''}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">{ar ? '💵 لا خصم من الصندوق هنا — الخصم تم عند شراء الدولار' : ''}</p>
+                </div>
+              )}
               <Button onClick={saveAdSpend} disabled={adBusy} className="w-full" data-testid="ad-spend-save">{ar ? 'تسجيل الصرف' : 'Enregistrer'}</Button>
               {adSpends.length > 0 && (
                 <div className="border rounded-lg divide-y text-sm" data-testid="ad-spend-list">
                   {adSpends.map(x => (
                     <div key={x.id} className="flex justify-between p-2">
                       <span>{x.title} <span className="text-xs text-muted-foreground">{(x.date || x.created_at || '').slice(0, 10)}</span></span>
-                      <span className="font-semibold">{Number(x.amount).toLocaleString()} دج</span>
+                      <span className="font-semibold">{Number(x.amount).toLocaleString()} دج{x.currency === 'USD' && <span className="text-xs text-muted-foreground" dir="ltr"> ({Number(x.amount_usd).toLocaleString()}$ × {Number(x.exchange_rate).toLocaleString()})</span>}</span>
                     </div>
                   ))}
                 </div>
