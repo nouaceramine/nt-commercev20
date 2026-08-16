@@ -1658,3 +1658,26 @@ Backup: /opt/ntcommerce/backups/p94_couriers_to_shipping/
 ملاحظة: FB_VERIFY_TOKEN/FB_APP_SECRET/TIKTOK_APP_SECRET غير مضبوطة في backend.env — الويبهوك يعمل بوضع التطوير حتى ضبطها.
 
 Backup: /opt/ntcommerce/backups/p95_webhooks_guide_companies/
+
+## p96 — ربط فيسبوك المباشر للعملاء المحتملين بدون وسيط (2026-08-16)
+- ad_webhooks_routes.py: فصل الحفظ إلى _save_lead؛ إضافة _resolve_fb_leads — إشعار ميتا الأصلي (leadgen_id فقط) يُجلب تلقائياً من Graph API v21.0 باستخدام access_token المحفوظ في تكامل فيسبوك (قناة البيع) لنفس المستأجر؛ يدعم عدة leads في إشعار واحد؛ بدون توكن يُتخطّى مع تحذير. حمولات الوسيط (field_data) ما تزال تعمل.
+- دليل فيسبوك في الواجهة حُدّث: الخطوة 4 أصبحت «احفظ Page Access Token بصلاحية leads_retrieval» بدل Make/Zapier.
+- اختبارات حية: بدون توكن → تخطّي نظيف ✓؛ توكن وهمي → اتصال HTTPS حقيقي بميتا (OAuthException 190) ✓؛ حمولة مباشرة → lead+customer ✓ (نظّفت بيانات الاختبار).
+- Commit a2840cf.
+
+## p97 — مزامنة يالدين التلقائية الدورية (2026-08-16)
+- backend/scripts/auto_sync_yalidine.py جديد: يمر على كل المستأجرين (saas_tenants)، لكل من لديه تكامل يالدين نشط يزامن الطرود المشحونة عبر نفس state machine (محاسبة كاملة: دخل المحفظة/عكس+رسوم/مخزون).
+- cron على المضيف: 15 * * * * docker exec ntcommerce-backend-1 python3 /app/scripts/auto_sync_yalidine.py >> backups/yalidine_sync.log
+- اختبار يدوي: tenants=2, synced=1 (bob) ✓ — بلا أخطاء.
+- Commit b5db684.
+
+## p98 — رسالة الزبون عند الشحن مع رابط التتبع (2026-08-16)
+- ecom_order_service.py: رسالة shipped عبر واتساب تتضمن الآن اسم شركة الشحن + رقم التتبع + رابط التتبع الرسمي (يالدين: yalidine.com/suivi/?tracking= — ZR: zrexpress.dz/suivi ✓200 — مايسترو: maystro-delivery.com ✓200). الاستدعاء محمي من الأخطاء (لا يعطّل تغيير الحالة).
+- اختبار بالتقاط الرسائل لأربع حالات (yalidine/zr/maystro/بدون شركة) — المحتوى صحيح ✓. تتطلب تكامل واتساب مضبوطاً (phone_number_id + access_token).
+- Commit 8c35833.
+
+## p99 — اقتراح أرخص شركة شحن لكل ولاية (2026-08-16)
+- backend: GET /ecom/shipping/cheapest?wilaya=<name>&desk= — لكل تكامل شحن نشط سعر الولاية (يالدين من delivery_rates المسحوبة حقيقياً، البقية من ecom_courier_prices اليدوية) + أرخص شركة. PUT /ecom/shipping/courier-prices/{courier} لرفع جدول أسعار يدوي (upsert بالجملة).
+- frontend: حوار الطلب (EcomOrderDetailDialog) يجلب الأرخص لولاية الطلب عند فتحه، يعرض سطر «💡 الأرخص لولاية X» مع المقارنة (cheapest-suggestion)، ويحدّد الشركة الأرخص تلقائياً في قائمة الناقل (قابل للتغيير).
+- اختبارات حية: يالدين فقط (الأغواط 950/750 حقيقي) ✓؛ إضافة جدول ZR تجريبي أرخص → cheapest=zr ✓؛ desk=true → أسعار المكتب ✓؛ نظّفت بيانات الاختبار.
+- الحزمة: main.c4975d61.js (تشمل أيضاً تحديث دليل p96).

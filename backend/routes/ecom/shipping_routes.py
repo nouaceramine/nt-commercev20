@@ -272,6 +272,85 @@ async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
     return results
 
 
+COURIER_DISPLAY_NAMES = {"yalidine": "يالدين", "zr": "ZR Express", "maystro": "مايسترو"}
+
+
+@router.get("/ecom/shipping/cheapest")
+async def cheapest_courier(wilaya: str = "", desk: bool = False, user: dict = Depends(require_tenant)):
+    """p99: for each ACTIVE courier integration, the price for a given wilaya + the cheapest pick.
+    Yalidine prices come from the pulled delivery_rates; other couriers from ecom_courier_prices
+    (manual rate sheets entered via PUT /courier-prices/{courier})."""
+    await require_ecom_feature(user)
+    w = (wilaya or "").strip()
+    options = []
+    if w:
+        intgs = await db.ecom_integrations.find(
+            {"kind": "shipping", "is_active": True}, {"_id": 0, "channel": 1}
+        ).to_list(20)
+        for intg in intgs:
+            ch = intg.get("channel")
+            if ch == "mock":
+                continue
+            row = None
+            source = "manual"
+            if ch == "yalidine":
+                row = await db.delivery_rates.find_one({"wilaya_name": w}, {"_id": 0})
+                source = "yalidine_api"
+            if row is None:
+                row = await db.ecom_courier_prices.find_one(
+                    {"courier": ch, "$or": [{"wilaya_name": w}, {"wilaya_id": w}]}, {"_id": 0}
+                )
+                source = "manual"
+            if not row:
+                continue
+            price = row.get("office_price") if desk else row.get("home_price")
+            if price is None:
+                continue
+            options.append({
+                "courier": ch,
+                "name": COURIER_DISPLAY_NAMES.get(ch, ch),
+                "price": price,
+                "home_price": row.get("home_price"),
+                "office_price": row.get("office_price"),
+                "source": source,
+            })
+    cheapest = min(options, key=lambda o: o["price"])["courier"] if options else None
+    return {"wilaya": w, "options": options, "cheapest": cheapest}
+
+
+@router.put("/ecom/shipping/courier-prices/{courier}")
+async def set_courier_prices(courier: str, body: dict, user: dict = Depends(require_tenant)):
+    """p99: bulk upsert a manual rate sheet for a courier (zr/maystro/...).
+    body: {rates: [{wilaya_id, wilaya_name, home_price, office_price}]}"""
+    await require_ecom_feature(user)
+    if courier not in SHIPPING_PROVIDER_KEYS or courier == "mock":
+        raise HTTPException(status_code=400, detail="شركة شحن غير مدعومة")
+    rates = body.get("rates") or []
+    now = datetime.now(timezone.utc).isoformat()
+    saved = 0
+    for r in rates:
+        try:
+            doc = {
+                "courier": courier,
+                "wilaya_id": str(r.get("wilaya_id") or "").strip(),
+                "wilaya_name": (r.get("wilaya_name") or "").strip(),
+                "home_price": float(r.get("home_price") or 0),
+                "office_price": float(r.get("office_price") or 0),
+                "updated_at": now,
+            }
+        except (TypeError, ValueError):
+            continue
+        if not (doc["wilaya_id"] or doc["wilaya_name"]):
+            continue
+        await db.ecom_courier_prices.update_one(
+            {"courier": courier, "wilaya_id": doc["wilaya_id"], "wilaya_name": doc["wilaya_name"]},
+            {"$set": doc},
+            upsert=True,
+        )
+        saved += 1
+    return {"saved": saved}
+
+
 @router.get("/ecom/shipping/labels-bulk")
 async def bulk_labels(date: Optional[str] = None, user: dict = Depends(require_tenant)):
     """p85: كل بوليصات يوم معيّن (افتراضياً اليوم) للطباعة الجماعية."""

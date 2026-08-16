@@ -19,6 +19,21 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const [callResult, setCallResult] = useState('');  // p79
   const [callNote, setCallNote] = useState('');      // p79
   const [packCost, setPackCost] = useState('');      // p71: packaging cost
+  const [cheapest, setCheapest] = useState(null);       // p99: cheapest courier for the order's wilaya
+
+  // p99: fetch cheapest courier for the order's wilaya and pre-select it
+  useEffect(() => {
+    if (!open || !order) return;
+    const w = (order.customer?.wilaya || '').trim();
+    setCheapest(null);
+    if (!w) return;
+    apiClient.get(`/ecom/shipping/cheapest?wilaya=${encodeURIComponent(w)}`)
+      .then(res => {
+        setCheapest(res.data || null);
+        if (res.data?.cheapest) setShippingProvider(res.data.cheapest);
+      })
+      .catch(() => {});
+  }, [open, order]);
 
   // Fetch tenant store name once when the dialog first opens
   useEffect(() => {
@@ -382,6 +397,17 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
                 إنشاء بطاقة + شحن
               </Button>
             </div>
+            {cheapest?.cheapest && (
+              <p className="text-xs text-emerald-700" data-testid="cheapest-suggestion">
+                💡 الأرخص لولاية {cheapest.wilaya}: {cheapest.options.find(o => o.courier === cheapest.cheapest)?.name}
+                ({Number(cheapest.options.find(o => o.courier === cheapest.cheapest)?.price).toLocaleString()} دج)
+                {cheapest.options.length > 1 && (
+                  <span className="text-muted-foreground">
+                    {' '}— مقارنة: {cheapest.options.map(o => `${o.name} ${Number(o.price).toLocaleString()}`).join(' / ')} دج
+                  </span>
+                )}
+              </p>
+            )}
             <p className="text-xs text-amber-800">
               ⚠️ المرحلة الحالية (P1) تعمل بمحاكاة فقط — التكامل الفعلي مع يالدين/ZR/Maystro يأتي في P2.
             </p>
