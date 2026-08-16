@@ -1986,3 +1986,7 @@ backup: backups/p120_identity/ — لا تغيير واجهة
 - RepairTrackingPage.printRepairReceipt: أصبح async — يستخدم قالب الصيانة المخصص الافتراضي عند وجوده (buildCustomTemplateHTML)، وإلا الإيصال المدمج الذي استُبدل فيه مربع النص بـ QR حقيقي (canvas + qrcode@1.5.3 CDN مع طباعة بعد اكتمال الرسم ومهلة أمان 3 ثوانٍ).
 - PrinterTab: onImported={fetchCustomTemplates}.
 نسخة احتياطية: backups/p122_templates_qr/. الحزمة: main.14f5d25f.js → main.6499f406.js.
+
+## p123 — اختبار استعادة أسبوعي حقيقي (2026-08-16)
+**قبل:** خدمة restore_test.py (p33) لم تُشغَّل قط (platform_restore_tests = 0) والنسخ اليومية غير مثبتة القابلية للاستعادة.
+**بعد:** scripts/weekly_restore_test.sh يستعيد أحدث أرشيف mongodump يومي حقيقي إلى قاعدة scratch داخل الحاوية (--nsInclude/--nsFrom/--nsTo لعزل الاستعادة عن القواعد الحية)، يقارن أعداد المستندات مع ما أبلغ عنه mongorestore نفسه من الأرشيف (ليس مع القاعدة الحية التي تنجرف بعد وقت النسخ)، يسقط الـ scratch، ويسجّل النتيجة في main_db.platform_restore_tests. **أول تشغيل: نجح — 163 مجموعة / 897 مستند / 0 اختلاف** من أرشيف 2026-08-16_0400. cron: كل أحد 05:00. ملاحظة: التشغيل اليدوي الأول كشف انحراف فهرس حقيقي (expense_number_1 sparse في الحي مقابل non-sparse في الكود) — لا يؤثر على الاستعادة لقاعدة جديدة.
