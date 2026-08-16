@@ -60,7 +60,8 @@ async def create_enhanced_remaining_indexes(db):
     await db.tenant_settings.create_index("tenant_id", unique=True)
     await db.notification_settings.create_index("tenant_id", unique=True)
     await db.appearance_settings.create_index("tenant_id", unique=True)
-    await db.shipping_settings.create_index("tenant_id", unique=True)
+    # p141 fix: unique tenant_id here breaks per-company upserts (tenant_id is null in tenant DBs) — use company_id unique instead
+    await db.shipping_settings.create_index("company_id", unique=True, sparse=True)
     await db.payment_settings.create_index("tenant_id", unique=True)
     await db.email_templates.create_index("id", unique=True)
     await db.email_templates.create_index([("tenant_id", 1), ("id", 1)])

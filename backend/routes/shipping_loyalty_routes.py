@@ -83,9 +83,12 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     @router.put("/shipping/settings/{company_id}")
     async def update_shipping_settings(company_id: str, settings: ShippingCompanySettings, admin: dict = Depends(get_tenant_admin)):
         """Update shipping company settings"""
+        # p141 fix: docs must carry a real `id` — the unique id_1 index otherwise
+        # collides on id:null for the second company upsert (E11000).
         await db.shipping_settings.update_one(
             {"company_id": company_id},
-            {"$set": settings.model_dump()},
+            {"$set": {**settings.model_dump(), "company_id": company_id},
+             "$setOnInsert": {"id": str(uuid.uuid4())}},
             upsert=True
         )
         return {"message": "تم حفظ إعدادات شركة الشحن"}

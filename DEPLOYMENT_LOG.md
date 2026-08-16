@@ -2055,3 +2055,12 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - قبل: البطاقات الأربع (طلبات اليوم / آخر 7 أيام / الإجمالي / جديدة) عرض فقط.
 - بعد: النقر يفتح Dialog يعرض الطلبات المصفّاة (since=اليوم / since=7 أيام / الكل / status=new) عبر GET /ecom/orders، والنقر على طلب يفتح تفاصيله.
 - النشر: release 20260816_203309، main.d212db89.js — تم التحقق علناً عبر curl.
+
+## p141 — إصلاح أخطاء autoheal الحرجة (2026-08-16)
+- السبب الجذري لـ PUT /api/shipping/settings/{company_id} → 500 E11000:
+  1) فهرس tenant_id_1 الفريد على shipping_settings في قواعد المستأجرين حيث tenant_id=null دائماً → أول upsert ينجح وثانيها يصطدم.
+  2) الـ upsert لا يولّد id → اصطدام id_1 على id:null.
+- الإصلاح: حذف tenant_id_1 من (template_tenant + كل المستأجرين + ntcommerce)، إنشاء company_id unique sparse بدلاً منه؛ تعديل enhanced_remaining_indexes.py؛ endpoint يولّد id عبر $setOnInsert.
+- تحقق: PUT yalidine/zr_express/maystro → 200 كلها ✓
+- تحقق من بقية findings: labels-bulk 200 ✓، analytics/revenue 200 ✓، pull-rates 422 (يتطلب body — طبيعي) ✓، POST /api/expenses 200 ✓ — كلها مُصلحة سلفاً في p123/p132.
+- backup: /opt/ntcommerce/backups/p138_ecom_delivery/*.bak
