@@ -28,7 +28,7 @@ const paymentLabel = (m, ar) => {
 };
 
 const statusLabel = (s, ar) => {
-  const map = { paid: ar ? 'مدفوع' : 'Payé', partial: ar ? 'جزئي' : 'Partiel', unpaid: ar ? 'غير مدفوع' : 'Impayé', returned: ar ? 'مرتجع' : 'Retourné', pending: ar ? 'قيد الانتظار' : 'En attente' };
+  const map = { paid: ar ? 'مدفوع' : 'Payé', partial: ar ? 'جزئي' : 'Partiel', unpaid: ar ? 'غير مدفوع' : 'Impayé', returned: ar ? 'مرتجع' : 'Retourné', pending: ar ? 'قيد الانتظار' : 'En attente', received: ar ? 'تم الاستلام' : 'Reçu', in_progress: ar ? 'قيد الإصلاح' : 'En cours', completed: ar ? 'مكتمل' : 'Terminé', delivered: ar ? 'تم التسليم' : 'Livré', cancelled: ar ? 'ملغي' : 'Annulé' };
   return map[s] || s || '';
 };
 
@@ -83,6 +83,19 @@ export const FIELD_BINDINGS = {
     { key: 'vendor', ar: 'المستفيد', fr: 'Bénéficiaire' },
     { key: 'payment_method', ar: 'طريقة الدفع', fr: 'Paiement' },
     { key: 'amount', ar: 'المبلغ', fr: 'Montant' },
+  ],
+  repair: [
+    { key: 'ticket_number', ar: 'رقم التذكرة', fr: 'N° ticket' },
+    { key: 'customer_name', ar: 'اسم الزبون', fr: 'Nom client' },
+    { key: 'customer_phone', ar: 'هاتف الزبون', fr: 'Tél client' },
+    { key: 'device_brand', ar: 'ماركة الجهاز', fr: 'Marque' },
+    { key: 'device_model', ar: 'الموديل', fr: 'Modèle' },
+    { key: 'problem_description', ar: 'المشكلة', fr: 'Problème' },
+    { key: 'status', ar: 'الحالة', fr: 'Statut' },
+    { key: 'estimated_cost', ar: 'التكلفة المقدرة', fr: 'Coût estimé' },
+    { key: 'advance_payment', ar: 'الدفعة المقدمة', fr: 'Avance' },
+    { key: 'final_cost', ar: 'التكلفة النهائية', fr: 'Coût final' },
+    { key: 'date', ar: 'التاريخ', fr: 'Date' },
   ],
 };
 
@@ -180,6 +193,14 @@ function resolveField(key, record, ar) {
     case 'category': return r.category || '';
     case 'vendor': return r.vendor || '';
     case 'amount': return formatCurrency(r.amount);
+    case 'ticket_number': return r.ticket_number || r.code || '';
+    case 'customer_phone': return r.customer_phone || r.phone || '';
+    case 'device_brand': return r.device_brand || '';
+    case 'device_model': return r.device_model || '';
+    case 'problem_description': return r.problem_description || (Array.isArray(r.problems) ? r.problems.join('، ') : '') || '';
+    case 'estimated_cost': return r.estimated_cost != null ? formatCurrency(r.estimated_cost) : '';
+    case 'advance_payment': return r.advance_payment != null ? formatCurrency(r.advance_payment) : '';
+    case 'final_cost': return r.final_cost != null ? formatCurrency(r.final_cost) : '';
     default: return r[key] != null ? String(r[key]) : '';
   }
 }

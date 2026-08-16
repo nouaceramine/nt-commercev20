@@ -1976,3 +1976,13 @@ backup: backups/p120_identity/ — لا تغيير واجهة
 ## p121 — POS تخطيط صفحة واحدة بلا سحب (2026-08-17)
 **قبل:** شبكة md:grid-cols-12 بأعمدة 2+3+7+2=14 → الاختصارات تلتف لسطر ثانٍ خارج الشاشة (يجب سحب الفأرة للوصول إليها).
 **بعد:** 2(شريط جانبي)+4(عمود وسط)+6(سلة)=12. السلة أصبحت العمود الأيمن الثابت (md:col-span-7→6). الاختصارات انتقلت من نهاية الشبكة إلى أعلى العمود الأوسط مباشرة (shrink-0 ثابتة)، وقائمة المنتجات/الفليكسي وحدها تُسحب داخلياً عبر div#pos-middle-scroll (md:flex-1 md:overflow-y-auto). ملفات: POSPage.js, pos/POSCart.js, pos/POSShortcuts.js. نسخة احتياطية: backups/p121_pos_layout/. الحزمة: main.ddb76b31.js → main.14f5d25f.js.
+
+## p122 — قوالب طباعة عصرية مع QR (2026-08-17)
+**قبل:** لا قوالب مخصصة جاهزة؛ إيصال الصيانة المدمج يعرض «QR» كنص داخل مربع منقّط وليس رمزاً حقيقياً؛ لا نوع مستند «صيانة» في محرر القوالب.
+**بعد:**
+- lib/modernTemplatePresets.js (جديد): 3 قوالب عصرية جاهزة — فاتورة بيع +QR (رقم الفاتورة للتحقق)، بطاقة منتج +QR (باركود)، تذكرة صيانة +QR (رقم التذكرة للتتبع).
+- CustomTemplatesTable: زر «قوالب عصرية جاهزة» (import-modern-templates-btn) يستورد الثلاثة دفعة واحدة عبر TemplateService.saveTemplate مع تخطّي الموجود مسبقاً؛ DOC_LABELS_MAP += repair.
+- customTemplateRenderer: FIELD_BINDINGS += repair (11 حقل: ticket_number/customer_phone/device_brand...)، resolveField += حالات الصيانة، statusLabel += حالات التذاكر (received/in_progress/completed/delivered/cancelled).
+- RepairTrackingPage.printRepairReceipt: أصبح async — يستخدم قالب الصيانة المخصص الافتراضي عند وجوده (buildCustomTemplateHTML)، وإلا الإيصال المدمج الذي استُبدل فيه مربع النص بـ QR حقيقي (canvas + qrcode@1.5.3 CDN مع طباعة بعد اكتمال الرسم ومهلة أمان 3 ثوانٍ).
+- PrinterTab: onImported={fetchCustomTemplates}.
+نسخة احتياطية: backups/p122_templates_qr/. الحزمة: main.14f5d25f.js → main.6499f406.js.

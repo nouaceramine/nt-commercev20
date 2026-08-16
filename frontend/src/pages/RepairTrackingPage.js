@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
+import { buildCustomTemplateHTML } from '../lib/customTemplateRenderer';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -354,9 +355,24 @@ export default function RepairTrackingPage() {
     }
   };
 
-  // Print repair receipt
-  const printRepairReceipt = (repair) => {
+  // Print repair receipt (p122: uses default custom repair template if one exists)
+  const printRepairReceipt = async (repair) => {
     const statusInfo = getStatusInfo(repair.status);
+    try {
+      const [tmplRes, brandRes] = await Promise.all([
+        apiClient.get('/printing/templates?type=repair').catch(() => ({ data: [] })),
+        apiClient.get('/settings/tenant-branding').catch(() => ({ data: {} })),
+      ]);
+      const custom = (tmplRes.data || []).filter(t => t.is_custom && Array.isArray(t.blocks) && t.blocks.length);
+      const tmpl = custom.find(t => t.is_default) || custom[0];
+      if (tmpl) {
+        const html = buildCustomTemplateHTML({ template: tmpl, record: repair, branding: brandRes.data || {}, language });
+        const pw = window.open('', '_blank');
+        pw.document.write(html);
+        pw.document.close();
+        return;
+      }
+    } catch { /* fall through to built-in receipt */ }
     const printWindow = window.open('', '_blank');
     
     const receiptHTML = `
@@ -455,13 +471,25 @@ export default function RepairTrackingPage() {
         </div>
         
         <div class="footer">
-          <div class="qr-placeholder">${repair.ticket_number}</div>
+          <canvas id="qr-ticket"></canvas>
           <p>شكراً لثقتكم بنا</p>
           <p style="margin-top: 5px;">يرجى الاحتفاظ بهذا الإيصال لاستلام الجهاز</p>
           <p style="margin-top: 10px; font-size: 9px;">NT POS System</p>
         </div>
         
-        <script>window.onload = function() { window.print(); }</script>
+        <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+        <script>
+          window.onload = function() {
+            var done = false;
+            function go(){ if (done) return; done = true; window.print(); }
+            try {
+              if (window.QRCode) {
+                QRCode.toCanvas(document.getElementById('qr-ticket'), "${repair.ticket_number}", { width: 80, margin: 1 }, function(){ setTimeout(go, 250); });
+              } else { go(); }
+            } catch(e) { go(); }
+            setTimeout(go, 3000);
+          };
+        </script>
       </body>
       </html>
     `;

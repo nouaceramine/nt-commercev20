@@ -48,6 +48,7 @@ export default function PrinterTab({ initialPrinterSettings, initialReceiptSetti
         onDelete={(id) => deleteCustomTemplate(id, language)}
         onDuplicate={duplicateCustomTemplate}
         onSetDefault={setDefaultCustomTemplate}
+        onImported={fetchCustomTemplates}
       />
       <ReceiptSettingsCard
         settings={receiptSettings}
