@@ -1735,3 +1735,16 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 ### نشر
 - main.9bf1823f.js — cp -r فقط، الحزم القديمة محفوظة.
 - backup: /opt/ntcommerce/backups/p103_reconcile_forecast/
+
+---
+
+## p104 — إصلاح القائمة الجانبية على الهاتف (2026-08-16)
+
+### قبل
+- القائمة الجانبية على الهاتف تفتح بوضع الأيقونات فقط (w-16) لأن sidebarCollapsed الافتراضي true ويُحفظ في localStorage ويُطبَّق على الهاتف أيضاً — وشريط التوسيع مخفي على الهاتف (hidden md:flex) فيعلق المستخدم بلا عناوين.
+
+### بعد
+- `Layout.js`: حالة isDesktop عبر matchMedia("(min-width: 768px)") مع مستمع تغيير + `collapsed = sidebarCollapsed && isDesktop` — وضع الأيقونات أصبح للحاسوب فقط، وعلى الهاتف تظهر القائمة كاملة بالعناوين دائماً (23 موضع عرض حُوّل). سلوك الحاسوب لم يتغير إطلاقاً.
+
+### نشر
+- main.dfcc5e08.js — cp -r فقط. backup: /opt/ntcommerce/backups/p104_mobile_sidebar/

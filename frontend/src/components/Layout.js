@@ -116,6 +116,15 @@ export const Layout = ({ children }) => {
     // Default to collapsed (true) if no saved preference
     return saved !== null ? saved === 'true' : true;
   });
+  // p104: icons-only mode is desktop-only — the mobile drawer always shows labels
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const collapsed = sidebarCollapsed && isDesktop;
   const [expandedSections, setExpandedSections] = useState(() => {
     const saved = localStorage.getItem('expandedSections');
     return saved ? JSON.parse(saved) : ['الرئيسية', 'Accueil'];
@@ -852,21 +861,21 @@ export const Layout = ({ children }) => {
         className={`
           fixed top-0 ${isRTL ? 'right-0' : 'left-0'} z-50 h-full bg-card border-e
           transform transition-all duration-300 ease-in-out
-          ${sidebarCollapsed ? 'w-16' : 'w-64'}
+          ${collapsed ? 'w-16' : 'w-64'}
           ${sidebarOpen ? 'translate-x-0' : isRTL ? 'translate-x-full' : '-translate-x-full'}
           md:translate-x-0
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo + Tenant identity */}
-          <div className={`flex items-center justify-between h-16 border-b ${sidebarCollapsed ? 'px-2' : 'px-4'}`}>
+          <div className={`flex items-center justify-between h-16 border-b ${collapsed ? 'px-2' : 'px-4'}`}>
             <div className="flex items-center gap-2 min-w-0">
               {brandLogo ? (
                 <img src={brandLogo} alt={brandName} className="h-9 w-9 rounded-lg object-cover flex-shrink-0 border" />
               ) : (
                 <Shield className="h-7 w-7 text-primary flex-shrink-0" />
               )}
-              {!sidebarCollapsed && (
+              {!collapsed && (
                 <div className="min-w-0">
                   <span className="font-bold text-base block truncate leading-tight">{brandName}</span>
                   {user?.name && (
@@ -884,7 +893,7 @@ export const Layout = ({ children }) => {
           </div>
 
           {/* Tenant user email (moved to top) */}
-          {!sidebarCollapsed && user?.email && (
+          {!collapsed && user?.email && (
             <div className="px-4 py-1.5 border-b flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground truncate">{user.email}</span>
               {isAdmin && (
@@ -895,22 +904,22 @@ export const Layout = ({ children }) => {
 
           {/* Compact control toolbar — medium icons to save space for section titles */}
           {!reorderMode && (
-            <div className={`hidden md:flex items-center border-b py-1.5 ${sidebarCollapsed ? 'flex-col gap-1 px-1' : 'justify-center gap-1 px-2'}`}>
+            <div className={`hidden md:flex items-center border-b py-1.5 ${collapsed ? 'flex-col gap-1 px-1' : 'justify-center gap-1 px-2'}`}>
               {/* Collapse / expand the whole sidebar */}
               <button
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                 className="p-2 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                title={sidebarCollapsed ? t.expandSidebar : t.collapseSidebar}
+                title={collapsed ? t.expandSidebar : t.collapseSidebar}
                 data-testid="sidebar-toggle-btn"
               >
-                {sidebarCollapsed ? (
+                {collapsed ? (
                   isRTL ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />
                 ) : (
                   isRTL ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />
                 )}
               </button>
 
-              {!sidebarCollapsed && (
+              {!collapsed && (
                 <>
                   {/* Expand all sections */}
                   <button
@@ -947,7 +956,7 @@ export const Layout = ({ children }) => {
           )}
 
           {/* Inline reorder mode */}
-          {reorderMode && !sidebarCollapsed && (
+          {reorderMode && !collapsed && (
             <div className="flex-1 overflow-hidden">
               <SidebarReorder
                 navSections={navSections}
@@ -958,7 +967,7 @@ export const Layout = ({ children }) => {
           )}
 
           {/* Navigation */}
-          {!(reorderMode && !sidebarCollapsed) && (
+          {!(reorderMode && !collapsed) && (
           <nav
             ref={navRef}
             onScroll={(e) => sessionStorage.setItem('sidebarScroll', String(e.currentTarget.scrollTop))}
@@ -967,7 +976,7 @@ export const Layout = ({ children }) => {
             {navSections.map((section) => (
               <div key={section.title} className="mb-2">
                 {/* Section Header */}
-                {!sidebarCollapsed && (
+                {!collapsed && (
                   <button
                     onClick={() => toggleSection(section.title)}
                     className="w-full flex items-center justify-between px-3 py-2 text-sm font-bold text-foreground uppercase tracking-wider hover:bg-muted/50 rounded-lg transition-colors"
@@ -981,8 +990,8 @@ export const Layout = ({ children }) => {
                 )}
                 
                 {/* Section Items */}
-                {(sidebarCollapsed || expandedSections.includes(section.title)) && (
-                  <div className={`space-y-1 ${!sidebarCollapsed ? 'mt-1 ms-2' : ''}`}>
+                {(collapsed || expandedSections.includes(section.title)) && (
+                  <div className={`space-y-1 ${!collapsed ? 'mt-1 ms-2' : ''}`}>
                     {Array.from(new Map(section.items.map(i => [i.path, i])).values()).map((item) => (
                       <Link
                         key={`${section.id || section.title}-${item.path}`}
@@ -992,18 +1001,18 @@ export const Layout = ({ children }) => {
                           isActive(item.path) 
                             ? 'bg-primary text-primary-foreground font-medium shadow-md ring-2 ring-primary/30' 
                             : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                        } ${sidebarCollapsed ? 'justify-center' : ''}`}
+                        } ${collapsed ? 'justify-center' : ''}`}
                         data-testid={`nav-${item.path.replace(/\//g, '-') || 'home'}`}
-                        title={sidebarCollapsed ? item.label : ''}
+                        title={collapsed ? item.label : ''}
                       >
                         <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.path) ? '' : 'opacity-70'}`} />
-                        {!sidebarCollapsed && <span className="truncate text-sm">{item.label}</span>}
-                        {!sidebarCollapsed && item.path === '/products' && lowStockCount > 0 && (
+                        {!collapsed && <span className="truncate text-sm">{item.label}</span>}
+                        {!collapsed && item.path === '/products' && lowStockCount > 0 && (
                           <span className="ms-auto shrink-0 h-4 min-w-4 px-1 text-[10px] font-bold bg-red-500 text-white rounded-full flex items-center justify-center">
                             {lowStockCount > 99 ? '99+' : lowStockCount}
                           </span>
                         )}
-                        {sidebarCollapsed && item.path === '/products' && lowStockCount > 0 && (
+                        {collapsed && item.path === '/products' && lowStockCount > 0 && (
                           <span className="absolute top-0.5 end-0.5 h-3 w-3 bg-red-500 rounded-full border border-card" />
                         )}
                       </Link>
@@ -1016,23 +1025,23 @@ export const Layout = ({ children }) => {
           )}
 
           {/* Logout */}
-          <div className={`p-2 border-t ${sidebarCollapsed ? 'px-2' : 'p-4'}`}>
+          <div className={`p-2 border-t ${collapsed ? 'px-2' : 'p-4'}`}>
             <Button
               variant="outline"
-              className={`w-full gap-2 ${sidebarCollapsed ? 'justify-center px-2' : 'justify-start'}`}
+              className={`w-full gap-2 ${collapsed ? 'justify-center px-2' : 'justify-start'}`}
               onClick={handleLogout}
               data-testid="logout-btn"
-              title={sidebarCollapsed ? t.logout : ''}
+              title={collapsed ? t.logout : ''}
             >
               <LogOut className="h-4 w-4 flex-shrink-0" />
-              {!sidebarCollapsed && t.logout}
+              {!collapsed && t.logout}
             </Button>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'md:ms-16' : 'md:ms-64'}`}>
+      <div className={`transition-all duration-300 ${collapsed ? 'md:ms-16' : 'md:ms-64'}`}>
         {/* Desktop Header */}
         <header className="hidden md:flex items-center justify-between h-16 px-8 bg-card/80 backdrop-blur-md border-b sticky top-0 z-40">
           {/* Search Bar - Using UnifiedSearch */}
