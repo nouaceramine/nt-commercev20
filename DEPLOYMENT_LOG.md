@@ -2104,3 +2104,8 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - البناء: main.fc6441d9.js — كل العلامات اللاتينية التسع موجودة في الحزمة ✓ — النشر release 20260816_221907
 - تحقق curl بعد النشر: 9×GET 200 ✓، flash-day تفعيل→ظهور عام في /api/shop→إيقاف ✓، wa-bot ON/OFF ✓، competitor-watch إضافة→تنبيه خفض→حذف ✓
 - backup: /opt/ntcommerce/backups/p145_offline_pos/ + p145_frontend/
+
+## p146 — حساب تجريبي دائم (2026-08-16)
+- demo@nt-commerce.net (NT-0001) خطة Enterprise، علامة is_permanent_test=true في saas_tenants — يُستثنى من أي تصفير مستقبلي
+- كلمة المرور في /root/DEMO_ACCOUNT.txt على الخادم (خارج git) وسُلّمت للمالك في المحادثة
+- تحقق: tenant-login ✓، قاعدة tenant_83c323d4... (145 مجموعة من القالب الذهبي) ✓، ecom/products/sales/smart/dashboard كلها 200 ✓
