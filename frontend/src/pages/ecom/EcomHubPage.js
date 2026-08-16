@@ -13,7 +13,8 @@ import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
 import { EcomManualOrderDialog } from './EcomManualOrderDialog';
 import { EcomOrderDetailDialog } from './EcomOrderDetailDialog';
-import { useEcomOrderNotifications, requestNotificationPermission } from '../../hooks/useEcomOrderNotifications';
+import { useEcomOrderNotifications, requestNotificationPermission, playNewOrderChime } from '../../hooks/useEcomOrderNotifications';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 
 export default function EcomHubPage() {
   const [orders, setOrders] = useState([]);
@@ -27,9 +28,14 @@ export default function EcomHubPage() {
   const [search, setSearch] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  // p139: sound works regardless of desktop-notification permission — default ON
   const [notifEnabled, setNotifEnabled] = useState(
-    typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted',
+    typeof window === 'undefined' ? true : localStorage.getItem('ecom_notif_enabled') !== '0',
   );
+  // p140: KPI drill-down dialog
+  const [kpiDrill, setKpiDrill] = useState(null); // 'today' | 'week' | 'all' | 'new'
+  const [kpiOrders, setKpiOrders] = useState([]);
+  const [kpiLoading, setKpiLoading] = useState(false);
 
   // Auto-poll for new orders + fire desktop notification when count increases.
   useEcomOrderNotifications(notifEnabled);
@@ -51,17 +57,20 @@ export default function EcomHubPage() {
   const toggleNotifications = async () => {
     if (notifEnabled) {
       setNotifEnabled(false);
-      toast.info('تم إيقاف تنبيهات سطح المكتب');
+      localStorage.setItem('ecom_notif_enabled', '0');
+      toast.info('تم إيقاف تنبيهات الطلبات الجديدة');
       return;
     }
+    setNotifEnabled(true);
+    localStorage.setItem('ecom_notif_enabled', '1');
+    playNewOrderChime();  // p139: confirm sound works immediately
     const { granted, reason } = await requestNotificationPermission();
     if (granted) {
-      setNotifEnabled(true);
-      toast.success('✅ سيتم تنبيهك تلقائياً عند وصول طلب جديد');
+      toast.success('✅ سيتم تنبيهك صوتياً وعلى سطح المكتب عند وصول طلب جديد');
     } else if (reason === 'denied') {
-      toast.error('الإذن مرفوض من المتصفح — فعّله من إعدادات الموقع.');
-    } else if (reason === 'unsupported') {
-      toast.error('متصفحك لا يدعم تنبيهات سطح المكتب.');
+      toast.success('✅ التنبيه الصوتي مُفعَّل — تنبيه سطح المكتب مرفوض من المتصفح');
+    } else {
+      toast.success('✅ التنبيه الصوتي مُفعَّل');
     }
   };
 
@@ -104,6 +113,41 @@ export default function EcomHubPage() {
       loadAll();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'فشل تسجيل المحاولة');
+    }
+  };
+
+  const quickSetDeliveryType = async (orderId, dt) => {  // p138
+    try {
+      await apiClient.put(`/ecom/orders/${orderId}`, { delivery_type: dt });
+      toast.success(dt === 'office' ? '🏢 التوصيل: مكتب (stopdesk)' : '🏠 التوصيل: باب المنزل');
+      loadAll();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل تحديث نوع التوصيل');
+    }
+  };
+
+  // p140: KPI drill-down — load the orders behind a stat card
+  const KPI_DRILLS = {
+    today: { title: 'طلبات اليوم', params: () => ({ since: new Date(new Date().setHours(0, 0, 0, 0)).toISOString() }) },
+    week:  { title: 'طلبات آخر 7 أيام', params: () => ({ since: new Date(Date.now() - 7 * 864e5).toISOString() }) },
+    all:   { title: 'إجمالي الطلبات', params: () => ({}) },
+    new:   { title: 'طلبات جديدة — بانتظار التأكيد', params: () => ({ status: 'new' }) },
+  };
+
+  const openKpiDrill = async (key) => {
+    setKpiDrill(key);
+    setKpiLoading(true);
+    setKpiOrders([]);
+    try {
+      const p = new URLSearchParams({ limit: '100' });
+      const extra = KPI_DRILLS[key].params();
+      Object.entries(extra).forEach(([k, v]) => p.append(k, v));
+      const res = await apiClient.get(`/ecom/orders?${p.toString()}`);
+      setKpiOrders(res.data.items || []);
+    } catch {
+      toast.error('فشل تحميل الطلبات');
+    } finally {
+      setKpiLoading(false);
     }
   };
 
@@ -175,28 +219,28 @@ export default function EcomHubPage() {
         {/* KPI cards */}
         {summary && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card className="border-emerald-200">
+            <Card className="border-emerald-200 cursor-pointer hover:shadow-md transition-shadow" onClick={() => openKpiDrill('today')} data-testid="kpi-today-card">
               <CardContent className="p-4">
                 <div className="text-xs text-muted-foreground">طلبات اليوم</div>
                 <div className="text-2xl font-bold text-emerald-700">{summary.today.count}</div>
                 <div className="text-xs text-emerald-600">{summary.today.revenue.toLocaleString()} دج</div>
               </CardContent>
             </Card>
-            <Card className="border-blue-200">
+            <Card className="border-blue-200 cursor-pointer hover:shadow-md transition-shadow" onClick={() => openKpiDrill('week')} data-testid="kpi-week-card">
               <CardContent className="p-4">
                 <div className="text-xs text-muted-foreground">آخر 7 أيام</div>
                 <div className="text-2xl font-bold text-blue-700">{summary.last_7_days.count}</div>
                 <div className="text-xs text-blue-600">{summary.last_7_days.revenue.toLocaleString()} دج</div>
               </CardContent>
             </Card>
-            <Card className="border-violet-200">
+            <Card className="border-violet-200 cursor-pointer hover:shadow-md transition-shadow" onClick={() => openKpiDrill('all')} data-testid="kpi-all-card">
               <CardContent className="p-4">
                 <div className="text-xs text-muted-foreground">إجمالي الطلبات</div>
                 <div className="text-2xl font-bold text-violet-700">{summary.total_all_time}</div>
                 <div className="text-xs text-muted-foreground">منذ التأسيس</div>
               </CardContent>
             </Card>
-            <Card className="border-amber-200">
+            <Card className="border-amber-200 cursor-pointer hover:shadow-md transition-shadow" onClick={() => openKpiDrill('new')} data-testid="kpi-new-card">
               <CardContent className="p-4">
                 <div className="text-xs text-muted-foreground">طلبات جديدة</div>
                 <div className="text-2xl font-bold text-amber-700">{summary.by_status?.new || 0}</div>
@@ -224,7 +268,22 @@ export default function EcomHubPage() {
                       {q.trust === 'risk' && <Badge className="bg-red-100 text-red-700">🔴 مُرجِع</Badge>}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {q.wilaya} · {Number(q.total).toLocaleString()} دج · منذ {q.age_hours} س · محاولات: {q.attempts}{q.last_result ? ` (آخرها: ${q.last_result})` : ''}{q.reasons.length > 0 ? ` · ${q.reasons.join('، ')}` : ''}
+                      {[q.wilaya, q.city, q.address].filter(Boolean).join(' · ') || '—'} · {Number(q.total).toLocaleString()} دج · منذ {q.age_hours} س · محاولات: {q.attempts}{q.last_result ? ` (آخرها: ${q.last_result})` : ''}{q.reasons.length > 0 ? ` · ${q.reasons.join('، ')}` : ''}
+                    </div>
+                    {/* p138: نوع التوصيل — مكتب أم باب المنزل */}
+                    <div className="flex items-center gap-1 mt-1">
+                      <Button
+                        size="sm" variant={(q.delivery_type || 'home') === 'home' ? 'default' : 'outline'}
+                        className="h-6 text-[11px] px-2"
+                        onClick={() => quickSetDeliveryType(q.id, 'home')}
+                        data-testid={`callq-dt-home-${q.order_code}`}
+                      >🏠 باب المنزل</Button>
+                      <Button
+                        size="sm" variant={q.delivery_type === 'office' ? 'default' : 'outline'}
+                        className="h-6 text-[11px] px-2"
+                        onClick={() => quickSetDeliveryType(q.id, 'office')}
+                        data-testid={`callq-dt-office-${q.order_code}`}
+                      >🏢 مكتب</Button>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-wrap">
@@ -354,6 +413,12 @@ export default function EcomHubPage() {
                           <td className="p-2">
                             <div className="font-medium">{o.customer?.name || '—'}</div>
                             {o.customer?.phone && <div className="text-xs text-muted-foreground">{o.customer.phone}</div>}
+                            {(o.customer?.wilaya || o.customer?.city) && (
+                              <div className="text-xs text-muted-foreground">
+                                {[o.customer?.wilaya, o.customer?.city].filter(Boolean).join(' · ')}
+                                {o.delivery_type === 'office' ? ' · 🏢' : o.delivery_type === 'home' ? ' · 🏠' : ''}
+                              </div>
+                            )}
                             {o.blacklist?.flagged && (
                               <Badge className="bg-red-100 text-red-700 mt-1" data-testid="blacklist-badge">
                                 ⚠ {o.blacklist.manual ? 'محظور' : `مُرجِع ×${o.blacklist.returned_count}`}
@@ -422,6 +487,47 @@ export default function EcomHubPage() {
         order={selectedOrder}
         onUpdated={refreshOrder}
       />
+
+      {/* p140: KPI drill-down — orders behind each stat card */}
+      <Dialog open={!!kpiDrill} onOpenChange={(v) => !v && setKpiDrill(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl" data-testid="kpi-drill-dialog">
+          <DialogHeader>
+            <DialogTitle>{kpiDrill ? KPI_DRILLS[kpiDrill].title : ''}</DialogTitle>
+          </DialogHeader>
+          {kpiLoading ? (
+            <div className="text-center py-10 text-muted-foreground">جارٍ التحميل...</div>
+          ) : kpiOrders.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground">لا توجد طلبات مطابقة</div>
+          ) : (
+            <div className="space-y-2">
+              {kpiOrders.map((o) => {
+                const stMeta = ORDER_STATUSES[o.status] || ORDER_STATUSES.new;
+                const chMeta = CHANNELS[o.channel] || CHANNELS.manual;
+                return (
+                  <button
+                    key={o.id}
+                    className="w-full text-right border rounded-lg p-3 hover:bg-muted/30 transition-colors"
+                    onClick={() => { setKpiDrill(null); setSelectedOrder(o); }}
+                    data-testid={`kpi-drill-order-${o.order_code}`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs">{o.order_code}</span>
+                        <span className="font-medium">{o.customer?.name || '—'}</span>
+                        <span className="text-xs text-muted-foreground" dir="ltr">{o.customer?.phone}</span>
+                      </div>
+                      <Badge className={stMeta.color}>{stMeta.labelAr}</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {chMeta.icon} {chMeta.labelAr} · {[o.customer?.wilaya, o.customer?.city, o.customer?.address].filter(Boolean).join(' · ') || '—'} · {Number(o.total).toLocaleString()} دج · {new Date(o.created_at).toLocaleDateString('ar-DZ')}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

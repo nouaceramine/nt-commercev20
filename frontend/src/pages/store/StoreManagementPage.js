@@ -274,6 +274,16 @@ export default function StoreManagementPage() {
     }
   };
 
+  const updateDeliveryType = async (orderId, dt) => {  // p138
+    try {
+      await apiClient.put(`/store/orders/${orderId}/delivery-type`, { delivery_type: dt });
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, delivery_type: dt } : o));
+      toast.success(language === 'ar' ? 'تم تحديث نوع التوصيل' : 'Delivery type updated');
+    } catch (error) {
+      toast.error(language === 'ar' ? 'فشل تحديث نوع التوصيل' : 'Failed to update delivery type');
+    }
+  };
+
   const generateSlug = (name) => {
     return name
       .toLowerCase()
@@ -971,6 +981,19 @@ export default function StoreManagementPage() {
                                   <SelectItem value="shipped">{language === 'ar' ? 'تم الشحن' : 'Shipped'}</SelectItem>
                                   <SelectItem value="delivered">{language === 'ar' ? 'تم التوصيل' : 'Delivered'}</SelectItem>
                                   <SelectItem value="cancelled">{language === 'ar' ? 'ملغي' : 'Cancelled'}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {/* p138: نوع التوصيل — مكتب أم باب المنزل */}
+                              <Select
+                                value={order.delivery_type || 'home'}
+                                onValueChange={(dt) => updateDeliveryType(order.id, dt)}
+                              >
+                                <SelectTrigger className="w-32 mt-1" data-testid={`store-dt-${order.order_number}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="home">{language === 'ar' ? '🏠 باب المنزل' : '🏠 Home'}</SelectItem>
+                                  <SelectItem value="office">{language === 'ar' ? '🏢 مكتب' : '🏢 Office'}</SelectItem>
                                 </SelectContent>
                               </Select>
                             </TableCell>

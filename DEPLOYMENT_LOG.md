@@ -2034,3 +2034,24 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 
 ## p137 — فحص OWASP ZAP baseline (2026-08-16)
 الفحص الأول: 0 FAIL / 8 WARN — أبرزها غياب CSP. أُضيف Content-Security-Policy لـ snippets/ntc-security-headers.conf. إعادة الفحص: **0 FAIL / 58 PASS** والتحذيرات الباقية معلوماتية (cacheable content, SRI للـ CDN, COEP). التقرير: docs/security/zap_baseline_2026-08-16.log.
+
+## p138-p140 — ecom-hub: معلومات الزبون + نوع التوصيل + صوت الطلبات + بطاقات KPI تفاعلية (2026-08-16)
+
+### p138 — الولاية/البلدية/العنوان + نوع التوصيل (مكتب/باب المنزل)
+- قبل: قائمة التأكيد (call-queue) تعرض الولاية فقط؛ لا يوجد حقل delivery_type في ecom_orders؛ لا يمكن تغيير نوع التوصيل.
+- بعد:
+  - backend/routes/ecom/orders_routes.py: call-queue يُرجع city + address + delivery_type؛ PUT /ecom/orders/{id} يقبل delivery_type (home|office، 400 لغيرها) ويزامنه إلى store_orders المتوأم.
+  - backend/routes/online_store_routes.py: ecom_doc يحفظ delivery_type عند إنشاء طلب webstore؛ endpoint جديد PUT /store/orders/{id}/delivery-type مع مزامنة عكسية إلى ecom_orders.
+  - frontend EcomHubPage: صف قائمة التأكيد يعرض ولاية·بلدية·عنوان + زرّا 🏠 باب المنزل / 🏢 مكتب؛ جدول الطلبات الموحَّد يعرض الولاية·البلدية + أيقونة نوع التوصيل.
+  - frontend StoreManagementPage (/store orders): عمود الزبون يعرض الولاية·البلدية·العنوان؛ قائمة منسدلة لنوع التوصيل تحت حالة الطلب.
+- اختبار curl: PUT ecom → 200 + mirror في store_orders ✓؛ PUT store → 200 + mirror في ecom_orders ✓؛ قيمة غير صالحة → 400 ✓ (الاتجاهان).
+- backup: /opt/ntcommerce/backups/p138_ecom_delivery/
+
+### p139 — إصلاح أصوات الطلبات الجديدة
+- السبب الجذري: useEcomOrderNotifications لم يكن فيه أي صوت إطلاقاً، وكان يخرج مبكراً إن لم يكن إذن Notification ممنوحاً (لا polling أصلاً).
+- بعد: رنين WebAudio ثنائي النغمة (playNewOrderChime) يعمل بغض النظر عن إذن الإشعارات؛ فكّ قفل AudioContext عند أول نقرة (سياسة autoplay)؛ التنبيه مُفعَّل افتراضياً (localStorage ecom_notif_enabled)؛ إشعار سطح المكتب يُرسَل فقط عند منح الإذن؛ زر التفعيل يعزف الرنين فوراً للتأكيد.
+
+### p140 — بطاقات KPI قابلة للنقر
+- قبل: البطاقات الأربع (طلبات اليوم / آخر 7 أيام / الإجمالي / جديدة) عرض فقط.
+- بعد: النقر يفتح Dialog يعرض الطلبات المصفّاة (since=اليوم / since=7 أيام / الكل / status=new) عبر GET /ecom/orders، والنقر على طلب يفتح تفاصيله.
+- النشر: release 20260816_203309، main.d212db89.js — تم التحقق علناً عبر curl.

@@ -595,8 +595,22 @@ async def update_order(order_id: str, body: dict, user: dict = Depends(require_t
             updates["packaging_cost"] = max(0.0, float(body.get("packaging_cost") or 0))
         except (TypeError, ValueError):
             pass
+    if "delivery_type" in body:  # p138: مكتب (office/stopdesk) أم باب المنزل (home)
+        dt = (body.get("delivery_type") or "").strip()
+        if dt not in ("home", "office"):
+            raise HTTPException(status_code=400, detail="نوع التوصيل غير صالح — المسموح: home أو office")
+        updates["delivery_type"] = dt
 
     await db.ecom_orders.update_one({"id": order_id}, {"$set": updates})
+    # p138: mirror delivery type to the webstore twin so /store orders stays in sync
+    if "delivery_type" in updates and order.get("channel") == "webstore" and order.get("external_id"):
+        try:
+            await db.store_orders.update_one(
+                {"id": order["external_id"]},
+                {"$set": {"delivery_type": updates["delivery_type"]}},
+            )
+        except Exception as _me:  # noqa: BLE001
+            logger.warning("p138 store_orders delivery_type mirror failed: %s", _me)
     refreshed = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
     return refreshed
 

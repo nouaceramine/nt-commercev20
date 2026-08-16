@@ -453,6 +453,29 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             pass
         return {"message": "تم تحديث حالة الطلب"}
 
+    @router.put("/store/orders/{order_id}/delivery-type")
+    async def update_store_order_delivery_type(order_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+        """p138: نوع التوصيل — مكتب (office/stopdesk) أم باب المنزل (home)، مع مزامنة صندوق الطلبات الموحَّد."""
+        dt = (data.get("delivery_type") or "").strip()
+        if dt not in ("home", "office"):
+            raise HTTPException(status_code=400, detail="نوع التوصيل غير صالح — المسموح: home أو office")
+        order = await db.store_orders.find_one({"id": order_id})
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        now = datetime.now(timezone.utc).isoformat()
+        await db.store_orders.update_one(
+            {"id": order_id},
+            {"$set": {"delivery_type": dt, "updated_at": now}}
+        )
+        try:
+            await db.ecom_orders.update_one(
+                {"channel": "webstore", "external_id": order_id},
+                {"$set": {"delivery_type": dt, "updated_at": now}}
+            )
+        except Exception:
+            pass
+        return {"message": "تم تحديث نوع التوصيل", "delivery_type": dt}
+
     # Public store endpoints (no auth required)
     # ── تقديم صور المنتجات العامة محسّنة (JPEG مصغّر + كاش) ──
     # الصور تُخزَّن base64 في قاعدة البيانات؛ إرسالها داخل JSON يجعل الصفحة بيضاء
@@ -755,6 +778,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 "subtotal": ecom_sub, "shipping_fee": ecom_ship, "total": round(ecom_sub + ecom_ship, 2),
                 "notes": order.notes or "",
                 "tags": [],
+                "delivery_type": getattr(order, "delivery_type", "home") or "home",  # p138: home | office
                 "shipping_label_id": None, "tracking_number": None, "courier": None,
                 "inventory_deducted": True,
                 "utm": order_data["utm"], "utm_source": order_data["utm_source"],

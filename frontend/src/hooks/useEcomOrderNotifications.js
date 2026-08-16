@@ -1,9 +1,13 @@
 /**
- * useEcomOrderNotifications — Polls /api/ecom/orders/summary every 30s and fires
- * a desktop notification when the "new" orders counter increases.
+ * useEcomOrderNotifications — Polls /api/ecom/orders/summary every 30s and, when the
+ * "new" orders counter increases, plays a sound chime (always) plus a desktop
+ * notification (when permission is granted).
  *
- * Lightweight: only runs while the hook is mounted (i.e. while user is on /ecom-hub),
- * stores last-seen counter in localStorage so we don't re-notify after a reload.
+ * p139 fix: previously the hook returned early unless Notification.permission ===
+ * 'granted', so no polling — and there was no audio at all. Sound now works
+ * independently of desktop-notification permission. Browsers require a user gesture
+ * before audio can play, so we lazily unlock the AudioContext on the first
+ * pointerdown/keydown anywhere on the page.
  */
 import { useEffect, useRef } from 'react';
 import apiClient from '../lib/apiClient';
@@ -11,14 +15,54 @@ import apiClient from '../lib/apiClient';
 const STORAGE_KEY = 'ecom_last_new_count';
 const POLL_INTERVAL_MS = 30_000;
 
+let _audioCtx = null;
+function getAudioCtx() {
+  if (typeof window === 'undefined') return null;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!_audioCtx) _audioCtx = new AC();
+  if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+  return _audioCtx;
+}
+
+/** Pleasant two-tone chime via WebAudio — no asset file needed. */
+export function playNewOrderChime() {
+  try {
+    const ctx = getAudioCtx();
+    if (!ctx || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    [
+      { f: 880, t: 0 },      // A5
+      { f: 1318.5, t: 0.18 }, // E6
+    ].forEach(({ f, t }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      gain.gain.setValueAtTime(0.0001, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.25, now + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.45);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + 0.5);
+    });
+  } catch {
+    /* audio is best-effort */
+  }
+}
+
 export function useEcomOrderNotifications(enabled = true) {
   const lastCountRef = useRef(parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10));
   const timerRef = useRef(null);
 
   useEffect(() => {
     if (!enabled) return;
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
+    if (typeof window === 'undefined') return;
+
+    // Unlock WebAudio on the first user gesture (browser autoplay policy).
+    const unlock = () => { getAudioCtx(); };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
 
     const tick = async () => {
       try {
@@ -27,19 +71,22 @@ export function useEcomOrderNotifications(enabled = true) {
         const previous = lastCountRef.current;
         if (newCount > previous && previous > 0) {
           const delta = newCount - previous;
-          new Notification('🛍️ طلب جديد في صندوقك', {
-            body: delta === 1
-              ? 'وصل طلب جديد — افتح صندوق الطلبات لمتابعته.'
-              : `وصل ${delta} طلب جديد — افتح صندوق الطلبات لمتابعتها.`,
-            tag: 'ecom-new-orders',
-            requireInteraction: false,
-            icon: '/favicon.ico',
-          });
+          playNewOrderChime();
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('🛍️ طلب جديد في صندوقك', {
+              body: delta === 1
+                ? 'وصل طلب جديد — افتح صندوق الطلبات لمتابعته.'
+                : `وصل ${delta} طلب جديد — افتح صندوق الطلبات لمتابعتها.`,
+              tag: 'ecom-new-orders',
+              requireInteraction: false,
+              icon: '/favicon.ico',
+            });
+          }
         }
         lastCountRef.current = newCount;
         localStorage.setItem(STORAGE_KEY, String(newCount));
       } catch {
-        /* silent — quotation polling failure is not user-visible */
+        /* silent — polling failure is not user-visible */
       }
     };
 
@@ -48,6 +95,8 @@ export function useEcomOrderNotifications(enabled = true) {
     timerRef.current = setInterval(tick, POLL_INTERVAL_MS);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
     };
   }, [enabled]);
 }
