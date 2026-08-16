@@ -17,6 +17,7 @@ import { useEcomOrderNotifications, requestNotificationPermission } from '../../
 
 export default function EcomHubPage() {
   const [orders, setOrders] = useState([]);
+  const [callQueue, setCallQueue] = useState([]);  // p108
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [integrations, setIntegrations] = useState([]);
@@ -72,11 +73,13 @@ export default function EcomHubPage() {
       if (channelFilter !== 'all') params.append('channel', channelFilter);
       if (search.trim()) params.append('search', search.trim());
 
-      const [ordersRes, summaryRes, integrationsRes] = await Promise.all([
+      const [ordersRes, summaryRes, integrationsRes, cqRes] = await Promise.all([
         apiClient.get(`/ecom/orders?${params.toString()}`),
         apiClient.get('/ecom/orders/summary'),
         apiClient.get('/ecom/integrations'),
+        apiClient.get('/ecom/call-queue').catch(() => ({ data: null })),  // p108
       ]);
+      setCallQueue(cqRes?.data?.queue || []);  // p108
       setOrders(ordersRes.data.items || []);
       setTotal(ordersRes.data.total || 0);
       setSummary(summaryRes.data);
@@ -93,6 +96,16 @@ export default function EcomHubPage() {
   }, [activeStatus, channelFilter, search]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  const quickCallResult = async (orderId, result) => {  // p108
+    try {
+      await apiClient.post(`/ecom/orders/${orderId}/call-attempt`, { result });
+      toast.success(result === 'confirmed' ? 'تم تأكيد الطلب ✓' : result === 'cancelled_by_phone' ? 'أُلغي الطلب' : 'سُجّلت المحاولة');
+      loadAll();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل تسجيل المحاولة');
+    }
+  };
 
   const refreshOrder = async () => {
     if (!selectedOrder) return;
@@ -191,6 +204,42 @@ export default function EcomHubPage() {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {/* p108: call center queue */}
+        {callQueue.length > 0 && (
+          <Card data-testid="call-queue-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">📞 مركز الاتصال — قائمة التأكيد ({callQueue.length})</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {callQueue.slice(0, 10).map(q => (
+                <div key={q.id} className={`border rounded-lg p-2 text-sm flex items-center justify-between gap-2 flex-wrap ${q.urgent ? 'border-red-300 bg-red-50/40' : ''}`} data-testid={`callq-row-${q.order_code}`}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold">{q.order_code}</span>
+                      <span>{q.customer_name}</span>
+                      <a href={`tel:${q.phone}`} className="text-emerald-700 underline font-semibold" dir="ltr">{q.phone}</a>
+                      {q.urgent && <Badge className="bg-red-100 text-red-700">عاجل</Badge>}
+                      {q.trust === 'risk' && <Badge className="bg-red-100 text-red-700">🔴 مُرجِع</Badge>}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {q.wilaya} · {Number(q.total).toLocaleString()} دج · منذ {q.age_hours} س · محاولات: {q.attempts}{q.last_result ? ` (آخرها: ${q.last_result})` : ''}{q.reasons.length > 0 ? ` · ${q.reasons.join('، ')}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <a href={`https://wa.me/${String(q.phone || '').replace(/\D/g, '').replace(/^0+/, '213')}`} target="_blank" rel="noreferrer">
+                      <Button size="sm" variant="outline" className="h-7 text-xs" data-testid="callq-wa-btn">💬</Button>
+                    </a>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => quickCallResult(q.id, 'no_answer')} data-testid="callq-noanswer-btn">لم يردّ</Button>
+                    <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700" onClick={() => quickCallResult(q.id, 'confirmed')} data-testid="callq-confirm-btn">✓ تأكيد</Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs text-red-700" onClick={() => quickCallResult(q.id, 'cancelled_by_phone')} data-testid="callq-cancel-btn">✕ إلغاء</Button>
+                  </div>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">مرتَّبة حسب الأولوية: الأقدم والأعلى قيمة والأخطر أولاً. «تأكيد/إلغاء» تمرّ عبر آلة الحالات تلقائياً (القيود والمخزون).</p>
+            </CardContent>
+          </Card>
         )}
 
         {/* Per-channel breakdown */}

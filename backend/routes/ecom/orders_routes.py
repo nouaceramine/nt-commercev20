@@ -624,3 +624,68 @@ async def customer_lookup(phone: str = "", user: dict = Depends(require_tenant))
     """p100: cross-tenant trust score for a phone number (aggregate network counters only)."""
     from services.application.ecom_order_service import get_network_trust
     return await get_network_trust(phone)
+
+
+# ============ p108: مركز الاتصال — قائمة أولويات التأكيد ============
+
+@router.get("/ecom/call-queue")
+async def call_queue(user: dict = Depends(require_tenant)):
+    """p108: طلبات بانتظار تأكيد هاتفي، مرتَّبة حسب الأولوية:
+    الأقدم + الأعلى قيمة + بلا محاولات + عوامل الخطر (شبكة المُرجِعين، مراجعة)."""
+    await require_ecom_feature(user)
+    orders = await db.ecom_orders.find(
+        {"status": {"$in": ["new", "awaiting_confirmation", "needs_review"]}},
+        {"_id": 0, "id": 1, "order_code": 1, "status": 1, "total": 1, "created_at": 1,
+         "customer": 1, "items": 1, "confirmation_attempts": 1, "network_trust": 1},
+    ).to_list(500)
+    now = datetime.now(timezone.utc)
+    rows = []
+    for o in orders:
+        try:
+            created = datetime.fromisoformat(str(o.get("created_at") or "").replace("Z", "+00:00"))
+            age_h = round(max((now - created).total_seconds() / 3600, 0), 1)
+        except Exception:  # noqa: BLE001
+            age_h = 0.0
+        attempts = o.get("confirmation_attempts") or []
+        trust = (o.get("network_trust") or {}).get("trust")
+        score = age_h * 2 + float(o.get("total") or 0) / 1000.0
+        reasons = []
+        if not attempts:
+            score += 10
+            reasons.append("لم يُتصل به بعد")
+        if o.get("status") == "awaiting_confirmation":
+            score += 8
+            reasons.append("بانتظار تأكيد الزبون")
+        if o.get("status") == "needs_review":
+            score += 8
+            reasons.append("يحتاج مراجعة")
+        if trust == "risk":
+            score += 15
+            reasons.append("مُرجِع متسلسل")
+        elif trust == "warn":
+            score += 5
+            reasons.append("سجل إرجاع سابق")
+        if len(attempts) >= 3:
+            score += 10
+            reasons.append("3+ محاولات — قرر: تأكيد أو إلغاء")
+        last = attempts[-1] if attempts else {}
+        cust = o.get("customer") or {}
+        rows.append({
+            "id": o.get("id"),
+            "order_code": o.get("order_code") or "",
+            "status": o.get("status"),
+            "customer_name": cust.get("name") or "",
+            "phone": cust.get("phone") or "",
+            "wilaya": cust.get("wilaya") or cust.get("city") or "",
+            "total": float(o.get("total") or 0),
+            "items_count": sum(int(i.get("qty") or 1) for i in (o.get("items") or [])),
+            "age_hours": age_h,
+            "attempts": len(attempts),
+            "last_result": last.get("result_ar"),
+            "trust": trust,
+            "score": round(score, 1),
+            "reasons": reasons,
+            "urgent": score >= 30,
+        })
+    rows.sort(key=lambda r: -r["score"])
+    return {"queue": rows[:50], "count": len(rows)}

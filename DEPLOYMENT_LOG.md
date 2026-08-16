@@ -1802,3 +1802,20 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 
 ### نشر
 - main.7748d550.js — cp -r فقط — backup: /opt/ntcommerce/backups/p107_cart_recovery/
+
+---
+
+## p108 — مركز اتصال للمؤكدين (2026-08-16)
+
+### قبل
+- تسجيل محاولات الاتصال موجود (p79) داخل تفاصيل الطلب فقط — لا توجد قائمة عمل تجيب: «من أتصل به الآن؟».
+
+### بعد
+- **Backend** (`orders_routes.py`): `GET /ecom/call-queue` — طلبات new/awaiting_confirmation/needs_review مرتَّبة بأولوية = عمر×2 + قيمة/1000 + بلا محاولات(+10) + بانتظار تأكيد(+8) + مراجعة(+8) + مُرجِع شبكة(+15) + 3+ محاولات(+10)؛ مع الأسباب وشارة عاجل (score≥30).
+- **Frontend** (`EcomHubPage.js`): بطاقة call-queue-card أعلى صفحة الطلبات — هاتف (tel:)، واتساب (wa.me)، أزرار سريعة: لم يردّ / ✓ تأكيد / ✕ إلغاء (تمر عبر call-attempt → آلة الحالات تلقائياً).
+
+### اختبار curl
+- الترتيب بالأولوية ✓ (طلب حقيقي عمره 84 ساعة في القمة) · تأكيد سريع عبر call-attempt → الطلب غادر القائمة (new_status: confirmed) ✓ · بيانات الاختبار نُظّفت ✓
+
+### نشر
+- main.d97a3092.js — cp -r فقط — backup: /opt/ntcommerce/backups/p108_call_center/
