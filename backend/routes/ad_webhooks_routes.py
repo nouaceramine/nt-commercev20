@@ -32,10 +32,11 @@ def _extract_fields(field_data: list) -> dict:
     return out
 
 
-def create_ad_webhooks_routes(db, main_db, get_current_user) -> APIRouter:
+def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["ad-lead-webhooks"])
 
-    async def _handle_lead(source: str, request: Request, secret_env: str, sig_header: str, prefix: str = "sha256="):
+    async def _handle_lead(source: str, request: Request, secret_env: str, sig_header: str, prefix: str = "sha256=", target_db=None):
+        tdb = target_db if target_db is not None else db  # p95b: tenant-scoped writes
         raw = await request.body()
         secret = os.environ.get(secret_env, "")
         if secret:
@@ -72,14 +73,14 @@ def create_ad_webhooks_routes(db, main_db, get_current_user) -> APIRouter:
             "raw": {k: v for k, v in fields.items() if k not in ("raw",)},
             "created_at": now,
         }
-        await db.leads.insert_one(dict(lead))
+        await tdb.leads.insert_one(dict(lead))
 
         # Add to customers if new (by phone)
         customer_created = False
         if phone:
-            existing = await db.customers.find_one({"phone": phone}, {"_id": 0, "id": 1})
+            existing = await tdb.customers.find_one({"phone": phone}, {"_id": 0, "id": 1})
             if not existing:
-                await db.customers.insert_one({
+                await tdb.customers.insert_one({
                     "id": str(uuid.uuid4()),
                     "name": name or f"زبون {source}",
                     "phone": phone,
@@ -92,7 +93,7 @@ def create_ad_webhooks_routes(db, main_db, get_current_user) -> APIRouter:
                 customer_created = True
 
         # Notification for admins
-        await db.notifications.insert_one({
+        await tdb.notifications.insert_one({
             "id": str(uuid.uuid4()),
             "type": "info",
             "title": f"Lead جديد من {source}",
@@ -120,6 +121,21 @@ def create_ad_webhooks_routes(db, main_db, get_current_user) -> APIRouter:
     @router.post("/tiktok-leads")
     async def tiktok_leads(request: Request):
         return await _handle_lead("tiktok", request, "TIKTOK_APP_SECRET", "X-Tt-Signature")
+
+    # ── p95b: tenant-scoped variants — leads land in the tenant DB the UI lists ──
+    @router.post("/facebook-leads/{tenant_id}")
+    async def facebook_leads_tenant(tenant_id: str, request: Request):
+        tdb = get_tenant_db(tenant_id) if get_tenant_db else db
+        return await _handle_lead("facebook", request, "FB_APP_SECRET", "X-Hub-Signature-256", target_db=tdb)
+
+    @router.get("/facebook-leads/{tenant_id}")
+    async def facebook_verify_tenant(tenant_id: str, request: Request):
+        return await facebook_verify(request)
+
+    @router.post("/tiktok-leads/{tenant_id}")
+    async def tiktok_leads_tenant(tenant_id: str, request: Request):
+        tdb = get_tenant_db(tenant_id) if get_tenant_db else db
+        return await _handle_lead("tiktok", request, "TIKTOK_APP_SECRET", "X-Tt-Signature", target_db=tdb)
 
     # ── Admin: leads list + webhook config status ──
     @router.get("/leads")

@@ -1641,3 +1641,20 @@ services/autoheal_service.py.bak.p55, core/error_handler.py.bak.p55
 - اختبار حي: GET /ecom/integrations (NT-0011) → yalidine | kind=shipping | live | return_fee=0 → ستظهر في البطاقة الجديدة وتُخفى من قنوات البيع.
 
 Backup: /opt/ntcommerce/backups/p94_couriers_to_shipping/
+
+## p95 — دليل إعداد Webhooks العملاء المحتملين + توسعة شركات الشحن الجزائرية (2026-08-16)
+
+**الطلب**: (1) خطوات إعداد Webhooks العملاء المحتملين (فيسبوك/تيك توك) في /ecom-hub/channels؛ (2) صفحة /ecom-hub/shipping/companies لا تعرض كل شركات الشحن الجزائرية.
+
+**قبل**: بطاقة LeadWebhooksCard تعرض الرابطين وشارات HMAC وآخر العملاء دون أي شرح للإعداد. قائمة شركات الشحن 7 فقط. علاوة على ذلك: روابط الويبهوك العمومية /webhooks/{facebook,tiktok}-leads تكتب في القاعدة الرئيسية بينما GET /webhooks/leads يقرأ قاعدة المستأجر — أي أن العملاء القادمين فعلياً لن يظهروا في الواجهة أبداً (خلل قائم).
+
+**بعد**:
+- backend/shipping_loyalty_routes.py: ALGERIAN_SHIPPING_COMPANIES من 7 إلى 17 شركة (+نوست إكسبريس، أندرسون، مايلرز، إيكوم ديليفري، إيلوجيستيا، ياليتيك، DHD، كونيكسلوغ، كويوت إكسبريس، بريد الجزائر EMS) + أسعار تقديرية لكل شركة في calculate-rate + رفع حد to_list الإعدادات إلى 100.
+- backend/ad_webhooks_routes.py: روابط جديدة مرتبطة بالمستأجر POST/GET /webhooks/facebook-leads/{tenant_id} و POST /webhooks/tiktok-leads/{tenant_id} تكتب عبر get_tenant_db في قاعدة المستأجر (العملاء + الزبائن + الإشعارات). الروابط القديمة بلا tenant_id تبقى تعمل (كتابة في القاعدة الرئيسية) للتوافق.
+- frontend/EcomChannelsPage.js: بطاقة Webhooks العملاء المحتملين تعرض الآن الرابطين مع tenant_id، وقسم «📖 خطوات الإعداد» القابل للطي (webhook-guide / guide-facebook / guide-tiktok): فيسبوك 6 خطوات (تطبيق ميتا، Webhooks/Page، Callback+Verify Token، حقل leadgen، وسيط Make/Zapier لجلب field_data، FB_APP_SECRET، أداة الاختبار) وتيك توك 5 خطوات (حملة Lead Generation، Custom Webhook يرسل البيانات مباشرة، TIKTOK_APP_SECRET، Test Lead).
+- اختبارات حية: POST tiktok-tenant → lead+customer في قاعدة NT-0011 ✓، GET /webhooks/leads يراه ✓، handshake فيسبوك يرفض رمزاً خاطئاً 403 ✓، فحص عبر الدومين العام ✓ (بيانات الاختبار حُذفت). GET /shipping/companies → 17 شركة ✓.
+- الحزمة: main.b5bec3a1.js (cp -r دون حذف القديمة).
+
+ملاحظة: FB_VERIFY_TOKEN/FB_APP_SECRET/TIKTOK_APP_SECRET غير مضبوطة في backend.env — الويبهوك يعمل بوضع التطوير حتى ضبطها.
+
+Backup: /opt/ntcommerce/backups/p95_webhooks_guide_companies/

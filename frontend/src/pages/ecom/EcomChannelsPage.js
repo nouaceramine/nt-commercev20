@@ -90,10 +90,12 @@ function LeadWebhooksCard() {
   const [leads, setLeads] = useState([]);
   const [config, setConfig] = useState(null);
   const [copied, setCopied] = useState('');
+  const { user } = useAuth();
   const origin = window.location.origin;
+  const tid = user?.tenant_id || '';
   const hooks = [
-    { key: 'facebook', label: 'فيسبوك Lead Ads', url: `${origin}/api/webhooks/facebook-leads`, color: 'bg-blue-100 text-blue-700' },
-    { key: 'tiktok', label: 'تيك توك Lead Generation', url: `${origin}/api/webhooks/tiktok-leads`, color: 'bg-pink-100 text-pink-700' },
+    { key: 'facebook', label: 'فيسبوك Lead Ads', url: `${origin}/api/webhooks/facebook-leads/${tid}`, color: 'bg-blue-100 text-blue-700' },
+    { key: 'tiktok', label: 'تيك توك Lead Generation', url: `${origin}/api/webhooks/tiktok-leads/${tid}`, color: 'bg-pink-100 text-pink-700' },
   ];
   const copy = (text, key) => {
     navigator.clipboard.writeText(text);
@@ -129,6 +131,34 @@ function LeadWebhooksCard() {
             </div>
           </div>
         ))}
+
+        {/* p95: step-by-step setup guides */}
+        <div className="space-y-2 border-t pt-3" data-testid="webhook-guide">
+          <p className="text-sm font-semibold">📖 خطوات الإعداد</p>
+          <details className="border rounded-lg p-3 bg-blue-50/40" data-testid="guide-facebook">
+            <summary className="cursor-pointer font-semibold text-sm text-blue-800">فيسبوك Lead Ads — خطوة بخطوة</summary>
+            <ol className="list-decimal mr-5 mt-2 space-y-1.5 text-sm text-muted-foreground">
+              <li>ادخل إلى <code dir="ltr">developers.facebook.com</code> وأنشئ تطبيقاً (نوع Business) ثم أضف منتج <b>Webhooks</b> من لوحة التطبيق.</li>
+              <li>في قائمة Webhooks اختر <b>Page</b> واضغط «Subscribe to this object»: الصق <b>رابط فيسبوك أعلاه</b> في خانة Callback URL، وفي خانة Verify Token ضع <b>الرمز الظاهر أسفل هذه البطاقة</b>، ثم اضغط «تحقق وحفظ».</li>
+              <li>من اشتراكات الصفحة فعّل الحقل <code dir="ltr">leadgen</code> (Subscribe) للصفحة التي تجمع العملاء.</li>
+              <li>ميتا ترسل معرّف العميل فقط (<code dir="ltr">leadgen_id</code>) وليس بياناته — لذلك استخدم وسيطاً مثل <b>Make / Zapier / n8n</b>: عند وصول حدث leadgen، اجلب بيانات النموذج عبر Graph API ثم أعد إرسالها إلى الرابط أعلاه بصيغة <code dir="ltr">{'{"field_data":[{"name":"full_name","values":["الاسم"]},{"name":"phone_number","values":["05..."]}]}'}</code>.</li>
+              <li>للأمان: انسخ <b>App Secret</b> من إعدادات التطبيق ← الإعدادات الأساسية، وأضفه في الخادم باسم <code dir="ltr">FB_APP_SECRET</code> ليُفعَّل تحقق التوقيع <code dir="ltr">X-Hub-Signature-256</code>.</li>
+              <li>جرّب من أداة <b>Lead Ads Testing Tool</b> في ميتا — يصل العميل إلى قائمة «آخر العملاء المحتملين» ويُسجَّل زبوناً جديداً تلقائياً مع إشعار.</li>
+            </ol>
+          </details>
+          <details className="border rounded-lg p-3 bg-pink-50/40" data-testid="guide-tiktok">
+            <summary className="cursor-pointer font-semibold text-sm text-pink-800">تيك توك Lead Generation — خطوة بخطوة</summary>
+            <ol className="list-decimal mr-5 mt-2 space-y-1.5 text-sm text-muted-foreground">
+              <li>من <b>TikTok Ads Manager</b> أنشئ حملة هدفها <b>Lead Generation</b> وصمّم نموذجاً فورياً (Instant Form).</li>
+              <li>في إعدادات النموذج ← قسم <b>CRM / Webhook</b> اختر «Custom Webhook» والصق <b>رابط تيك توك أعلاه</b>.</li>
+              <li>تيك توك يرسل بيانات النموذج مباشرةً (الاسم والهاتف ضمن الحمولة) — لا حاجة لوسيط.</li>
+              <li>للأمان: أضف سرّ تطبيق تيك توك في الخادم باسم <code dir="ltr">TIKTOK_APP_SECRET</code> ليُفعَّل تحقق التوقيع <code dir="ltr">X-Tt-Signature</code>.</li>
+              <li>أرسل <b>Test Lead</b> من لوحة تيك توك — سيظهر في «آخر العملاء المحتملين» خلال ثوانٍ ويُسجَّل زبوناً تلقائياً.</li>
+            </ol>
+          </details>
+          <p className="text-xs text-muted-foreground">متغيرات الأمان تُضاف في ملف <code dir="ltr">backend.env</code> على الخادم ثم يُعاد تشغيل الباك إند. بدونها يعمل الويبهوك في وضع التطوير (بدون تحقق من التوقيع).</p>
+        </div>
+
         {config && (
           <div className="text-xs text-muted-foreground space-y-1 border-t pt-3">
             <p>رمز التحقق (Verify Token) لفيسبوك: <code dir="ltr">{config.facebook_verify_token || 'غير مضبوط — عيّن FB_VERIFY_TOKEN'}</code></p>

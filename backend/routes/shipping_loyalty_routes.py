@@ -27,6 +27,17 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
         {"id": "ecotrack", "name": "EcoTrack", "name_ar": "إيكو تراك", "website": "https://ecotrack.dz", "has_api": True},
         {"id": "guepex", "name": "Guepex", "name_ar": "قيبكس", "website": "https://guepex.com", "has_api": True},
         {"id": "procolis", "name": "Procolis", "name_ar": "بروكوليس", "website": "https://procolis.com", "has_api": False},
+        # p95: بقية شركات الشحن الجزائرية المعروفة
+        {"id": "noest", "name": "NOEST Express", "name_ar": "نوست إكسبريس", "website": "https://noest-dz.com", "has_api": True},
+        {"id": "anderson", "name": "Anderson Logistique", "name_ar": "أندرسون لوجيستيك", "website": "", "has_api": True},
+        {"id": "mylers", "name": "Mylers", "name_ar": "مايلرز", "website": "", "has_api": True},
+        {"id": "ecom_delivery", "name": "Ecom Delivery", "name_ar": "إيكوم ديليفري", "website": "", "has_api": True},
+        {"id": "elogistia", "name": "Elogistia", "name_ar": "إيلوجيستيا", "website": "", "has_api": True},
+        {"id": "yalitec", "name": "Yalitec", "name_ar": "ياليتيك", "website": "", "has_api": True},
+        {"id": "dhd", "name": "DHD WorldExpress", "name_ar": "دي إتش دي إكسبريس", "website": "", "has_api": True},
+        {"id": "conexlog", "name": "Conexlog", "name_ar": "كونيكسلوغ", "website": "", "has_api": True},
+        {"id": "coyote", "name": "Coyote Express", "name_ar": "كويوت إكسبريس", "website": "", "has_api": False},
+        {"id": "algerie_poste", "name": "Algérie Poste (EMS)", "name_ar": "بريد الجزائر", "website": "https://www.poste.dz", "has_api": False},
         {"id": "other", "name": "Autre", "name_ar": "أخرى", "website": "", "has_api": False}
     ]
 
@@ -52,7 +63,7 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     @router.get("/shipping/settings")
     async def get_shipping_settings(admin: dict = Depends(get_tenant_admin)):
         """Get shipping integration settings"""
-        settings = await db.shipping_settings.find({}, {"_id": 0}).to_list(20)
+        settings = await db.shipping_settings.find({}, {"_id": 0}).to_list(100)  # p95: more companies
 
         # Add default settings for companies not configured
         configured_ids = {s.get("company_id") for s in settings}
@@ -91,6 +102,16 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
             "ecotrack": 420,
             "guepex": 390,
             "procolis": 450,
+            "noest": 380,
+            "anderson": 400,
+            "mylers": 380,
+            "ecom_delivery": 370,
+            "elogistia": 390,
+            "yalitec": 400,
+            "dhd": 360,
+            "conexlog": 360,
+            "coyote": 420,
+            "algerie_poste": 250,
             "other": 500
         }
 
