@@ -141,7 +141,7 @@ function LeadWebhooksCard() {
               <li>ادخل إلى <code dir="ltr">developers.facebook.com</code> وأنشئ تطبيقاً (نوع Business) ثم أضف منتج <b>Webhooks</b> من لوحة التطبيق.</li>
               <li>في قائمة Webhooks اختر <b>Page</b> واضغط «Subscribe to this object»: الصق <b>رابط فيسبوك أعلاه</b> في خانة Callback URL، وفي خانة Verify Token ضع <b>الرمز الظاهر أسفل هذه البطاقة</b>، ثم اضغط «تحقق وحفظ».</li>
               <li>من اشتراكات الصفحة فعّل الحقل <code dir="ltr">leadgen</code> (Subscribe) للصفحة التي تجمع العملاء.</li>
-              <li>ميتا ترسل معرّف العميل فقط (<code dir="ltr">leadgen_id</code>) وليس بياناته — لذلك استخدم وسيطاً مثل <b>Make / Zapier / n8n</b>: عند وصول حدث leadgen، اجلب بيانات النموذج عبر Graph API ثم أعد إرسالها إلى الرابط أعلاه بصيغة <code dir="ltr">{'{"field_data":[{"name":"full_name","values":["الاسم"]},{"name":"phone_number","values":["05..."]}]}'}</code>.</li>
+              <li>احفظ <b>Page Access Token</b> في تكامل فيسبوك (من شبكة القنوات أعلاه ← فيسبوك) بصلاحية <code dir="ltr">leads_retrieval</code> — سيجلب النظام بيانات كل عميل تلقائياً عبر Graph API فور وصول الإشعار، <b>دون أي وسيط</b>. (بدون التوكن تصل الإشعارات لكن تُتخطّى لعدم وجود بيانات).</li>
               <li>للأمان: انسخ <b>App Secret</b> من إعدادات التطبيق ← الإعدادات الأساسية، وأضفه في الخادم باسم <code dir="ltr">FB_APP_SECRET</code> ليُفعَّل تحقق التوقيع <code dir="ltr">X-Hub-Signature-256</code>.</li>
               <li>جرّب من أداة <b>Lead Ads Testing Tool</b> في ميتا — يصل العميل إلى قائمة «آخر العملاء المحتملين» ويُسجَّل زبوناً جديداً تلقائياً مع إشعار.</li>
             </ol>

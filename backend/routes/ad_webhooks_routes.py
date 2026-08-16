@@ -7,11 +7,13 @@ If the secret env var is not set, verification is skipped (dev mode).
 """
 import hashlib
 import hmac
+import json
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Request, HTTPException, Depends
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,10 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="حمولة JSON غير صالحة")
+        return await _save_lead(tdb, source, payload)
 
+    async def _save_lead(tdb, source: str, payload: dict) -> dict:
+        """p96: extract contact fields from a lead payload and persist (lead + customer + notification)."""
         # Facebook shape: field_data list; TikTok shape: flat fields
         if isinstance(payload.get("field_data"), list):
             fields = _extract_fields(payload["field_data"])
@@ -122,11 +127,64 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
     async def tiktok_leads(request: Request):
         return await _handle_lead("tiktok", request, "TIKTOK_APP_SECRET", "X-Tt-Signature")
 
+    async def _resolve_fb_leads(tdb, payload: dict) -> list:
+        """p96: Meta leadgen webhooks carry only leadgen_id — fetch each lead from Graph API
+        using the tenant's facebook channel access_token. Returns payloads with field_data."""
+        ids = []
+        for entry in (payload.get("entry") or []):
+            for change in (entry.get("changes") or []):
+                v = change.get("value") or {}
+                lid = v.get("leadgen_id")
+                if lid:
+                    ids.append((lid, v.get("form_id", "")))
+        if not ids:
+            return []
+        intg = await tdb.ecom_integrations.find_one(
+            {"channel": "facebook", "is_active": True},
+            {"_id": 0, "credentials": 1},
+        )
+        token = ((intg or {}).get("credentials") or {}).get("access_token", "")
+        if not token:
+            logger.warning("FB leadgen received but no facebook access_token saved for this tenant")
+            return []
+        out = []
+        async with httpx.AsyncClient(timeout=15) as client:
+            for lid, form_id in ids:
+                try:
+                    r = await client.get(f"https://graph.facebook.com/v21.0/{lid}", params={"access_token": token})
+                    data = r.json()
+                    if r.status_code == 200 and isinstance(data.get("field_data"), list):
+                        data["lead_id"] = lid
+                        if form_id and not data.get("form_id"):
+                            data["form_id"] = form_id
+                        out.append(data)
+                    else:
+                        logger.warning("FB lead fetch failed id=%s: %s", lid, data)
+                except Exception as exc:
+                    logger.warning("FB lead fetch error id=%s: %s", lid, exc)
+        return out
+
     # ── p95b: tenant-scoped variants — leads land in the tenant DB the UI lists ──
     @router.post("/facebook-leads/{tenant_id}")
     async def facebook_leads_tenant(tenant_id: str, request: Request):
         tdb = get_tenant_db(tenant_id) if get_tenant_db else db
-        return await _handle_lead("facebook", request, "FB_APP_SECRET", "X-Hub-Signature-256", target_db=tdb)
+        raw = await request.body()
+        secret = os.environ.get("FB_APP_SECRET", "")
+        if secret:
+            sig = request.headers.get("X-Hub-Signature-256", "")
+            if not sig or not _verify_signature(raw, sig, secret):
+                raise HTTPException(status_code=401, detail="توقيع غير صالح")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail="حمولة JSON غير صالحة")
+        if isinstance(payload.get("field_data"), list):
+            # connector-style payload (fields already inside) — save directly
+            return await _save_lead(tdb, "facebook", payload)
+        # p96: native Meta notification — resolve leadgen_id(s) via Graph API, no middleman
+        resolved = await _resolve_fb_leads(tdb, payload)
+        results = [await _save_lead(tdb, "facebook", p) for p in resolved]
+        return {"success": True, "fetched": len(resolved), "results": results}
 
     @router.get("/facebook-leads/{tenant_id}")
     async def facebook_verify_tenant(tenant_id: str, request: Request):
