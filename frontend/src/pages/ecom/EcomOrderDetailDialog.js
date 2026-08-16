@@ -11,6 +11,7 @@ import { printEcomOrderInvoice } from '../../lib/ecomOrderInvoice';
 
 export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) {
   const [busy, setBusy] = useState(false);
+  const [autoDispatchInfo, setAutoDispatchInfo] = useState('');  // p145: smart auto-dispatch result line
   const [shippingProvider, setShippingProvider] = useState('yalidine');
   const [storeName, setStoreName] = useState('متجر إلكتروني');
   const [fin, setFin] = useState(null);  // p59: accounting ledger row
@@ -144,6 +145,23 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
       onUpdated?.();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'فشل تحديث الحالة');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // p145: smart auto-dispatch — picks best courier (price × wilaya success rate), creates the label
+  const autoDispatch = async () => {
+    setBusy(true);
+    setAutoDispatchInfo('');
+    try {
+      const res = await apiClient.post('/smart/auto-dispatch', { order_id: order.id });
+      const d = res.data || {};
+      setAutoDispatchInfo(`⚡ اختار النظام: ${d.chosen} — ${d.reason}${d.label?.tracking_number ? ` · تتبع: ${d.label.tracking_number}` : ''}`);
+      toast.success('تم الإرسال التلقائي بأفضل ناقل');
+      onUpdated?.();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'فشل الإرسال التلقائي');
     } finally {
       setBusy(false);
     }
@@ -417,7 +435,13 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
                 <Truck className="w-4 h-4 ml-1" />
                 إنشاء بطاقة + شحن
               </Button>
+              <Button variant="outline" onClick={autoDispatch} disabled={busy} data-testid="auto-dispatch-btn">
+                ⚡ إرسال تلقائي
+              </Button>
             </div>
+            {autoDispatchInfo && (
+              <p className="text-xs text-violet-800" data-testid="auto-dispatch-info">{autoDispatchInfo}</p>
+            )}
             {cheapest?.cheapest && (
               <p className="text-xs text-emerald-700" data-testid="cheapest-suggestion">
                 💡 الأرخص لولاية {cheapest.wilaya}: {cheapest.options.find(o => o.courier === cheapest.cheapest)?.name}

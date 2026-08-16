@@ -209,6 +209,26 @@ async def whatsapp_webhook(tenant_id: str, integration_id: str, request: Request
     except Exception as exc:  # noqa: BLE001
         logger.warning("p101 wa confirmation handling failed: %s", exc)
 
+    # p144 (idea 3): WhatsApp sales bot — answer product queries with store suggestions
+    # before falling back to plain lead creation.
+    try:
+        _slug_row = await _tenant_db(tenant_id).store_settings.find_one(
+            {"enabled": True}, {"_id": 0, "store_slug": 1})
+        _slug = ""
+        if not _slug_row:
+            _m = await main_db.store_slugs.find_one({"tenant_id": tenant_id, "enabled": True},
+                                                    {"_id": 0, "store_slug": 1})
+            _slug = (_m or {}).get("store_slug", "")
+        else:
+            _m = await main_db.store_slugs.find_one({"tenant_id": tenant_id, "enabled": True},
+                                                    {"_id": 0, "store_slug": 1})
+            _slug = (_m or {}).get("store_slug", "")
+        from routes.smart_routes import handle_wa_sales_bot
+        if await handle_wa_sales_bot(db, tenant_id, parsed, _slug):
+            return {"ok": True, "bot_replied": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("p144 wa sales bot failed: %s", exc)
+
     await _upsert_lead(db, channel="whatsapp", integration_id=integration_id, parsed=parsed)
     return {"ok": True, "lead_created": True}
 

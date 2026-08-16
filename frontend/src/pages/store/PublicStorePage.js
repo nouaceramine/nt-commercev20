@@ -1104,12 +1104,12 @@ export default function PublicStorePage() {
       setCart([...cart, {
         product_id: product.id,
         name: product.name_ar || product.name,
-        price: product.retail_price || product.selling_price || 0,
+        price: priceOf(product),
         image_url: product.image_url,
         quantity: 1
       }]);
     }
-    trackPixel('AddToCart', { content_name: product.name_ar || product.name, value: product.retail_price || product.selling_price || 0, currency: 'DZD' });
+    trackPixel('AddToCart', { content_name: product.name_ar || product.name, value: priceOf(product), currency: 'DZD' });
     toast.success('تمت الإضافة للسلة');
   };
 
@@ -1129,6 +1129,14 @@ export default function PublicStorePage() {
 
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  // p145: Flash Day — storefront-wide discount window (set from store settings)
+  const flash = (store && store.flash_day && store.flash_day.active
+    && (!store.flash_day.ends_at || new Date(store.flash_day.ends_at) > new Date())) ? store.flash_day : null;
+  const priceOf = (product) => {
+    const base = Number(product.retail_price || product.selling_price || 0);
+    return flash && Number(flash.discount_pct) > 0 ? Math.round(base * (100 - Number(flash.discount_pct)) / 100) : base;
+  };
   // p69: selected wilaya rate + computed fee
   const wilayaList = deliveryRates.length > 0 ? deliveryRates : WILAYAS.map(w => ({ wilaya_id: w.id, wilaya_name: w.name }));
   const selectedRate = deliveryRates.find(r => String(r.wilaya_id) === String(customerInfo.wilaya)) || null;
@@ -1247,6 +1255,14 @@ export default function PublicStorePage() {
           </button>
         </div>
       </header>
+
+      {/* p145: Flash Day banner */}
+      {flash && (
+        <div className="nc-flash-banner" data-testid="flash-day-banner" style={{ background: 'linear-gradient(90deg,#dc2626,#ea580c)', color: '#fff', textAlign: 'center', padding: '10px 12px', fontWeight: 700, fontSize: '15px' }}>
+          {flash.banner_ar || '🔥 عروض اليوم فقط!'} {Number(flash.discount_pct) > 0 && <span> — خصم {flash.discount_pct}% على كل المنتجات</span>}
+          {flash.ends_at && <span style={{ fontWeight: 400, fontSize: '12px' }}> · حتى {new Date(flash.ends_at).toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })}</span>}
+        </div>
+      )}
 
       {/* ─── Hero ─── */}
       <section className="nc-hero">
@@ -1399,9 +1415,13 @@ export default function PublicStorePage() {
                     <h3 className="nc-product-title">{product.name_ar || product.name}</h3>
                     <div className="nc-product-price">
                       <span className="nc-price-current">
-                        {(product.retail_price || product.selling_price || 0).toLocaleString()} دج
+                        {priceOf(product).toLocaleString()} دج
                       </span>
-                      {product.purchase_price > 0 && (
+                      {flash ? (
+                        <span className="nc-price-old" data-testid="flash-old-price">
+                          {(product.retail_price || product.selling_price || 0).toLocaleString()} دج
+                        </span>
+                      ) : product.purchase_price > 0 && (
                         <span className="nc-price-old">
                           {Math.round((product.retail_price || product.selling_price || 0) * 1.2).toLocaleString()} دج
                         </span>

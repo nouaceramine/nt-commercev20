@@ -122,6 +122,59 @@ export default function POSPage() {
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [lastSaleId, setLastSaleId] = useState(null);
   const [lastSaleInvoice, setLastSaleInvoice] = useState(null);
+
+  // === Offline POS (idea 11): queue sales when network drops, sync on reconnect ===
+  const POS_QUEUE_KEY = 'pos_offline_queue';
+  const readOfflineQueue = () => { try { return JSON.parse(localStorage.getItem(POS_QUEUE_KEY) || '[]'); } catch { return []; } };
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [offlineQueue, setOfflineQueue] = useState(readOfflineQueue);
+  const [syncingQueue, setSyncingQueue] = useState(false);
+  const persistQueue = (q) => { setOfflineQueue(q); try { localStorage.setItem(POS_QUEUE_KEY, JSON.stringify(q)); } catch { /* storage full */ } };
+  const enqueueOfflineSale = (saleData) => {
+    const q = [...readOfflineQueue(), { ...saleData, _offline_at: new Date().toISOString() }];
+    persistQueue(q);
+  };
+  const syncOfflineSales = useCallback(async () => {
+    if (syncingQueue) return;
+    const q = readOfflineQueue();
+    if (q.length === 0 || !navigator.onLine) return;
+    setSyncingQueue(true);
+    let synced = 0, failed = 0;
+    const remaining = [];
+    for (const item of q) {
+      const { _offline_at, ...saleData } = item;
+      try {
+        await apiClient.post('/sales', saleData);
+        synced += 1;
+      } catch (e) {
+        if (e && e.response) {
+          // Server rejected (e.g. duplicate code): retry once with an offline suffix
+          try {
+            await apiClient.post('/sales', { ...saleData, code: `${saleData.code}-O${Date.now() % 1000}` });
+            synced += 1;
+          } catch (e2) {
+            if (e2 && e2.response) { failed += 1; } else { remaining.push(item); }
+          }
+        } else {
+          remaining.push(item); // still offline
+        }
+      }
+    }
+    persistQueue(remaining);
+    if (synced > 0) toast.success(language === 'ar' ? `تمت مزامنة ${synced} بيع أوفلاين` : `${synced} vente(s) synchronisee(s)`);
+    if (failed > 0) toast.error(language === 'ar' ? `فشلت مزامنة ${failed} بيع` : `${failed} vente(s) echouee(s)`);
+    if (synced > 0) { fetchProducts(); fetchSaleCode(); if (session.currentSession) session.fetchSessionStats(session.currentSession.id); }
+    setSyncingQueue(false);
+  }, [syncingQueue, language, session.currentSession]);
+  useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => { setIsOffline(false); syncOfflineSales(); };
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online', goOnline);
+    if (navigator.onLine && readOfflineQueue().length > 0) syncOfflineSales();
+    const iv = setInterval(() => { if (navigator.onLine && readOfflineQueue().length > 0) syncOfflineSales(); }, 60000);
+    return () => { window.removeEventListener('offline', goOffline); window.removeEventListener('online', goOnline); clearInterval(iv); };
+  }, [syncOfflineSales]);
   const [showInstallmentDialog, setShowInstallmentDialog] = useState(false);
   const [installmentPlan, setInstallmentPlan] = useState({
     down_payment: 0, installments_count: 3, interest_rate: 0,
@@ -318,6 +371,7 @@ export default function POSPage() {
     if (cart.paymentType !== 'cash' && !selectedCustomer) { toast.error(language === 'ar' ? 'اختر زبوناً' : 'Selectionnez un client'); return; }
 
     setLoading(true);
+    let saleData = null; // hoisted so the catch block can queue it offline
     try {
       // Build PaymentDetails domain object (fix: pass proper args per payment type,
       // previously the whole cart object was passed as paid_amount -> 500 from API)
@@ -327,7 +381,7 @@ export default function POSPage() {
         : cart.paymentType === 'mixed' ? PaymentDetails.mixed(Number(cart.mixedCash) || 0, Number(cart.mixedBank) || 0)
         : PaymentDetails.cash(Number(cart.paidAmount) || cart.subtotal);
 
-      const saleData = {
+      saleData = {
         code: saleCode,
         customer_id: selectedCustomer,
         warehouse_id: selectedWarehouse || null,
@@ -366,7 +420,15 @@ export default function POSPage() {
       if (session.currentSession) session.fetchSessionStats(session.currentSession.id);
     } catch (error) {
       console.error('Sale error:', error);
-      toast.error(errText(error) ||  (language === 'ar' ? 'خطأ في البيع' : 'Erreur vente'));
+      if (!error.response && saleData) {
+        // Network failure: keep the sale locally and sync it when connection returns
+        enqueueOfflineSale(saleData);
+        setIsOffline(true);
+        toast.success(language === 'ar' ? 'انقطع الاتصال — حُفظ البيع محلياً وسيُزامَن تلقائياً' : 'Hors ligne — vente enregistree localement');
+        cart.clear();
+      } else {
+        toast.error(errText(error) ||  (language === 'ar' ? 'خطأ في البيع' : 'Erreur vente'));
+      }
     } finally {
       setLoading(false);
     }
@@ -476,6 +538,12 @@ export default function POSPage() {
             <h1 className="text-base sm:text-xl font-bold">{language === 'ar' ? 'نقطة البيع' : 'Point de Vente'}</h1>
             {barcodeBuffer.length > 0 && <Badge variant="secondary" className="animate-pulse text-xs gap-1"><Barcode className="h-3 w-3" />{barcodeBuffer}</Badge>}
             {cart.returnMode && <Badge variant="destructive" className="animate-pulse text-xs">{language === 'ar' ? 'إرجاع' : 'Retour'}</Badge>}
+            {isOffline && <Badge variant="destructive" className="text-xs" data-testid="pos-offline-badge">{language === 'ar' ? 'بدون اتصال' : 'Hors ligne'}</Badge>}
+            {offlineQueue.length > 0 && (
+              <Badge variant="secondary" className="text-xs cursor-pointer" data-testid="pos-offline-queue-badge" onClick={syncOfflineSales}>
+                {language === 'ar' ? `${offlineQueue.length} بيع بانتظار المزامنة` : `${offlineQueue.length} vente(s) en attente`}
+              </Badge>
+            )}
           </div>
           <div className="bg-primary text-primary-foreground text-base sm:text-xl font-bold px-3 py-1.5 rounded-lg shadow">
             {formatCurrency(total)} {t.currency}

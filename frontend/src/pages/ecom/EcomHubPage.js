@@ -36,6 +36,10 @@ export default function EcomHubPage() {
   const [kpiDrill, setKpiDrill] = useState(null); // 'today' | 'week' | 'all' | 'new'
   const [kpiOrders, setKpiOrders] = useState([]);
   const [kpiLoading, setKpiLoading] = useState(false);
+  // p145: smart features — AI call script dialog + smart insights strip
+  const [callScript, setCallScript] = useState(null); // { order_code, script }
+  const [scriptLoading, setScriptLoading] = useState(false);
+  const [smartData, setSmartData] = useState(null); // { morning, stock, cartLeak, wilayaRisk }
 
   // Auto-poll for new orders + fire desktop notification when count increases.
   useEcomOrderNotifications(notifEnabled);
@@ -105,6 +109,41 @@ export default function EcomHubPage() {
   }, [activeStatus, channelFilter, search]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // p145: load smart insights once (failures are silent — insights are advisory)
+  useEffect(() => {
+    (async () => {
+      try {
+        const [morning, stock, cartLeak, wilayaRisk] = await Promise.all([
+          apiClient.get('/smart/morning-report').catch(() => null),
+          apiClient.get('/smart/stock-forecast').catch(() => null),
+          apiClient.get('/smart/cart-leak-analysis').catch(() => null),
+          apiClient.get('/smart/wilaya-risk-map').catch(() => null),
+        ]);
+        setSmartData({
+          morning: morning?.data || null,
+          stock: (stock?.data?.forecast || []).filter(i => i.urgency === 'critical').slice(0, 3),
+          cartLeak: cartLeak?.data || null,
+          wilayaRisk: (wilayaRisk?.data?.own || []).filter(w => w.level === 'red').slice(0, 3),
+        });
+      } catch { /* advisory only */ }
+    })();
+  }, []);
+
+  // p145: AI call script for confirmation agents
+  const openCallScript = async (q) => {
+    setScriptLoading(true);
+    setCallScript({ order_code: q.order_code, script: null });
+    try {
+      const r = await apiClient.get(`/smart/call-script/${q.id}`);
+      setCallScript({ order_code: q.order_code, script: r.data?.script || '' });
+    } catch (e) {
+      setCallScript(null);
+      toast.error(e?.response?.data?.detail || 'فشل توليد السكربت');
+    } finally {
+      setScriptLoading(false);
+    }
+  };
 
   const quickCallResult = async (orderId, result) => {  // p108
     try {
@@ -287,6 +326,7 @@ export default function EcomHubPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-wrap">
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openCallScript(q)} data-testid={`callq-script-${q.order_code}`}>🤖 سكربت</Button>
                     <a href={`https://wa.me/${String(q.phone || '').replace(/\D/g, '').replace(/^0+/, '213')}`} target="_blank" rel="noreferrer">
                       <Button size="sm" variant="outline" className="h-7 text-xs" data-testid="callq-wa-btn">💬</Button>
                     </a>
@@ -297,6 +337,53 @@ export default function EcomHubPage() {
                 </div>
               ))}
               <p className="text-xs text-muted-foreground">مرتَّبة حسب الأولوية: الأقدم والأعلى قيمة والأخطر أولاً. «تأكيد/إلغاء» تمرّ عبر آلة الحالات تلقائياً (القيود والمخزون).</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* p145: smart insights strip — morning report, stock-out, cart leak, wilaya risk */}
+        {smartData && (smartData.morning || smartData.stock.length > 0 || smartData.cartLeak?.abandoned > 0 || smartData.wilayaRisk.length > 0) && (
+          <Card data-testid="smart-insights-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">🧠 مساعد ذكي</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {smartData.morning && (
+                <div className="border rounded-lg p-2 bg-slate-50" data-testid="smart-morning-report">
+                  <div className="text-xs font-semibold text-muted-foreground mb-1">☀️ التقرير الصباحي</div>
+                  <pre className="whitespace-pre-wrap font-sans text-sm">{smartData.morning.text}</pre>
+                </div>
+              )}
+              {smartData.stock.length > 0 && (
+                <div className="border border-amber-300 rounded-lg p-2 bg-amber-50/40" data-testid="smart-stock-alerts">
+                  <div className="text-xs font-semibold text-amber-800 mb-1">📦 تنفد خلال 3 أيام</div>
+                  {smartData.stock.map(i => (
+                    <div key={i.product_id || i.name} className="flex items-center justify-between gap-2 text-xs">
+                      <span>{i.name}</span>
+                      <span className="text-amber-800">{i.days_left} يوم — اطلب {i.suggested_reorder}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {smartData.cartLeak?.abandoned > 0 && (
+                <div className="border border-blue-200 rounded-lg p-2 bg-blue-50/40" data-testid="smart-cart-leak">
+                  <div className="text-xs font-semibold text-blue-800 mb-1">🛒 سلال مهجورة: {smartData.cartLeak.abandoned} ({smartData.cartLeak.abandon_rate}%) — قيمة قابلة للاسترجاع {Number(smartData.cartLeak.recoverable_value).toLocaleString()} دج</div>
+                  {(smartData.cartLeak.suggestions || []).map(s => (
+                    <div key={s.key} className="text-xs text-blue-900">💡 {s.title_ar}: {s.detail_ar}</div>
+                  ))}
+                </div>
+              )}
+              {smartData.wilayaRisk.length > 0 && (
+                <div className="border border-red-300 rounded-lg p-2 bg-red-50/40" data-testid="smart-wilaya-risk">
+                  <div className="text-xs font-semibold text-red-800 mb-1">🗺 ولايات عالية المرتجعات</div>
+                  {smartData.wilayaRisk.map(w => (
+                    <div key={w.wilaya} className="flex items-center justify-between gap-2 text-xs">
+                      <span>{w.wilaya}</span>
+                      <span className="text-red-700">مرتجع {w.return_rate}% ({w.returned}/{w.delivered + w.returned})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -525,6 +612,20 @@ export default function EcomHubPage() {
                 );
               })}
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* p145: AI call script for the confirmation agent */}
+      <Dialog open={!!callScript} onOpenChange={(v) => !v && setCallScript(null)}>
+        <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto" dir="rtl" data-testid="call-script-dialog">
+          <DialogHeader>
+            <DialogTitle>🤖 سكربت المكالمة — {callScript?.order_code}</DialogTitle>
+          </DialogHeader>
+          {scriptLoading || !callScript?.script ? (
+            <div className="text-center py-10 text-muted-foreground">{scriptLoading ? 'يولّد السكربت...' : 'لا يوجد سكربت'}</div>
+          ) : (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed" data-testid="call-script-text">{callScript.script}</pre>
           )}
         </DialogContent>
       </Dialog>

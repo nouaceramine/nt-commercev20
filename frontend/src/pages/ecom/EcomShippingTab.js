@@ -113,6 +113,31 @@ export default function EcomShippingTab() {
     }
   };
 
+  // p145: one-tap return via scanned tracking/order code
+  const [qrReturn, setQrReturn] = useState('');
+  const [qrBusy, setQrBusy] = useState(false);
+  const submitQrReturn = async () => {
+    if (!qrReturn.trim()) return;
+    setQrBusy(true);
+    try {
+      const r = await apiClient.post('/smart/return-by-tracking', { tracking: qrReturn.trim() });
+      if (r.data?.already_returned) {
+        toast.info(ar ? `الطلب ${r.data.order_code} مُستردّ مسبقاً` : 'Deja retourne');
+      } else {
+        toast.success(r.data?.message_ar || (ar ? 'تم الاسترجاع' : 'Retour effectue'));
+      }
+      setQrReturn('');
+      apiClient.get('/integrations/yalidine/parcels').then(r2 => {
+        const d2 = r2.data;
+        setParcels(Array.isArray(d2) ? d2 : (d2?.parcels || d2?.items || []));
+      }).catch(() => {});
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشل الاسترجاع' : 'Echec retour'));
+    } finally {
+      setQrBusy(false);
+    }
+  };
+
   // p85: bulk label print — opens a print window with today's (or chosen day's) labels
   const bulkPrint = async () => {
     setBulkLoading(true);
@@ -446,6 +471,16 @@ export default function EcomShippingTab() {
                 {trackResult && (
                   <pre className="mt-3 text-xs bg-muted rounded-lg p-3 overflow-auto max-h-48" dir="ltr">{JSON.stringify(trackResult, null, 2)}</pre>
                 )}
+              </div>
+
+              {/* p145: QR-scan return — scan/enter tracking or order code → refund + restock */}
+              <div>
+                <p className="font-medium mb-2">{ar ? '↩️ استرجاع بمسح البوليصة (QR)' : 'Retour par scan QR'}</p>
+                <div className="flex gap-2">
+                  <Input value={qrReturn} onChange={e => setQrReturn(e.target.value)} placeholder={ar ? 'رقم التتبع أو رقم الطلب...' : 'N° suivi ou commande...'} dir="ltr" data-testid="qr-return-input" />
+                  <Button onClick={submitQrReturn} variant="outline" disabled={qrBusy} data-testid="qr-return-btn">{qrBusy ? '...' : (ar ? 'استرجاع' : 'Retour')}</Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{ar ? 'امسح QR على البوليصة — يُعلَّم الطلب «مُستردّ» وتُعاد الكمية للمخزون فوراً.' : 'Scannez le QR du bordereau — commande remboursée et stock réapprovisionné.'}</p>
               </div>
             </CardContent>
           </Card>

@@ -96,6 +96,13 @@ export default function StoreManagementPage() {
   const [cartLeads, setCartLeads] = useState([]);  // p83
   const [cartRecovered, setCartRecovered] = useState(0);  // p107
   const [tgTesting, setTgTesting] = useState(false);  // p84
+  // p145: smart store tools — flash day, WhatsApp sales bot, competitor watch
+  const [flashDay, setFlashDay] = useState({ active: false, discount_pct: 20, banner_ar: '🔥 عروض اليوم فقط!' });
+  const [flashReport, setFlashReport] = useState(null);
+  const [flashSaving, setFlashSaving] = useState(false);
+  const [waBot, setWaBot] = useState({ enabled: false, greeting_ar: '', max_suggestions: 3 });
+  const [watches, setWatches] = useState([]);
+  const [watchForm, setWatchForm] = useState({ product_name: '', competitor_name: '', competitor_url: '-', my_price: '', competitor_price: '' });
   const [saving, setSaving] = useState(false);
   const [showProductDialog, setShowProductDialog] = useState(false);
   const [landingDialog, setLandingDialog] = useState(null);
@@ -113,6 +120,80 @@ export default function StoreManagementPage() {
   useEffect(() => {
     fetchData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // p145: load smart tools state (silent failures — advisory features)
+  useEffect(() => {
+    apiClient.get('/smart/flash-day').then(r => {
+      const fd = r.data?.flash_day;
+      if (fd) setFlashDay(prev => ({ ...prev, ...fd }));
+    }).catch(() => {});
+    apiClient.get('/smart/flash-day/report').then(r => setFlashReport(r.data?.report || null)).catch(() => {});
+    apiClient.get('/smart/wa-bot/settings').then(r => { if (r.data) setWaBot(prev => ({ ...prev, ...r.data })); }).catch(() => {});
+    apiClient.get('/smart/competitor-watch').then(r => setWatches(r.data?.items || [])).catch(() => {});
+  }, []);
+
+  const saveFlashDay = async (active) => {
+    setFlashSaving(true);
+    try {
+      const r = await apiClient.put('/smart/flash-day', { active, discount_pct: Number(flashDay.discount_pct) || 0, banner_ar: flashDay.banner_ar || '' });
+      setFlashDay(prev => ({ ...prev, ...(r.data?.flash_day || {}), active }));
+      const rep = await apiClient.get('/smart/flash-day/report').catch(() => null);
+      setFlashReport(rep?.data?.report || null);
+      toast.success(active ? '🔥 وضع يوم التخفيضات مُفعَّل' : 'توقّف وضع التخفيضات');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل الحفظ');
+    } finally { setFlashSaving(false); }
+  };
+
+  const saveWaBot = async (enabled) => {
+    try {
+      await apiClient.put('/smart/wa-bot/settings', { enabled, greeting_ar: waBot.greeting_ar || '', max_suggestions: Number(waBot.max_suggestions) || 3 });
+      setWaBot(prev => ({ ...prev, enabled }));
+      toast.success(enabled ? '🤖 بوت واتساب مُفعَّل' : 'توقّف بوت واتساب');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل الحفظ');
+    }
+  };
+
+  const addWatch = async () => {
+    if (!watchForm.product_name.trim()) { toast.error(language === 'ar' ? 'أدخل اسم المنتج' : 'Nom du produit'); return; }
+    try {
+      await apiClient.post('/smart/competitor-watch', {
+        product_name: watchForm.product_name.trim(),
+        competitor_name: watchForm.competitor_name.trim(),
+        competitor_url: watchForm.competitor_url.trim() || '-',
+        my_price: Number(watchForm.my_price) || 0,
+        competitor_price: Number(watchForm.competitor_price) || 0,
+      });
+      const r = await apiClient.get('/smart/competitor-watch');
+      setWatches(r.data?.items || []);
+      setWatchForm({ product_name: '', competitor_name: '', competitor_url: '-', my_price: '', competitor_price: '' });
+      toast.success(language === 'ar' ? 'أُضيفت مراقبة' : 'Surveillance ajoutee');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل');
+    }
+  };
+
+  const updateWatchPrice = async (w) => {
+    const val = window.prompt(language === 'ar' ? `سعر المنافس الجديد لـ «${w.product_name}» (دج):` : 'Nouveau prix:', w.competitor_price || '');
+    if (val === null) return;
+    try {
+      const r = await apiClient.put(`/smart/competitor-watch/${w.id}/price`, { competitor_price: Number(val) || 0 });
+      if (r.data?.price_dropped) toast.warning(r.data.alert_ar, { duration: 8000 });
+      else toast.success(language === 'ar' ? 'حُدّث السعر' : 'Prix mis a jour');
+      const list = await apiClient.get('/smart/competitor-watch');
+      setWatches(list.data?.items || []);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل');
+    }
+  };
+
+  const removeWatch = async (w) => {
+    try {
+      await apiClient.delete(`/smart/competitor-watch/${w.id}`);
+      setWatches(prev => prev.filter(x => x.id !== w.id));
+    } catch { toast.error('فشل'); }
+  };
 
   // تحديث تلقائي للطلبات كل 20 ثانية (صامت — بدون مؤشر تحميل)
   useEffect(() => {
@@ -749,6 +830,99 @@ export default function StoreManagementPage() {
                 </div>
               </>
             )}
+
+            {/* p145: Smart tools — Flash Day + WhatsApp bot + competitor watch */}
+            <Card data-testid="smart-tools-card">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">🧠 {language === 'ar' ? 'أدوات ذكية' : 'Outils intelligents'}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Flash Day */}
+                <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg flex-wrap gap-3">
+                  <div>
+                    <p className="font-medium">{language === 'ar' ? '🔥 وضع يوم التخفيضات (Flash Day)' : 'Mode Flash Day'}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {language === 'ar' ? 'خصم تلقائي على كل المتجر حتى نهاية اليوم + شعار في الواجهة' : 'Remise globale jusqu\'a minuit + banniere'}
+                    </p>
+                    {flashReport && (
+                      <p className="text-xs text-emerald-700 mt-1" data-testid="flash-day-report">📊 {flashReport.summary_ar}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number" min="0" max="90" className="w-20"
+                      value={flashDay.discount_pct}
+                      onChange={(e) => setFlashDay(prev => ({ ...prev, discount_pct: e.target.value }))}
+                      data-testid="flash-day-pct"
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                    <Switch
+                      checked={!!flashDay.active}
+                      onCheckedChange={(checked) => saveFlashDay(checked)}
+                      disabled={flashSaving}
+                      data-testid="toggle-flash-day"
+                    />
+                  </div>
+                </div>
+
+                {/* WhatsApp sales bot */}
+                <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg flex-wrap gap-3">
+                  <div className="flex-1 min-w-[220px]">
+                    <p className="font-medium">{language === 'ar' ? '🤖 بوت المبيعات على واتساب' : 'Bot commercial WhatsApp'}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {language === 'ar' ? 'يرد على استفسارات الزبائن بمنتجات مطابقة + رابط المتجر تلقائياً' : 'Repond aux clients avec des produits + lien'}
+                    </p>
+                    {waBot.enabled && (
+                      <Input
+                        className="mt-2"
+                        value={waBot.greeting_ar}
+                        onChange={(e) => setWaBot(prev => ({ ...prev, greeting_ar: e.target.value }))}
+                        onBlur={() => saveWaBot(true)}
+                        placeholder={language === 'ar' ? 'رسالة الترحيب...' : 'Message d\'accueil...'}
+                        data-testid="wa-bot-greeting"
+                      />
+                    )}
+                  </div>
+                  <Switch
+                    checked={!!waBot.enabled}
+                    onCheckedChange={(checked) => saveWaBot(checked)}
+                    data-testid="toggle-wa-bot"
+                  />
+                </div>
+
+                {/* Competitor watch */}
+                <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                  <div>
+                    <p className="font-medium">{language === 'ar' ? '👁 مراقبة أسعار المنافسين' : 'Veille concurrentielle'}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {language === 'ar' ? 'حدّث سعر المنافس عند تغيّره — يُنبَّهك فوراً إذا خفّض سعره' : 'Alerte quand un concurrent baisse son prix'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Input className="w-40" placeholder={language === 'ar' ? 'منتجي' : 'Mon produit'} value={watchForm.product_name} onChange={(e) => setWatchForm(prev => ({ ...prev, product_name: e.target.value }))} data-testid="watch-product-name" />
+                    <Input className="w-32" placeholder={language === 'ar' ? 'المنافس' : 'Concurrent'} value={watchForm.competitor_name} onChange={(e) => setWatchForm(prev => ({ ...prev, competitor_name: e.target.value }))} />
+                    <Input className="w-24" type="number" placeholder={language === 'ar' ? 'سعري' : 'Mon prix'} value={watchForm.my_price} onChange={(e) => setWatchForm(prev => ({ ...prev, my_price: e.target.value }))} />
+                    <Input className="w-24" type="number" placeholder={language === 'ar' ? 'سعره' : 'Son prix'} value={watchForm.competitor_price} onChange={(e) => setWatchForm(prev => ({ ...prev, competitor_price: e.target.value }))} data-testid="watch-competitor-price" />
+                    <Button size="sm" variant="outline" onClick={addWatch} data-testid="watch-add-btn">{language === 'ar' ? '+ مراقبة' : '+ Ajouter'}</Button>
+                  </div>
+                  {watches.length > 0 && (
+                    <div className="space-y-1">
+                      {watches.map(w => (
+                        <div key={w.id} className="flex items-center justify-between border rounded-lg p-2 text-sm bg-background" data-testid={`watch-row-${w.id}`}>
+                          <span>{w.product_name} — <span className="text-muted-foreground">{w.competitor_name || w.competitor_url}</span></span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-xs">{Number(w.my_price || 0).toLocaleString()} / {Number(w.competitor_price || 0).toLocaleString()} دج</span>
+                            {w.verdict && <Badge variant={w.verdict.includes('✓') ? 'secondary' : 'destructive'} className="text-xs">{w.verdict}</Badge>}
+                            <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => updateWatchPrice(w)} data-testid={`watch-update-${w.id}`}>{language === 'ar' ? 'تحديث' : 'MAJ'}</Button>
+                            <Button size="sm" variant="ghost" className="h-6 text-xs text-red-600" onClick={() => removeWatch(w)}>✕</Button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Products Tab */}

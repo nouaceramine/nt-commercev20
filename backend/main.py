@@ -1228,6 +1228,15 @@ async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(b
 
 app.include_router(robot_router, prefix="/api")
 
+# ── p143/p144: Smart features (AI call scripts, auto-dispatch, forecasts, etc.) ──
+try:
+    from routes.smart_routes import create_smart_router, create_smart_router_ext
+    app.include_router(create_smart_router(db, main_db, require_tenant, get_tenant_admin), prefix="/api", tags=["Smart"])
+    app.include_router(create_smart_router_ext(db, main_db, require_tenant, get_tenant_admin, get_tenant_db), prefix="/api", tags=["Smart2"])
+    print("✅ Smart features router loaded")
+except Exception as _smart_err:
+    print(f"⚠️ smart router not loaded: {_smart_err}")
+
 
 # ── Advanced Dashboard endpoints ──
 @app.get("/api/dashboard/advanced-stats")
