@@ -2064,3 +2064,14 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - تحقق: PUT yalidine/zr_express/maystro → 200 كلها ✓
 - تحقق من بقية findings: labels-bulk 200 ✓، analytics/revenue 200 ✓، pull-rates 422 (يتطلب body — طبيعي) ✓، POST /api/expenses 200 ✓ — كلها مُصلحة سلفاً في p123/p132.
 - backup: /opt/ntcommerce/backups/p138_ecom_delivery/*.bak
+
+## p142 — تصفير النظام لأول استعمال حقيقي (2026-08-16)
+- نسخة احتياطية كاملة قبل الحذف: /opt/ntcommerce/backups/pre_purge_20260816_205435/ (mongo_full.archive 28MB + env + nginx config) — تم التحقق بـ mongorestore --dryRun ✓
+- حُذفت قواعد: tenant_1c16c29a (Nouacer Telecom), tenant_45e398b9 (bob), 3× ecomtest, exptest, rt2 — من الإنتاج والستيجنغ
+- ntcommerce الرئيسية: 75 مجموعة معاملات/بيانات تجريبية مُسحت؛ أُبقي فقط: superadmin + saas_plans(3) + القوالب (whatsapp/invoice) + الكتالوجات المنصّية + currencies/tax_rates + system settings
+- saas_counters أُعيد للصفر → أول مستأجر حقيقي يحصل NT-0001
+- Redis FLUSHALL على البيئتين
+- كلمة مرور superadmin أُعيد تعيينها (سُلّمت للمالك في المحادثة)
+- تنظيف ملفات: baseline_p122 (819MB) + نسخ www_before_p38/44/46 (289MB) + أرشيفات المستأجرين المحذوفين + deleted_tenants + p29 + /tmp junk + docker images (51MB) + logs قديمة → المساحة 22G→20G
+- تحقق بعد التصفير: تسجيل مستأجر جديد تجريبي نجح (NT-0001 + قاعدة من القالب الذهبي + كل الواجهات 200) ثم حُذف وأُعيد العداد للصفر
+- autoheal: 0 findings، health_score=100
