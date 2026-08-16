@@ -1994,3 +1994,7 @@ backup: backups/p120_identity/ — لا تغيير واجهة
 ## p124 — تنبيهات تيليغرام للمراقبة (2026-08-16)
 **قبل:** health_monitor وdaily_backup وweekly_restore_test يكتبون ALERT في ملفات log فقط — لا يصل شيء لأحد.
 **بعد:** scripts/alert.sh مرسل موحد يقرأ /opt/ntcommerce/.alert.env (TELEGRAM_BOT_TOKEN/CHAT_ID) ويرسل عبر Telegram Bot API؛ no-op صامت بدون الإعداد. رُبط في: health_monitor (عند ALERT)، daily_backup (عند فشل mongodump)، weekly_restore_test (4 مسارات فشل). bash -n سليم للكل. **التفعيل ينتظر توكن البوت من المالك.**
+
+## p125 — تدوير الأسرار وتحصين JWT (2026-08-16)
+**قبل:** أسرار JWT وُجدت في تاريخ git (commit قديم)؛ utils/auth.py فيه fallback ثابت مكشوف؛ .env بصلاحيات 644.
+**بعد:** تدوير JWT_SECRET_KEY + JWT_SECRET + SECRET_KEY (openssl rand 48 بايت) — كل الجلسات القديمة أُبطلت (إعادة دخول مطلوبة). إزالة الـ fallbacks الثابتة من utils/auth.py وservices/auth_service.py — التطبيق الآن يرفض الإقلاع بدون JWT_SECRET_KEY (fail-closed). chmod 600 للـ .env. مفاتيح التشفير عند التخزين (CODE/FIELD_ENCRYPTION_KEY) لم تُدوَّر عمداً — تدويرها يعطّل البيانات المشفرة القائمة. GEMINI/AI keys يجب تدويرها من لوحات مزوديها (بند على المالك). تحقق: openapi 200 + endpoint محمي بتوكن جديد 200. نسخة: backups/p125_secrets/.
