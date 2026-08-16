@@ -413,3 +413,91 @@ async def get_label(label_id: str, user: dict = Depends(require_tenant)):
     if not label:
         raise HTTPException(status_code=404, detail="بطاقة الشحن غير موجودة")
     return label
+
+
+# ============ p103: التسوية الذكية + توقع التدفق النقدي ============
+
+@router.get("/ecom/shipping/cash-forecast")
+async def cash_forecast(user: dict = Depends(require_tenant)):
+    """p103: لكل شركة شحن — المستحق الآن (الرصيد) + قيد التحصيل في الطريق
+    + المتوقع تحصيله فعلاً حسب معدل التسليم التاريخي لهذه الشركة."""
+    await require_ecom_feature(user)
+    couriers = await db.ecom_orders.distinct(
+        "courier",
+        {"status": {"$in": ["shipped", "delivered", "refunded"]}, "courier": {"$nin": [None, ""]}},
+    )
+    out = []
+    for c in sorted(couriers):
+        shipped = await db.ecom_orders.find(
+            {"courier": c, "status": "shipped"},
+            {"_id": 0, "total": 1, "shipping_fee": 1},
+        ).to_list(5000)
+        in_transit = round(
+            sum(max(float(o.get("total") or 0) - float(o.get("shipping_fee") or 0), 0) for o in shipped), 2)
+        delivered = await db.ecom_orders.count_documents({"courier": c, "status": "delivered"})
+        refunded = await db.ecom_orders.count_documents({"courier": c, "status": "refunded"})
+        outcomes = delivered + refunded
+        rate = round(delivered / outcomes, 3) if outcomes else None
+        expected = round(in_transit * rate, 2) if rate is not None else None
+        box = await db.cash_boxes.find_one({"id": f"ecom_store_{c}"}, {"_id": 0, "balance": 1})
+        out.append({
+            "courier": c,
+            "owed_now": round(float(box.get("balance") or 0), 2) if box else 0.0,
+            "in_transit_count": len(shipped),
+            "in_transit": in_transit,
+            "delivery_rate": rate,
+            "expected": expected,
+        })
+    return {"forecast": out}
+
+
+@router.post("/ecom/shipping/reconcile")
+async def reconcile_statement(body: dict, user: dict = Depends(require_tenant)):
+    """p103: مطابقة كشف دفع شركة الشحن — الصق أرقام التتبع من الكشف،
+    فيكشف النظام الطرود المسلَّمة التي لم تُدفع لك (الفجوة) وأرقاماً مجهولة."""
+    await require_ecom_feature(user)
+    raw = body.get("tracking_numbers") or ""
+    if isinstance(raw, list):
+        raw = "\n".join(str(x) for x in raw)
+    courier = (body.get("courier") or "").strip()
+    nums = [t.strip() for t in re.split(r"[\s,;]+", str(raw)) if t.strip()]
+    if not nums:
+        raise HTTPException(status_code=400, detail="الصق أرقام التتبع من الكشف أولاً")
+    orig = {}
+    for n in nums:
+        orig.setdefault(n.lower(), n)
+
+    q = {"status": "delivered", "tracking_number": {"$nin": [None, ""]}}
+    if courier:
+        q["courier"] = courier
+    orders = await db.ecom_orders.find(
+        q, {"_id": 0, "order_code": 1, "tracking_number": 1, "total": 1, "shipping_fee": 1},
+    ).to_list(10000)
+    sys_map = {}
+    for o in orders:
+        tn = str(o.get("tracking_number") or "").strip()
+        if tn:
+            sys_map[tn.lower()] = o
+
+    stmt_set = set(orig.keys())
+    sys_set = set(sys_map.keys())
+    missing, gap = [], 0.0
+    for tn in sorted(sys_set - stmt_set):
+        o = sys_map[tn]
+        amount = round(max(float(o.get("total") or 0) - float(o.get("shipping_fee") or 0), 0), 2)
+        gap += amount
+        missing.append({
+            "tracking": o.get("tracking_number"),
+            "order_code": o.get("order_code") or "",
+            "amount": amount,
+        })
+    unknown = [orig[tn] for tn in sorted(stmt_set - sys_set)]
+    return {
+        "courier": courier or "all",
+        "statement_count": len(nums),
+        "system_delivered": len(sys_map),
+        "matched": len(stmt_set & sys_set),
+        "missing_in_statement": missing,
+        "unknown_in_statement": unknown,
+        "gap_amount": round(gap, 2),
+    }

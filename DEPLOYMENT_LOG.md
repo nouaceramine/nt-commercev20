@@ -1711,3 +1711,27 @@ Backup: /opt/ntcommerce/backups/p101_wa_confirm/
 - اختبار حي: نفقة «إعلان ممول — facebook» (10,000 دج حقيقية) نُسبت تلقائياً → ROAS=0.5 (الإنفاق أعلى من المُسلَّم!) ✓؛ 6 طلبات تيك توك (4 مُرجعة) → نازف ✓؛ سطر تيليجرام ظهر ✓. نظّفت البيانات التجريبية.
 - الحزمة: main.db5a86d2.js
 Backup: /opt/ntcommerce/backups/p102_roas/
+
+---
+
+## p103 — التسوية الذكية + توقع التدفق النقدي (2026-08-16)
+
+### قبل
+- التسوية (p90) تعرض رصيد كل شركة فقط — بلا توقع للنقد القادم، وبلا طريقة لمطابقة كشف دفع شركة الشحن مع النظام (الفروقات تُكتشف يدوياً أو لا تُكتشف).
+
+### بعد
+- **Backend** (`routes/ecom/shipping_routes.py`):
+  - `GET /ecom/shipping/cash-forecast` — لكل شركة شحن: owed_now (رصيد المحفظة) + in_transit (Σ(total−shipping_fee) للطُرود المشحونة) + delivery_rate تاريخي (delivered/(delivered+refunded)) + expected = in_transit × rate.
+  - `POST /ecom/shipping/reconcile` — لصق أرقام التتبع من كشف الدفع (نص/قائمة، فواصل: مسافة/سطر/فاصلة/؛) → مقارنة case-insensitive مع الطلبات المسلّمة: matched / missing_in_statement (مع المبالغ و gap_amount) / unknown_in_statement. حارس 400 عند الإدخال الفارغ، 403 بلا توكن.
+- **Frontend** (`pages/ecom/EcomShippingTab.js`):
+  - سطر توقع داخل كل صف تسوية (forecast-line-{courier}): في الطريق + معدل التسليم + المتوقع تحصيله.
+  - بطاقة «📄 مطابقة كشف شركة الشحن» (reconcile-card): أزرار اختيار الشركة + textarea (reconcile-input) + زر reconcile-btn + نتائج (reconcile-summary/gap/missing/unknown/perfect).
+
+### اختبار curl
+- cash-forecast: shipped 3500 دج × معدل 0.75 → expected 2625 دج ✓
+- reconcile: كشف من 3 أرقام → matched 2، ناقص YDN-P103-C بمبلغ 1400 دج (gap_amount=1400)، مجهول YDN-P103-X ✓
+- حارس فارغ 400 ✓ · بلا توكن 403 ✓ · تنظيف بيانات الاختبار ✓
+
+### نشر
+- main.9bf1823f.js — cp -r فقط، الحزم القديمة محفوظة.
+- backup: /opt/ntcommerce/backups/p103_reconcile_forecast/

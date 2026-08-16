@@ -6,6 +6,7 @@ import { Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
 import { Badge } from '../../components/ui/badge';
 import { Truck, Search, Settings, CheckCircle, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
@@ -48,6 +49,11 @@ export default function EcomShippingTab() {
   const [settleAmount, setSettleAmount] = useState('');    // p90
   const [settleTarget, setSettleTarget] = useState('');    // p90
   const [settling, setSettling] = useState(false);         // p90
+  const [forecast, setForecast] = useState([]);            // p103
+  const [recCourier, setRecCourier] = useState('');        // p103
+  const [recText, setRecText] = useState('');              // p103
+  const [recResult, setRecResult] = useState(null);        // p103
+  const [recLoading, setRecLoading] = useState(false);     // p103
 
   const syncYalidine = async () => {
     setSyncing(true); setSyncResult(null);
@@ -145,6 +151,22 @@ export default function EcomShippingTab() {
       setSettlements(res.data?.settlements || []);
       setSettleTargets(res.data?.targets || []);
     } catch (e) { /* silent */ }
+    try {  // p103: cash-flow forecast
+      const fc = await apiClient.get('/ecom/shipping/cash-forecast');
+      setForecast(fc.data?.forecast || []);
+    } catch (e) { /* silent */ }
+  };
+
+  const fcOf = (c) => forecast.find(x => x.courier === c);  // p103
+
+  const runReconcile = async () => {  // p103
+    setRecLoading(true); setRecResult(null);
+    try {
+      const r = await apiClient.post('/ecom/shipping/reconcile', { courier: recCourier, tracking_numbers: recText });
+      setRecResult(r.data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشلت المطابقة' : 'Échec'));
+    } finally { setRecLoading(false); }
   };
 
   useEffect(() => { fetchSettlements(); }, []);  // p90
@@ -250,6 +272,13 @@ export default function EcomShippingTab() {
                       )}
                     </div>
                   </div>
+                  {fcOf(s.courier) && (
+                    <p className="text-xs text-muted-foreground mt-2" data-testid={`forecast-line-${s.courier}`}>
+                      {ar
+                        ? `🚚 في الطريق: ${fcOf(s.courier).in_transit_count} طرد (${Number(fcOf(s.courier).in_transit).toLocaleString()} دج) · معدل التسليم ${fcOf(s.courier).delivery_rate !== null ? Math.round(fcOf(s.courier).delivery_rate * 100) + '%' : '—'} · متوقع تحصيله: ${fcOf(s.courier).expected !== null ? Number(fcOf(s.courier).expected).toLocaleString() + ' دج' : '—'}`
+                        : `En route: ${fcOf(s.courier).in_transit_count} (${Number(fcOf(s.courier).in_transit).toLocaleString()} DZD) · attendu: ${fcOf(s.courier).expected !== null ? Number(fcOf(s.courier).expected).toLocaleString() + ' DZD' : '—'}`}
+                    </p>
+                  )}
                   {settleRow === s.box_id && (
                     <div className="flex items-center gap-2 mt-3 flex-wrap" data-testid="settle-form">
                       <Input type="number" className="w-32" value={settleAmount} onChange={(e) => setSettleAmount(e.target.value)} data-testid="settle-amount-input" dir="ltr" />
@@ -273,6 +302,65 @@ export default function EcomShippingTab() {
             </CardContent>
           </Card>
         )}
+        {/* p103: statement reconciliation */}
+        <Card data-testid="reconcile-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Search className="h-5 w-5" />
+              {ar ? '📄 مطابقة كشف شركة الشحن' : 'Rapprochement du relevé'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {ar ? 'الصق أرقام التتبع من كشف دفع شركة الشحن — يكشف النظام أي طرد مسلّم لم يُدفع لك.' : 'Collez les numéros de suivi du relevé du transporteur.'}
+            </p>
+            <div className="flex gap-1 flex-wrap">
+              <Button size="sm" variant={recCourier === '' ? 'default' : 'outline'} onClick={() => setRecCourier('')} data-testid="rec-courier-all">{ar ? 'الكل' : 'Tous'}</Button>
+              {settlements.filter(s => s.courier !== 'manual').map(s => (
+                <Button key={s.courier} size="sm" variant={recCourier === s.courier ? 'default' : 'outline'} onClick={() => setRecCourier(s.courier)} data-testid={`rec-courier-${s.courier}`}>{s.name}</Button>
+              ))}
+            </div>
+            <Textarea rows={4} dir="ltr" value={recText} onChange={e => setRecText(e.target.value)} placeholder={'YDN-123456\nYDN-123457'} data-testid="reconcile-input" />
+            <div>
+              <Button size="sm" onClick={runReconcile} disabled={recLoading || !recText.trim()} data-testid="reconcile-btn">
+                {recLoading ? '...' : (ar ? 'طابِق الآن' : 'Comparer')}
+              </Button>
+            </div>
+            {recResult && (
+              <div className="border rounded-lg p-3 space-y-2 text-sm" data-testid="reconcile-result">
+                <p data-testid="reconcile-summary">
+                  {ar
+                    ? `الكشف: ${recResult.statement_count} · مسلّم في النظام: ${recResult.system_delivered} · متطابق: ${recResult.matched}`
+                    : `Relevé: ${recResult.statement_count} · Système: ${recResult.system_delivered} · Match: ${recResult.matched}`}
+                </p>
+                {recResult.gap_amount > 0 && (
+                  <p className="font-semibold text-red-600" data-testid="reconcile-gap">
+                    {ar ? `⚠️ فجوة: ${Number(recResult.gap_amount).toLocaleString()} دج مسلّمة ولم تُدفع لك` : `Écart: ${Number(recResult.gap_amount).toLocaleString()} DZD`}
+                  </p>
+                )}
+                {recResult.missing_in_statement.length > 0 && (
+                  <div data-testid="reconcile-missing">
+                    <p className="font-medium text-red-700">{ar ? 'مسلّم في النظام وغير موجود في الكشف:' : 'Livrés absents du relevé:'}</p>
+                    {recResult.missing_in_statement.map(m => (
+                      <p key={m.tracking} className="text-xs" dir="ltr" data-testid={`reconcile-missing-${m.tracking}`}>
+                        {m.tracking} · {m.order_code} · {Number(m.amount).toLocaleString()} {ar ? 'دج' : 'DZD'}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {recResult.unknown_in_statement.length > 0 && (
+                  <div data-testid="reconcile-unknown">
+                    <p className="font-medium text-amber-700">{ar ? 'في الكشف وغير معروف في النظام:' : 'Inconnus dans le système:'}</p>
+                    <p className="text-xs" dir="ltr">{recResult.unknown_in_statement.join(' · ')}</p>
+                  </div>
+                )}
+                {recResult.missing_in_statement.length === 0 && recResult.unknown_in_statement.length === 0 && (
+                  <p className="text-emerald-700 font-medium" data-testid="reconcile-perfect">{ar ? '✅ مطابقة تامة — لا فروقات' : '✅ Aucun écart'}</p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
         {/* p94: courier API connections */}
         <Card data-testid="couriers-card">
           <CardHeader>
