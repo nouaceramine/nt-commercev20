@@ -2019,3 +2019,18 @@ docker-compose.staging.yml: backend-staging (127.0.0.1:8002) + mongodb-staging (
 
 ## p125-fix — تصحيح تدوير الأسرار (2026-08-16)
 اكتشف أثناء p130 أن التدوير الأول كتب في backend/.env (غير المستخدم من الإنتاج) بينما compose يقرأ /opt/ntcommerce/.env الجذري — أُعيد التدوير في الملفين معاً (بصمة جديدة، طول 96 hex) مع chmod 600 للاثنين. تحقق: prod openapi 200 + endpoint محمي بتوكن بالمفتاح الجديد 200 + fail-closed أثبت نفسه (staging رفض الإقلاع بمفتاح فارغ). الدرس الموثق: restart لا يعيد قراءة env_file — يلزم up -d لإعادة الإنشاء.
+
+## p133 — تتبع الأخطاء الخلفية (2026-08-16)
+general_exception_handler يحفظ كل استثناء غير معالج في main_db.system_logs (source=backend, type=exception, stack) مع dedup 5 دقائق (عداد occurrences) + إرسال تيليغرام مباشر عند ضبط TELEGRAM_ALERT_BOT_TOKEN/CHAT_ID.
+
+## p134 — Dozzle سجلات مركزية (2026-08-16)
+حاوية amir20/dozzle:v8 على 127.0.0.1:9999 --base /logs --auth-provider simple (users.yml بكلمة مرور bcrypt في /opt/ntcommerce/.dozzle_pass بصلاحيات 600). nginx يخدم /logs/ مع websocket upgrade. الوصول: https://nt-commerce.net/logs/ (admin). تحقق: 200 حي.
+
+## p135 — APM-lite (2026-08-16)
+middleware/apm.py: قياس زمن كل طلب في الذاكرة + تصريف كل 60 ثانية إلى main_db.apm_stats (count/avg/max/slow>2s/errors لكل route) + GET /api/system/apm (super admin). تحقق حي: 6+ مسارات متتبعة بأرقام فعلية.
+
+## p136 — Runbooks (2026-08-16)
+docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، قرص ممتلئ، استعادة من نسخة، تراجع frontend) + مرجع سريع.
+
+## p137 — فحص OWASP ZAP baseline (2026-08-16)
+الفحص الأول: 0 FAIL / 8 WARN — أبرزها غياب CSP. أُضيف Content-Security-Policy لـ snippets/ntc-security-headers.conf. إعادة الفحص: **0 FAIL / 58 PASS** والتحذيرات الباقية معلوماتية (cacheable content, SRI للـ CDN, COEP). التقرير: docs/security/zap_baseline_2026-08-16.log.
