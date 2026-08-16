@@ -538,5 +538,20 @@ async def _maybe_notify_customer(db, order: dict, new_status: str) -> None:
     msg = template.get(new_status)
     if not msg:
         return
+    # p98: enrich the shipped message with courier name + tracking link
+    if new_status == "shipped":
+        tn = (order.get("tracking_number") or "").strip()
+        courier = (order.get("courier") or "").strip()
+        c_name, c_link = {
+            "yalidine": ("يالدين", "https://yalidine.com/suivi/?tracking={tn}"),
+            "zr":       ("ZR Express", "https://zrexpress.dz/suivi"),
+            "maystro":  ("مايسترو", "https://maystro-delivery.com"),
+        }.get(courier, ("", ""))
+        parts = [f"📦 تم شحن طلبك {order.get('order_code', '')}" + (f" عبر {c_name}." if c_name else ".")]
+        if tn:
+            parts.append(f"رقم التتبع: {tn}")
+        if c_link:
+            parts.append("🔗 تتبع طردك: " + (c_link.format(tn=tn) if "{tn}" in c_link else c_link))
+        msg = "\n".join(parts)
     from services.ecom.whatsapp_service import send_text_message
     await send_text_message(integration, phone, msg)
