@@ -1836,3 +1836,20 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 
 ### نشر
 - main.3f8d6d64.js — cp -r فقط — backup: /opt/ntcommerce/backups/p109_do_not_ship/
+
+---
+
+## p110 — توليد صفحات الهبوط بالذكاء الاصطناعي (2026-08-16)
+
+### قبل
+- صفحات الهبوط (p82) تُملأ يدوياً — عنوان ونص عرض وسعر مرجعي.
+
+### بعد
+- **Backend** (`online_store_routes.py`): `POST /store/landing/{product_id}/ai-generate` — يولّد headline + offer_text + old_price من اسم المنتج ووصفه وسعره عبر services/ai/openai_llm.py (llm_chat، JSON صارم، حدود طول، old_price لا يقل عن السعر×1.4). لا يحفظ — التاجر يراجع ثم يحفظ. حارس 404 للمنتج، 503 بلا مفتاح AI، 502 عند ردّ غير قابل للفهم. يقبل hint اختيارية من التاجر.
+- **Frontend** (StoreManagementPage): زر «✨ ولّد بالذكاء الاصطناعي» أعلى حوار صفحة الهبوط يملأ الحقول الثلاثة.
+
+### اختبار
+- توليد حقيقي على منتج «cable samsuge type c» (1200 دج): headline «كابل سامسونج Type-C أصلي.. شحن صاروخي لهاتفك!» + عرض + old_price 1800 ✓ · حارس 404 ✓ · لا كتابة في القاعدة ✓
+
+### نشر
+- main.6bbadde7.js — cp -r فقط — backup: /opt/ntcommerce/backups/p110_ai_landing/

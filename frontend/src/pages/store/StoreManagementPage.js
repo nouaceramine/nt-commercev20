@@ -101,6 +101,7 @@ export default function StoreManagementPage() {
   const [landingDialog, setLandingDialog] = useState(null);
   const [landingCfg, setLandingCfg] = useState(null);
   const [landingSaving, setLandingSaving] = useState(false);
+  const [landingAi, setLandingAi] = useState(false);  // p110
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [activeTab, setActiveTab] = useState('settings');
   
@@ -223,6 +224,19 @@ export default function StoreManagementPage() {
     } finally {
       setLandingSaving(false);
     }
+  };
+
+  const aiGenerateLanding = async () => {  // p110
+    if (!landingDialog) return;
+    setLandingAi(true);
+    try {
+      const headers = getAuthHeaders();
+      const r = await apiClient.post(`/store/landing/${landingDialog.id}/ai-generate`, {}, { headers });
+      setLandingCfg({ ...landingCfg, headline: r.data.headline, offer_text: r.data.offer_text, old_price: r.data.old_price });
+      toast.success(language === 'ar' ? '✨ وُلّد المحتوى — راجعه ثم احفظ' : 'Généré');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (language === 'ar' ? 'فشل التوليد' : 'Erreur'));
+    } finally { setLandingAi(false); }
   };
 
   const landingUrl = () => {
@@ -811,6 +825,9 @@ export default function StoreManagementPage() {
           </DialogHeader>
           {landingCfg && (
             <div className="space-y-4">
+              <Button type="button" variant="outline" className="w-full" onClick={aiGenerateLanding} disabled={landingAi} data-testid="lp-ai-generate-btn">
+                {landingAi ? (language === 'ar' ? '⏳ يولّد المحتوى...' : '...') : (language === 'ar' ? '✨ ولّد العنوان والعرض بالذكاء الاصطناعي' : '✨ Générer par IA')}
+              </Button>
               <div className="flex items-center justify-between border rounded-lg p-3">
                 <Label>{language === 'ar' ? 'تفعيل صفحة الهبوط' : 'Enable'}</Label>
                 <Switch data-testid="lp-enabled-toggle" checked={!!landingCfg.enabled} onCheckedChange={(v) => setLandingCfg({ ...landingCfg, enabled: v })} />

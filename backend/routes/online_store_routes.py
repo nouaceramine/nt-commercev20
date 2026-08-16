@@ -324,6 +324,49 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         await db.store_landing_pages.update_one({"product_id": product_id}, {"$set": cfg}, upsert=True)
         return {"ok": True, "config": cfg}
 
+    @router.post("/store/landing/{product_id}/ai-generate")
+    async def ai_generate_landing(product_id: str, data: dict = None, admin: dict = Depends(get_tenant_admin)):
+        """p110: توليد محتوى صفحة الهبوط بالذكاء الاصطناعي — عنوان + نص عرض + سعر مرجعي.
+        لا يحفظ شيئاً: يملأ الحقول في الواجهة ليراجعها التاجر ثم يحفظ."""
+        product = await db.products.find_one({"id": product_id}, {"_id": 0})
+        if not product:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        from services.ai.openai_llm import llm_chat, llm_configured
+        if not llm_configured():
+            raise HTTPException(status_code=503, detail="خدمة الذكاء الاصطناعي غير مُفعّلة — أضِف مفتاح OpenAI في إعدادات النظام")
+        hint = str((data or {}).get("hint") or "")[:300]
+        name = product.get("name_ar") or product.get("name") or ""
+        desc = str(product.get("description_ar") or product.get("description_en") or "")[:600]
+        price = float(product.get("retail_price") or product.get("price") or 0)
+        system_msg = "أنت خبير تسويق للتجارة الإلكترونية الجزائرية (الدفع عند الاستلام). اكتب عربية بسيطة محفِّزة موجَّهة للزبون العادي."
+        prompt = (
+            f"المنتج: {name}\nالوصف: {desc or '—'}\nالسعر: {price} دج\n"
+            + (f"معلومة إضافية من التاجر: {hint}\n" if hint else "")
+            + "اكتب محتوى صفحة هبوط لهذا المنتج. أجب بصيغة JSON فقط دون أي نص آخر:\n"
+              '{"headline": "عنوان رئيسي قصير جذاب حتى 60 حرفاً", '
+              '"offer_text": "جملة عرض محفزة حتى 90 حرفاً", '
+              '"old_price": رقم السعر قبل التخفيض أعلى من السعر الحالي بواقعية 30-50%}'
+        )
+        raw = await llm_chat(system_msg, prompt, max_tokens=400)
+        if not raw:
+            raise HTTPException(status_code=503, detail="خدمة الذكاء الاصطناعي غير مُفعّلة")
+        import json as _json
+        try:
+            m = re.search(r"\{.*\}", raw, re.S)
+            gen = _json.loads(m.group(0))
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail="تعذّر فهم ردّ الذكاء الاصطناعي — حاول مجدداً")
+        headline = str(gen.get("headline") or "")[:120]
+        offer_text = str(gen.get("offer_text") or "")[:150]
+        old_price = 0.0
+        try:
+            old_price = max(0.0, float(gen.get("old_price") or 0))
+        except (TypeError, ValueError):
+            old_price = 0.0
+        if price and old_price <= price:
+            old_price = round(price * 1.4)
+        return {"ok": True, "headline": headline, "offer_text": offer_text, "old_price": old_price}
+
     @router.get("/shop/{store_slug}/lp/{product_id}")
     async def get_landing_page(store_slug: str, product_id: str):
         """p82: صفحة الهبوط العامة — منتج + إعدادات عامة + إعدادات الهبوط."""
