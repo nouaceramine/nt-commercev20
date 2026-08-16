@@ -40,9 +40,13 @@ async def get_agent(agent_id: str, admin: dict = Depends(get_super_admin)):
 
 @router.post("/saas/agents", response_model=AgentResponse)
 async def create_agent(agent: AgentCreate, admin: dict = Depends(get_super_admin)):
-    existing = await db.saas_agents.find_one({"email": agent.email})
+    from utils.auth import email_ci as _email_ci
+    from utils.identity import assert_email_globally_free, register_identity
+    agent_email = agent.email.strip().lower()
+    existing = await db.saas_agents.find_one({"email": _email_ci(agent_email)})
     if existing:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+    await assert_email_globally_free(agent_email)
 
     hashed_password = bcrypt.hashpw(agent.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -59,7 +63,7 @@ async def create_agent(agent: AgentCreate, admin: dict = Depends(get_super_admin
     agent_doc = {
         "id": str(uuid.uuid4()),
         "name": agent.name,
-        "email": agent.email,
+        "email": agent_email,
         "password": hashed_password,
         "phone": agent.phone or "",
         "agent_type": agent.agent_type,
@@ -76,6 +80,7 @@ async def create_agent(agent: AgentCreate, admin: dict = Depends(get_super_admin
     }
 
     await db.saas_agents.insert_one(agent_doc)
+    await register_identity(agent_email, "agent", agent_doc["id"], name=agent.name)
     return AgentResponse(**{k: v for k, v in agent_doc.items() if k not in ["_id", "password"]}, tenants_count=0)
 
 
@@ -88,7 +93,14 @@ async def update_agent(agent_id: str, updates: AgentUpdate, admin: dict = Depend
     update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
+    if update_data.get("email"):
+        from utils.identity import assert_email_globally_free, register_identity
+        new_email = update_data["email"].strip().lower()
+        await assert_email_globally_free(new_email, exclude_user_id=agent_id)
+        update_data["email"] = new_email
     await db.saas_agents.update_one({"id": agent_id}, {"$set": update_data})
+    if update_data.get("email"):
+        await register_identity(update_data["email"], "agent", agent_id, name=update_data.get("name") or agent.get("name", ""))
     updated = await db.saas_agents.find_one({"id": agent_id}, {"_id": 0})
     tenants_count = await db.saas_tenants.count_documents({"agent_id": agent_id})
 
@@ -100,6 +112,8 @@ async def delete_agent(agent_id: str, admin: dict = Depends(get_super_admin)):
     result = await db.saas_agents.delete_one({"id": agent_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Agent not found")
+    from utils.identity import remove_identity
+    await remove_identity(user_id=agent_id)
     return {"message": "Agent deleted successfully"}
 
 

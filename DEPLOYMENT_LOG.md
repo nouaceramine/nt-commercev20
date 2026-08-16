@@ -1953,3 +1953,22 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 - backup: backups/p119_daily_report/
 
 **الحزمة المنشورة: main.ddb76b31.js** (p115-p119)
+
+## p120 — نظام الهوية الموحد العالمي (2026-08-16)
+
+**الهدف**: الجميع (صاحب المنصة/مشترك/وكيل/موظف) يدخلون من /portal بإيميلاتهم دون أي تضارب حسابات أو قواعد.
+
+### الجذر المكتشف
+`tenant_user_directory` كان فارغاً تماماً وبلا فهارس — يُكتب فقط من employees_routes. موظفو POST /users **لم يكن بإمكانهم الدخول إطلاقاً**، ونفس الإيميل كان يمكن تسجيله كموظف في متجرين (تضارب توجيه صامت).
+
+### التنفيذ
+- `utils/identity.py` جديد: identity_registry {email*, kind: platform/agent/owner/employee, user_id, tenant_id} + assert_email_globally_free + register_identity + remove_identity + فهرس فريد email_1
+- **نقاط الإنشاء الخمس كلها** تمر بالبوابة العالمية: POST /users، employee create-account، /saas/register (+فحص الوكلاء الجديد +تخزين lowercase)، إنشاء/تعديل الوكيل، /auth/register
+- **المزامنة**: DELETE /users + delete-account + حذف الوكيل تنظّف السجل؛ تعديل إيميل الوكيل يتحقق ويحدّث
+- **الدخول**: unified-login خطوة الموظفين تقرأ identity_registry أولاً (fallback للدليل القديم)؛ إعادة تعيين كلمة المرور كذلك
+- **الهجرة**: scripts/identity_migration.py — 4 هويات (2 platform + 2 owner)، مرآة المالك تُتخطى، **صفر تضاربات**
+
+### اختبارات حية (7/7 ✓)
+1. موظف عبر /users → سُجّل عالمياً 2. **دخوله عبر unified-login نجح → /tenant/dashboard is_employee=true** (كان مستحيلاً قبل اليوم) 3. نفس الإيميل في متجر آخر → 400 «موظف في متجر آخر» 4. إيميل المالك → 400 5. إيميل المنصة → 400 «مستخدم المنصة» 6. تسجيل مشترك بإيميل موظف → 400 7. حذف الموظف → السجل نظّف نفسه
+
+backup: backups/p120_identity/ — لا تغيير واجهة

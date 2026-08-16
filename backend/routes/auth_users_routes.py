@@ -230,7 +230,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                 pass
 
         # 2.5 Check tenant employees (main_db directory maps email → tenant)
-        directory = await main_db.tenant_user_directory.find_one({"email": email.strip().lower()}, {"_id": 0})
+        directory = await main_db.identity_registry.find_one({"email": email.strip().lower(), "kind": "employee"}, {"_id": 0})
+        if not directory:
+            directory = await main_db.tenant_user_directory.find_one({"email": email.strip().lower()}, {"_id": 0})  # legacy fallback
         if directory:
             tenant = await main_db.saas_tenants.find_one({"id": directory["tenant_id"]}, {"_id": 0})
             if tenant:
@@ -446,7 +448,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             if a:
                 account = ("agent", a["id"], None)
         if not account:
-            d = await main_db.tenant_user_directory.find_one({"email": email}, {"_id": 0})
+            d = await main_db.identity_registry.find_one({"email": email, "kind": "employee"}, {"_id": 0})
+            if not d:
+                d = await main_db.tenant_user_directory.find_one({"email": email}, {"_id": 0})
             if d:
                 account = ("employee", d["user_id"], d["tenant_id"])
         if not account:
@@ -681,6 +685,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         existing = await db.users.find_one({"email": email_ci(norm_email)})
         if existing:
             raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+        # p120: platform-wide uniqueness (owner/agent/employee/platform)
+        from utils.identity import assert_email_globally_free, register_identity
+        await assert_email_globally_free(norm_email)
 
         if len(user_data.password) < 4:
             raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 4 أحرف على الأقل")
@@ -698,6 +705,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         }
 
         await db.users.insert_one(new_user)
+        await register_identity(norm_email, "employee", new_user["id"], tenant_id=admin.get("tenant_id"), name=user_data.name)
 
         # Return without password
         del new_user["password"]
@@ -739,6 +747,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         result = await db.users.delete_one({"id": user_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="User not found")
+        from utils.identity import remove_identity
+        await remove_identity(user_id=user_id)
         return {"message": "User deleted successfully"}
 
     @router.put("/users/{user_id}/password")

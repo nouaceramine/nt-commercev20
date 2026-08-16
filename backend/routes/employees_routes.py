@@ -143,6 +143,8 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         if await db.users.find_one({"email": email_ci(account.email)}):
             raise HTTPException(status_code=400, detail="Email already registered")
         # Email must also be globally unique across the platform (owners, agents, other tenants' staff)
+        from utils.identity import assert_email_globally_free, register_identity
+        await assert_email_globally_free(email_lower)
         if (await main_db.tenant_user_directory.find_one({"email": email_lower})
                 or await main_db.saas_tenants.find_one({"email": email_ci(account.email)})
                 or await main_db.users.find_one({"email": email_ci(account.email)})
@@ -156,13 +158,9 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         user_doc = {"id": user_id, "email": email_lower, "password": hashed, "name": emp["name"], "role": account.role, "employee_id": employee_id, "permissions": DEFAULT_PERMISSIONS.get(account.role, {}), "created_at": now}
         await db.users.insert_one(user_doc)
         await db.employees.update_one({"id": employee_id}, {"$set": {"user_id": user_id, "user_email": email_lower}})
-        # Directory entry so unified-login can route this email to the right tenant DB
+        # p120: global registry entry so unified-login routes this email to the right tenant DB
         if admin.get("tenant_id"):
-            await main_db.tenant_user_directory.update_one(
-                {"email": email_lower},
-                {"$set": {"email": email_lower, "tenant_id": admin["tenant_id"], "user_id": user_id, "employee_id": employee_id, "role": account.role, "created_at": now}},
-                upsert=True,
-            )
+            await register_identity(email_lower, "employee", user_id, tenant_id=admin["tenant_id"], name=emp["name"])
         return {"success": True, "user_id": user_id, "email": email_lower, "role": account.role}
 
     @router.delete("/{employee_id}/delete-account")
@@ -174,6 +172,8 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
             raise HTTPException(status_code=400, detail="Employee has no linked account")
         from config.database import main_db
         await db.users.delete_one({"id": emp["user_id"]})
+        from utils.identity import remove_identity
+        await remove_identity(user_id=emp["user_id"])
         await main_db.tenant_user_directory.delete_one({"user_id": emp["user_id"]})
         await db.employees.update_one({"id": employee_id}, {"$unset": {"user_id": "", "user_email": ""}})
         return {"success": True}

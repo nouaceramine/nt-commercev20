@@ -51,6 +51,14 @@ async def register_tenant(tenant: TenantCreate):
             detail="البريد الإلكتروني مستخدم بالفعل في حساب آخر. الرجاء استخدام بريد مختلف أو التواصل مع الإدارة.",
         )
 
+    # p120: reject agent emails + any registered identity, then normalize
+    stale_agent = await db.saas_agents.find_one({"email": email_ci(tenant.email)})
+    if stale_agent:
+        raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل في حساب وكيل")
+    from utils.identity import assert_email_globally_free, register_identity
+    await assert_email_globally_free(tenant.email)
+    tenant.email = tenant.email.strip().lower()
+
     plan = await db.saas_plans.find_one({"id": tenant.plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="الخطة غير موجودة")
@@ -86,6 +94,7 @@ async def register_tenant(tenant: TenantCreate):
     }
 
     await db.saas_tenants.insert_one(tenant_doc)
+    await register_identity(tenant.email, "owner", tenant_id, tenant_id=tenant_id, name=tenant.name)
     # Golden template provisioning (p31): full collections/indexes/seeds;
     # legacy seeding kept as fallback if the template is missing/broken
     try:

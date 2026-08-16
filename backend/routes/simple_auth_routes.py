@@ -39,7 +39,10 @@ def create_auth_routes(db, get_current_user):
         existing = await auth_service.get_user_by_email(norm_email)
         if existing:
             raise HTTPException(status_code=400, detail="Email already registered")
+        from utils.identity import assert_email_globally_free, register_identity
+        await assert_email_globally_free(norm_email)
         user = await auth_service.create_user(norm_email, body.password, body.full_name, role="admin")
+        await register_identity(norm_email, "platform", user["id"], name=body.full_name)
         token = auth_service.create_access_token({"sub": user["id"], "email": user["email"], "role": user.get("role", "user")})
         return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}}
 
