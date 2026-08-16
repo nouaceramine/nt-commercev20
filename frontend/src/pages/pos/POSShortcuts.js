@@ -59,7 +59,7 @@ export default function POSShortcuts({
   };
 
   return (
-    <div className="hidden md:block md:col-span-2" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+    <div className="hidden md:block shrink-0" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
       <Card className="h-full">
         <CardHeader className="p-2 pb-1 flex flex-row items-center justify-between">
           <CardTitle className="text-xs text-muted-foreground">
