@@ -1,28 +1,23 @@
 # p130: Staging environment — isolated copy of the stack on separate ports/DBs.
-# Backend: 127.0.0.1:8002 | Mongo: 127.0.0.1:27018 | Redis: 127.0.0.1:6380
+# Code lives in /opt/ntcommerce-staging (git clone — can run any branch).
+# Backend: 127.0.0.1:8002 | Mongo: staging internal | Redis: staging internal
 # Public URL: https://nt-commerce.net:8443 (Cloudflare-proxied port, UFW-limited to CF ranges)
 services:
   backend-staging:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: ntcommerce-staging-backend
+    env_file:
+      - backend/.env
     environment:
-      - MONGO_URL=mongodb://mongodb-staging:27018/ntcommerce_staging
+      - MONGO_URL=mongodb://mongodb-staging:27017/ntcommerce_staging?replicaSet=rsStaging
       - DB_NAME=ntcommerce_staging
-      - REDIS_URL=redis://redis-staging:6379
+      - REDIS_URL=redis://redis-staging:6379/0
       - APP_ENV=staging
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_SECRET=${JWT_SECRET_KEY}
-      - SECRET_KEY=${SECRET_KEY:-staging_secret}
-      - CODE_ENCRYPTION_KEY=${CODE_ENCRYPTION_KEY:-}
-      - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - AI_INTEGRATIONS_OPENAI_API_KEY=${AI_INTEGRATIONS_OPENAI_API_KEY:-}
-      - AI_INTEGRATIONS_OPENAI_BASE_URL=${AI_INTEGRATIONS_OPENAI_BASE_URL:-}
-      - AI_INTEGRATIONS_OPENAI_MODEL=${AI_INTEGRATIONS_OPENAI_MODEL:-}
-      - CURRENCY_DEFAULT=DZD
-      - LOG_LEVEL=INFO
+    volumes:
+      - /opt/ntcommerce-staging/backend:/app
+      - /opt/ntcommerce-staging/backups:/backups
     ports:
       - "127.0.0.1:8002:8001"
     restart: unless-stopped
