@@ -10,6 +10,7 @@ export default function POSSessionBar({
   checkingSession, hasOpenSession, currentSession, sessionStats,
   setShowSessionDialog, setShowSessionDetailsDialog,
   setClosingCash, cashBoxBalance, setShowCloseSessionDialog,
+  fetchSessionStats,
   language, formatCurrency, t, isStaleSession,
 }) {
   if (checkingSession) return null;
@@ -79,6 +80,7 @@ export default function POSSessionBar({
                 variant="destructive"
                 className="gap-1 text-xs"
                 onClick={() => {
+                  if (currentSession && fetchSessionStats) fetchSessionStats(currentSession.id);
                   setClosingCash(cashBoxBalance);
                   setShowCloseSessionDialog(true);
                 }}

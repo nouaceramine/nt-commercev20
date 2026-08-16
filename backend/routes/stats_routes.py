@@ -76,6 +76,27 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         customer_debt_total = customer_debt_agg[0]["total"] if customer_debt_agg else 0
         customers_with_debt = customer_debt_agg[0]["count"] if customer_debt_agg else 0
 
+        # p115: today's NEW debt — what went out as debt today
+        customer_debt_today_agg = await db.sales.aggregate([
+            {"$match": {"created_at": {"$gte": today}, "debt_amount": {"$gt": 0}, "status": {"$ne": "returned"}}},
+            {"$group": {"_id": None, "total": {"$sum": "$debt_amount"}, "count": {"$sum": 1}}}
+        ]).to_list(1)
+        customer_debt_today = customer_debt_today_agg[0]["total"] if customer_debt_today_agg else 0
+        customer_debt_today_count = customer_debt_today_agg[0]["count"] if customer_debt_today_agg else 0
+
+        supplier_debt_today_agg = await db.purchases.aggregate([
+            {"$match": {"created_at": {"$gte": today}, "remaining": {"$gt": 0}}},
+            {"$group": {"_id": None, "total": {"$sum": "$remaining"}, "count": {"$sum": 1}}}
+        ]).to_list(1)
+        supplier_debt_today = supplier_debt_today_agg[0]["total"] if supplier_debt_today_agg else 0
+        supplier_debt_today_count = supplier_debt_today_agg[0]["count"] if supplier_debt_today_agg else 0
+
+        supplier_debt_agg = await db.suppliers.aggregate([
+            {"$match": {"balance": {"$gt": 0}}},
+            {"$group": {"_id": None, "total": {"$sum": "$balance"}, "count": {"$sum": 1}}}
+        ]).to_list(1)
+        supplier_debt_total = supplier_debt_agg[0]["total"] if supplier_debt_agg else 0
+
         response = {
             "total_products": total_products, "total_customers": total_customers,
             "total_suppliers": total_suppliers, "total_employees": total_employees,
@@ -90,6 +111,11 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "customer_balance_count": customer_balance_count,
             "customer_debt_total": customer_debt_total,
             "customers_with_debt": customers_with_debt,
+            "customer_debt_today": customer_debt_today,
+            "customer_debt_today_count": customer_debt_today_count,
+            "supplier_debt_today": supplier_debt_today,
+            "supplier_debt_today_count": supplier_debt_today_count,
+            "supplier_debt_total": supplier_debt_total,
             "currency": CURRENCY
         }
         cache.set(cache_key, response, ttl=60)  # Cache for 1 minute
@@ -415,6 +441,112 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             },
             "daily_breakdown": sorted_daily[:30],
             "top_profitable_products": top_products
+        }
+
+    # ── p119: Comprehensive Daily Report — every business line, one endpoint ──
+    @router.get("/reports/daily-full")
+    async def get_daily_full_report(date: Optional[str] = None, admin: dict = Depends(get_tenant_admin)):
+        day = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        next_day = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        in_day = {"$gte": day, "$lt": next_day}
+
+        # 1) POS / inventory sales (webstore mirror rows are counted in the ecom line)
+        pos_docs = await db.sales.find({"created_at": in_day, "source": {"$ne": "webstore"}}, {"_id": 0}).to_list(5000)
+        pos_active = [s for s in pos_docs if s.get("status") != "returned"]
+        pos_returned = [s for s in pos_docs if s.get("status") == "returned"]
+        pos_ids = [it.get("product_id") for s in pos_active for it in (s.get("items") or [])]
+        pmap = await product_docs_map(db, pos_ids)
+        pos_profit = 0.0
+        for s in pos_active:
+            for it in (s.get("items") or []):
+                pp = it.get("purchase_price")
+                if pp is None:
+                    pp = (pmap.get(it.get("product_id")) or {}).get("purchase_price", 0)
+                pos_profit += ((it.get("price") or 0) - (pp or 0)) * (it.get("quantity") or 1)
+        pos = {
+            "count": len(pos_active),
+            "total": round(sum(s.get("total") or 0 for s in pos_active), 2),
+            "cash": round(sum(s.get("paid_amount") or 0 for s in pos_active if s.get("payment_method") == "cash"), 2),
+            "debt": round(sum(s.get("debt_amount") or 0 for s in pos_active), 2),
+            "profit": round(pos_profit, 2),
+            "returned_count": len(pos_returned),
+            "returned_total": round(sum(s.get("total") or 0 for s in pos_returned), 2),
+        }
+
+        # 2) E-commerce store (status_history drives delivered/cancelled/refunded "today")
+        ecom_new = await db.ecom_orders.find({"created_at": in_day}, {"_id": 0, "status": 1, "total": 1}).to_list(3000)
+        ecom_delivered = await db.ecom_orders.find(
+            {"status_history": {"$elemMatch": {"status": "delivered", "at": in_day}}},
+            {"_id": 0, "total": 1, "shipping_fee": 1}).to_list(3000)
+        ecom_cancelled = await db.ecom_orders.count_documents(
+            {"status_history": {"$elemMatch": {"status": "cancelled", "at": in_day}}})
+        ecom_refunded = await db.ecom_orders.count_documents(
+            {"status_history": {"$elemMatch": {"status": "refunded", "at": in_day}}})
+        ecom_shipped = await db.ecom_orders.find({"status": "shipped"}, {"_id": 0, "total": 1, "shipping_fee": 1}).to_list(3000)
+        ecom = {
+            "new_count": len(ecom_new),
+            "new_total": round(sum(o.get("total") or 0 for o in ecom_new), 2),
+            "delivered_count": len(ecom_delivered),
+            "delivered_total": round(sum(o.get("total") or 0 for o in ecom_delivered), 2),
+            "cancelled_today": ecom_cancelled,
+            "refunded_today": ecom_refunded,
+            "in_transit_count": len(ecom_shipped),
+            "in_transit_total": round(sum(max((o.get("total") or 0) - (o.get("shipping_fee") or 0), 0) for o in ecom_shipped), 2),
+        }
+
+        # 3) Balance recharge service
+        recharge_agg = await db.recharges.aggregate([
+            {"$match": {"created_at": in_day}},
+            {"$group": {"_id": None, "count": {"$sum": 1}, "amount": {"$sum": "$amount"}, "profit": {"$sum": "$profit"}}}
+        ]).to_list(1)
+        recharge = {"count": 0, "amount": 0, "profit": 0}
+        if recharge_agg:
+            r0 = recharge_agg[0]
+            recharge = {"count": r0.get("count", 0), "amount": round(r0.get("amount") or 0, 2), "profit": round(r0.get("profit") or 0, 2)}
+
+        # 4) Digital services / IPTV
+        dig_docs = await db.digital_orders.find({"created_at": in_day}, {"_id": 0, "status": 1, "amount": 1, "product_type": 1}).to_list(3000)
+        dig_done = [d for d in dig_docs if d.get("status") == "COMPLETED"]
+        by_type = {}
+        for d in dig_docs:
+            tpe = d.get("product_type") or "OTHER"
+            by_type[tpe] = by_type.get(tpe, 0) + 1
+        digital = {
+            "count": len(dig_docs),
+            "completed_count": len(dig_done),
+            "revenue": round(sum(d.get("amount") or 0 for d in dig_done), 2),
+            "pending_count": len([d for d in dig_docs if d.get("status") == "PENDING"]),
+            "by_type": by_type,
+        }
+
+        # 5) Repairs / maintenance
+        rep_received = await db.repair_tickets.count_documents({"received_at": in_day})
+        rep_delivered_docs = await db.repair_tickets.find({"delivered_at": in_day}, {"_id": 0, "final_cost": 1}).to_list(2000)
+        rep_in_progress = await db.repair_tickets.count_documents({"status": {"$nin": ["delivered", "cancelled"]}})
+        repairs = {
+            "received_today": rep_received,
+            "delivered_today": len(rep_delivered_docs),
+            "revenue": round(sum(t.get("final_cost") or 0 for t in rep_delivered_docs), 2),
+            "in_progress": rep_in_progress,
+        }
+
+        # 6) Expenses + capital snapshot
+        exp_agg = await db.expenses.aggregate([
+            {"$match": {"date": day}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+        ]).to_list(1)
+        expenses = {"total": round(exp_agg[0]["total"], 2), "count": exp_agg[0]["count"]} if exp_agg else {"total": 0, "count": 0}
+        boxes = await db.cash_boxes.find({}, {"_id": 0, "id": 1, "name": 1, "balance": 1}).to_list(50)
+        capital = round(sum(b.get("balance", 0) for b in boxes if b.get("id") != "personal"), 2)
+
+        total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + repairs["revenue"], 2)
+
+        return {
+            "date": day,
+            "pos": pos, "ecom": ecom, "recharge": recharge,
+            "digital": digital, "repairs": repairs,
+            "expenses": expenses, "capital": capital, "cash_boxes": boxes,
+            "total_revenue": total_revenue,
         }
 
     return router

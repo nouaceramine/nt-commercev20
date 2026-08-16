@@ -92,6 +92,33 @@ export default function AIChatPage() {
     inputRef.current?.focus();
   };
 
+  // p118: delete one conversation
+  const deleteSession = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await apiClient.delete(`/ai/chat/sessions/${id}`);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      if (sessionId === id) {
+        setSessionId(null);
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
+    }
+  };
+
+  // p118: delete all conversations
+  const deleteAllSessions = async () => {
+    try {
+      await apiClient.delete(`/ai/chat/sessions`);
+      setSessions([]);
+      setSessionId(null);
+      setMessages([]);
+    } catch (error) {
+      console.error('Error deleting all sessions:', error);
+    }
+  };
+
   // Send message
   const sendMessage = async (text = input) => {
     if (!text.trim() || loading) return;
@@ -168,25 +195,44 @@ export default function AIChatPage() {
                   <History className="h-5 w-5" />
                   {language === 'ar' ? 'المحادثات' : 'Conversations'}
                 </CardTitle>
-                <Button variant="ghost" size="icon" onClick={startNewChat} data-testid="new-chat-btn">
-                  <Plus className="h-5 w-5" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  {sessions.length > 0 && (
+                    <Button variant="ghost" size="icon" onClick={deleteAllSessions}
+                      title={language === 'ar' ? 'حذف كل المحادثات' : 'Tout supprimer'}
+                      data-testid="delete-all-chats-btn">
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="icon" onClick={startNewChat} data-testid="new-chat-btn">
+                    <Plus className="h-5 w-5" />
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <ScrollArea className="flex-1">
               <div className="p-2 space-y-1">
                 {sessions.map((session) => (
-                  <Button
-                    key={session.id}
-                    variant={sessionId === session.id ? 'secondary' : 'ghost'}
-                    className="w-full justify-start text-sm"
-                    onClick={() => loadSession(session.id)}
-                  >
-                    <MessageCircle className="h-4 w-4 mr-2" />
-                    <span className="truncate">
-                      {session.title || (language === 'ar' ? 'محادثة جديدة' : 'Nouvelle conversation')}
-                    </span>
-                  </Button>
+                  <div key={session.id} className="flex items-center gap-1">
+                    <Button
+                      variant={sessionId === session.id ? 'secondary' : 'ghost'}
+                      className="flex-1 justify-start text-sm min-w-0"
+                      onClick={() => loadSession(session.id)}
+                    >
+                      <MessageCircle className="h-4 w-4 mr-2 shrink-0" />
+                      <span className="truncate">
+                        {session.title || (language === 'ar' ? 'محادثة جديدة' : 'Nouvelle conversation')}
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost" size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-600"
+                      title={language === 'ar' ? 'حذف المحادثة' : 'Supprimer'}
+                      onClick={(e) => deleteSession(session.id, e)}
+                      data-testid={`delete-chat-${session.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 ))}
                 {sessions.length === 0 && (
                   <p className="text-center text-muted-foreground text-sm py-8">
@@ -214,7 +260,16 @@ export default function AIChatPage() {
                   {language === 'ar' ? 'مدعوم بـ GPT-4o' : 'Propulsé par GPT-4o'}
                 </p>
               </div>
-              <Badge variant="secondary" className="ml-auto">
+              {sessionId && (
+                <Button variant="ghost" size="icon"
+                  className="ml-auto text-muted-foreground hover:text-red-600"
+                  title={language === 'ar' ? 'حذف هذه المحادثة' : 'Supprimer cette conversation'}
+                  onClick={() => deleteSession(sessionId)}
+                  data-testid="delete-current-chat-btn">
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              )}
+              <Badge variant="secondary" className={sessionId ? '' : 'ml-auto'}>
                 <Sparkles className="h-3 w-3 mr-1" />
                 AI
               </Badge>

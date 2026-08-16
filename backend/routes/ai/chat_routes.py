@@ -267,7 +267,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         """Get user's chat sessions"""
         sessions = await db.chat_sessions.find(
             {"user_id": user["id"]},
-            {"_id": 0, "id": 1, "created_at": 1, "last_message_at": 1}
+            {"_id": 0, "id": 1, "created_at": 1, "last_message_at": 1, "title": 1}
         ).sort("last_message_at", -1).to_list(50)
         return sessions
     
@@ -607,4 +607,17 @@ def create_ai_routes(db, get_current_user) -> dict:
             "generated_at": datetime.now(timezone.utc).isoformat()
         }
     
+    # p118: delete chat sessions (user-scoped)
+    @router.delete("/chat/sessions/{session_id}")
+    async def delete_chat_session(session_id: str, user=Depends(get_current_user)):
+        result = await db.chat_sessions.delete_one({"id": session_id, "user_id": user["id"]})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"message": "deleted", "id": session_id}
+
+    @router.delete("/chat/sessions")
+    async def delete_all_chat_sessions(user=Depends(get_current_user)):
+        result = await db.chat_sessions.delete_many({"user_id": user["id"]})
+        return {"message": "deleted", "count": result.deleted_count}
+
     return router

@@ -41,6 +41,10 @@ export function usePOSSession({ language, toast, apiClient }) {
       if (session && session.status === 'open') {
         setHasOpenSession(true);
         setCurrentSession(session);
+        // p117: default stats object so the close-session dialog always renders
+        // (previously stats stayed null until a sale was made → empty dialog,
+        //  "غلق الحصة" appeared broken on a fresh page load)
+        setSessionStats({ cashSales: 0, creditSales: 0, totalSales: 0, salesCount: 0, todaySales: [] });
         const sessionDay = new Date(session.opened_at).toDateString();
         const today = new Date().toDateString();
         const stale = sessionDay !== today;

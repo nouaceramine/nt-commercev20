@@ -10,7 +10,7 @@ import { Link } from 'react-router-dom';
 import {
   ShoppingCart, Banknote, TrendingUp, TrendingDown, Package,
   Receipt, AlertTriangle, Calendar, RefreshCw, Equal, ArrowRight, ArrowLeft,
-  CreditCard, Wallet,
+  CreditCard, Wallet, Globe, Smartphone, Tv, Wrench,
 } from 'lucide-react';
 
 export default function DailyReportPage() {
@@ -25,20 +25,23 @@ export default function DailyReportPage() {
   const [stats, setStats] = useState({ low_stock_count: 0, total_products: 0, total_customers: 0 });
   const [todayExpenses, setTodayExpenses] = useState(0);
   const [todaySales, setTodaySales] = useState([]);
+  const [dailyFull, setDailyFull] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchAll = async () => {
     setLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const [salesRes, profitRes, cashRes, statsRes, expRes, salesListRes] = await Promise.allSettled([
+      const [salesRes, profitRes, cashRes, statsRes, expRes, salesListRes, fullRes] = await Promise.allSettled([
         apiClient.get('/dashboard/sales-stats'),
         apiClient.get('/dashboard/profit-stats'),
         apiClient.get('/cash-boxes'),
         apiClient.get('/stats'),
         apiClient.get(`/expenses?start_date=${today}&end_date=${today}`),
         apiClient.get(`/sales?date=${today}&limit=10`),
+        apiClient.get('/reports/daily-full'),
       ]);
+      if (fullRes.status === 'fulfilled' && fullRes.value.data) setDailyFull(fullRes.value.data);
 
       if (salesRes.status === 'fulfilled' && salesRes.value.data) setSalesStats(salesRes.value.data);
       if (profitRes.status === 'fulfilled' && profitRes.value.data) setProfitStats(profitRes.value.data);
@@ -155,6 +158,85 @@ export default function DailyReportPage() {
             ))}
           </div>
         </div>
+
+        {/* ── p119: All business lines today ── */}
+        {dailyFull && (
+          <div data-testid="daily-full-report">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+              {ar ? 'كل الأنشطة اليوم' : "Toutes les activités du jour"}
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* POS / inventory sales */}
+              <Card className="border-0 shadow-sm" data-testid="dr-pos-card">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-950/30 w-fit"><ShoppingCart className="h-4 w-4 text-emerald-600" /></div>
+                    <span className="font-semibold text-sm">{ar ? 'مبيعات المخزون (POS)' : 'Ventes stock (POS)'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">{ar ? 'المبيعات' : 'Ventes'}</span><span className="font-bold">{formatCurrency(dailyFull.pos?.total || 0)} DA</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{dailyFull.pos?.count || 0} {ar ? 'عملية' : 'op.'}</span><span className="text-emerald-600">{ar ? 'ربح' : 'profit'}: {formatCurrency(dailyFull.pos?.profit || 0)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-amber-600">{ar ? 'دين' : 'crédit'}: {formatCurrency(dailyFull.pos?.debt || 0)}</span><span className="text-muted-foreground">{ar ? 'مرتجع' : 'retours'}: {dailyFull.pos?.returned_count || 0}</span></div>
+                </CardContent>
+              </Card>
+              {/* E-commerce */}
+              <Card className="border-0 shadow-sm" data-testid="dr-ecom-card">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/30 w-fit"><Globe className="h-4 w-4 text-blue-600" /></div>
+                    <span className="font-semibold text-sm">{ar ? 'المتجر الإلكتروني' : 'Boutique en ligne'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">{ar ? 'طلبات جديدة' : 'Nouvelles cmd'}</span><span className="font-bold">{dailyFull.ecom?.new_count || 0} ({formatCurrency(dailyFull.ecom?.new_total || 0)} DA)</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-emerald-600">{ar ? 'سُلّمت اليوم' : 'livrées'}: {dailyFull.ecom?.delivered_count || 0}</span><span className="text-emerald-600">{formatCurrency(dailyFull.ecom?.delivered_total || 0)} DA</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-blue-600">{ar ? 'قيد التوصيل' : 'en transit'}: {dailyFull.ecom?.in_transit_count || 0} ({formatCurrency(dailyFull.ecom?.in_transit_total || 0)})</span><span className="text-red-600">{ar ? 'ملغي/مرتجع' : 'annul./ret.'}: {(dailyFull.ecom?.cancelled_today || 0) + (dailyFull.ecom?.refunded_today || 0)}</span></div>
+                </CardContent>
+              </Card>
+              {/* Recharge */}
+              <Card className="border-0 shadow-sm" data-testid="dr-recharge-card">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-2 rounded-lg bg-teal-100 dark:bg-teal-950/30 w-fit"><Smartphone className="h-4 w-4 text-teal-600" /></div>
+                    <span className="font-semibold text-sm">{ar ? 'شحن الرصيد' : 'Recharge'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">{ar ? 'المبيعات' : 'Ventes'}</span><span className="font-bold">{formatCurrency(dailyFull.recharge?.amount || 0)} DA</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{dailyFull.recharge?.count || 0} {ar ? 'عملية' : 'op.'}</span><span className="text-emerald-600">{ar ? 'ربح' : 'profit'}: {formatCurrency(dailyFull.recharge?.profit || 0)}</span></div>
+                </CardContent>
+              </Card>
+              {/* Digital / IPTV */}
+              <Card className="border-0 shadow-sm" data-testid="dr-digital-card">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-950/30 w-fit"><Tv className="h-4 w-4 text-purple-600" /></div>
+                    <span className="font-semibold text-sm">{ar ? 'الخدمات الرقمية / IPTV' : 'Services digitaux / IPTV'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">{ar ? 'المداخيل' : 'Revenus'}</span><span className="font-bold">{formatCurrency(dailyFull.digital?.revenue || 0)} DA</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{dailyFull.digital?.completed_count || 0} {ar ? 'مكتمل' : 'complétées'}</span><span className="text-amber-600">{dailyFull.digital?.pending_count || 0} {ar ? 'معلّق' : 'en attente'}</span></div>
+                </CardContent>
+              </Card>
+              {/* Repairs */}
+              <Card className="border-0 shadow-sm" data-testid="dr-repairs-card">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-950/30 w-fit"><Wrench className="h-4 w-4 text-orange-600" /></div>
+                    <span className="font-semibold text-sm">{ar ? 'الصيانة' : 'Réparations'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">{ar ? 'مداخيل التسليم' : 'Revenus livrés'}</span><span className="font-bold">{formatCurrency(dailyFull.repairs?.revenue || 0)} DA</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{ar ? 'استلام اليوم' : 'reçus'}: {dailyFull.repairs?.received_today || 0} · {ar ? 'تسليم' : 'livrés'}: {dailyFull.repairs?.delivered_today || 0}</span><span className="text-blue-600">{ar ? 'قيد العمل' : 'en cours'}: {dailyFull.repairs?.in_progress || 0}</span></div>
+                </CardContent>
+              </Card>
+              {/* Grand total */}
+              <Card className="border-0 shadow-sm border-l-4 border-l-primary" data-testid="dr-total-card">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-2 rounded-lg bg-primary/10 w-fit"><Wallet className="h-4 w-4 text-primary" /></div>
+                    <span className="font-semibold text-sm">{ar ? 'إجمالي دخل اليوم (كل الأنشطة)' : 'Revenu total du jour'}</span>
+                  </div>
+                  <p className="text-2xl font-bold text-primary">{formatCurrency(dailyFull.total_revenue || 0)} DA</p>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{ar ? 'رأس المال' : 'Capital'}: {formatCurrency(dailyFull.capital || 0)}</span><span className="text-red-600">{ar ? 'مصاريف' : 'dép.'}: {formatCurrency(dailyFull.expenses?.total || 0)}</span></div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
 
         {/* ── Profit ── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

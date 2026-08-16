@@ -1923,3 +1923,33 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 - backend: services/auth_service.py, routes/simple_auth_routes.py, routes/auth_users_routes.py, routes/products_routes.py
 - backup: /opt/ntcommerce/backups/p113_dedup_barcode/
 - لا تغيير واجهة (backend فقط)
+
+## p115 — لوحة التحكم: ديون اليوم + رأس المال (2026-08-16)
+- /stats: +customer_debt_today(+count), supplier_debt_today(+count), supplier_debt_total (purchases.remaining اليوم / suppliers.balance)
+- DashboardPage: «رصيد محفظة الزبون»→«رصيد ديون الزبائن»، بطاقة 2→«ديون الزبائن اليوم»، +بطاقة «ديون الموردين اليوم»، «إجمالي النقد»→«رأس المال»
+- اختبار حي: دين زبون 777 + دين مورد 333 ظهرا بدقة ثم نُظّفا. backup: backups/p115_dashboard/
+
+## p116 — صفحة المنتجات: أيقونة حذف فردي (2026-08-16)
+- زر حذف أحمر لكل منتج (قائمة+شبكة) يعيد استخدام حوار الحذف الجماعي الموجود؛ التحديد المتعدد موجود مسبقاً (bulk-select-btn)
+- تحقق: DELETE /products/{id} حذف+أرشفة deleted_products ✓ (id 81f93021). backup: backups/p116_products_delete/
+
+## p117 — POS: إصلاح غلق الحصة + تكبير البحث (2026-08-16)
+- **جذر العطل**: fetchSessionStats كانت تُستدعى فقط بعد إتمام بيع → sessionStats=null عند فتح صفحة جديدة → حوار الغلق يشترط currentSession && sessionStats → حوار فارغ بلا زر تأكيد
+- الإصلاح: checkOpenSession يزرع stats افتراضية صفرية فوراً + زر «غلق الحصة» يحدّث الأرقام الحقيقية عند الفتح (fetchSessionStats)
+- خانة البحث: h-9 text-sm → h-14 text-base (+أيقونة أكبر)
+- أُغلقت حصة S003/26 العالقة منذ 2026-08-15 (مبيعات 5650) عبر اختبار حي للـ endpoint
+- backup: backups/p117_pos_fixes/
+
+## p118 — AI Chat: حذف المحادثات (2026-08-16)
+- backend: DELETE /ai/chat/sessions/{id} (user-scoped) + DELETE /ai/chat/sessions (الكل) + title في قائمة الجلسات
+- frontend: أيقونة حذف لكل محادثة + حذف المحادثة الحالية في الرأس + حذف الكل في الشريط
+- اختبار حي: إنشاء→حذف ✓، 404 لغير موجود ✓، حذف الكل (11 محادثة قديمة) ✓
+- backup: backups/p118_aichat_delete/
+
+## p119 — التقرير اليومي الشامل (2026-08-16)
+- backend: GET /reports/daily-full?date= — 5 أنشطة: POS (بدون مرآة webstore) / متجر إلكتروني (جديد+مُسلَّم اليوم عبر status_history+قيد التوصيل+ملغي) / شحن رصيد (count+amount+profit) / خدمات رقمية IPTV (completed+pending+by_type) / صيانة (استلام+تسليم+final_cost+قيد العمل) + مصاريف اليوم + رأس المال + إجمالي الدخل
+- frontend: قسم «كل الأنشطة اليوم» بـ 6 بطاقات في /daily-report
+- **تدقيق حسابي**: /stats=sales-stats=daily-full=4150 بعد حذف بيعة اختبار p108 متروكة (ECO-P108-2, 1500 دج)؛ sales-stats.today يدمج POS+متجر عمداً (p86) مع فصل store.* — لا تسريب
+- backup: backups/p119_daily_report/
+
+**الحزمة المنشورة: main.ddb76b31.js** (p115-p119)

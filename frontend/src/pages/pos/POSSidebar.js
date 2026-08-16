@@ -43,7 +43,7 @@ export default function POSSidebar({
     <div className="hidden md:flex md:col-span-2 flex-col gap-2" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
       <Card className="p-2">
         <div className="relative mb-2">
-          <Search className="absolute top-1/2 -translate-y-1/2 start-2 h-4 w-4 text-muted-foreground z-10" />
+          <Search className="absolute top-1/2 -translate-y-1/2 start-3 h-5 w-5 text-muted-foreground z-10" />
           <Input
             ref={searchInputRef}
             placeholder={language === 'ar' ? 'بحث أو مسح باركود...' : 'Rechercher ou scanner...'}
@@ -71,7 +71,7 @@ export default function POSSidebar({
                 }
               }
             }}
-            className="ps-8 h-9 text-sm"
+            className="ps-11 h-14 text-base font-medium"
             data-testid="pos-search-input"
           />
           <Barcode className="absolute top-1/2 -translate-y-1/2 end-2 h-4 w-4 text-muted-foreground/50" />

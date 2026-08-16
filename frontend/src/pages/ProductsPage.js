@@ -823,6 +823,11 @@ export default function ProductsPage() {
                             data-testid={`clone-product-${product.id}`}>
                             <Copy className="h-4 w-4" />
                           </Button>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); setSelectedProducts(new Set([product.id])); setShowDeleteDialog(true); }}
+                            title={language === 'ar' ? 'حذف المنتج' : 'Supprimer le produit'}
+                            data-testid={`delete-product-${product.id}`}>
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
                         </>
                       )}
                     </div>
@@ -922,6 +927,14 @@ export default function ProductsPage() {
                           >
                             <Pencil className="h-4 w-4 text-slate-700" />
                           </Link>
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedProducts(new Set([product.id])); setShowDeleteDialog(true); }}
+                            className="bg-white/90 hover:bg-white rounded-full p-1.5 shadow"
+                            title={language === 'ar' ? 'حذف المنتج' : 'Supprimer'}
+                            data-testid={`delete-product-card-${product.id}`}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </button>
                         </div>
                       )}
                     </div>
