@@ -2013,3 +2013,9 @@ nginx: HSTS (سنة + subdomains), X-Frame-Options SAMEORIGIN, X-Content-Type-Op
 ## p129 — CI كامل (2026-08-16)
 **قبل:** workflow واحد lint-only؛ الاختبارات لا تُشغَّل آلياً؛ حالة الحقيقية للسويت: 167 ناجح / 80 فاشل / 68 خطأ (اختبارات قديمة انجرفت بعد 122 مرحلة).
 **بعد:** .github/workflows/ci.yml بخمس بوابات: ESLint + **بناء frontend إنتاجي** (يكشف كسر البناء قبل السيرفر) + ruff (قواعد كارثية) + **bandit** (الخطورة العالية تمنع الدمج) + **السويت الأخضر** tests/green_suite.txt = 6 ملفات تنجح 100% اليوم (59 اختباراً: auth, cashier blocks, repository, email x3). إصلاح بقية الـ 148 اختباراً المتدهورة مسجّل كدَين تقني.
+
+## p130 — بيئة Staging منفصلة (2026-08-16)
+docker-compose.staging.yml: backend-staging (127.0.0.1:8002) + mongodb-staging (RS rsStaging) + redis-staging على شبكة ntc-staging معزولة. الكود من نسخة git منفصلة /opt/ntcommerce-staging (يمكن تجربة أي فرع). البيانات بُذرت من نسخة الإنتاج اليومية. nginx vhost على :8443 (منفذ ضمن قائمة Cloudflare) مع noindex + رؤوس الأمان؛ UFW يقبل 8443 من نطاقات Cloudflare فقط (أُضيف لـ cf_ufw_sync.sh ليبقى دائماً). تحقق: https://nt-commerce.net:8443 → 200 + /api/health → 200.
+
+## p125-fix — تصحيح تدوير الأسرار (2026-08-16)
+اكتشف أثناء p130 أن التدوير الأول كتب في backend/.env (غير المستخدم من الإنتاج) بينما compose يقرأ /opt/ntcommerce/.env الجذري — أُعيد التدوير في الملفين معاً (بصمة جديدة، طول 96 hex) مع chmod 600 للاثنين. تحقق: prod openapi 200 + endpoint محمي بتوكن بالمفتاح الجديد 200 + fail-closed أثبت نفسه (staging رفض الإقلاع بمفتاح فارغ). الدرس الموثق: restart لا يعيد قراءة env_file — يلزم up -d لإعادة الإنشاء.

@@ -91,7 +91,7 @@ def _iso(dt: datetime) -> str:
 
 
 def _sig(module: str, key: str) -> str:
-    return hashlib.sha1(f"{module}:{key}".encode()).hexdigest()[:16]
+    return hashlib.sha1(f"{module}:{key}".encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 class AutoHealEngine:
