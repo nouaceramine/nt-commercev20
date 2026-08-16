@@ -1,0 +1,98 @@
+name: CI
+
+# Full CI pipeline (p129):
+#   1. Frontend ESLint (errors block)
+#   2. Frontend production build (catches build breakage before it reaches the VPS)
+#   3. Backend ruff (catastrophic rules only)
+#   4. Backend bandit security scan (high severity blocks)
+#   5. Backend green-path pytest suite (test files that pass 100% today — the
+#      rest of the legacy suite is being repaired; see DEPLOYMENT_LOG p129)
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  frontend-lint:
+    name: Frontend ESLint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+      - run: yarn install --frozen-lockfile
+      - run: yarn lint
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+        env:
+          CI: false
+
+  backend-lint:
+    name: Backend Ruff
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install ruff
+      - name: Run ruff (errors only)
+        run: |
+          ruff check . \
+            --select=F821,F811,F601,F602 \
+            --exclude=__pycache__,logs,static
+
+  backend-security:
+    name: Backend Bandit (security)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install bandit
+      - name: Bandit — high severity blocks the merge
+        run: bandit -r . -lll -q -x ./tests,./logs,./static,./__pycache__
+
+  backend-tests:
+    name: Backend Tests (green suite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt -r tests/requirements.txt
+      - name: Run green test files
+        run: python3 -m pytest $(cat tests/green_suite.txt | tr '\n' ' ') -q

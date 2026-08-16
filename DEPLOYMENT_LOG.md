@@ -2005,3 +2005,7 @@ nginx: HSTS (سنة + subdomains), X-Frame-Options SAMEORIGIN, X-Content-Type-Op
 ## p127 — MongoDB Replica Set (2026-08-16)
 **قبل:** standalone — لا transactions ولا oplog ولا PITR.
 **بعد:** command: --replSet rs0 في compose + rs.initiate (host mongodb:27017) + MONGO_URL?replicaSet=rs0. الحالة PRIMARY(1). تحقق: openapi 200، البيانات سليمة (2 مستأجرين)، endpoint محمي 200، HTTPS 200. نسخة: backups/p127_replicaset/. ملاحظة تقنية: الأداة على السيرفر هي docker-compose (v5.3.1) وليست docker compose plugin.
+
+## p128 — نسخة خارجية مشفرة (2026-08-16)
+**قبل:** نسخ Mongo لا تغادر الـ VPS — احتراق السيرفر = ضياع كل شيء.
+**بعد:** scripts/offsite_backup.sh (يومي 04:30): يشفّر أحدث mongodump بـ GPG AES256 (passphrase في /opt/ntcommerce/.backup_key بصلاحيات 600) ثم يرفعه عبر rclone إلى remote باسم offsite: — **الـ remote ينتظر بيانات التخزين السحابي من المالك** (حتى_then_ تُخزَّن المشفَّرة محلياً في backups/offsite_ready/ مع تنبيه). تحقق: أول نسخة مشفرة 9.1M + فك التشفير وgzip -t ناجحان. احتفاظ: 7 محلياً / 30 يوماً عن بُعد. rclone v1.75.0 مثبت.

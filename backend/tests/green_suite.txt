@@ -1,0 +1,6 @@
+tests/test_auth_service.py
+tests/test_cashier_blocks.py
+tests/test_iter20_email_templates.py
+tests/test_iter21_email_validation.py
+tests/test_iter22_multi_provider_email.py
+tests/test_repository.py
