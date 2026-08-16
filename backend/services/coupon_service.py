@@ -40,8 +40,10 @@ class CouponService:
     @staticmethod
     async def validate_coupon(db, code: str, subtotal: float, 
                               customer_phone: str = "",
-                              product_ids: List[str] = []) -> Dict[str, Any]:
+                              product_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """التحقق من صلاحية الكوبون"""
+        if product_ids is None:
+            product_ids = []
         coupon = await db.coupons.find_one({
             "code": code.upper().strip(),
             "is_active": True

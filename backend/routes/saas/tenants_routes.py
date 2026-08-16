@@ -657,10 +657,12 @@ async def set_recharge_mode(
 @router.post("/saas/tenants/{tenant_id}/test-bridge")
 async def test_tenant_bridge(
     tenant_id: str,
-    body: dict = {},
+    body: Optional[dict] = None,
     admin: dict = Depends(get_super_admin)
 ):
     """Super admin: ping a tenant's self-bridge /health endpoint."""
+    if body is None:
+        body = {}
     tenant = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")

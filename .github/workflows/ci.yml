@@ -64,7 +64,7 @@ jobs:
       - name: Run ruff (errors only)
         run: |
           ruff check . \
-            --select=F821,F811,F601,F602 \
+            --select=F821,F811,F601,F602,B006,B018,B025 \
             --exclude=__pycache__,logs,static
 
   backend-security:

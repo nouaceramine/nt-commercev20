@@ -373,12 +373,6 @@ async def _courier_box(db, order: dict):
     except Exception:
         pass
     return f"{ECOM_BOX_ID}_{courier}", f"محفظة {name}"
-    await db.transactions.insert_one({
-        "id": str(uuid.uuid4()), "cash_box_id": box_id, "type": tx_type,
-        "amount": amount, "description": description,
-        "reference_type": ref_type, "reference_id": ref_id,
-        "created_at": now, "created_by": user.get("name") or "المتجر الإلكتروني",
-    })
 
 
 async def _auto_expense(db, amount, category, title, now):

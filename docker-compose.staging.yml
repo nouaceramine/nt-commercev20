@@ -1,0 +1,57 @@
+# p130: Staging environment — isolated copy of the stack on separate ports/DBs.
+# Backend: 127.0.0.1:8002 | Mongo: 127.0.0.1:27018 | Redis: 127.0.0.1:6380
+# Public URL: https://nt-commerce.net:8443 (Cloudflare-proxied port, UFW-limited to CF ranges)
+services:
+  backend-staging:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ntcommerce-staging-backend
+    environment:
+      - MONGO_URL=mongodb://mongodb-staging:27018/ntcommerce_staging
+      - DB_NAME=ntcommerce_staging
+      - REDIS_URL=redis://redis-staging:6379
+      - APP_ENV=staging
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET_KEY}
+      - SECRET_KEY=${SECRET_KEY:-staging_secret}
+      - CODE_ENCRYPTION_KEY=${CODE_ENCRYPTION_KEY:-}
+      - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AI_INTEGRATIONS_OPENAI_API_KEY=${AI_INTEGRATIONS_OPENAI_API_KEY:-}
+      - AI_INTEGRATIONS_OPENAI_BASE_URL=${AI_INTEGRATIONS_OPENAI_BASE_URL:-}
+      - AI_INTEGRATIONS_OPENAI_MODEL=${AI_INTEGRATIONS_OPENAI_MODEL:-}
+      - CURRENCY_DEFAULT=DZD
+      - LOG_LEVEL=INFO
+    ports:
+      - "127.0.0.1:8002:8001"
+    restart: unless-stopped
+    depends_on:
+      - mongodb-staging
+      - redis-staging
+    networks:
+      - ntc-staging
+
+  mongodb-staging:
+    image: mongo:7.0
+    container_name: ntcommerce-staging-mongodb
+    command: ["mongod", "--replSet", "rsStaging", "--bind_ip_all"]
+    volumes:
+      - staging_mongodb_data:/data/db
+    restart: unless-stopped
+    networks:
+      - ntc-staging
+
+  redis-staging:
+    image: redis:7-alpine
+    container_name: ntcommerce-staging-redis
+    restart: unless-stopped
+    networks:
+      - ntc-staging
+
+networks:
+  ntc-staging:
+    driver: bridge
+
+volumes:
+  staging_mongodb_data:

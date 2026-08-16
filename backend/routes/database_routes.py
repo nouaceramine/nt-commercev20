@@ -77,12 +77,6 @@ async def verify_super_admin(credentials: HTTPAuthorizationCredentials = Depends
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        
-        return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:

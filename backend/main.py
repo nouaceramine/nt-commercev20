@@ -1160,9 +1160,7 @@ for _mod_path in _AUTO_REG_MODULES:
 
 
 # ============ ROUND 4: RESTORED & MISSING ENDPOINTS ============
-try:
-    block_cashier
-except NameError:
+if "block_cashier" not in globals():
     block_cashier = create_cashier_block(get_current_user)
 
 # ── Robot API (restored from git history e825d32) ──

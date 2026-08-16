@@ -12,6 +12,11 @@ from utils.permissions import create_cashier_block
 def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> dict:
     router = APIRouter(prefix="/wallet", tags=["wallet"])
 
+    async def _super_admin(user: dict = Depends(get_current_user)):
+        if user.get("role") != "super_admin" and user.get("user_type") != "super_admin":
+            raise HTTPException(status_code=403, detail="صلاحيات المشرف العام مطلوبة")
+        return user
+
     async def _get_or_create_wallet(entity_id, entity_type="tenant"):
         wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
         if not wallet:
@@ -83,7 +88,7 @@ def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> d
         return await main_db.wallet_services.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
 
     @router.post("/services")
-    async def create_service(data: dict, admin: dict = Depends(lambda: create_super_admin_dependency(main_db, get_current_user))):
+    async def create_service(data: dict, admin: dict = Depends(_super_admin)):
         name_ar = (data.get("name_ar") or data.get("name") or "").strip()
         if not name_ar:
             raise HTTPException(status_code=400, detail="اسم الخدمة مطلوب")
@@ -105,7 +110,7 @@ def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> d
         return service
 
     @router.put("/services/{service_id}")
-    async def update_service(service_id: str, data: dict, admin: dict = Depends(lambda: create_super_admin_dependency(main_db, get_current_user))):
+    async def update_service(service_id: str, data: dict, admin: dict = Depends(_super_admin)):
         updates = {}
         for k in ["name_ar", "name_fr", "description", "currency"]:
             if k in data:
@@ -125,7 +130,7 @@ def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> d
         return service
 
     @router.delete("/services/{service_id}")
-    async def delete_service(service_id: str, admin: dict = Depends(lambda: create_super_admin_dependency(main_db, get_current_user))):
+    async def delete_service(service_id: str, admin: dict = Depends(_super_admin)):
         res = await main_db.wallet_services.delete_one({"id": service_id})
         if res.deleted_count == 0:
             raise HTTPException(status_code=404, detail="الخدمة غير موجودة")

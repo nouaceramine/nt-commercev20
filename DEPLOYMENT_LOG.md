@@ -2009,3 +2009,7 @@ nginx: HSTS (سنة + subdomains), X-Frame-Options SAMEORIGIN, X-Content-Type-Op
 ## p128 — نسخة خارجية مشفرة (2026-08-16)
 **قبل:** نسخ Mongo لا تغادر الـ VPS — احتراق السيرفر = ضياع كل شيء.
 **بعد:** scripts/offsite_backup.sh (يومي 04:30): يشفّر أحدث mongodump بـ GPG AES256 (passphrase في /opt/ntcommerce/.backup_key بصلاحيات 600) ثم يرفعه عبر rclone إلى remote باسم offsite: — **الـ remote ينتظر بيانات التخزين السحابي من المالك** (حتى_then_ تُخزَّن المشفَّرة محلياً في backups/offsite_ready/ مع تنبيه). تحقق: أول نسخة مشفرة 9.1M + فك التشفير وgzip -t ناجحان. احتفاظ: 7 محلياً / 30 يوماً عن بُعد. rclone v1.75.0 مثبت.
+
+## p129 — CI كامل (2026-08-16)
+**قبل:** workflow واحد lint-only؛ الاختبارات لا تُشغَّل آلياً؛ حالة الحقيقية للسويت: 167 ناجح / 80 فاشل / 68 خطأ (اختبارات قديمة انجرفت بعد 122 مرحلة).
+**بعد:** .github/workflows/ci.yml بخمس بوابات: ESLint + **بناء frontend إنتاجي** (يكشف كسر البناء قبل السيرفر) + ruff (قواعد كارثية) + **bandit** (الخطورة العالية تمنع الدمج) + **السويت الأخضر** tests/green_suite.txt = 6 ملفات تنجح 100% اليوم (59 اختباراً: auth, cashier blocks, repository, email x3). إصلاح بقية الـ 148 اختباراً المتدهورة مسجّل كدَين تقني.
