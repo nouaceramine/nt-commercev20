@@ -1765,4 +1765,4 @@ Backup: /opt/ntcommerce/backups/p102_roas/
 - cable: 6000 − 775 − 1500 − 666.67 = صافي 3058.33 (هامش 51%) ✓ · منتج ثانٍ: 3000 − 600 − 333.33 = 2066.67 ✓ · توزيع الإعلان 2:1 حسب الإيراد ✓ · بيانات الاختبار نُظّفت ✓
 
 ### نشر
-- main.66d41279.js — backup: /opt/ntcommerce/backups/p105_product_pnl/
+- main.a1dbfb4d.js — backup: /opt/ntcommerce/backups/p105_product_pnl/
