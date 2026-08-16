@@ -1998,3 +1998,10 @@ backup: backups/p120_identity/ — لا تغيير واجهة
 ## p125 — تدوير الأسرار وتحصين JWT (2026-08-16)
 **قبل:** أسرار JWT وُجدت في تاريخ git (commit قديم)؛ utils/auth.py فيه fallback ثابت مكشوف؛ .env بصلاحيات 644.
 **بعد:** تدوير JWT_SECRET_KEY + JWT_SECRET + SECRET_KEY (openssl rand 48 بايت) — كل الجلسات القديمة أُبطلت (إعادة دخول مطلوبة). إزالة الـ fallbacks الثابتة من utils/auth.py وservices/auth_service.py — التطبيق الآن يرفض الإقلاع بدون JWT_SECRET_KEY (fail-closed). chmod 600 للـ .env. مفاتيح التشفير عند التخزين (CODE/FIELD_ENCRYPTION_KEY) لم تُدوَّر عمداً — تدويرها يعطّل البيانات المشفرة القائمة. GEMINI/AI keys يجب تدويرها من لوحات مزوديها (بند على المالك). تحقق: openapi 200 + endpoint محمي بتوكن جديد 200. نسخة: backups/p125_secrets/.
+
+## p126 — رؤوس الأمان (2026-08-16)
+nginx: HSTS (سنة + subdomains), X-Frame-Options SAMEORIGIN, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy — في مستوى server + snippet /etc/nginx/snippets/ntc-security-headers.conf مضمَّن في كل location لها add_header خاص (قاعدة nginx: add_header في location يلغي الوراثة). تحقق حي: 5/5 رؤوس عبر Cloudflare + api/health 200.
+
+## p127 — MongoDB Replica Set (2026-08-16)
+**قبل:** standalone — لا transactions ولا oplog ولا PITR.
+**بعد:** command: --replSet rs0 في compose + rs.initiate (host mongodb:27017) + MONGO_URL?replicaSet=rs0. الحالة PRIMARY(1). تحقق: openapi 200، البيانات سليمة (2 مستأجرين)، endpoint محمي 200، HTTPS 200. نسخة: backups/p127_replicaset/. ملاحظة تقنية: الأداة على السيرفر هي docker-compose (v5.3.1) وليست docker compose plugin.
