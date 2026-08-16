@@ -713,7 +713,18 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 "status_history": [{"status": "new", "at": now, "by": "webstore"}],
                 "created_at": now, "updated_at": now, "created_by": "webstore",
             }
-            await tenant_db_inst.ecom_orders.insert_one(ecom_doc)
+            # p100: cross-tenant reputation — attach trust badge (no auto-escalation for webstore)
+            try:
+                from services.application.ecom_order_service import get_network_trust, reputation_on_create
+                _net = await get_network_trust((ecom_doc.get("customer") or {}).get("phone", ""))
+                if _net.get("found"):
+                    ecom_doc["network_trust"] = _net
+                await tenant_db_inst.ecom_orders.insert_one(ecom_doc)
+                await reputation_on_create(ecom_doc, tenant_id or "")
+            except Exception as _ne:  # noqa: BLE001
+                logger.warning(f"p100 webstore reputation hook failed: {_ne}")
+                if not await tenant_db_inst.ecom_orders.find_one({"id": ecom_doc["id"]}):
+                    await tenant_db_inst.ecom_orders.insert_one(ecom_doc)
             try:  # p87: mirror into the POS sales ledger
                 from services.application.ecom_order_service import sync_sale_doc
                 await sync_sale_doc(tenant_db_inst, ecom_doc)

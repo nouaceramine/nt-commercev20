@@ -34,6 +34,8 @@ SALES_CHANNEL_KEYS = {k for k, m in CHANNELS.items() if m.get("kind") != "shippi
 # State machine: new → confirmed → packed → shipped → delivered | cancelled | refunded
 ORDER_STATUSES = {
     "new":       {"label_ar": "جديد",         "label_en": "New",        "color": "#3b82f6"},
+    "needs_review": {"label_ar": "بحاجة لمراجعة", "label_en": "Needs review", "color": "#f97316"},
+    "awaiting_confirmation": {"label_ar": "بانتظار تأكيد الزبون", "label_en": "Awaiting confirmation", "color": "#eab308"},
     "confirmed": {"label_ar": "مؤكَّد",       "label_en": "Confirmed",  "color": "#8b5cf6"},
     "packed":    {"label_ar": "محضَّر",       "label_en": "Packed",     "color": "#f59e0b"},
     "shipped":   {"label_ar": "في الشحن",     "label_en": "Shipped",    "color": "#06b6d4"},
@@ -47,6 +49,8 @@ ORDER_STATUS_KEYS = set(ORDER_STATUSES.keys())
 # Allowed forward transitions (cancel/refund allowed from most states)
 STATUS_TRANSITIONS = {
     "new":       {"confirmed", "cancelled"},
+    "needs_review": {"confirmed", "cancelled"},
+    "awaiting_confirmation": {"confirmed", "cancelled"},
     "confirmed": {"packed", "cancelled"},
     "packed":    {"shipped", "cancelled"},
     "shipped":   {"delivered", "refunded"},

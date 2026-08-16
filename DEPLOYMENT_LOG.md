@@ -1681,3 +1681,17 @@ Backup: /opt/ntcommerce/backups/p95_webhooks_guide_companies/
 - frontend: حوار الطلب (EcomOrderDetailDialog) يجلب الأرخص لولاية الطلب عند فتحه، يعرض سطر «💡 الأرخص لولاية X» مع المقارنة (cheapest-suggestion)، ويحدّد الشركة الأرخص تلقائياً في قائمة الناقل (قابل للتغيير).
 - اختبارات حية: يالدين فقط (الأغواط 950/750 حقيقي) ✓؛ إضافة جدول ZR تجريبي أرخص → cheapest=zr ✓؛ desk=true → أسعار المكتب ✓؛ نظّفت بيانات الاختبار.
 - الحزمة: main.c4975d61.js (تشمل أيضاً تحديث دليل p96).
+
+## p100 — شبكة كشف الزبائن المُرجِعين عبر المتاجر (2026-08-16)
+**الفكرة**: سمعة مشتركة لكل رقم هاتف عبر كل متاجر المنصة (عدادات مجمّعة فقط — بلا بيانات شخصية).
+- backend: main_db.customer_reputation (مفتاحها الهاتف المُطبَّع): orders/delivered/returned/tenants. normalize_phone يوحّد +213/00213/بدون صفر.
+- تغذية تلقائية: عند إنشاء الطلب (يدوي + متجر ويب) orders++، وعند shipped→delivered/refunded تُسجَّل النتيجة (استلام/إرجاع فعلي فقط).
+- إنشاء الطلبات اليدوية: يُرفق doc.network_trust، والمُرجِع المتسلسل (return_rate ≥40% مع ≥2 نتيجة) يُصعَّد تلقائياً إلى «بانتظار تأكيد الزبون» + سطر في أسباب cod_risk.
+- إصلاح خلل قائم: needs_review/awaiting_confirmation لم تكن في STATUS_TRANSITIONS — كانت الطلبات المصعَّدة تعلق بلا إمكانية انتقال. أضيفت للباك إند والواجهة معاً.
+- endpoint: GET /ecom/customer-lookup?phone= → {trust: good/warn/risk/unknown, orders, delivered, returned, return_rate, tenants}.
+- تيليجرام p91: سطر تحذير «⚠️ مُرجِع متسلسل» يُلحق بالتنبيه الفوري.
+- الواجهة: شارة ثقة في حوار الطلب (customer-trust-badge) 🟢/🟡/🔴/⚪ + تحذير فوري عند إدخال الهاتف في حوار الطلب اليدوي (manual-phone-trust).
+- Backfill: scripts/backfill_reputation.py — 13 طلباً تاريخياً من المستأجرين → 10 أرقام، ورقم واحد ثبت ظهوره في المتجرين معاً.
+- اختبارات حية: lookup مع +213 طبّع صح ✓؛ رقم مزروع (3 إرجاع/4) → طلب جديد اصطعد لـ awaiting_confirmation مع network_trust ✓؛ الانتقال منها إلى cancelled يعمل ✓؛ نظّفت كل بيانات الاختبار.
+- الحزمة: main.d4530382.js
+Backup: /opt/ntcommerce/backups/p100_reputation/

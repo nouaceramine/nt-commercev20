@@ -20,19 +20,29 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
   const [callNote, setCallNote] = useState('');      // p79
   const [packCost, setPackCost] = useState('');      // p71: packaging cost
   const [cheapest, setCheapest] = useState(null);       // p99: cheapest courier for the order's wilaya
+  const [networkTrust, setNetworkTrust] = useState(null);  // p100: cross-tenant customer reputation
 
   // p99: fetch cheapest courier for the order's wilaya and pre-select it
   useEffect(() => {
     if (!open || !order) return;
     const w = (order.customer?.wilaya || '').trim();
     setCheapest(null);
-    if (!w) return;
-    apiClient.get(`/ecom/shipping/cheapest?wilaya=${encodeURIComponent(w)}`)
-      .then(res => {
-        setCheapest(res.data || null);
-        if (res.data?.cheapest) setShippingProvider(res.data.cheapest);
-      })
-      .catch(() => {});
+    setNetworkTrust(null);
+    if (w) {
+      apiClient.get(`/ecom/shipping/cheapest?wilaya=${encodeURIComponent(w)}`)
+        .then(res => {
+          setCheapest(res.data || null);
+          if (res.data?.cheapest) setShippingProvider(res.data.cheapest);
+        })
+        .catch(() => {});
+    }
+    // p100: cross-tenant customer reputation badge
+    const ph = (order.customer?.phone || '').trim();
+    if (ph) {
+      apiClient.get(`/ecom/customer-lookup?phone=${encodeURIComponent(ph)}`)
+        .then(res => setNetworkTrust(res.data || null))
+        .catch(() => {});
+    }
   }, [open, order]);
 
   // Fetch tenant store name once when the dialog first opens
@@ -200,6 +210,14 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
         <div className="bg-muted/30 p-3 rounded-lg space-y-1 border">
           <div className="font-semibold flex items-center gap-2"><User className="w-4 h-4" /> {order.customer?.name || '—'}</div>
           {order.customer?.phone && <div className="text-sm text-muted-foreground flex items-center gap-2"><Phone className="w-3 h-3" /> {order.customer.phone}</div>}
+          {networkTrust && (
+            <div className="text-xs" data-testid="customer-trust-badge">
+              {networkTrust.trust === 'good' && <span className="text-emerald-700 font-semibold">🟢 زبون موثوق عبر الشبكة — استلم {networkTrust.delivered} من {networkTrust.outcomes} طلبات</span>}
+              {networkTrust.trust === 'warn' && <span className="text-amber-700 font-semibold">🟡 سجل مختلط عبر الشبكة — أرجع {networkTrust.returned} من {networkTrust.outcomes}</span>}
+              {networkTrust.trust === 'risk' && <span className="text-red-700 font-semibold">🔴 مُرجِع متسلسل — أرجع {networkTrust.returned} من {networkTrust.outcomes} طلبات عبر {networkTrust.tenants} متجر!</span>}
+              {networkTrust.trust === 'unknown' && <span className="text-muted-foreground">⚪ {networkTrust.found ? 'مسجّل في الشبكة لكن بلا نتائج تسليم بعد' : 'زبون جديد على الشبكة'}</span>}
+            </div>
+          )}
           {order.customer?.phone && (
             <button type="button" onClick={toggleBlacklist} disabled={busy} className="text-xs text-red-600 underline underline-offset-2" data-testid="blacklist-toggle-btn">
               {order.blacklist?.manual ? 'إزالة من القائمة السوداء' : '🚫 حظر هذا الرقم'}

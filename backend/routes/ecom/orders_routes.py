@@ -385,7 +385,29 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         elif risk["action"] == "confirm_first":
             doc["status"] = "awaiting_confirmation"
 
+    # p100: cross-tenant reputation — attach trust, escalate serial returners to confirmation
+    try:
+        from services.application.ecom_order_service import get_network_trust
+        net = await get_network_trust(doc["customer"]["phone"])
+        if net.get("found"):
+            doc["network_trust"] = net
+            if net["trust"] == "risk":
+                reason = f"شبكة المتاجر: أرجع {net['returned']} من {net['outcomes']} طلبات عبر {net.get('tenants', 1)} متجر"
+                if isinstance(doc.get("cod_risk"), dict):
+                    doc["cod_risk"].setdefault("reasons", []).append(reason)
+                if doc.get("status") == "new":
+                    doc["status"] = "awaiting_confirmation"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("p100 network trust lookup failed: %s", exc)
+
     await db.ecom_orders.insert_one(doc)
+
+    # p100: feed the shared network
+    try:
+        from services.application.ecom_order_service import reputation_on_create
+        await reputation_on_create(doc, user.get("tenant_id") or "")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("p100 reputation create failed: %s", exc)
 
     # p87: mirror into the POS sales ledger
     try:
@@ -595,3 +617,10 @@ async def delete_order(order_id: str, user: dict = Depends(require_tenant)):
     await db.ecom_orders.delete_one({"id": order_id})
     await db.ecom_order_financials.delete_one({"id": order_id})  # p59: no orphan ledger rows
     return {"ok": True, "deleted": order_id}
+
+
+@router.get("/ecom/customer-lookup")
+async def customer_lookup(phone: str = "", user: dict = Depends(require_tenant)):
+    """p100: cross-tenant trust score for a phone number (aggregate network counters only)."""
+    from services.application.ecom_order_service import get_network_trust
+    return await get_network_trust(phone)

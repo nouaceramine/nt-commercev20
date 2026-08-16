@@ -21,6 +21,8 @@ export const CHANNELS = {
 
 export const ORDER_STATUSES = {
   new:       { labelAr: 'جديد',         color: 'bg-blue-100 text-blue-800 border-blue-200',     dot: 'bg-blue-500' },
+  needs_review: { labelAr: 'بحاجة لمراجعة', color: 'bg-orange-100 text-orange-800 border-orange-200', dot: 'bg-orange-500' },
+  awaiting_confirmation: { labelAr: 'بانتظار تأكيد الزبون', color: 'bg-yellow-100 text-yellow-800 border-yellow-200', dot: 'bg-yellow-500' },
   confirmed: { labelAr: 'مؤكَّد',       color: 'bg-violet-100 text-violet-800 border-violet-200', dot: 'bg-violet-500' },
   packed:    { labelAr: 'محضَّر',       color: 'bg-amber-100 text-amber-800 border-amber-200',  dot: 'bg-amber-500' },
   shipped:   { labelAr: 'في الشحن',     color: 'bg-cyan-100 text-cyan-800 border-cyan-200',     dot: 'bg-cyan-500' },
@@ -39,6 +41,8 @@ export const SHIPPING_PROVIDERS = {
 // Forward state machine — must mirror STATUS_TRANSITIONS in backend constants.py
 export const NEXT_STATUSES = {
   new:       ['confirmed', 'cancelled'],
+  needs_review: ['confirmed', 'cancelled'],
+  awaiting_confirmation: ['confirmed', 'cancelled'],
   confirmed: ['packed', 'cancelled'],
   packed:    ['shipped', 'cancelled'],
   shipped:   ['delivered', 'refunded'],

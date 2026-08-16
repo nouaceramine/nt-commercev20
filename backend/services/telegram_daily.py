@@ -134,12 +134,15 @@ async def notify_new_order(db, order: dict) -> None:
             return
         cust = order.get("customer") or {}
         items = "، ".join(f"{i.get('name')}×{i.get('qty')}" for i in (order.get("items") or [])[:5])
+        _nt = order.get("network_trust") or {}
+        _warn = (f"\n⚠️ مُرجِع متسلسل عبر الشبكة: أرجع {_nt.get('returned')} من {_nt.get('outcomes')} طلبات!"
+                 if _nt.get("trust") == "risk" else "")
         text = (
             f"🛒 طلب جديد! {order.get('order_code') or ''}\n"
             f"💰 الإجمالي: {order.get('total')} دج\n"
             f"👤 {cust.get('name', '')} — {cust.get('phone', '')}\n"
             f"📍 {cust.get('wilaya', '')} {cust.get('city', '')}\n"
-            f"📦 {items}"
+            f"📦 {items}{_warn}"
         )
         await send_telegram(token, chat, text)
     except Exception as exc:  # noqa: BLE001

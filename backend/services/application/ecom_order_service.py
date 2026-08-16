@@ -5,6 +5,7 @@ customer notification, and ecom_order.* event publishing.
 """
 from datetime import datetime, timezone
 import logging
+import re
 import uuid
 
 from fastapi import HTTPException
@@ -12,6 +13,90 @@ from fastapi import HTTPException
 from routes.ecom.constants import ORDER_STATUS_KEYS, ORDER_STATUSES, STATUS_TRANSITIONS
 
 logger = logging.getLogger(__name__)
+
+
+
+# ── p100: shared customer-reputation network (aggregate counters only — no personal data) ──
+def normalize_phone(phone: str) -> str:
+    """Normalize Algerian phones to local digits (0XXXXXXXXX) for cross-tenant matching."""
+    digits = re.sub(r"\D", "", phone or "")
+    if digits.startswith("00213"):
+        digits = "0" + digits[5:]
+    elif digits.startswith("213") and len(digits) >= 12:
+        digits = "0" + digits[3:]
+    if len(digits) == 9 and digits[0] in "567":
+        digits = "0" + digits
+    return digits
+
+
+def _trust_from_counts(delivered: int, returned: int):
+    outcomes = delivered + returned
+    if outcomes == 0:
+        return "unknown", None
+    rate = round(returned / outcomes, 3)
+    if outcomes >= 2 and rate >= 0.4:
+        return "risk", rate
+    if outcomes >= 2 and rate < 0.2:
+        return "good", rate
+    return "warn", rate
+
+
+async def get_network_trust(phone: str) -> dict:
+    """Cross-tenant reputation lookup (main_db.customer_reputation)."""
+    p = normalize_phone(phone)
+    if not p:
+        return {"found": False, "trust": "unknown", "phone": ""}
+    from config.database import main_db
+    doc = await main_db.customer_reputation.find_one({"_id": p}, {"_id": 0})
+    if not doc:
+        return {"found": False, "trust": "unknown", "phone": p}
+    d = int(doc.get("delivered") or 0)
+    r = int(doc.get("returned") or 0)
+    trust, rate = _trust_from_counts(d, r)
+    return {
+        "found": True, "phone": p, "trust": trust,
+        "orders": int(doc.get("orders") or 0), "delivered": d, "returned": r,
+        "outcomes": d + r, "return_rate": rate,
+        "tenants": len(doc.get("tenants") or []),
+    }
+
+
+async def reputation_on_create(order: dict, tenant_id: str = "") -> None:
+    """Feed the network: a new order was placed by this phone."""
+    phone = normalize_phone((order.get("customer") or {}).get("phone", ""))
+    if not phone:
+        return
+    from config.database import main_db
+    now = datetime.now(timezone.utc).isoformat()
+    upd = {
+        "$inc": {"orders": 1},
+        "$set": {"updated_at": now},
+        "$setOnInsert": {"created_at": now, "delivered": 0, "returned": 0},
+    }
+    if tenant_id:
+        upd["$addToSet"] = {"tenants": tenant_id}
+    await main_db.customer_reputation.update_one({"_id": phone}, upd, upsert=True)
+
+
+async def _reputation_on_status(order: dict, prev_status: str, new_status: str) -> None:
+    """Only real delivery-attempt outcomes count: shipped→delivered / shipped→refunded."""
+    if prev_status == "shipped" and new_status == "delivered":
+        field = "delivered"
+    elif prev_status == "shipped" and new_status == "refunded":
+        field = "returned"
+    else:
+        return
+    phone = normalize_phone((order.get("customer") or {}).get("phone", ""))
+    if not phone:
+        return
+    from config.database import main_db
+    now = datetime.now(timezone.utc).isoformat()
+    await main_db.customer_reputation.update_one(
+        {"_id": phone},
+        {"$inc": {field: 1}, "$set": {"updated_at": now},
+         "$setOnInsert": {"created_at": now, "orders": 0}},
+        upsert=True,
+    )
 
 
 async def change_order_status(db, order_id: str, new_status: str, note: str, user: dict, return_fee_override=None) -> dict:
@@ -69,6 +154,12 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
         await sync_sale_doc(db, {**order, "status": new_status, "updated_at": now})
     except Exception as exc:  # noqa: BLE001
         logger.warning("sale doc sync failed for order %s: %s", order_id, exc)
+
+    # p100: shared reputation network — record delivery-attempt outcomes
+    try:
+        await _reputation_on_status(order, current, new_status)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reputation hook failed for order %s: %s", order_id, exc)
 
     # مزامنة عكسية لطلبات متجر الويب: عكس الحالة إلى store_orders
     # (المخزون أداره _sync_inventory أعلاه — نعلّم stock_restored لتفادي إعادة مزدوجة)

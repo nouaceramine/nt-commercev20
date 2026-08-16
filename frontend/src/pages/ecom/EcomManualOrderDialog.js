@@ -18,6 +18,16 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
   const [channel, setChannel] = useState('manual');
   const [integrationId, setIntegrationId] = useState('');
   const [customer, setCustomer] = useState({ name: '', phone: '', address: '', city: '', wilaya: '', wilaya_code: '' });
+  const [phoneTrust, setPhoneTrust] = useState(null);  // p100: network reputation of the entered phone
+
+  const checkPhoneTrust = async () => {  // p100
+    const ph = (customer.phone || '').trim();
+    if (ph.length < 9) { setPhoneTrust(null); return; }
+    try {
+      const r = await apiClient.get(`/ecom/customer-lookup?phone=${encodeURIComponent(ph)}`);
+      setPhoneTrust(r.data || null);
+    } catch { /* silent */ }
+  };
   const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
   const [shippingFee, setShippingFee] = useState(0);
   const [notes, setNotes] = useState('');
@@ -41,6 +51,7 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
     setChannel('manual');
     setIntegrationId('');
     setCustomer({ name: '', phone: '', address: '', city: '', wilaya: '', wilaya_code: '' });
+    setPhoneTrust(null);
     setItems([{ ...EMPTY_ITEM }]);
     setShippingFee(0);
     setNotes('');
@@ -177,7 +188,10 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
             <div className="text-xs font-semibold text-muted-foreground">معلومات الزبون</div>
             <div className="grid grid-cols-2 gap-2">
               <Input placeholder="الاسم الكامل *" value={customer.name} onChange={e => setCustomer({ ...customer, name: e.target.value })} data-testid="manual-order-customer-name" />
-              <Input placeholder="رقم الهاتف" value={customer.phone} onChange={e => setCustomer({ ...customer, phone: e.target.value })} data-testid="manual-order-customer-phone" />
+              <Input placeholder="رقم الهاتف" value={customer.phone} onChange={e => setCustomer({ ...customer, phone: e.target.value })} onBlur={checkPhoneTrust} data-testid="manual-order-customer-phone" />
+              {phoneTrust?.trust === 'risk' && <p className="text-xs text-red-700 font-semibold col-span-full" data-testid="manual-phone-trust">🔴 هذا الرقم مُرجِع متسلسل: أرجع {phoneTrust.returned} من {phoneTrust.outcomes} طلبات عبر {phoneTrust.tenants} متجر — أكّد هاتفياً قبل أي شحن!</p>}
+              {phoneTrust?.trust === 'warn' && <p className="text-xs text-amber-700 col-span-full" data-testid="manual-phone-trust">🟡 سجل مختلط عبر الشبكة: أرجع {phoneTrust.returned} من {phoneTrust.outcomes}</p>}
+              {phoneTrust?.trust === 'good' && <p className="text-xs text-emerald-700 col-span-full" data-testid="manual-phone-trust">🟢 زبون موثوق عبر الشبكة — استلم {phoneTrust.delivered} من {phoneTrust.outcomes}</p>}
 
               {/* Wilaya dropdown */}
               <div>
