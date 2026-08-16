@@ -29,6 +29,7 @@ USE=$(df / | awk 'NR==2{gsub("%","",$5); print $5}')
 
 if [ -n "$ALERTS" ]; then
   echo "[$TS] ALERT$ALERTS" >> "$LOG"
+  /opt/ntcommerce/scripts/alert.sh "تنبيه صحة النظام:$ALERTS"
   exit 1
 else
   echo "[$TS] OK disk=${USE}%" >> "$LOG"

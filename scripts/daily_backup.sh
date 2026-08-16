@@ -17,6 +17,7 @@ if docker exec ntcommerce-mongodb mongodump --archive=/tmp/ntc_backup.archive --
   echo "[$(date -Is)] mongo OK ($SIZE)" >> "$LOG"
 else
   echo "[$(date -Is)] MONGO DUMP FAILED" >> "$LOG"
+  /opt/ntcommerce/scripts/alert.sh "فشل النسخ الاحتياطي اليومي لقاعدة البيانات!"
 fi
 
 # 2) Configs + secrets (small, critical for a full restore)

@@ -18,6 +18,7 @@ echo "[$TS] start" >> "$LOG"
 ARCHIVE=$(ls -t "$BASE"/*/mongo.archive.gz 2>/dev/null | head -1)
 if [ -z "$ARCHIVE" ]; then
   echo "[$TS] ALERT no daily archive found" >> "$LOG"
+  /opt/ntcommerce/scripts/alert.sh "لا توجد نسخة يومية للاختبار!"
   exit 1
 fi
 SIZE=$(du -h "$ARCHIVE" | cut -f1)
@@ -31,6 +32,7 @@ TENANT_DB=$(docker exec ntcommerce-mongodb mongosh --quiet "mongodb://localhost:
 
 if [ -z "$TENANT_DB" ]; then
   echo "[$TS] ALERT no tenant DB found" >> "$LOG"
+  /opt/ntcommerce/scripts/alert.sh "لا توجد قاعدة مستأجر لاختبار الاستعادة!"
   exit 1
 fi
 
@@ -51,6 +53,7 @@ FAILED_DOCS=${FAILED_DOCS:-0}
 
 if [ "$RC" != "0" ] || [ "$FAILED_DOCS" != "0" ]; then
   echo "[$TS] ALERT restore rc=$RC failed_docs=$FAILED_DOCS archive=$ARCHIVE" >> "$LOG"
+  /opt/ntcommerce/scripts/alert.sh "فشل اختبار الاستعادة الأسبوعي! rc=$RC failed=$FAILED_DOCS"
   rm -f "$TMPREP"
   exit 1
 fi
@@ -94,5 +97,6 @@ if [ -z "$MISMATCHES" ]; then
   exit 0
 else
   echo "[$TS] ALERT mismatches archive=$ARCHIVE:$MISMATCHES" >> "$LOG"
+  /opt/ntcommerce/scripts/alert.sh "اختبار الاستعادة وجد اختلافات:$MISMATCHES"
   exit 1
 fi
