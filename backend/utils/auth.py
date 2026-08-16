@@ -10,7 +10,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config.database import db, main_db, get_tenant_db, set_tenant_context, _tenant_db_ctx
 
 # JWT Configuration
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "nt_commerce_super_secure_jwt_secret_key_2024_v3_hardened")
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable is required (no fallback allowed)")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 

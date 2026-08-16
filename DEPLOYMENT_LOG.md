@@ -1990,3 +1990,7 @@ backup: backups/p120_identity/ — لا تغيير واجهة
 ## p123 — اختبار استعادة أسبوعي حقيقي (2026-08-16)
 **قبل:** خدمة restore_test.py (p33) لم تُشغَّل قط (platform_restore_tests = 0) والنسخ اليومية غير مثبتة القابلية للاستعادة.
 **بعد:** scripts/weekly_restore_test.sh يستعيد أحدث أرشيف mongodump يومي حقيقي إلى قاعدة scratch داخل الحاوية (--nsInclude/--nsFrom/--nsTo لعزل الاستعادة عن القواعد الحية)، يقارن أعداد المستندات مع ما أبلغ عنه mongorestore نفسه من الأرشيف (ليس مع القاعدة الحية التي تنجرف بعد وقت النسخ)، يسقط الـ scratch، ويسجّل النتيجة في main_db.platform_restore_tests. **أول تشغيل: نجح — 163 مجموعة / 897 مستند / 0 اختلاف** من أرشيف 2026-08-16_0400. cron: كل أحد 05:00. ملاحظة: التشغيل اليدوي الأول كشف انحراف فهرس حقيقي (expense_number_1 sparse في الحي مقابل non-sparse في الكود) — لا يؤثر على الاستعادة لقاعدة جديدة.
+
+## p124 — تنبيهات تيليغرام للمراقبة (2026-08-16)
+**قبل:** health_monitor وdaily_backup وweekly_restore_test يكتبون ALERT في ملفات log فقط — لا يصل شيء لأحد.
+**بعد:** scripts/alert.sh مرسل موحد يقرأ /opt/ntcommerce/.alert.env (TELEGRAM_BOT_TOKEN/CHAT_ID) ويرسل عبر Telegram Bot API؛ no-op صامت بدون الإعداد. رُبط في: health_monitor (عند ALERT)، daily_backup (عند فشل mongodump)، weekly_restore_test (4 مسارات فشل). bash -n سليم للكل. **التفعيل ينتظر توكن البوت من المالك.**
