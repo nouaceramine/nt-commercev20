@@ -38,11 +38,12 @@ export default function EcomAnalyticsPage() {
   const [profit, setProfit] = useState(null);  // p71
   const [wilayaRisk, setWilayaRisk] = useState([]);  // p92
   const [campaignRoas, setCampaignRoas] = useState([]);  // p102
+  const [productPnl, setProductPnl] = useState([]);  // p105
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rev, fun, top, dig, pro, wr, ro] = await Promise.all([
+      const [rev, fun, top, dig, pro, wr, ro, pnl] = await Promise.all([
         apiClient.get(`/ecom/analytics/revenue?days=${days}`),
         apiClient.get(`/ecom/analytics/funnel?days=${days}`),
         apiClient.get(`/ecom/analytics/top-products?days=${days}&limit=10`),
@@ -50,11 +51,13 @@ export default function EcomAnalyticsPage() {
         apiClient.get(`/ecom/analytics/profitability?days=${days}`).catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/wilaya-risk?days=${days}`).catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/campaign-roas?days=${days}`).catch(() => ({ data: null })),
+        apiClient.get(`/ecom/analytics/product-pnl?days=${days}`).catch(() => ({ data: null })),
       ]);
       setDigital(dig.data);
       setProfit(pro.data);
       setWilayaRisk(wr?.data?.wilayas || []);
       setCampaignRoas(ro?.data?.rows || []);
+      setProductPnl(pnl?.data?.rows || []);
       setRevenue(rev.data);
       setFunnel(fun.data);
       setTopProducts(top.data?.items || []);
@@ -334,6 +337,52 @@ export default function EcomAnalyticsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   الإيراد والربح يُحسبان من الطلبات المُسلَّمة فعلاً فقط. الإنفاق يُلتقط من المصاريف التي يذكر عنوانها اسم المصدر (مثال: «إعلان ممول — facebook»). نازف = إرجاع ≥40% مع ≥5 طلبات، أو ربح سالب مع إنفاق.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* p105: true per-product P&L */}
+          {productPnl.length > 0 && (
+            <Card data-testid="product-pnl-card">
+              <CardHeader>
+                <CardTitle>💰 الربح الحقيقي لكل منتج — بعد التكلفة والشحن والإرجاع والإعلان</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border overflow-x-auto">
+                  <table className="w-full text-sm min-w-[640px]">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="p-2 text-right">المنتج</th>
+                        <th className="p-2 text-center">طلبات</th>
+                        <th className="p-2 text-center">إرجاع %</th>
+                        <th className="p-2 text-center">الإيراد</th>
+                        <th className="p-2 text-center">التكلفة</th>
+                        <th className="p-2 text-center">شحن+إرجاع</th>
+                        <th className="p-2 text-center">إعلان</th>
+                        <th className="p-2 text-center">صافي الربح</th>
+                        <th className="p-2 text-center">الهامش</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productPnl.map((r, idx) => (
+                        <tr key={idx} className="border-t" data-testid={`pnl-row-${idx}`}>
+                          <td className="p-2 font-medium">{r.product}</td>
+                          <td className="p-2 text-center">{r.orders}</td>
+                          <td className={`p-2 text-center ${r.return_rate >= 30 ? 'text-red-700 font-semibold' : ''}`}>{r.return_rate != null ? `${r.return_rate}%` : '—'}</td>
+                          <td className="p-2 text-center">{Number(r.revenue).toLocaleString()}</td>
+                          <td className="p-2 text-center text-muted-foreground">{Number(r.cogs).toLocaleString()}</td>
+                          <td className="p-2 text-center text-muted-foreground">{Number(r.shipping + r.return_cost).toLocaleString()}</td>
+                          <td className="p-2 text-center text-muted-foreground">{r.ad_spend > 0 ? Number(r.ad_spend).toLocaleString() : '—'}</td>
+                          <td className={`p-2 text-center font-bold ${r.net < 0 ? 'text-red-700' : 'text-emerald-700'}`} data-testid={`pnl-net-${idx}`}>{Number(r.net).toLocaleString()} دج</td>
+                          <td className={`p-2 text-center ${r.margin != null && r.margin < 10 ? 'text-red-700' : ''}`}>{r.margin != null ? `${r.margin}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  الإيراد من الطلبات المُسلَّمة فعلاً فقط. التكلفة = سعر شراء المنتج × الكمية. الإنفاق الإعلاني يُوزَّع على المنتجات بنسبة إيراد كل منتج. المنتج بالهامش السالب يأكل أرباح الباقين — أوقف إعلانه أو ارفع سعره.
                 </p>
               </CardContent>
             </Card>

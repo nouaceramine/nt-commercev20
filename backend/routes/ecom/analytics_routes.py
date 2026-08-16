@@ -457,3 +457,90 @@ async def campaign_roas(days: int = Query(90, ge=1, le=365), user: dict = Depend
         out.append(r)
     out.sort(key=lambda r: (r["spend"], r["revenue"]), reverse=True)
     return {"days": days, "rows": out, "spend_total": round(spend_total, 2)}
+
+
+# ============ p105: P&L الحقيقي لكل منتج ============
+
+@router.get("/ecom/analytics/product-pnl")
+async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
+    """p105: ربح وخسارة حقيقي لكل منتج — الإيراد من المُسلَّم فقط، ناقص تكلفة الشراء
+    والشحن وكلفة الإرجاع وحصة الإنفاق الإعلاني (توزيع نسبي حسب الإيراد)."""
+    await require_ecom_feature(user)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    orders = await db.ecom_orders.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "status": 1, "total": 1, "shipping_fee": 1, "items": 1},
+    ).to_list(20000)
+
+    prod_cost = {}
+    async for p in db.products.find({}, {"_id": 0, "id": 1, "purchase_price": 1}):
+        prod_cost[p.get("id")] = float(p.get("purchase_price") or 0)
+
+    rows: dict = {}
+
+    def _row(key: str, name: str) -> dict:
+        return rows.setdefault(key, {
+            "product": name, "orders": 0, "delivered": 0, "returned": 0,
+            "revenue": 0.0, "cogs": 0.0, "shipping": 0.0, "return_cost": 0.0,
+        })
+
+    def _item_total(i: dict) -> float:
+        t = float(i.get("total") or 0)
+        if t > 0:
+            return t
+        return float(i.get("price") or 0) * float(i.get("qty") or 1)
+
+    for o in orders:
+        status = o.get("status")
+        if status not in ("delivered", "refunded", "returned"):
+            continue
+        items = o.get("items") or []
+        if not items:
+            continue
+        ship_fee = float(o.get("shipping_fee") or 0)
+        items_total = sum(_item_total(i) for i in items) or float(o.get("total") or 0) or 1.0
+        for i in items:
+            key = i.get("product_id") or i.get("name") or "؟"
+            r = _row(key, i.get("name") or "منتج")
+            r["orders"] += 1
+            share = _item_total(i) / items_total if items_total else 1.0
+            if status == "delivered":
+                r["delivered"] += 1
+                r["revenue"] += _item_total(i)
+                r["cogs"] += prod_cost.get(i.get("product_id") or "", 0.0) * float(i.get("qty") or 1)
+                r["shipping"] += ship_fee * share
+            else:
+                r["returned"] += 1
+                r["return_cost"] += ship_fee * share
+
+    expenses = await db.expenses.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "category": 1, "title": 1, "amount": 1},
+    ).to_list(5000)
+    ad_spend = 0.0
+    for e in expenses:
+        blob = f"{e.get('category') or ''} {e.get('title') or ''}".lower()
+        if any(k in blob for k in AD_CATEGORY_KEYS):
+            ad_spend += float(e.get("amount") or 0)
+
+    total_revenue = sum(r["revenue"] for r in rows.values())
+    out = []
+    for r in rows.values():
+        ad_alloc = round(ad_spend * (r["revenue"] / total_revenue), 2) if total_revenue > 0 else 0.0
+        net = round(r["revenue"] - r["cogs"] - r["shipping"] - r["return_cost"] - ad_alloc, 2)
+        outcomes = r["delivered"] + r["returned"]
+        out.append({
+            "product": r["product"],
+            "orders": r["orders"], "delivered": r["delivered"], "returned": r["returned"],
+            "return_rate": round(r["returned"] / outcomes * 100, 1) if outcomes else None,
+            "revenue": round(r["revenue"], 2),
+            "cogs": round(r["cogs"], 2),
+            "shipping": round(r["shipping"], 2),
+            "return_cost": round(r["return_cost"], 2),
+            "ad_spend": ad_alloc,
+            "net": net,
+            "margin": round(net / r["revenue"] * 100, 1) if r["revenue"] > 0 else None,
+        })
+    out.sort(key=lambda r: r["net"], reverse=True)
+    return {"days": days, "rows": out, "ad_spend_total": round(ad_spend, 2)}
