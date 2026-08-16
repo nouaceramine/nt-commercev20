@@ -37,21 +37,24 @@ export default function EcomAnalyticsPage() {
   const [digital, setDigital] = useState(null);
   const [profit, setProfit] = useState(null);  // p71
   const [wilayaRisk, setWilayaRisk] = useState([]);  // p92
+  const [campaignRoas, setCampaignRoas] = useState([]);  // p102
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rev, fun, top, dig, pro, wr] = await Promise.all([
+      const [rev, fun, top, dig, pro, wr, ro] = await Promise.all([
         apiClient.get(`/ecom/analytics/revenue?days=${days}`),
         apiClient.get(`/ecom/analytics/funnel?days=${days}`),
         apiClient.get(`/ecom/analytics/top-products?days=${days}&limit=10`),
         apiClient.get('/digital/stats').catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/profitability?days=${days}`).catch(() => ({ data: null })),
         apiClient.get(`/ecom/analytics/wilaya-risk?days=${days}`).catch(() => ({ data: null })),
+        apiClient.get(`/ecom/analytics/campaign-roas?days=${days}`).catch(() => ({ data: null })),
       ]);
       setDigital(dig.data);
       setProfit(pro.data);
       setWilayaRisk(wr?.data?.wilayas || []);
+      setCampaignRoas(ro?.data?.rows || []);
       setRevenue(rev.data);
       setFunnel(fun.data);
       setTopProducts(top.data?.items || []);
@@ -281,6 +284,56 @@ export default function EcomAnalyticsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   الولايات ذات الإرجاع المرتفع: فعّل التأكيد الهاتفي المسبق أو قلّل الإعلانات الموجهة إليها.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* p102: true ROAS per traffic source */}
+          {campaignRoas.length > 0 && (
+            <Card data-testid="campaign-roas-card">
+              <CardHeader>
+                <CardTitle>📣 ROAS الحقيقي لكل مصدر إعلاني — بناءً على المُسلَّم فعلاً فقط</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="p-2 text-right">المصدر</th>
+                        <th className="p-2 text-center">الطلبات</th>
+                        <th className="p-2 text-center">مُسلَّم</th>
+                        <th className="p-2 text-center">إرجاع %</th>
+                        <th className="p-2 text-center">إيراد مُسلَّم</th>
+                        <th className="p-2 text-center">إنفاق إعلاني</th>
+                        <th className="p-2 text-center">ROAS</th>
+                        <th className="p-2 text-center">صافي الربح</th>
+                        <th className="p-2 text-center">الحالة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {campaignRoas.map(r => (
+                        <tr key={r.source} className="border-t" data-testid={`roas-row-${r.source}`}>
+                          <td className="p-2 font-medium">{r.source}</td>
+                          <td className="p-2 text-center">{r.orders}</td>
+                          <td className="p-2 text-center text-emerald-700">{r.delivered}</td>
+                          <td className="p-2 text-center text-red-700">{r.return_rate != null ? `${r.return_rate}%` : '—'}</td>
+                          <td className="p-2 text-center">{Number(r.revenue).toLocaleString()} دج</td>
+                          <td className="p-2 text-center">{r.spend > 0 ? `${Number(r.spend).toLocaleString()} دج` : '—'}</td>
+                          <td className="p-2 text-center font-semibold">{r.roas != null ? r.roas : '—'}</td>
+                          <td className={`p-2 text-center font-semibold ${r.net < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{Number(r.net).toLocaleString()} دج</td>
+                          <td className="p-2 text-center">
+                            {r.bleeding
+                              ? <Badge className="bg-red-100 text-red-700" data-testid={`roas-bleeding-${r.source}`}>🔥 نازف — أوقفه</Badge>
+                              : <Badge className="bg-emerald-100 text-emerald-700">سليم</Badge>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  الإيراد والربح يُحسبان من الطلبات المُسلَّمة فعلاً فقط. الإنفاق يُلتقط من المصاريف التي يذكر عنوانها اسم المصدر (مثال: «إعلان ممول — facebook»). نازف = إرجاع ≥40% مع ≥5 طلبات، أو ربح سالب مع إنفاق.
                 </p>
               </CardContent>
             </Card>

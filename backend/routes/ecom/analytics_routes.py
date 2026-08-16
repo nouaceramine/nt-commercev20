@@ -375,3 +375,85 @@ async def analytics_copilot(body: dict, user: dict = Depends(require_tenant)):
         session_id=body.get("session_id"),
         days=int(body.get("days", 30) or 30),
     )
+
+
+# ── p102: true ROAS per traffic source + bleeding-campaign detector ─────────────
+AD_CATEGORY_KEYS = ("إعلان", "ads", "advertis", "marketing", "تسويق", "ممول")
+SOURCE_KEYWORDS = {
+    "facebook": ["facebook", "فيسبوك", "meta", "ميتا"],
+    "instagram": ["instagram", "انستغرام", "إنستغرام"],
+    "tiktok": ["tiktok", "تيك توك", "تيكتوك", "تيك_توك"],
+    "google": ["google", "جوجل", "قوقل"],
+    "snapchat": ["snapchat", "سناب"],
+}
+
+
+def _detect_ad_source(text: str) -> str:
+    t = (text or "").lower()
+    for src, keys in SOURCE_KEYWORDS.items():
+        if any(k in t for k in keys):
+            return src
+    return "عام"
+
+
+@router.get("/ecom/analytics/campaign-roas")
+async def campaign_roas(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
+    """TRUE ROAS per traffic source: revenue/profit from DELIVERED orders only
+    (never from merely-placed ones), ad spend from expenses tagged to the source."""
+    await require_ecom_feature(user)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    orders = await db.ecom_orders.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "id": 1, "status": 1, "total": 1, "utm": 1, "utm_source": 1},
+    ).to_list(20000)
+    fins = await db.ecom_order_financials.find(
+        {}, {"_id": 0, "id": 1, "status": 1, "realized_profit": 1}
+    ).to_list(20000)
+    fin_by_id = {f.get("id"): f for f in fins}
+
+    rows: dict = {}
+
+    def _row(src: str) -> dict:
+        return rows.setdefault(src, {"source": src, "orders": 0, "delivered": 0, "returned": 0,
+                                     "revenue": 0.0, "profit": 0.0, "spend": 0.0})
+
+    for o in orders:
+        src = ((o.get("utm") or {}).get("utm_source") or o.get("utm_source") or "").strip().lower() or "بدون تتبع"
+        r = _row(src)
+        r["orders"] += 1
+        if o.get("status") == "delivered":
+            r["delivered"] += 1
+            r["revenue"] += float(o.get("total") or 0)
+            f = fin_by_id.get(o.get("id")) or {}
+            if f.get("status") == "realized":
+                r["profit"] += float(f.get("realized_profit") or 0)
+        elif o.get("status") in ("refunded", "returned"):
+            r["returned"] += 1
+
+    expenses = await db.expenses.find(
+        {"created_at": {"$gte": since}},
+        {"_id": 0, "category": 1, "title": 1, "notes": 1, "amount": 1},
+    ).to_list(5000)
+    spend_total = 0.0
+    for e in expenses:
+        blob = f"{e.get('category') or ''} {e.get('title') or ''}".lower()
+        if not any(k in blob for k in AD_CATEGORY_KEYS):
+            continue
+        src = _detect_ad_source(f"{e.get('title') or ''} {e.get('notes') or ''}")
+        _row(src)["spend"] += float(e.get("amount") or 0)
+        spend_total += float(e.get("amount") or 0)
+
+    out = []
+    for r in rows.values():
+        outcomes = r["delivered"] + r["returned"]
+        r["return_rate"] = round(r["returned"] / outcomes * 100, 1) if outcomes else None
+        r["roas"] = round(r["revenue"] / r["spend"], 2) if r["spend"] > 0 else None
+        r["net"] = round(r["profit"], 2)
+        r["bleeding"] = bool(
+            (r["orders"] >= 5 and (r["return_rate"] or 0) >= 40)
+            or (r["spend"] > 0 and r["delivered"] >= 3 and r["profit"] < 0)
+        )
+        out.append(r)
+    out.sort(key=lambda r: (r["spend"], r["revenue"]), reverse=True)
+    return {"days": days, "rows": out, "spend_total": round(spend_total, 2)}

@@ -62,12 +62,40 @@ async def build_daily_summary(tdb, day: str) -> str:
             losses += float(f.get("losses") or 0)
 
     net = round(profit - losses, 2)
+    # p102: bleeding traffic sources over the last 30 days (>=5 orders, return rate >= 40%)
+    bleeding = ""
+    try:
+        from datetime import timedelta as _td
+        since30 = (datetime.now(timezone.utc) - _td(days=30)).isoformat()
+        agg: dict = {}
+        async for o in tdb.ecom_orders.find(
+            {"created_at": {"$gte": since30}},
+            {"_id": 0, "status": 1, "utm": 1, "utm_source": 1},
+        ):
+            src = ((o.get("utm") or {}).get("utm_source") or o.get("utm_source") or "").strip().lower()
+            if not src:
+                continue
+            a = agg.setdefault(src, [0, 0, 0])
+            a[0] += 1
+            if o.get("status") == "delivered":
+                a[1] += 1
+            elif o.get("status") in ("refunded", "returned"):
+                a[2] += 1
+        bad = []
+        for src, (n, dlv, ret) in agg.items():
+            outcomes = dlv + ret
+            if n >= 5 and outcomes and ret / outcomes >= 0.4:
+                bad.append(f"{src} ({round(ret / outcomes * 100)}% إرجاع)")
+        if bad:
+            bleeding = "\n🔥 مصدر نازف — أوقف إعلانه: " + "، ".join(bad)
+    except Exception:
+        pass
     return (
         f"📊 ملخص اليوم — {day}\n"
         f"🛒 طلبات جديدة: {len(orders)} (بانتظار المعالجة: {new_n})\n"
         f"✅ مُسلَّمة: {delivered_n} — إيراد {round(revenue):,} دج\n"
         f"↩️ مُرجعة: {returned_n} — خسائر {round(losses):,} دج\n"
-        f"💰 صافي ربح اليوم: {round(net):,} دج"
+        f"💰 صافي ربح اليوم: {round(net):,} دج{bleeding}"
     )
 
 
