@@ -2109,3 +2109,11 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - demo@nt-commerce.net (NT-0001) خطة Enterprise، علامة is_permanent_test=true في saas_tenants — يُستثنى من أي تصفير مستقبلي
 - كلمة المرور في /root/DEMO_ACCOUNT.txt على الخادم (خارج git) وسُلّمت للمالك في المحادثة
 - تحقق: tenant-login ✓، قاعدة tenant_83c323d4... (145 مجموعة من القالب الذهبي) ✓، ecom/products/sales/smart/dashboard كلها 200 ✓
+
+## p147 — إصلاح ملاحة + مسح شامل للروابط (2026-08-16)
+- علة 1: زر «شحن المحفظة» في /tenant/dashboard ينتقل إلى /wallet (غير موجود) — الصحيح /wallet-management. أُصلح في موضعين (TenantDashboardPage.js)
+- علة 2: /tenant/dashboard بلا عنصر في القائمة اليمنى — أُضيف «لوحة تحكم المشترك» في قسم الرئيسية (Layout.js)
+- مسح شامل (288 ملف JS): 143 مساراً في App.js، 106 عناصر قائمة — صفر روابط قائمة مكسورة، /wallet كان الهدف المكسور الوحيد في كل الكود (navigate + Link + template literals)
+- بلا عنصر قائمة وبمبرر: صفحات عامة (/shop/*، /landing، /pricing، /portal...)، تحويلات alias (/shipping، /store، /loyalty...)، تبويبات ecom-hub الداخلية، مسارات بمعرّف (/products/:id)، /whatsapp و/products/add (تُفتح من داخل الصفحات)، /agent/dashboard (قائمة الوكيل)
+- تحقق من الحزمة main.470dd403.js: wallet-management 9 (كانت 7)، tenant/dashboard 4 (كانت 3)، التسمية العربية المشفّرة موجودة — النشر release 20260816_235507
+- backup: /opt/ntcommerce/backups/p147_nav_fix/

@@ -446,7 +446,7 @@ export default function TenantDashboardPage() {
         {walletBalance && (
           <Card
             className="cursor-pointer hover:shadow-md transition-shadow bg-gradient-to-br from-primary/10 to-blue-500/10 border-primary/20"
-            onClick={() => navigate('/wallet')}
+            onClick={() => navigate('/wallet-management')}
             data-testid="tenant-wallet-card"
           >
             <CardContent className="p-5 flex flex-wrap items-center justify-between gap-4">
@@ -468,7 +468,7 @@ export default function TenantDashboardPage() {
                     رصيد منخفض
                   </Badge>
                 )}
-                <Button variant="outline" className="gap-2" onClick={(e) => { e.stopPropagation(); navigate('/wallet'); }}>
+                <Button variant="outline" className="gap-2" onClick={(e) => { e.stopPropagation(); navigate('/wallet-management'); }}>
                   <DollarSign className="h-4 w-4" />
                   شحن المحفظة
                 </Button>
