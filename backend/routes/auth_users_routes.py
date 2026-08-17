@@ -251,6 +251,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "type": "agent"
                     }
                     access_token = create_access_token(token_data)
+                    agent["two_fa_email_enabled"] = True  # p155: email OTP enforced for all agents
                     return await _2fa_gate(agent, {
                         "access_token": access_token,
                         "user_type": "agent",

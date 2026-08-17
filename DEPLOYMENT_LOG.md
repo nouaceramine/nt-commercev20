@@ -2249,3 +2249,27 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - UnifiedLoginPage.js: رسالة الخادم («أرسلنا رمز تحقق إلى بريدك») تظهر في خطوة الرمز بدل نص تطبيق المصادقة
 - اختبار e2e: دخول → requires_2fa method=email ✓ | كود خاطئ 401 ✓ | صحيح → توكن super_admin ✓ | إعادة الاستخدام 401 ✓
 - release main.675f71a7.js ✓
+
+## p155 — توحيد 2FA عبر البريد للوكلاء + وكيل تجريبي دائم (2026-08-17)
+
+### قبل
+- الوكلاء (saas_agents) يسجلون الدخول بكلمة مرور فقط — بدون تحقق ثنائي.
+- لا يوجد حساب وكيل تجريبي لعرض لوحة الوكيل.
+
+### بعد
+1. **auth_users_routes.py** — فرع الوكلاء في unified-login: إضافة سطر واحد
+   `agent["two_fa_email_enabled"] = True` قبل `_2fa_gate` ← كل الوكلاء (الحاليين والمستقبليين)
+   يمرون إجبارياً برمز بريد 6 أرقام (TTL 10 دقائق، 5 محاولات، استخدام واحد) — بدون ترحيل بيانات.
+2. **وكيل تجريبي دائم**: nouaceramine017+agent@gmail.com (gmail plus-alias ← الرموز تصل لبريد المالك)
+   كلمة المرور: Agent@2026 — الاسم: وكيل تجريبي — نوع: reseller — صلاحيات كاملة — id: ea47eb2d-cc68-408a-a7b5-3240a6b580d7
+
+### اختبار (curl/e2e عبر سكربت داخل الحاوية)
+1. كلمة مرور خاطئة ← 401 + عداد المحاولات ✓
+2. دخول صحيح ← requires_2fa + method=email ✓
+3. الرمز موجود في pending_2fa_logins مع expires_at ✓
+4. رمز خاطئ ← 401 ✓
+5. رمز صحيح ← 200 + type=agent + redirect=/agent/dashboard ✓
+6. إعادة استخدام الرمز ← 401 ✓
+
+### نسخة احتياطية
+/opt/ntcommerce/backups/p155_agents/auth_users_routes.py
