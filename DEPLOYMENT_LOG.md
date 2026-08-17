@@ -2212,3 +2212,26 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - OPTIONS بأصل https://shop.example.dz → access-control-allow-origin مطابق ✓
 - الموقع 200 بالحزمة main.626ec8e7.js — release 20260817_154559 ✓
 - demo tenant: slugs 0, domains 0, settings 0, products 0, sales 0 ✓
+
+## p153 — إصلاح دخول السوبر أدمن + ربط البريد وتنبيهات Telegram (2026-08-17)
+
+### 1. دخول السوبر أدمن
+- السبب: كلمة مرور خاطئة (محاولات فاشلة متراكمة في Redis bf_cnt) — لا خطأ برمجي.
+- الإجراء: إعادة تعيين bcrypt hash + حذف الحقل القديم password + تصفير عدّاد القفل.
+- تحقق: unified-login → user_type=admin role=super_admin redirect=/saas-admin token ✓
+
+### 2. البريد الإلكتروني (تشخيص Resend)
+- مفتاح Resend صالح (re_fH43q…) لكن: sender gmail مرفوض (403 domain not verified) + وضع الاختبار يسمح فقط لبريد مالك حساب Resend (nouaceramine017@gmail.com).
+- مفتاح Brevo المخزّن ميت (401 Key not found) وكان preference=brevo → كل الإيميلات تفشل.
+- الإصلاح: platform_settings → provider_preference=resend + sender=onboarding@resend.dev → إرسال تجريبي ناجح لبريد المالك ✓
+- المتبقي (يدوي): توثيق nt-commerce.net في لوحة Resend + سجلات DNS في Cloudflare → sender=noreply@nt-commerce.net للإرسال للجميع.
+
+### 3. تنبيهات Telegram عبر واجهة SaaS
+- Backend email_settings_routes.py: GET/PUT /api/saas/alert-settings (platform_settings/_id=alert_settings، التوكن masked) + POST .../test (إرسال حقيقي مع تفاصيل خطأ Telegram) + GET /api/internal/alert-config (محمي بـ ALERT_INTERNAL_KEY في .env).
+- scripts/alert.sh: fallback — إذا غاب .alert.env يجلب الإعداد من الـ API الداخلي (المصدر الآن واجهة SaaS).
+- Frontend EmailSettingsPage.js: بطاقة "تنبيهات Telegram للمنصة" — توكن/Chat ID/حفظ/اختبار/شارة حالة + روابط BotFather وuserinfobot.
+- ملاحظة تشغيلية: تعديل .env يتطلب docker-compose up -d backend (وليس restart) لالتقاط المتغيرات.
+
+### تحقق
+- internal/alert-config بمفتاح صحيح → {token,chat_id} فارغان (لم يُدخلا بعد) ✓ | بمفتاح خاطئ → 404 ✓
+- build main.18965468.js markers كاملة؛ release 20260817_172246؛ الموقع 200 ✓

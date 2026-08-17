@@ -14,7 +14,7 @@ import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Badge } from '../../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Mail, Save, Send, ArrowRight, AlertTriangle, ExternalLink, Globe } from 'lucide-react';
+import { Mail, Save, Send, ArrowRight, AlertTriangle, ExternalLink, Globe, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PROVIDER_LABELS = {
@@ -39,11 +39,21 @@ export default function EmailSettingsPage() {
     provider_preference: 'auto',
   });
   const [testTo, setTestTo] = useState('');
+  const [alertInfo, setAlertInfo] = useState({});   // p153: telegram alerts
+  const [alertForm, setAlertForm] = useState({ telegram_bot_token: '', telegram_chat_id: '' });
+  const [alertSaving, setAlertSaving] = useState(false);
+  const [alertTesting, setAlertTesting] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       const res = await apiClient.get('/saas/email-settings');
+      apiClient.get('/saas/alert-settings')
+        .then(r => {
+          setAlertInfo(r.data || {});
+          setAlertForm(f => ({ ...f, telegram_chat_id: (r.data || {}).chat_id || '' }));
+        })
+        .catch(() => {});
       setSettings(res.data);
       setForm({
         resend_api_key: '',
@@ -100,6 +110,37 @@ export default function EmailSettingsPage() {
       toast.error(err?.response?.data?.detail || 'فشل الإرسال');
     } finally {
       setTesting(false);
+    }
+  };
+
+  // p153: telegram alert handlers
+  const saveAlert = async () => {
+    setAlertSaving(true);
+    try {
+      const payload = { telegram_chat_id: alertForm.telegram_chat_id.trim() };
+      if (alertForm.telegram_bot_token.trim()) payload.telegram_bot_token = alertForm.telegram_bot_token.trim();
+      await apiClient.put('/saas/alert-settings', payload);
+      const r = await apiClient.get('/saas/alert-settings');
+      setAlertInfo(r.data || {});
+      setAlertForm(f => ({ ...f, telegram_bot_token: '' }));
+      toast.success('حُفظت إعدادات التنبيهات');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'فشل الحفظ');
+    } finally {
+      setAlertSaving(false);
+    }
+  };
+
+  const testAlert = async () => {
+    setAlertTesting(true);
+    try {
+      const r = await apiClient.post('/saas/alert-settings/test');
+      if (r.data?.ok) toast.success(r.data.message);
+      else toast.error(r.data?.message || 'فشل الإرسال');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'فشل الإرسال');
+    } finally {
+      setAlertTesting(false);
     }
   };
 
@@ -294,6 +335,62 @@ export default function EmailSettingsPage() {
               <Button onClick={sendTest} disabled={testing} data-testid="send-test-email-btn">
                 <Send className="w-4 h-4 ml-1" />
                 {testing ? 'جارٍ الإرسال...' : 'إرسال'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ── p153: Telegram platform alerts ────────────────────────────── */}
+        <Card data-testid="telegram-alerts-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-sky-600" /> تنبيهات Telegram للمنصة
+            </CardTitle>
+            <CardDescription>
+              تنبيهات النسخ الاحتياطي ومراقبة الصحة والنشر تصل إلى Telegram فوراً. أنشئ بوتاً عبر
+              <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="underline mx-1">@BotFather</a>
+              واحصل على Chat ID عبر
+              <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="underline mx-1">@userinfobot</a>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span>الحالة:</span>
+              <Badge className={alertInfo.has_token ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'} data-testid="telegram-status-badge">
+                {alertInfo.has_token ? `مُعَدّ ✅ (${alertInfo.token_masked})` : 'غير مُعَدّ ⚠️'}
+              </Badge>
+            </div>
+            <div>
+              <Label htmlFor="tg-token">Bot Token</Label>
+              <Input
+                id="tg-token"
+                dir="ltr"
+                placeholder="123456:ABC-DEF..."
+                value={alertForm.telegram_bot_token}
+                onChange={(e) => setAlertForm({ ...alertForm, telegram_bot_token: e.target.value })}
+                data-testid="telegram-token-input"
+              />
+              <p className="text-xs text-muted-foreground mt-1">اتركه فارغاً للإبقاء على الحالي.</p>
+            </div>
+            <div>
+              <Label htmlFor="tg-chat">Chat ID</Label>
+              <Input
+                id="tg-chat"
+                dir="ltr"
+                placeholder="123456789"
+                value={alertForm.telegram_chat_id}
+                onChange={(e) => setAlertForm({ ...alertForm, telegram_chat_id: e.target.value })}
+                data-testid="telegram-chatid-input"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={testAlert} disabled={alertTesting || !alertInfo.has_token} data-testid="telegram-test-btn">
+                <Send className="w-4 h-4 ml-1" />
+                {alertTesting ? 'جارٍ الإرسال...' : 'اختبار'}
+              </Button>
+              <Button onClick={saveAlert} disabled={alertSaving} data-testid="telegram-save-btn">
+                <Save className="w-4 h-4 ml-1" />
+                {alertSaving ? 'جارٍ الحفظ...' : 'حفظ'}
               </Button>
             </div>
           </CardContent>
