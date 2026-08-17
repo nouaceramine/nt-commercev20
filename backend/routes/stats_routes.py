@@ -244,7 +244,10 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        result = await top_products_rows(db, limit, start_date)
+        # p148: items carry product_name/total (not name/price) — defaults produced null names and zero revenue
+        result = await top_products_rows(db, limit, start_date,
+                                         name_field="product_name", revenue_mode="total",
+                                         sort_key="total_revenue")
         return {"period": period, "products": result}
 
     # ── Analytics: Top Customers ──
@@ -462,7 +465,8 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
                 pp = it.get("purchase_price")
                 if pp is None:
                     pp = (pmap.get(it.get("product_id")) or {}).get("purchase_price", 0)
-                pos_profit += ((it.get("price") or 0) - (pp or 0)) * (it.get("quantity") or 1)
+                # p148: sale items store unit_price (never "price") — wrong field made profit negative
+                pos_profit += ((it.get("unit_price") or it.get("price") or 0) - (pp or 0)) * (it.get("quantity") or 1)
         pos = {
             "count": len(pos_active),
             "total": round(sum(s.get("total") or 0 for s in pos_active), 2),
@@ -531,8 +535,9 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         }
 
         # 6) Expenses + capital snapshot
+        # p148: expenses.date is a full ISO datetime — exact string match never hits; use the day range
         exp_agg = await db.expenses.aggregate([
-            {"$match": {"date": day}},
+            {"$match": {"date": in_day}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
         ]).to_list(1)
         expenses = {"total": round(exp_agg[0]["total"], 2), "count": exp_agg[0]["count"]} if exp_agg else {"total": 0, "count": 0}

@@ -1281,27 +1281,35 @@ async def dashboard_sales_chart(user: dict = Depends(get_current_user)):
             {"$match": {"created_at": {"$gte": day_start, "$lt": day_end}, "status": {"$ne": "returned"}}},
             {"$group": {"_id": None, "sales": {"$sum": "$total"}, "orders": {"$sum": 1}}},
         ]).to_list(1)
+        # p148: expenses were hardcoded to 0 — aggregate them per day (expense.date is ISO, prefix-match the day)
+        day_prefix = day_start[:10]
+        exp_agg = await db.expenses.aggregate([
+            {"$match": {"date": {"$gte": day_prefix, "$lt": (day + timedelta(days=1)).strftime("%Y-%m-%d")}}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+        ]).to_list(1)
         row = agg[0] if agg else {"sales": 0, "orders": 0}
         results.append({
             "name": ar_days[(day.weekday() + 1) % 7],
             "sales": row["sales"],
             "orders": row["orders"],
-            "expenses": 0,
+            "expenses": round(exp_agg[0]["total"], 2) if exp_agg else 0,
         })
     return results
 
 @app.get("/api/dashboard/alerts")
 async def dashboard_alerts(user: dict = Depends(get_current_user)):
     alerts = []
+    # p148: products store quantity/low_stock_threshold (not stock/min_stock) — old fields flagged everything with "(0)"
     low_stock = await db.products.find(
-        {"$expr": {"$lte": ["$stock", {"$ifNull": ["$min_stock", 5]}]}},
-        {"_id": 0, "name": 1, "stock": 1},
+        {"$expr": {"$lte": [{"$ifNull": ["$quantity", 0]}, {"$ifNull": ["$low_stock_threshold", 5]}]}},
+        {"_id": 0, "name": 1, "name_ar": 1, "quantity": 1},
     ).limit(10).to_list(10)
     for p in low_stock:
+        pname = p.get("name_ar") or p.get("name", "")
         alerts.append({
-            "id": f"stock-{p.get('name', '')}",
+            "id": f"stock-{pname}",
             "type": "low_stock",
-            "message": f"المنتج {p.get('name', '')} منخفض المخزون ({p.get('stock', 0)})",
+            "message": f"المنتج {pname} منخفض المخزون ({p.get('quantity', 0)})",
             "priority": "high",
         })
     overdue = await db.debts.count_documents({"remaining_amount": {"$gt": 0}})

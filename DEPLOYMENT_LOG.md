@@ -2117,3 +2117,16 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - بلا عنصر قائمة وبمبرر: صفحات عامة (/shop/*، /landing، /pricing، /portal...)، تحويلات alias (/shipping، /store، /loyalty...)، تبويبات ecom-hub الداخلية، مسارات بمعرّف (/products/:id)، /whatsapp و/products/add (تُفتح من داخل الصفحات)، /agent/dashboard (قائمة الوكيل)
 - تحقق من الحزمة main.470dd403.js: wallet-management 9 (كانت 7)، tenant/dashboard 4 (كانت 3)، التسمية العربية المشفّرة موجودة — النشر release 20260816_235507
 - backup: /opt/ntcommerce/backups/p147_nav_fix/
+
+## p148 — تدقيق بطاقات KPI الشامل + إصلاح 5 علل حسابية (2026-08-17)
+- مسح كودي: 124 ملفاً فيها بطاقات KPI، 44 صفحة KPI رئيسية — ربط كل بطاقة بنقطة النهاية المغذّية لها
+- مسح نقاط النهاية: 265 مسار GET حياً (openapi) — 236 سليمة (200/204)، 29 مفسّرة وليست عللاً: 13×307 (شرطة مائلة)، 3×422 (معامل مطلوب: price-preview/check-slug/tax/report)، 8×403 (مسارات وكيل فقط)، 5×404 (مسارات بمعرّف فارغ)
+- حقن بيانات مرجعية على الحساب التجريبي (منتج 1000/400 كمية 10، مبيعتان ×2000، مصروف 300) ثم تحقق رقمي — كشف 5 علل حقيقية:
+  (1) stats_routes.py analytics/top-products: كان يمرر name_field="name" + revenue_mode="price_qty" (حقل $items.price غير موجود) → أسماء null وإيراد 0 — الإصلاح: product_name + total + sort total_revenue
+  (2) stats_routes.py daily-full: ربح POS كان it.get("price") والحقل الصحيح unit_price → الربح سالب دائماً — الإصلاح: (unit_price أو price) − purchase_price × quantity
+  (3) stats_routes.py daily-full: المصروفات تُطابخ date بنص يوم كامل بينما المخزّن ISO datetime → 0 دائماً — الإصلاح: مطابقة نطاق اليوم
+  (4) main.py dashboard_sales_chart: مصروفات الرسم البياني كانت hardcoded 0 — الإصلاح: تجميع مصروفات حقيقي لكل يوم
+  (5) main.py dashboard_alerts: مخزون منخفض كان يقرأ $stock/$min_stock (حقول غير موجودة) → يعلّم كل المنتجات بـ«(0)» — الإصلاح: $expr على quantity/low_stock_threshold مع إسقاط name_ar/quantity
+- تحقق مباشر بعد الإصلاح: daily-full ربح 3200 (=4000−800 تكلفة) ✓ مصروفات 300/1 ✓ top-products «منتج اختبار KPI» 2000×2 ✓ alerts منتج واحد حقيقي «(8)» والمنتج السليم غائب ✓ sales-chart اثنين: مبيعات 4000 مصروفات 300 ✓
+- تنظيف: حذف بيانات الاختبار (2 مبيعة KPI-TEST-1 + مصروف + منتجان) وتصفير كل cash_boxes — الحساب التجريبي عاد نقياً (مبيعات 0 منتجات 0 مصروفات 0)
+- backup: /opt/ntcommerce/backups/p148_daily_full/ (main.py + stats_routes.py + reporting.py)
