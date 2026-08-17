@@ -12,51 +12,54 @@ from bson import ObjectId
 from openpyxl import Workbook, load_workbook
 from config.database import get_tenant_db
 
+
+EXPORTABLE_COLLECTIONS = {
+    "products": {
+        "fields": ["name_ar", "name_en", "barcode", "article_code", "retail_price", "wholesale_price", "purchase_price", "quantity", "min_stock", "category", "family_id", "unit", "tax_rate"],
+        "label_ar": "المنتجات",
+        "label_fr": "Products"
+    },
+    "customers": {
+        "fields": ["name", "phone", "email", "address", "city", "wilaya", "notes", "family_id"],
+        "label_ar": "الزبائن",
+        "label_fr": "Customers"
+    },
+    "suppliers": {
+        "fields": ["name", "phone", "email", "address", "city", "company", "tax_id", "notes"],
+        "label_ar": "الموردين",
+        "label_fr": "Suppliers"
+    },
+    "employees": {
+        "fields": ["name", "phone", "email", "position", "salary", "hire_date", "notes"],
+        "label_ar": "الموظفين",
+        "label_fr": "Employees"
+    },
+    "sales": {
+        "fields": ["invoice_number", "customer_name", "total", "discount", "payment_method", "payment_type", "status", "created_at", "note"],
+        "label_ar": "المبيعات",
+        "label_fr": "Sales"
+    },
+    "purchases": {
+        "fields": ["invoice_number", "supplier_name", "total", "discount", "payment_method", "status", "created_at", "note"],
+        "label_ar": "المشتريات",
+        "label_fr": "Purchases"
+    },
+    "expenses": {
+        "fields": ["title", "amount", "category", "payment_method", "date", "notes", "recurring"],
+        "label_ar": "المصاريف",
+        "label_fr": "Expenses"
+    },
+    "debts": {
+        "fields": ["customer_name", "amount", "remaining", "type", "status", "due_date", "created_at", "notes"],
+        "label_ar": "الديون",
+        "label_fr": "Debts"
+    }
+}
+
+
 def create_import_export_routes(db, get_current_user) -> dict:
     router = APIRouter(prefix="/data", tags=["data-import-export"])
 
-    EXPORTABLE_COLLECTIONS = {
-        "products": {
-            "fields": ["name_ar", "name_en", "barcode", "article_code", "retail_price", "wholesale_price", "purchase_price", "quantity", "min_stock", "category", "family_id", "unit", "tax_rate"],
-            "label_ar": "المنتجات",
-            "label_fr": "Products"
-        },
-        "customers": {
-            "fields": ["name", "phone", "email", "address", "city", "wilaya", "notes", "family_id"],
-            "label_ar": "الزبائن",
-            "label_fr": "Customers"
-        },
-        "suppliers": {
-            "fields": ["name", "phone", "email", "address", "city", "company", "tax_id", "notes"],
-            "label_ar": "الموردين",
-            "label_fr": "Suppliers"
-        },
-        "employees": {
-            "fields": ["name", "phone", "email", "position", "salary", "hire_date", "notes"],
-            "label_ar": "الموظفين",
-            "label_fr": "Employees"
-        },
-        "sales": {
-            "fields": ["invoice_number", "customer_name", "total", "discount", "payment_method", "payment_type", "status", "created_at", "note"],
-            "label_ar": "المبيعات",
-            "label_fr": "Sales"
-        },
-        "purchases": {
-            "fields": ["invoice_number", "supplier_name", "total", "discount", "payment_method", "status", "created_at", "note"],
-            "label_ar": "المشتريات",
-            "label_fr": "Purchases"
-        },
-        "expenses": {
-            "fields": ["title", "amount", "category", "payment_method", "date", "notes", "recurring"],
-            "label_ar": "المصاريف",
-            "label_fr": "Expenses"
-        },
-        "debts": {
-            "fields": ["customer_name", "amount", "remaining", "type", "status", "due_date", "created_at", "notes"],
-            "label_ar": "الديون",
-            "label_fr": "Debts"
-        }
-    }
 
     def _resolve_db(user, tenant_id):
         """Super admin can target a specific tenant's database via tenant_id."""

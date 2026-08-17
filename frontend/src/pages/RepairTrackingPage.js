@@ -54,7 +54,8 @@ import {
   ArrowRight,
   RefreshCw,
   Printer,
-  Package
+  Package,
+  FileText
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -162,6 +163,10 @@ export default function RepairTrackingPage() {
   const [updateForm, setUpdateForm] = useState({ status: '', notes: '', actual_cost: '', spare_parts: [] });
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0, inProgress: 0, ready: 0, delivered: 0 });
+  const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);  // p151
+  const [invoicingRepair, setInvoicingRepair] = useState(null);        // p151
+  const [invoiceForm, setInvoiceForm] = useState({ service_price: '', paid_amount: '', discount: '0' });  // p151
+  const [invoiceLoading, setInvoiceLoading] = useState(false);         // p151
   
   // Spare parts search
   const [productSearch, setProductSearch] = useState('');
@@ -337,6 +342,41 @@ export default function RepairTrackingPage() {
     } catch (error) {
       console.error('Error updating repair:', error);
       toast.error(language === 'ar' ? 'فشل في تحديث الحالة' : 'Échec de mise à jour');
+    }
+  };
+
+  // p151: convert repair ticket to sale invoice
+  const handleOpenInvoice = (repair) => {
+    setInvoicingRepair(repair);
+    setInvoiceForm({
+      service_price: ((repair.final_cost ?? repair.estimated_cost) || 0).toString(),
+      paid_amount: '',
+      discount: '0',
+    });
+    setShowInvoiceDialog(true);
+  };
+
+  const handleCreateInvoice = async () => {
+    if (!invoicingRepair) return;
+    try {
+      setInvoiceLoading(true);
+      const payload = {
+        service_price: parseFloat(invoiceForm.service_price) || 0,
+        discount: parseFloat(invoiceForm.discount) || 0,
+      };
+      if (invoiceForm.paid_amount !== '') {
+        payload.paid_amount = parseFloat(invoiceForm.paid_amount) || 0;
+      }
+      const res = await apiClient.post(`/repairs/tickets/${invoicingRepair.id}/invoice`, payload);
+      toast.success((language === 'ar' ? '\u062a\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0641\u0627\u062a\u0648\u0631\u0629 ' : 'Facture cr\u00e9\u00e9e ') + (res.data?.invoice_number || ''));
+      setShowInvoiceDialog(false);
+      await fetchRepairs();
+      await fetchStats();
+    } catch (error) {
+      const detail = error?.response?.data?.detail;
+      toast.error(detail || (language === 'ar' ? '\u0641\u0634\u0644 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0641\u0627\u062a\u0648\u0631\u0629' : '\u00c9chec de cr\u00e9ation'));
+    } finally {
+      setInvoiceLoading(false);
     }
   };
 
@@ -672,6 +712,23 @@ export default function RepairTrackingPage() {
                             >
                               <Printer className="h-4 w-4" />
                             </Button>
+                            {['ready', 'testing', 'in_repair', 'repaired'].includes(repair.status) && !repair.invoice_id && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleOpenInvoice(repair)}
+                                title={language === 'ar' ? '\u062a\u062d\u0648\u064a\u0644 \u0625\u0644\u0649 \u0641\u0627\u062a\u0648\u0631\u0629' : 'Convertir en facture'}
+                                className="text-purple-600 hover:text-purple-700 hover:bg-purple-100"
+                                data-testid="repair-invoice-btn"
+                              >
+                                <FileText className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {repair.invoice_id && (
+                              <Badge variant="outline" className="text-xs self-center" title={repair.invoice_number}>
+                                {repair.invoice_number}
+                              </Badge>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -682,6 +739,62 @@ export default function RepairTrackingPage() {
             </Table>
           </CardContent>
         </Card>
+
+        {/* p151: Invoice Dialog */}
+        <Dialog open={showInvoiceDialog} onOpenChange={setShowInvoiceDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                {language === 'ar' ? 'تحويل إلى فاتورة' : 'Convertir en facture'}
+              </DialogTitle>
+              <DialogDescription>
+                {language === 'ar' ? 'القطع المستعملة تُضاف تلقائياً إلى الفاتورة' : 'Les pièces utilisées sont ajoutées automatiquement'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4" data-testid="repair-invoice-dialog">
+              <div>
+                <Label>{language === 'ar' ? 'سعر الخدمة (دج)' : 'Prix du service (DA)'}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={invoiceForm.service_price}
+                  onChange={(e) => setInvoiceForm(prev => ({ ...prev, service_price: e.target.value }))}
+                  data-testid="repair-invoice-service"
+                />
+              </div>
+              <div>
+                <Label>{language === 'ar' ? 'الخصم (دج)' : 'Remise (DA)'}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={invoiceForm.discount}
+                  onChange={(e) => setInvoiceForm(prev => ({ ...prev, discount: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>{language === 'ar' ? 'المبلغ المدفوع (دج) — اتركه فارغاً للدفع الكامل' : 'Montant payé (DA) — vide = paiement total'}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={invoiceForm.paid_amount}
+                  onChange={(e) => setInvoiceForm(prev => ({ ...prev, paid_amount: e.target.value }))}
+                  data-testid="repair-invoice-paid"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowInvoiceDialog(false)}>
+                {language === 'ar' ? 'إلغاء' : 'Annuler'}
+              </Button>
+              <Button onClick={handleCreateInvoice} disabled={invoiceLoading} data-testid="repair-invoice-submit">
+                {invoiceLoading
+                  ? (language === 'ar' ? 'جارٍ الإنشاء...' : 'Création...')
+                  : (language === 'ar' ? 'إنشاء الفاتورة' : 'Créer la facture')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Details Dialog */}
         <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>

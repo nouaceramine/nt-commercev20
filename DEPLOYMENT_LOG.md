@@ -2164,3 +2164,25 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - build main.244b1982.js — markers: scan-invoice-btn, shipping-company-group, courier-chip-, shipping-provider-select, ship-opt- ✓
 - release 20260817_145515؛ https://nt-commerce.net/ 200 بالحزمة الجديدة ✓
 - demo tenant نظيف: products 0, sales 0, orders 0, store_products 0 ✓
+
+## p151 — المرحلة 3: فوترة الصيانة + الاستيراد الذكي (2026-08-17)
+
+### التغييرات
+- Backend repair_routes.py: POST /api/repairs/tickets/{id}/invoice — يحوّل تذكرة الصيانة إلى فاتورة بيع:
+  القطع المستعملة (part_usage) تُضاف كعناصر دون إعادة خصم المخزون (خُصمت عند use-part)،
+  سطر خدمة بسعر قابل للتعديل، خصم، دفع كلي/جزئي، ربط الزبون بالهاتف أو إنشاؤه تلقائياً عند وجود دين،
+  ترقيم INV مشترك، تحديث cash_boxes + transactions، سجل repair_invoices، ربط التذكرة بالفاتورة (idempotent 400)،
+  حدث sale.completed قناة repair. صلاحية repairs.edit.
+- Backend import_export_routes.py: نقل EXPORTABLE_COLLECTIONS إلى module-level (إعادة استخدام، بلا تغيير سلوك — regression OK).
+- Backend ai_routes.py: POST /api/ai/map-columns — مطابقة أعمدة ملفات برامج محاسبة أجنبية بالحقول عبر Gemini + heuristic fallback.
+- Frontend RepairTrackingPage.js: زر "تحويل إلى فاتورة" (repair-invoice-btn) للتذاكر الجاهزة + حوار السعر/الخصم/الدفع + شارة رقم الفاتورة.
+- Frontend ImportDataPage.js (جديد): معالج 4 خطوات — اختيار القسم، رفع CSV/Excel (تحليل xlsx محلياً)، مطابقة AI قابلة للتعديل، معاينة + استيراد append/replace عبر /api/data/import الموجود.
+- App.js route /import-wizard + Layout.js عنصر "الاستيراد الذكي" في قسم الإعدادات.
+
+### اختبارات حية (demo tenant)
+- فاتورة صيانة: قطعتان 3000 + خدمة 500 = 3500، مدفوع 2000 → remaining 1500، status partial، source=repair ✓
+- المخزون لم يُخصم مرتين (8 قبل وبعد) ✓ | زبون أُنشئ تلقائياً balance/total_debt=1500 ✓
+- إعادة POST → 400 ✓ | cash box +2000 ومعاملة "صيانة - فاتورة" ✓ | التنظيف الكامل بعدها ✓
+- map-columns: عناوين فرنسية/عربية أجنبية → مطابقة 6/6 صحيحة ai_used=true ✓
+- import/customers regression: Imported 1 records ✓ (ثم حُذف)
+- build main.b8c474e2.js markers كاملة؛ release 20260817_152303؛ الموقع 200 ✓

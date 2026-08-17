@@ -189,3 +189,139 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
     with open(upload_dir / fname, "wb") as f:
         f.write(content)
     return {"success": True, "url": f"/api/static/uploads/{fname}", "filename": fname}
+
+
+# ── p151: AI column mapping for the import wizard ──
+# Field synonym hints help both the AI prompt and the heuristic fallback.
+_IMPORT_FIELD_HINTS = {
+    "name_ar": "Arabic name / الاسم / designation / libellé / produit",
+    "name_en": "Latin/English name / nom / item name / reference name",
+    "barcode": "barcode / code-barres / الباركود / ean / code barre",
+    "article_code": "article/ref code / référence / المرجع / ref / code article",
+    "retail_price": "sell/retail price / prix de vente / سعر البيع / pv / price",
+    "wholesale_price": "wholesale price / prix de gros / سعر الجملة",
+    "purchase_price": "purchase/cost price / prix d'achat / سعر الشراء / pa / cost",
+    "quantity": "quantity/stock / quantité / الكمية / qty / stock / qte",
+    "min_stock": "minimum stock / stock min / الحد الأدنى",
+    "category": "category / catégorie / الفئة / famille / rubrique",
+    "family_id": "family id (internal)",
+    "unit": "unit / unité / الوحدة",
+    "tax_rate": "tax rate / TVA / الضريبة",
+    "name": "name / nom / الاسم / raison sociale",
+    "phone": "phone / téléphone / الهاتف / tel / mobile",
+    "email": "email / بريد / e-mail / mail",
+    "address": "address / adresse / العنوان",
+    "city": "city / ville / المدينة / commune",
+    "wilaya": "wilaya / ولاية / province",
+    "notes": "notes / ملاحظات / remarques / observation",
+    "position": "position / poste / المنصب / fonction",
+    "salary": "salary / salaire / الراتب",
+    "hire_date": "hire date / date d'embauche / تاريخ التوظيف",
+    "invoice_number": "invoice number / n° facture / رقم الفاتورة / numero",
+    "customer_name": "customer name / client / الزبون",
+    "supplier_name": "supplier name / fournisseur / المورد",
+    "total": "total / الإجمالي / montant total",
+    "discount": "discount / remise / الخصم",
+    "payment_method": "payment method / mode de paiement / طريقة الدفع",
+    "payment_type": "payment type / نوع الدفع",
+    "status": "status / statut / الحالة / etat",
+    "created_at": "date / التاريخ / created",
+    "note": "note / ملاحظة",
+    "title": "title / titre / العنوان / libelle",
+    "amount": "amount / montant / المبلغ",
+    "date": "date / التاريخ",
+    "recurring": "recurring / متكرر",
+    "company": "company / société / الشركة / entreprise",
+    "tax_id": "tax id / NIF / الرقم الجبائي / rc",
+    "remaining": "remaining / reste / المتبقي",
+    "type": "type / النوع",
+    "due_date": "due date / échéance / تاريخ الاستحقاق",
+}
+
+
+def _norm_header(h):
+    return "".join(ch for ch in str(h or "").strip().lower() if ch.isalnum() or ord(ch) > 127)
+
+
+def _heuristic_map(headers, fields):
+    """Direct/normalized matching fallback when AI is unavailable."""
+    mapping = {}
+    norm_fields = {f: _norm_header(f) for f in fields}
+    for h in headers:
+        nh = _norm_header(h)
+        target = ""
+        for f, nf in norm_fields.items():
+            if nh == nf:
+                target = f
+                break
+        if not target:
+            # substring match against hint tokens
+            for f in fields:
+                hint = _IMPORT_FIELD_HINTS.get(f, "")
+                for tok in hint.split("/"):
+                    tok = _norm_header(tok)
+                    if tok and len(tok) > 2 and nh == tok:
+                        target = f
+                        break
+                if target:
+                    break
+        mapping[h] = target
+    return mapping
+
+
+@router.post("/map-columns")
+async def map_columns(data: dict, admin: dict = Depends(get_tenant_admin)):
+    """Map source-file columns (from any accounting software) to target fields.
+
+    body: {collection: str, headers: [str], sample_rows: [[...]] (optional)}
+    returns {mapping: {source: target|""}, fields: [...], ai_used: bool}
+    """
+    from routes.import_export_routes import EXPORTABLE_COLLECTIONS
+
+    collection = (data.get("collection") or "").strip()
+    headers = [str(h) for h in (data.get("headers") or [])][:60]
+    if collection not in EXPORTABLE_COLLECTIONS:
+        raise HTTPException(status_code=400, detail=f"Collection '{collection}' غير مدعومة")
+    if not headers:
+        raise HTTPException(status_code=400, detail="لم يتم العثور على أعمدة في الملف")
+
+    fields = EXPORTABLE_COLLECTIONS[collection]["fields"]
+    mapping = _heuristic_map(headers, fields)
+    ai_used = False
+
+    if AIService.is_configured():
+        try:
+            sample = data.get("sample_rows") or []
+            sample_txt = ""
+            for row in sample[:3]:
+                sample_txt += " | ".join(str(v)[:30] for v in row[:len(headers)]) + "\n"
+            fields_desc = "\n".join(f"- {f}: {_IMPORT_FIELD_HINTS.get(f, f)}" for f in fields)
+            prompt = (
+                "You map spreadsheet column headers exported from arbitrary accounting/inventory software "
+                "to a target database schema. Reply with ONLY valid JSON, no markdown, no explanation.\n"
+                f"TARGET FIELDS (with meaning hints):\n{fields_desc}\n\n"
+                f"SOURCE HEADERS:\n" + "\n".join(f"- {h}" for h in headers) + "\n\n"
+                + (f"SAMPLE ROWS (same order as headers):\n{sample_txt}\n" if sample_txt else "")
+                + 'Return JSON object mapping EACH source header exactly as given to the best target field name, '
+                'or "" if no reasonable match. Example: {"source header": "retail_price", "other": ""}'
+            )
+            model = genai.GenerativeModel(AIService.MODEL)
+            resp = await model.generate_content_async(prompt)
+            text = (resp.text or "").strip()
+            import re as _re3
+            m = _re3.search(r"\{.*\}", text, _re3.S)
+            ai_map = _json.loads(m.group(0)) if m else None
+            if isinstance(ai_map, dict):
+                for h in headers:
+                    t = ai_map.get(h)
+                    if isinstance(t, str) and t in fields:
+                        mapping[h] = t
+                    elif h not in mapping or mapping[h] not in fields:
+                        mapping.setdefault(h, "")
+                ai_used = True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("map-columns AI fallback: %s", e)
+
+    unmatched = [h for h in headers if not mapping.get(h)]
+    return {"mapping": mapping, "fields": fields, "unmatched": unmatched, "ai_used": ai_used}

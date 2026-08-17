@@ -154,6 +154,7 @@ import AutoHealPage from "./pages/admin/saas/AutoHealPage";
 import StoreManagementPage from "./pages/store/StoreManagementPage";
 import PublicStorePage from "./pages/store/PublicStorePage";
 import DataImportExportPage from "./pages/DataImportExportPage";
+import ImportDataPage from "./pages/ImportDataPage";  // p151
 import MotherboardPage from "./pages/MotherboardPage";
 import TemplateEditorPage from "./pages/settings/TemplateEditorPage";
 import DailyReportPage from "./pages/DailyReportPage";
@@ -459,6 +460,7 @@ function AppRoutes() {
       <Route path="/defective-goods" element={<ProtectedRoute featureKey="inventory"><DefectiveGoodsPage /></ProtectedRoute>} />
       <Route path="/backup-system" element={<ProtectedRoute featureKey="backup"><BackupSystemPage /></ProtectedRoute>} />
       <Route path="/data-import-export" element={<ProtectedRoute><DataImportExportPage /></ProtectedRoute>} />
+      <Route path="/import-wizard" element={<ProtectedRoute><ImportDataPage /></ProtectedRoute>} />  {/* p151 */}
       <Route path="/security-dashboard" element={<ProtectedRoute><SecurityDashboardPage /></ProtectedRoute>} />
       <Route path="/motherboard" element={<ProtectedRoute superAdminOnly><MotherboardPage /></ProtectedRoute>} />
       <Route path="/daily-report" element={<ProtectedRoute><DailyReportPage /></ProtectedRoute>} />

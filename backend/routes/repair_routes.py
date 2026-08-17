@@ -344,4 +344,198 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
     async def get_technicians(user: dict = Depends(get_current_user)):
         return await db.technicians.find({}, {"_id": 0}).to_list(100)
 
+
+    # ── p151: Convert repair ticket to sale invoice ──
+    @router.post("/tickets/{ticket_id}/invoice")
+    async def ticket_to_invoice(ticket_id: str, data: dict, admin: dict = Depends(require_permission("repairs.edit"))):
+        """Create a sale invoice from a repair ticket.
+
+        Parts were already deducted from stock at use-part time, so this
+        endpoint must NOT re-claim stock. It mirrors the create_sale_op
+        side effects: invoice numbering, customer balance, cashbox,
+        transaction log and the sale.completed event.
+        """
+        from services.application.sales_service import generate_invoice_number
+
+        ticket = await db.repair_tickets.find_one({"id": ticket_id}, {"_id": 0})
+        if not ticket:
+            raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
+        if ticket.get("invoice_id"):
+            raise HTTPException(status_code=400, detail=f"الفاتورة موجودة مسبقاً: {ticket.get('invoice_number', '')}")
+
+        parts = await db.part_usage.find({"repair_ticket_id": ticket_id}, {"_id": 0}).to_list(200)
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Service price: explicit override > final_cost > estimated_cost
+        service_price = data.get("service_price")
+        if service_price is None:
+            service_price = ticket.get("final_cost") or ticket.get("estimated_cost") or 0
+        service_price = float(service_price or 0)
+
+        items = []
+        for p in parts:
+            qty = int(p.get("quantity", 1))
+            unit = float(p.get("unit_price", 0))
+            items.append({
+                "product_id": p.get("part_id"),
+                "name": p.get("part_name", ""),
+                "quantity": qty,
+                "price": unit,
+                "unit_price": unit,
+                "purchase_price": float(p.get("purchase_price", 0) or 0),
+                "total": round(unit * qty, 2),
+                "source": "repair_part",  # stock already consumed at use-part
+            })
+        if service_price > 0:
+            items.append({
+                "product_id": None,
+                "name": f"خدمة صيانة - {ticket.get('ticket_number', ticket_id)}",
+                "quantity": 1,
+                "price": service_price,
+                "unit_price": service_price,
+                "purchase_price": 0,
+                "total": service_price,
+                "source": "repair_service",
+            })
+        if not items:
+            raise HTTPException(status_code=400, detail="لا توجد قطع ولا كلفة خدمة لإنشاء فاتورة")
+
+        subtotal = round(sum(it["total"] for it in items), 2)
+        discount = float(data.get("discount", 0) or 0)
+        total = round(subtotal - discount, 2)
+        if total < 0:
+            raise HTTPException(status_code=400, detail="الخصم أكبر من الإجمالي")
+
+        paid_amount = data.get("paid_amount")
+        paid_amount = float(total if paid_amount is None else paid_amount)
+        paid_amount = max(0.0, min(paid_amount, total))
+        remaining = round(total - paid_amount, 2)
+
+        # Customer: link by phone, auto-create when there is debt to track
+        customer = await db.customers.find_one({"phone": ticket.get("customer_phone", "")}, {"_id": 0})
+        if not customer and remaining > 0:
+            customer = {
+                "id": str(uuid.uuid4()),
+                "name": ticket.get("customer_name", ""),
+                "phone": ticket.get("customer_phone", ""),
+                "email": "",
+                "address": "",
+                "price_tier": "retail",
+                "balance": 0, "total_debt": 0, "total_purchases": 0,
+                "is_active": True,
+                "notes": f"أُنشئ تلقائياً من تذكرة صيانة {ticket.get('ticket_number', '')}",
+                "created_at": now,
+            }
+            await db.customers.insert_one(customer)
+        customer_id = customer.get("id") if customer else None
+        customer_name = customer.get("name") if customer else (ticket.get("customer_name") or "عميل نقدي")
+
+        status = "paid" if remaining <= 0 else ("partial" if paid_amount > 0 else "unpaid")
+        payment_type = "cash" if remaining <= 0 else ("partial" if paid_amount > 0 else "credit")
+
+        # Cash box: explicit id or first available box
+        payment_method = data.get("payment_method") or ""
+        if paid_amount > 0:
+            if not payment_method:
+                box = await db.cash_boxes.find_one({}, {"_id": 0, "id": 1})
+                if not box:
+                    raise HTTPException(status_code=400, detail="لا توجد خزينة لتسجيل المبلغ المدفوع")
+                payment_method = box["id"]
+
+        invoice_number = await generate_invoice_number(db, "INV")
+        sale_id = str(uuid.uuid4())
+        sale_doc = {
+            "id": sale_id,
+            "invoice_number": invoice_number,
+            "code": "",
+            "customer_id": customer_id,
+            "customer_name": customer_name,
+            "items": items,
+            "subtotal": subtotal,
+            "discount": discount,
+            "delivery_fee": 0,
+            "delivery": None,
+            "total": total,
+            "paid_amount": paid_amount,
+            "debt_amount": remaining if customer_id else 0,
+            "remaining": max(0, remaining),
+            "payment_method": payment_method,
+            "payment_type": payment_type,
+            "payments": ([{"amount": paid_amount, "method": payment_method, "at": now}] if paid_amount > 0 else []),
+            "installment_plan": None,
+            "status": status,
+            "notes": data.get("notes") or f"فاتورة صيانة - تذكرة {ticket.get('ticket_number', ticket_id)}",
+            "source": "repair",
+            "repair_ticket_id": ticket_id,
+            "created_at": now,
+            "created_by": admin.get("name", admin.get("email", "")),
+        }
+        await db.sales.insert_one(sale_doc)
+
+        if customer_id:
+            await db.customers.update_one(
+                {"id": customer_id},
+                {"$inc": {"total_purchases": total, "balance": remaining, "total_debt": remaining}},
+            )
+
+        if paid_amount > 0:
+            await db.cash_boxes.update_one(
+                {"id": payment_method},
+                {"$inc": {"balance": paid_amount}, "$set": {"updated_at": now}},
+            )
+            await db.transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "cash_box_id": payment_method,
+                "type": "income",
+                "amount": paid_amount,
+                "description": f"صيانة - فاتورة {invoice_number}",
+                "reference_type": "sale",
+                "reference_id": sale_id,
+                "created_at": now,
+                "created_by": admin.get("name", ""),
+            })
+
+        # Mirror record + mark ticket
+        await db.repair_invoices.insert_one({
+            "id": str(uuid.uuid4()),
+            "repair_ticket_id": ticket_id,
+            "sale_id": sale_id,
+            "invoice_number": invoice_number,
+            "total": total,
+            "paid_amount": paid_amount,
+            "created_at": now,
+            "created_by": admin.get("name", ""),
+        })
+        await db.repair_tickets.update_one(
+            {"id": ticket_id},
+            {"$set": {
+                "invoice_id": sale_id,
+                "invoice_number": invoice_number,
+                "invoiced_at": now,
+                "final_cost": ticket.get("final_cost") or total,
+                "updated_at": now,
+            }},
+        )
+
+        try:
+            from services.event_bus import event_bus
+            await event_bus.publish(
+                "sale.completed",
+                {
+                    "sale_id": sale_id,
+                    "invoice_number": invoice_number,
+                    "total": total,
+                    "paid_amount": paid_amount,
+                    "items": [{"product_id": it.get("product_id"), "quantity": it["quantity"], "price": it["price"]} for it in items],
+                    "channel": "repair",
+                },
+                tenant_id=admin.get("tenant_id") or "platform",
+                source="repair_routes",
+            )
+        except Exception:
+            pass
+
+        sale_doc.pop("_id", None)
+        return sale_doc
+
     return router
