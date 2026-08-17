@@ -16,6 +16,8 @@ import {
   Plus, 
   Receipt,
   AlertCircle,
+  ScanLine,
+  Loader2,
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import PurchaseDialogs from './purchases/PurchaseDialogs';
@@ -34,6 +36,8 @@ export default function PurchasesPage() {
   const [purchases, setPurchases] = useState([]);
   const [supplierDebts, setSupplierDebts] = useState([]);
   const [cart, setCart] = useState([]);
+  const [scanningInvoice, setScanningInvoice] = useState(false);  // p150
+  const invoiceScanRef = useRef(null);                             // p150
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [paidAmount, setPaidAmount] = useState(0);
@@ -325,6 +329,69 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
       setPaidAmount(0);
     }
   }, [paymentType, subtotal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // p150: مسح فاتورة شراء بكاميرا الهاتف → Gemini vision → تعبئة المسودة للمراجعة
+  const handleInvoiceScan = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error(language === 'ar' ? 'الصورة أكبر من 8MB' : 'Image supérieure à 8MB');
+      return;
+    }
+    setScanningInvoice(true);
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await apiClient.post('/purchases/scan-invoice', { image_base64: b64 }, { timeout: 120000 });
+      const draft = res.data?.draft;
+      if (!res.data?.success || !draft) {
+        toast.error(language === 'ar' ? 'تعذرت قراءة الفاتورة' : 'Lecture impossible');
+        return;
+      }
+      const matched = (draft.items || []).filter(it => it.product_id);
+      const unmatched = (draft.items || []).filter(it => !it.product_id);
+      if (matched.length === 0 && (draft.items || []).length > 0) {
+        toast.warning(language === 'ar'
+          ? `قُرئت ${draft.items.length} أصناف لكن لا يطابق أيٌّ منها منتجاتك — أضفها يدوياً`
+          : `${draft.items.length} articles lus, aucun ne correspond à vos produits`);
+      }
+      setCart(matched.map(it => ({
+        product_id: it.product_id,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        total: it.quantity * it.unit_price,
+        originalPurchasePrice: it.unit_price,
+        updatePrices: false,
+        newRetailPrice: 0,
+      })));
+      if (res.data.matched_supplier_id) setSelectedSupplier(res.data.matched_supplier_id);
+      const noteBits = [
+        draft.invoice_number ? `فاتورة: ${draft.invoice_number}` : '',
+        draft.invoice_date ? `بتاريخ: ${draft.invoice_date}` : '',
+        draft.supplier_name && !res.data.matched_supplier_id ? `مورد مقروء: ${draft.supplier_name}` : '',
+        unmatched.length ? `أصناف غير مطابقة: ${unmatched.map(u => u.raw_name).join('، ')}` : '',
+      ].filter(Boolean);
+      if (noteBits.length) setNotes(prev => (prev ? prev + ' | ' : '') + noteBits.join(' — '));
+      try {
+        const codeRes = await apiClient.get(`/purchases/generate-code`);
+        setPurchaseCode(codeRes.data.code);
+      } catch { setPurchaseCode(''); }
+      setShowNewPurchaseDialog(true);
+      toast.success(language === 'ar'
+        ? `تمت قراءة ${matched.length}/${(draft.items || []).length} أصناف — راجع ثم اعتمد`
+        : `${matched.length}/${(draft.items || []).length} articles lus — vérifiez puis validez`);
+    } catch (err) {
+      toast.error(errText(err) || (language === 'ar' ? 'فشل مسح الفاتورة' : 'Échec du scan'));
+    } finally {
+      setScanningInvoice(false);
+    }
+  };
 
   const completePurchase = async (asDraft = false) => {
     if (cart.length === 0) {
@@ -622,6 +689,18 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
             }} className="gap-2" data-testid="new-purchase-btn">
               <Plus className="h-5 w-5" />
               {t.newPurchase}
+            </Button>
+            <input ref={invoiceScanRef} type="file" accept="image/*" capture="environment" onChange={handleInvoiceScan} className="hidden" />
+            <Button
+              variant="outline"
+              onClick={() => invoiceScanRef.current?.click()}
+              disabled={scanningInvoice}
+              className="gap-2"
+              data-testid="scan-invoice-btn"
+              title={language === 'ar' ? 'مسح فاتورة الشراء بكاميرا الهاتف' : 'Scanner la facture avec la caméra'}
+            >
+              {scanningInvoice ? <Loader2 className="h-5 w-5 animate-spin" /> : <ScanLine className="h-5 w-5" />}
+              {language === 'ar' ? (scanningInvoice ? 'جارٍ القراءة...' : 'مسح فاتورة') : 'Scanner facture'}
             </Button>
           </div>
         </div>

@@ -39,6 +39,7 @@ export default function AddProductPage() {
   const [generatingBarcode, setGeneratingBarcode] = useState(false);
   const [uploadingProductImage, setUploadingProductImage] = useState(false);
   const [families, setFamilies] = useState([]);
+  const [shippingProviders, setShippingProviders] = useState([]);  // p150
   const [showAddFamilyDialog, setShowAddFamilyDialog] = useState(false);
   const [newFamily, setNewFamily] = useState({ name: '' });
   const [addingFamily, setAddingFamily] = useState(false);
@@ -74,6 +75,7 @@ export default function AddProductPage() {
     internal_notes: '',
     is_blocked: false,
     allow_online_payment: true,  // p149
+    shipping_provider: '',  // p150
     fixed_price: false,
     force_qty_entry: false,
     force_price_entry: false,
@@ -125,6 +127,8 @@ export default function AddProductPage() {
       const token = localStorage.getItem('token');
       const response = await apiClient.get(`/product-families`);
       setFamilies(response.data);
+      const provRes = await apiClient.get(`/ecom/shipping/providers`).catch(() => ({ data: null }));  // p150
+      setShippingProviders((provRes.data?.providers || []).filter(pr => pr.key !== 'mock'));
     } catch (error) {
       console.error('Error fetching families:', error);
     }
@@ -254,6 +258,7 @@ export default function AddProductPage() {
       unit_of_measure: 'U', storage_location: '', qty_per_package: '1',
       is_non_stockable: false, tax_rate: '0', internal_notes: '',
       is_blocked: false, fixed_price: false, force_qty_entry: false, allow_online_payment: true,
+      shipping_provider: '',
       force_price_entry: false, serial_number_tracking: false,
       color: '', sizes_text: '', has_variants: false, variants: [],
     });
@@ -336,6 +341,7 @@ export default function AddProductPage() {
         internal_notes: formData.internal_notes,
         is_blocked: formData.is_blocked,
         allow_online_payment: formData.allow_online_payment,  // p149
+        shipping_provider: formData.shipping_provider || '',  // p150
         fixed_price: formData.fixed_price,
         force_qty_entry: formData.force_qty_entry,
         force_price_entry: formData.force_price_entry,
@@ -676,6 +682,25 @@ export default function AddProductPage() {
                       </div>
                     ))}
                   </div>
+
+                  {shippingProviders.length > 0 && (
+                    <div className="border rounded-lg p-3 space-y-2" data-testid="shipping-provider-row">
+                      <Label>{isAr ? 'شركة الشحن المفروضة (اختياري)' : 'Transporteur imposé (optionnel)'}</Label>
+                      <p className="text-[11px] text-muted-foreground">{isAr ? 'إن اخترت شركة، لا يستطيع زبون المتجر تغييرها لهذا المنتج' : 'Si choisi, le client ne peut pas changer de transporteur pour ce produit'}</p>
+                      <select
+                        name="shipping_provider"
+                        value={formData.shipping_provider || ''}
+                        onChange={handleChange}
+                        className="w-full h-9 px-2 text-sm border border-border rounded-md bg-background"
+                        data-testid="shipping-provider-select"
+                      >
+                        <option value="">{isAr ? '— حسب اختيار الزبون —' : '— Au choix du client —'}</option>
+                        {shippingProviders.map(pr => (
+                          <option key={pr.key} value={pr.key}>{isAr ? (pr.label_ar || pr.label_en) : (pr.label_en || pr.label_ar)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="border rounded-lg p-3 space-y-2">
                     <div className="flex items-center justify-between">

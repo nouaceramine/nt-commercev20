@@ -2141,3 +2141,26 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - الحزمة: main.cfee3800.js — 11 علامة لاتينية موجودة — النشر release 20260817_140457
 - ملاحظة: التكرار في المنتجات يُفحص على name_en وأيضاً name_ar (اكتُشف أثناء الاختبار)
 - backup: /opt/ntcommerce/backups/p149_stage1/
+
+## p150 — المرحلة 2: شركات الشحن للمتجر + OCR فواتير الشراء (2026-08-17)
+
+### قبل
+- إصلاح خطأ بناء: تعليق `// p149,` ابتلع فاصلة في PublicStorePage.js:1118 → Syntax error (1119:8). أُصلحت الفاصلة وأُعيد البناء.
+- demo tenant بدون store_slug (المتجر لم يُفعّل له أصلاً) — سلوك 404 على /api/shop/demo/* صحيح.
+
+### التغييرات (منشورة سابقاً على القرص، هذا النشر للواجهة)
+- Backend online_store_routes.py: store_shipping_companies في StoreSettings، GET /api/shop/{slug}/shipping-options?wilaya=&desk= (أسعار كل شركة من delivery_rates/ecom_courier_prices)، التحقق من الشركة server-side عند إنشاء الطلب (400 لشركة غير مفعّلة، السعر من قائمة الشركة لا من العميل).
+- Backend purchases_routes.py: POST /api/purchases/scan-invoice — رفع صورة فاتورة شراء (base64 ≤8MB، jpeg/png/webp) → Gemini vision → JSON {supplier, invoice_number, date, items} + مطابقة منتجات/مورد.
+- Frontend PurchasesPage.js: زر scan-invoice-btn (كاميرا/رفع) يملأ سلة الشراء تلقائياً.
+- Frontend StoreManagementPage.js: shipping-companies-card (chips اختيار الشركات المعروضة).
+- Frontend PublicStorePage.js: shipping-company-group — الزبون يرى الشركات والأسعار ويختار؛ قفل الشركة إذا حدّدها المنتج.
+- Frontend Add/EditProductPage: shipping-provider-select لتحديد شركة شحن افتراضية للمنتج.
+
+### بعد (اختبارات حية)
+- GET /api/shop/{slug}/shipping-options → [{key:zr,label,price:400.0}] ✓
+- طلب متجر بشركة zr برسوم مزيّفة=1 → التخزين delivery_fee=400.0 total=1400.0 ✓ (السعر من الخادم)
+- طلب بشركة وهمية → 400 ✓
+- POST /api/purchases/scan-invoice بفاتورة تجريبية → استخراج المورد/الرقم/التاريخ/3 عناصر بدقة ✓
+- build main.244b1982.js — markers: scan-invoice-btn, shipping-company-group, courier-chip-, shipping-provider-select, ship-opt- ✓
+- release 20260817_145515؛ https://nt-commerce.net/ 200 بالحزمة الجديدة ✓
+- demo tenant نظيف: products 0, sales 0, orders 0, store_products 0 ✓

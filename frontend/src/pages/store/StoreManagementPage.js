@@ -90,8 +90,10 @@ export default function StoreManagementPage() {
     delivery_fee: 0,
     free_delivery_threshold: 0,
     online_payment_enabled: false,  // p149
-    visible_family_ids: []          // p149
+    visible_family_ids: [],         // p149
+    store_shipping_companies: []    // p150
   });
+  const [shippingProviders, setShippingProviders] = useState([]);  // p150
   const [allFamilies, setAllFamilies] = useState([]);  // p149: لاختيار العائلات الظاهرة
   const [products, setProducts] = useState([]);
   const [storeProducts, setStoreProducts] = useState([]);
@@ -249,6 +251,11 @@ export default function StoreManagementPage() {
       // p149: families for the store-visibility picker
       const famRes = await apiClient.get(`/product-families`, { headers }).catch(() => ({ data: [] }));
       setAllFamilies(Array.isArray(famRes.data) ? famRes.data : (famRes.data?.families || []));
+
+      // p150: shipping companies offered at checkout
+      const provRes = await apiClient.get(`/ecom/shipping/providers`, { headers }).catch(() => ({ data: null }));
+      const provs = provRes.data?.providers || [];
+      setShippingProviders(provs.filter(pr => pr.key !== 'mock'));
       
       // Fetch store products
       const storeProductsRes = await apiClient.get(`/store/products`, { headers }).catch(() => ({ data: [] }));
@@ -880,6 +887,48 @@ export default function StoreManagementPage() {
                                 }`}
                               >
                                 {language === 'ar' ? (fam.name_ar || fam.name_en || fam.name) : (fam.name_en || fam.name_ar || fam.name)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* p150: shipping companies offered to customers */}
+                    {shippingProviders.length > 0 && (
+                      <div className="p-3 bg-muted/30 rounded-lg space-y-2" data-testid="shipping-companies-card">
+                        <div className="flex items-center gap-3">
+                          <Truck className="h-5 w-5 text-teal-600" />
+                          <div>
+                            <p className="font-medium">{language === 'ar' ? 'شركات الشحن المعروضة للزبون' : 'Shipping Companies for Customers'}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {language === 'ar'
+                                ? 'الزبون يرى الشركات المختارة مع سعر كل واحدة لولايته ويختار — بلا اختيار تُستخدم رسوم التوصيل الثابتة'
+                                : 'Customer sees chosen companies with per-wilaya prices and picks — empty keeps fixed delivery fees'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {shippingProviders.map((pr) => {
+                            const active = (storeSettings.store_shipping_companies || []).includes(pr.key);
+                            return (
+                              <button
+                                key={pr.key}
+                                type="button"
+                                data-testid={`courier-chip-${pr.key}`}
+                                onClick={() => setStoreSettings(prev => ({
+                                  ...prev,
+                                  store_shipping_companies: active
+                                    ? (prev.store_shipping_companies || []).filter(x => x !== pr.key)
+                                    : [...(prev.store_shipping_companies || []), pr.key]
+                                }))}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                                  active
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                                }`}
+                              >
+                                🚚 {language === 'ar' ? (pr.label_ar || pr.label_en) : (pr.label_en || pr.label_ar)}
                               </button>
                             );
                           })}

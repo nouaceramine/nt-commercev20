@@ -166,6 +166,114 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         return await paginate(db.purchases, query, page, page_size)
 
     # ── Generate Purchase Code ──
+
+    # ── p150: OCR scan of a supplier invoice photo (Gemini vision) ──
+    @router.post("/scan-invoice")
+    async def scan_purchase_invoice(data: dict, user: dict = Depends(require_permission("purchases.add"))):
+        """p150: صورة فاتورة شراء من كاميرا الهاتف → Gemini vision يستخرج مسودة + مطابقة تلقائية مع المنتجات والموردين"""
+        import base64 as _b64
+        import json as _j
+        import re as _re2
+        b64 = (data.get("image_base64") or "").strip()
+        if not b64:
+            raise HTTPException(status_code=400, detail="الصورة مطلوبة")
+        if "," in b64[:40]:
+            b64 = b64.split(",", 1)[1]
+        try:
+            img_bytes = _b64.b64decode(b64)
+        except Exception:
+            raise HTTPException(status_code=400, detail="صورة غير صالحة")
+        if len(img_bytes) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="الصورة أكبر من 8MB")
+        if len(img_bytes) < 2000:
+            raise HTTPException(status_code=400, detail="الصورة صغيرة جداً أو فارغة")
+
+        mime = "image/jpeg"
+        if img_bytes[:4] == b"\x89PNG":
+            mime = "image/png"
+        elif img_bytes[:4] == b"RIFF" and img_bytes[8:12] == b"WEBP":
+            mime = "image/webp"
+
+        from services.ai_service import AIService
+        import google.generativeai as genai
+        if not AIService.is_configured():
+            raise HTTPException(status_code=503, detail="ميزة المسح غير مفعّلة — مفتاح Gemini غير مهيأ")
+
+        prompt = (
+            'You are reading a supplier PURCHASE INVOICE photo (Arabic/French/English, printed or handwritten). '
+            'Extract and reply with ONLY valid JSON (no markdown fences, no explanation) in exactly this shape: '
+            '{"supplier_name": str, "invoice_number": str, "invoice_date": "YYYY-MM-DD or empty", '
+            '"items": [{"name": str, "quantity": number, "unit_price": number}], "total": number}. '
+            'List every purchased line with name, quantity and unit price (unit, not line total). '
+            'Unreadable values become empty string or 0. Plain numbers only, no currency symbols.'
+        )
+        try:
+            model = genai.GenerativeModel(AIService.MODEL)
+            resp = await model.generate_content_async([prompt, {"mime_type": mime, "data": img_bytes}])
+            text = (resp.text or "").strip()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"فشل تحليل الصورة: {str(e)[:120]}")
+
+        m = _re2.search(r"\{.*\}", text, _re2.S)
+        draft = None
+        if m:
+            try:
+                draft = _j.loads(m.group(0))
+            except Exception:
+                draft = None
+        if not isinstance(draft, dict):
+            raise HTTPException(status_code=422, detail="لم يتمكن النظام من قراءة الفاتورة — جرّب صورة أوضح بإضاءة أفضل")
+
+        items_out = []
+        for it in (draft.get("items") or [])[:60]:
+            name = str(it.get("name") or "").strip()[:120]
+            try:
+                qty = float(it.get("quantity") or 0) or 1
+            except Exception:
+                qty = 1
+            try:
+                price = float(it.get("unit_price") or 0)
+            except Exception:
+                price = 0
+            match = None
+            if name:
+                rx = {"$regex": f"^{_re2.escape(name)}$", "$options": "i"}
+                match = await db.products.find_one(
+                    {"$or": [{"name_ar": rx}, {"name_en": rx}, {"barcode": name}]},
+                    {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1, "retail_price": 1})
+                if not match and len(name) >= 6:
+                    rx2 = {"$regex": _re2.escape(name[:25]), "$options": "i"}
+                    match = await db.products.find_one(
+                        {"$or": [{"name_ar": rx2}, {"name_en": rx2}]},
+                        {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1, "retail_price": 1})
+            items_out.append({
+                "raw_name": name, "quantity": qty, "unit_price": price,
+                "product_id": match.get("id") if match else None,
+                "product_name": (match.get("name_ar") or match.get("name_en")) if match else None,
+            })
+
+        supplier_id = None
+        supplier_name_found = None
+        sname = str(draft.get("supplier_name") or "").strip()[:120]
+        if sname:
+            rxs = {"$regex": _re2.escape(sname[:25]), "$options": "i"}
+            sup = await db.suppliers.find_one({"name": rxs}, {"_id": 0, "id": 1, "name": 1})
+            if sup:
+                supplier_id, supplier_name_found = sup["id"], sup.get("name")
+
+        return {
+            "success": True,
+            "draft": {
+                "supplier_name": sname,
+                "invoice_number": str(draft.get("invoice_number") or "")[:60],
+                "invoice_date": str(draft.get("invoice_date") or "")[:20],
+                "total": float(draft.get("total") or 0),
+                "items": items_out,
+            },
+            "matched_supplier_id": supplier_id,
+            "matched_supplier_name": supplier_name_found,
+        }
+
     @router.get("/generate-code")
     async def generate_purchase_code(user: dict = Depends(require_tenant)):
         from datetime import datetime as dt

@@ -32,6 +32,7 @@ class ProductCreate(BaseModel):
     # Sales flags
     is_blocked: Optional[bool] = False
     allow_online_payment: Optional[bool] = True  # p149: السماح بالدفع الإلكتروني لهذا المنتج في المتجر
+    shipping_provider: Optional[str] = ""  # p150: فرض شركة شحن معينة للمنتج (فارغ = اختيار الزبون)
     fixed_price: Optional[bool] = False
     force_qty_entry: Optional[bool] = False
     force_price_entry: Optional[bool] = False
@@ -110,6 +111,7 @@ class ProductUpdate(BaseModel):
     family_id: Optional[str] = None
     use_average_price: Optional[bool] = None
     allow_online_payment: Optional[bool] = None  # p149
+    shipping_provider: Optional[str] = None  # p150
     color: Optional[str] = None
     sizes: Optional[List[str]] = None
     has_variants: Optional[bool] = None

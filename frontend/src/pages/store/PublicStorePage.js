@@ -1039,6 +1039,8 @@ export default function PublicStorePage() {
     name: '', phone: '', email: '', wilaya: '', commune: '', address: '', notes: '', delivery_type: 'home'
   });
   const [paymentMethod, setPaymentMethod] = useState('cod');  // p149
+  const [shippingOptions, setShippingOptions] = useState([]);        // p150
+  const [shippingCompany, setShippingCompany] = useState('');        // p150
   // p149: إن أُغلق COD وبقي الإلكتروني وحده — يصبح هو الافتراضي
   useEffect(() => {
     if (store?.online_payment_enabled && store?.cod_enabled === false) setPaymentMethod('online');
@@ -1113,7 +1115,8 @@ export default function PublicStorePage() {
         price: priceOf(product),
         image_url: product.image_url,
         quantity: 1,
-        allow_online_payment: product.allow_online_payment !== false  // p149
+        allow_online_payment: product.allow_online_payment !== false,  // p149
+        shipping_provider: product.shipping_provider || ''  // p150
       }]);
     }
     trackPixel('AddToCart', { content_name: product.name_ar || product.name, value: priceOf(product), currency: 'DZD' });
@@ -1145,10 +1148,28 @@ export default function PublicStorePage() {
     return flash && Number(flash.discount_pct) > 0 ? Math.round(base * (100 - Number(flash.discount_pct)) / 100) : base;
   };
   // p69: selected wilaya rate + computed fee
+  // p150: fetch per-company shipping prices whenever wilaya/delivery type changes
+  useEffect(() => {
+    const companies = store?.store_shipping_companies || [];
+    if (!customerInfo.wilaya || !companies.length) { setShippingOptions([]); setShippingCompany(''); return; }
+    apiClient.get(`/shop/${slug}/shipping-options`, { params: { wilaya: customerInfo.wilaya, desk: customerInfo.delivery_type === 'office' } })
+      .then(res => {
+        const opts = res.data?.companies || [];
+        setShippingOptions(opts);
+        setShippingCompany(prev => (opts.some(o => o.key === prev) ? prev : (opts[0]?.key || '')));
+      })
+      .catch(() => { setShippingOptions([]); setShippingCompany(''); });
+  }, [customerInfo.wilaya, customerInfo.delivery_type, store]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const wilayaList = deliveryRates.length > 0 ? deliveryRates : WILAYAS.map(w => ({ wilaya_id: w.id, wilaya_name: w.name }));
   const selectedRate = deliveryRates.find(r => String(r.wilaya_id) === String(customerInfo.wilaya)) || null;
   const deliveryFee = selectedRate ? (customerInfo.delivery_type === 'office' ? Number(selectedRate.office_price || 0) : Number(selectedRate.home_price || 0)) : 0;
-  const grandTotal = cartTotal + deliveryFee;
+  // p150: company-specific fee (customer choice or product-forced) overrides the flat rate
+  const forcedShipProvider = (cart.find(it => it.shipping_provider) || {}).shipping_provider || '';
+  const effectiveCompany = forcedShipProvider || shippingCompany;
+  const companyFee = shippingOptions.find(o => o.key === effectiveCompany)?.price;
+  const effectiveDeliveryFee = companyFee !== undefined ? Number(companyFee) : deliveryFee;
+  const grandTotal = cartTotal + effectiveDeliveryFee;
 
   const handleSubmitOrder = async (e) => {
     e.preventDefault();
@@ -1170,10 +1191,11 @@ export default function PublicStorePage() {
           price: item.price
         })),
         subtotal: cartTotal,
-        delivery_fee: deliveryFee,
+        delivery_fee: effectiveDeliveryFee,  // p150
         total: grandTotal,
         notes: customerInfo.notes,
         payment_method: paymentMethod,  // p149
+        shipping_company: effectiveCompany,  // p150
         utm: getUtm()
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
@@ -1603,6 +1625,35 @@ export default function PublicStorePage() {
                     <input required value={customerInfo.address} onChange={e => setCustomerInfo({...customerInfo, address: e.target.value})} placeholder="حي ..., شارع ..., عمارة ..." />
                   </div>
                 )}
+                {shippingOptions.length > 0 && (
+                  <div className="nc-form-group" data-testid="shipping-company-group">
+                    <label>شركة الشحن *</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {shippingOptions.map(opt => {
+                        const locked = !!forcedShipProvider && opt.key !== forcedShipProvider;
+                        return (
+                          <label key={opt.key} data-testid={`ship-opt-${opt.key}`}
+                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem',
+                                     border: `2px solid ${effectiveCompany === opt.key ? '#059669' : '#e5e7eb'}`,
+                                     borderRadius: '0.5rem', cursor: locked ? 'not-allowed' : 'pointer',
+                                     opacity: locked ? 0.45 : 1 }}>
+                            <input type="radio" name="shipping_company" disabled={locked}
+                              checked={effectiveCompany === opt.key}
+                              onChange={() => setShippingCompany(opt.key)} />
+                            <span style={{ flex: 1 }}>🚚 {opt.label}</span>
+                            <span style={{ fontWeight: 600 }}>{Number(opt.price).toLocaleString()} دج</span>
+                          </label>
+                        );
+                      })}
+                      {forcedShipProvider && (
+                        <span style={{ fontSize: '0.75rem', color: '#9ca3af' }} data-testid="ship-forced-note">
+                          ⚠️ شركة الشحن محددة مسبقاً لأحد منتجات سلتك
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="nc-form-group">
                   <label>ملاحظات</label>
                   <textarea rows={3} value={customerInfo.notes} onChange={e => setCustomerInfo({...customerInfo, notes: e.target.value})} placeholder="أي ملاحظات خاصة..." />
@@ -1616,14 +1667,14 @@ export default function PublicStorePage() {
                       <span>{(item.price * item.quantity).toLocaleString()} دج</span>
                     </div>
                   ))}
-                  {deliveryFee > 0 && (
+                  {effectiveDeliveryFee > 0 && (
                     <div className="nc-order-item" data-testid="delivery-fee-line">
-                      <span>🚚 رسوم التوصيل {customerInfo.delivery_type === 'office' ? '(للمكتب)' : '(للمنزل)'}</span>
-                      <span>{deliveryFee.toLocaleString()} دج</span>
+                      <span>🚚 رسوم التوصيل {customerInfo.delivery_type === 'office' ? '(للمكتب)' : '(للمنزل)'}{effectiveCompany ? ` — ${shippingOptions.find(o => o.key === effectiveCompany)?.label || effectiveCompany}` : ''}</span>
+                      <span>{effectiveDeliveryFee.toLocaleString()} دج</span>
                     </div>
                   )}
                   <div className="nc-order-total">
-                    <span>الإجمالي{deliveryFee > 0 ? ' مع التوصيل' : ''}:</span>
+                    <span>الإجمالي{effectiveDeliveryFee > 0 ? ' مع التوصيل' : ''}:</span>
                     <span>{grandTotal.toLocaleString()} دج</span>
                   </div>
                 </div>

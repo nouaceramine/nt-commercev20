@@ -139,6 +139,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         cart_recovery_delay_hours: int = 3    # p107: send reminder after this many hours
         online_payment_enabled: bool = False  # p149: مفتاح عرض الدفع الإلكتروني في المتجر
         visible_family_ids: List[str] = []    # p149: عائلات تُعرض تلقائياً في المتجر (فارغ = المنتجات المختارة يدوياً فقط)
+        store_shipping_companies: List[str] = []  # p150: شركات الشحن المعروضة للزبون (فارغ = رسوم التوصيل الثابتة الحالية)
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -154,6 +155,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         total: float
         notes: str = ""
         payment_method: str = "cod"
+        shipping_company: str = ""  # p150: الشركة التي اختارها الزبون
         utm: Optional[dict] = None  # p78: campaign attribution
 
     class WooCommerceSettings(BaseModel):
@@ -280,6 +282,38 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             rates = DEFAULT_DELIVERY_RATES
         return [{"wilaya_id": r.get("id") or r.get("wilaya_id"), "wilaya_name": r.get("wilaya_name", ""),
                  "home_price": r.get("home_price", 0), "office_price": r.get("office_price", 0)} for r in rates]
+
+    @router.get("/shop/{store_slug}/shipping-options")
+    async def public_shipping_options(store_slug: str, wilaya: str = "", desk: bool = False):
+        """p150: شركات الشحن المفعّلة للمتجر مع سعر كل واحدة لولاية الزبون.
+        فارغ = المتجر يستخدم رسوم التوصيل الثابتة (الوضع الحالي)."""
+        slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
+        if not slug_mapping:
+            raise HTTPException(status_code=404, detail="Store not found")
+        tenant_id = slug_mapping.get("tenant_id")
+        tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
+        settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0}) or {}
+        companies = [c for c in (settings.get("store_shipping_companies") or []) if c]
+        if not companies:
+            return {"success": True, "companies": []}
+        w = (wilaya or "").strip()
+        PROVIDER_LABELS = {"yalidine": "يالدين", "zr": "ZR Express", "maystro": "Maystro", "mock": "وهمي"}
+        options = []
+        for ch in companies:
+            row = None
+            if ch == "yalidine":
+                row = await tenant_db_inst.delivery_rates.find_one(
+                    {"$or": [{"wilaya_name": w}, {"id": w.zfill(2)}, {"wilaya_id": w.zfill(2)}]}, {"_id": 0})
+            if row is None:
+                row = await tenant_db_inst.ecom_courier_prices.find_one(
+                    {"courier": ch, "$or": [{"wilaya_name": w}, {"wilaya_id": w}, {"wilaya_id": w.zfill(2)}]}, {"_id": 0})
+            if not row:
+                continue
+            price = row.get("office_price") if desk else row.get("home_price")
+            if price is None:
+                continue
+            options.append({"key": ch, "label": PROVIDER_LABELS.get(ch, ch), "price": float(price or 0)})
+        return {"success": True, "companies": options}
 
     @router.post("/store/telegram/test")
     async def test_telegram(data: dict = None, admin: dict = Depends(get_tenant_admin)):
@@ -572,7 +606,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
              "purchase_price": 1, "image_url": 1, "description_ar": 1,
              "description_en": 1, "quantity": 1, "family_id": 1, "barcode": 1,
-             "allow_online_payment": 1}
+             "allow_online_payment": 1, "shipping_provider": 1}
         ).to_list(1000)
         # المتوفر أولاً ثم النافد (يظهر بشارة «نفذت الكمية» في الواجهة)
         products.sort(key=lambda p: (p.get("quantity", 0) <= 0, p.get("name_ar") or ""))
@@ -682,11 +716,28 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 raise HTTPException(status_code=400, detail="الدفع عند الاستلام غير متاح في هذا المتجر")
             order.payment_method = "cod"
         # p69: server-side delivery fee from tenant rates — never trust the client
-        _rates = {r["id"]: r for r in await tenant_db_inst.delivery_rates.find({}, {"_id": 0}).to_list(100)}
-        _rate = _rates.get(str(order.delivery_wilaya).zfill(2))
         _fee = 0.0
-        if _rate:
-            _fee = float(_rate.get("office_price", 0) if order.delivery_type == "office" else _rate.get("home_price", 0))
+        if order.shipping_company:
+            # p150: customer picked a company — price MUST come from that company's rate sheet
+            _allowed = [c for c in (settings.get("store_shipping_companies") or []) if c]
+            if order.shipping_company not in _allowed:
+                raise HTTPException(status_code=400, detail="شركة الشحن المختارة غير متاحة في هذا المتجر")
+            _w = str(order.delivery_wilaya or "").strip()
+            _row = None
+            if order.shipping_company == "yalidine":
+                _row = await tenant_db_inst.delivery_rates.find_one(
+                    {"$or": [{"wilaya_name": _w}, {"id": _w.zfill(2)}, {"wilaya_id": _w.zfill(2)}]}, {"_id": 0})
+            if _row is None:
+                _row = await tenant_db_inst.ecom_courier_prices.find_one(
+                    {"courier": order.shipping_company,
+                     "$or": [{"wilaya_name": _w}, {"wilaya_id": _w}, {"wilaya_id": _w.zfill(2)}]}, {"_id": 0})
+            if _row:
+                _fee = float(_row.get("office_price", 0) if order.delivery_type == "office" else _row.get("home_price", 0) or 0)
+        else:
+            _rates = {r["id"]: r for r in await tenant_db_inst.delivery_rates.find({}, {"_id": 0}).to_list(100)}
+            _rate = _rates.get(str(order.delivery_wilaya).zfill(2))
+            if _rate:
+                _fee = float(_rate.get("office_price", 0) if order.delivery_type == "office" else _rate.get("home_price", 0))
         order.delivery_fee = _fee
         order.total = round(float(order.subtotal) + _fee, 2)
         if order.delivery_type == "office":
