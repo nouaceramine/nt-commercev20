@@ -2319,3 +2319,14 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 
 ### نسخة احتياطية
 /opt/ntcommerce/backups/p157_verifyfix/ — النشر: release 20260817_194948
+
+## p158 — حساب المالك NT-0004 غير محدود بكل المزايا (2026-08-17)
+
+- المستأجر «Nouacer Telecom» (nouacertelecom05@gmail.com، short_id NT-0004، id a24f0b7e-…) — المتجر الحقيقي لمالك المنصة.
+- plan_id ← Enterprise (المؤسسات).
+- features_override: has_woocommerce=true (العلم الوحيد الناقص في Enterprise) → كل الأعلام true.
+- limits_override: max_products/users/warehouses = -1 (غير محدود).
+- is_trial=false، subscription_ends_at=2099-12-31 (بلا انتهاء)، subscription_type=yearly.
+- notes توثيقية على الوثيقة.
+- تحقق: effective features كلها مفعّلة، disabled=NONE، limited=NONE.
+- ملاحظة: المزايا تُحمَّل عند تسجيل الدخول — يلزم خروج/دخول لتظهر كل القوائم.
