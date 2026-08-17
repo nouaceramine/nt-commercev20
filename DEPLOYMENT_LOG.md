@@ -2242,3 +2242,10 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - Domain nt-commerce.net في Resend: status=verified (region eu-west-1) — فُعّل عبر POST /domains/{id}/verify
 - platform_settings: sender_email=noreply@nt-commerce.net — إرسال تجريبي خارجي ناجح (gmail) ✓
 - البريد الآن: استقبال يدوي عبر Hostinger (support@) + إرسال آلي للجميع عبر Resend (noreply@)
+
+## p154 — إيميل المالك الحقيقي + تحقق بكود البريد عند الدخول (2026-08-17)
+- users: superadmin@ntcommerce.com → nouaceramine017@gmail.com + two_fa_email_enabled=true (لا تعارض في users/saas_agents/tenants)
+- auth_users_routes.py: مسار Email OTP في _2fa_gate — كود 6 أرقام (secrets)، صلاحية 10 دقائق، 5 محاولات، استخدام واحد، يُرسل عبر noreply@nt-commerce.net (Resend الموثّق)؛ login_verify_2fa يقارن compare_digest أو TOTP حسب نوع الطلب
+- UnifiedLoginPage.js: رسالة الخادم («أرسلنا رمز تحقق إلى بريدك») تظهر في خطوة الرمز بدل نص تطبيق المصادقة
+- اختبار e2e: دخول → requires_2fa method=email ✓ | كود خاطئ 401 ✓ | صحيح → توكن super_admin ✓ | إعادة الاستخدام 401 ✓
+- release main.675f71a7.js ✓

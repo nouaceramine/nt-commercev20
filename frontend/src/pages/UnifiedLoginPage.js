@@ -150,6 +150,7 @@ export default function UnifiedLoginPage() {
   // p53: login package — 2FA step, forgot/reset password, inline lockout error
   const [view, setView] = useState('login'); // login | twofa | forgot | reset
   const [pendingToken, setPendingToken] = useState('');
+  const [twoFaMsg, setTwoFaMsg] = useState('');  // p154: server-side 2FA method message
   const [twoFaCode, setTwoFaCode] = useState('');
   const [forgotEmail, setForgotEmail] = useState('');
   const [resetCode, setResetCode] = useState('');
@@ -232,6 +233,7 @@ export default function UnifiedLoginPage() {
       if (result && result.requires_2fa && result.pending_token) {
         // p53: account has 2FA — move to the code-entry step
         setPendingToken(result.pending_token);
+        setTwoFaMsg(result.message || '');
         setTwoFaCode('');
         setView('twofa');
         setLoading(false);
@@ -439,7 +441,7 @@ export default function UnifiedLoginPage() {
                     data-testid="twofa-code-input"
                   />
                   <p className="text-xs text-muted-foreground text-center">
-                    {T.twofaHint}
+                    {twoFaMsg || T.twofaHint}
                   </p>
                 </div>
 

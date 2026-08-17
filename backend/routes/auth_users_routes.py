@@ -138,10 +138,48 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         """If the account has TOTP 2FA enabled, stash the minted login payload
         server-side (5 min TTL, single use) and ask the client for the
         authenticator code instead of returning the token directly."""
+        now = datetime.now(timezone.utc)
+        # p154: email OTP branch — 6-digit code sent to the account email
+        if user_record.get("two_fa_email_enabled") and user_record.get("email"):
+            import secrets as _sec2
+            await main_db.pending_2fa_logins.delete_many({"expires_at": {"$lt": now.isoformat()}})
+            _code = f"{_sec2.randbelow(1000000):06d}"
+            pending_id = str(uuid.uuid4())
+            await main_db.pending_2fa_logins.insert_one({
+                "_id": pending_id,
+                "email_code": _code,
+                "payload": final_payload,
+                "attempts": 0,
+                "created_at": now.isoformat(),
+                "expires_at": (now + timedelta(minutes=10)).isoformat(),
+            })
+            try:
+                from services.email_service import send_email as _send_2fa_email
+                await _send_2fa_email(
+                    user_record["email"],
+                    "رمز الدخول — NT Commerce",
+                    html=(
+                        "<div dir='rtl' style='font-family:Arial,sans-serif;padding:24px;max-width:480px'>"
+                        "<h2 style='color:#1e40af;margin:0 0 12px'>رمز التحقق لتسجيل الدخول</h2>"
+                        "<p style='color:#334155'>محاولة دخول إلى حساب مالك المنصة. الرمز صالح 10 دقائق:</p>"
+                        f"<div style='font-size:32px;letter-spacing:8px;font-weight:bold;text-align:center;"
+                        f"background:#f1f5f9;border-radius:12px;padding:16px;margin:16px 0;direction:ltr'>{_code}</div>"
+                        "<p style='color:#94a3b8;font-size:12px'>إن لم تطلب هذا الرمز تجاهل الرسالة وغيّر كلمة المرور فوراً.</p>"
+                        "</div>"
+                    ),
+                )
+            except Exception as _exc:
+                import logging as _lg
+                _lg.getLogger(__name__).error("2FA email send failed: %s", _exc)
+            return {
+                "requires_2fa": True,
+                "pending_token": pending_id,
+                "method": "email",
+                "message": "أرسلنا رمز تحقق من 6 أرقام إلى بريدك الإلكتروني — صالح 10 دقائق",
+            }
         secret = user_record.get("two_fa_secret")
         if not (user_record.get("two_fa_enabled") and secret):
             return final_payload
-        now = datetime.now(timezone.utc)
         # lazy cleanup of expired pending logins (ISO strings compare lexically in UTC)
         await main_db.pending_2fa_logins.delete_many({"expires_at": {"$lt": now.isoformat()}})
         pending_id = str(uuid.uuid4())
@@ -415,7 +453,13 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
             raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — أعد تسجيل الدخول من جديد")
         code = (body.code or "").strip().replace(" ", "")
-        if not pyotp.TOTP(doc["secret"]).verify(code, valid_window=1):
+        if doc.get("email_code"):
+            # p154: email OTP — constant-time compare, same attempts policy
+            import secrets as _sec3
+            _ok = _sec3.compare_digest(code, doc["email_code"])
+        else:
+            _ok = pyotp.TOTP(doc["secret"]).verify(code, valid_window=1)
+        if not _ok:
             await main_db.pending_2fa_logins.update_one({"_id": body.pending_token}, {"$inc": {"attempts": 1}})
             remaining = 5 - (doc.get("attempts", 0) + 1)
             raise HTTPException(status_code=401, detail=f"رمز التحقق غير صحيح — تبقّى {remaining} من المحاولات")
