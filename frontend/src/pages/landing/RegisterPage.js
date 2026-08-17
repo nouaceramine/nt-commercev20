@@ -468,7 +468,7 @@ export default function RegisterPage() {
                 </div>
                 <CardTitle className="text-2xl">تأكيد بريدك الإلكتروني</CardTitle>
                 <CardDescription>
-                  أرسلنا رمز تحقق من 6 أرقام إلى <span dir="ltr" className="font-medium">{formData.email}</span> — صالح 10 دقائق
+                  أرسلنا رمز تحقق من 6 أرقام إلى <span dir="ltr" className="font-medium">{formData.email}</span> — صالح 30 دقيقة
                 </CardDescription>
               </CardHeader>
               <CardContent>

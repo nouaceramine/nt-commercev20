@@ -43,7 +43,7 @@ async def _send_verification_code(tenant_id: str, email: str, name: str = "") ->
         "code": code,
         "attempts": 0,
         "created_at": now.isoformat(),
-        "expires_at": (now + timedelta(minutes=10)).isoformat(),
+        "expires_at": (now + timedelta(minutes=30)).isoformat(),  # p157: 30-min window (email delays)
     })
     try:
         from services.email_service import send_email as _send_mail
@@ -53,7 +53,7 @@ async def _send_verification_code(tenant_id: str, email: str, name: str = "") ->
             html=(
                 "<div dir='rtl' style='font-family:Arial,sans-serif;padding:24px;max-width:480px'>"
                 "<h2 style='color:#1e40af;margin:0 0 12px'>أهلاً بك في NT Commerce</h2>"
-                f"<p style='color:#334155'>مرحباً {name or ''} — أكّد بريدك الإلكتروني لتفعيل حسابك. الرمز صالح 10 دقائق:</p>"
+                f"<p style='color:#334155'>مرحباً {name or ''} — أكّد بريدك الإلكتروني لتفعيل حسابك. الرمز صالح 30 دقيقة:</p>"
                 f"<div style='font-size:32px;letter-spacing:8px;font-weight:bold;text-align:center;"
                 f"background:#f1f5f9;border-radius:12px;padding:16px;margin:16px 0;direction:ltr'>{code}</div>"
                 "<p style='color:#94a3b8;font-size:12px'>إن لم تنشئ حساباً تجاهل هذه الرسالة.</p>"
@@ -62,6 +62,18 @@ async def _send_verification_code(tenant_id: str, email: str, name: str = "") ->
         )
     except Exception as _exc:
         print(f"[REG] verification email send failed: {_exc}")
+
+
+async def ensure_active_verification_code(tenant: dict) -> bool:
+    """p157: send a fresh code only if no unexpired one exists. Returns True if sent."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    active = await db.email_verifications.find_one(
+        {"email": tenant["email"], "expires_at": {"$gt": now_iso}}
+    )
+    if active:
+        return False
+    await _send_verification_code(tenant["id"], tenant["email"], tenant.get("name", ""))
+    return True
 
 
 def _max_tenants() -> int:
@@ -209,7 +221,12 @@ async def tenant_login(request: Request, login_data: AgentLoginRequest):
 
     # p156: block login until the signup email is verified (legacy accounts have no flag)
     if tenant.get("email_verified") is False:
-        raise HTTPException(status_code=403, detail="يجب تأكيد بريدك الإلكتروني أولاً — أدخل الرمز المرسل إليك عند التسجيل في صفحة /verify-email")
+        # p157: auto-send a fresh code when none is valid so the user is never stuck
+        _sent = await ensure_active_verification_code(tenant)
+        _msg = ("بريدك غير مؤكد — أرسلنا رمز تأكيد جديداً إلى بريدك، أدخله في صفحة /verify-email"
+                if _sent else
+                "بريدك غير مؤكد — أدخل الرمز المرسل إلى بريدك في صفحة /verify-email")
+        raise HTTPException(status_code=403, detail=_msg)
 
     access_token = create_access_token({
         "sub": tenant["id"],

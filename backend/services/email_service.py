@@ -114,7 +114,9 @@ class EmailService:
         try:
             import resend as _r
             _r.api_key = cfg["resend_key"]
-            params = {"from": cfg["sender"], "to": [to], "subject": subject, "html": html}
+            _sender = cfg["sender"]
+            _from = _sender if "<" in _sender else f"NT Commerce <{_sender}>"  # p157: display name
+            params = {"from": _from, "to": [to], "subject": subject, "html": html}
             res = await asyncio.to_thread(_r.Emails.send, params)
             logger.info("Resend email sent to %s (id=%s)", to, (res or {}).get("id"))
             return True
