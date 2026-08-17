@@ -88,8 +88,11 @@ export default function StoreManagementPage() {
     delivery_enabled: true,
     min_order_amount: 0,
     delivery_fee: 0,
-    free_delivery_threshold: 0
+    free_delivery_threshold: 0,
+    online_payment_enabled: false,  // p149
+    visible_family_ids: []          // p149
   });
+  const [allFamilies, setAllFamilies] = useState([]);  // p149: لاختيار العائلات الظاهرة
   const [products, setProducts] = useState([]);
   const [storeProducts, setStoreProducts] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -242,6 +245,10 @@ export default function StoreManagementPage() {
       // Fetch all products
       const productsRes = await apiClient.get(`/products`, { headers });
       setProducts(productsRes.data);
+
+      // p149: families for the store-visibility picker
+      const famRes = await apiClient.get(`/product-families`, { headers }).catch(() => ({ data: [] }));
+      setAllFamilies(Array.isArray(famRes.data) ? famRes.data : (famRes.data?.families || []));
       
       // Fetch store products
       const storeProductsRes = await apiClient.get(`/store/products`, { headers }).catch(() => ({ data: [] }));
@@ -815,6 +822,67 @@ export default function StoreManagementPage() {
                             value={storeSettings.min_order_amount}
                             onChange={(e) => setStoreSettings(prev => ({ ...prev, min_order_amount: parseFloat(e.target.value) || 0 }))}
                           />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* p149: Online payment toggle */}
+                    <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg" data-testid="online-payment-row">
+                      <div className="flex items-center gap-3">
+                        <CreditCard className="h-5 w-5 text-purple-600" />
+                        <div>
+                          <p className="font-medium">{language === 'ar' ? 'الدفع الإلكتروني' : 'Online Payment'}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {language === 'ar' ? 'إظهار خيار الدفع الإلكتروني للزبائن في المتجر' : 'Show online payment option to customers'}
+                          </p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={storeSettings.online_payment_enabled}
+                        onCheckedChange={(checked) => setStoreSettings(prev => ({ ...prev, online_payment_enabled: checked }))}
+                        data-testid="online-payment-switch"
+                      />
+                    </div>
+
+                    {/* p149: Family visibility picker */}
+                    {allFamilies.length > 0 && (
+                      <div className="p-3 bg-muted/30 rounded-lg space-y-2" data-testid="visible-families-card">
+                        <div className="flex items-center gap-3">
+                          <Package className="h-5 w-5 text-orange-600" />
+                          <div>
+                            <p className="font-medium">{language === 'ar' ? 'العائلات الظاهرة في المتجر' : 'Visible Families in Store'}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {language === 'ar'
+                                ? 'اختر عائلات لتظهر بكل منتجاتها تلقائياً — بلا اختيار تبقى المنتجات المضافة يدوياً فقط'
+                                : 'Selected families auto-show all their products — empty keeps hand-picked products only'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {allFamilies.map((fam) => {
+                            const fid = fam.id;
+                            const active = (storeSettings.visible_family_ids || []).includes(fid);
+                            return (
+                              <button
+                                key={fid}
+                                type="button"
+                                data-testid={`family-chip-${fid}`}
+                                onClick={() => setStoreSettings(prev => ({
+                                  ...prev,
+                                  visible_family_ids: active
+                                    ? (prev.visible_family_ids || []).filter(x => x !== fid)
+                                    : [...(prev.visible_family_ids || []), fid]
+                                }))}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                                  active
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                                }`}
+                              >
+                                {language === 'ar' ? (fam.name_ar || fam.name_en || fam.name) : (fam.name_en || fam.name_ar || fam.name)}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

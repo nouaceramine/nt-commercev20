@@ -119,3 +119,73 @@ async def ai_status():
         "model": ai_service.MODEL if ai_service.is_configured() else None,
         "message": "AI جاهز" if ai_service.is_configured() else "أضف GEMINI_API_KEY في .env"
     }
+
+
+# ============ p149: AI product-image GENERATION — Gemini image -> OpenAI fallback ============
+@router.post("/generate-product-image")
+async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_admin)):
+    """توليد صورة منتج بالذكاء الاصطناعي وحفظها في static/uploads.
+    السلسلة: نماذج صور Gemini (مجانية عند توفر الحصة) <- OpenAI Images — أول نموذج ينجح يُعتمد."""
+    import uuid as _uuid
+    from pathlib import Path as _Path
+
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="أدخل اسم المنتج أولاً")
+
+    prompt = (
+        f'Professional e-commerce product photo of: "{name}". '
+        'Single product centered on a clean pure-white studio background, soft even lighting, '
+        'realistic, high detail, no text, no watermark, no people, no hands.'
+    )
+    errors = []
+    content = None
+
+    # 1) Gemini image models
+    if os.environ.get("GEMINI_API_KEY"):
+        for mn in ("gemini-3.1-flash-lite-image", "gemini-2.5-flash-image"):
+            try:
+                gm = genai.GenerativeModel(mn)
+                r = await gm.generate_content_async(prompt)
+                for part in r.candidates[0].content.parts:
+                    idata = getattr(part, "inline_data", None)
+                    if idata and idata.data:
+                        content = idata.data
+                        break
+                if content:
+                    break
+            except Exception as e:
+                errors.append(f"Gemini {mn}: {str(e)[:60]}")
+
+    # 2) OpenAI Images fallback
+    if not content and os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"):
+        try:
+            import base64 as _b64
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                api_key=os.environ["AI_INTEGRATIONS_OPENAI_API_KEY"],
+                base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL") or None,
+            )
+            resp = await client.images.generate(model="gpt-image-1", prompt=prompt, size="1024x1024", n=1)
+            item = resp.data[0]
+            if getattr(item, "b64_json", None):
+                content = _b64.b64decode(item.b64_json)
+            elif getattr(item, "url", None):
+                req = _urlreq.Request(item.url, headers={"User-Agent": "NTCommerce/1.0"})
+                with _urlreq.urlopen(req, timeout=60) as rr:
+                    content = rr.read()
+        except Exception as e:
+            errors.append(f"OpenAI: {str(e)[:60]}")
+
+    if not content:
+        raise HTTPException(
+            status_code=503,
+            detail="حصة توليد الصور مستنفدة حالياً — فعّل الفوترة على مفتاح Gemini أو أضف مفتاح OpenAI مدفوعاً",
+        )
+
+    upload_dir = _Path(__file__).resolve().parent.parent / "static" / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{_uuid.uuid4()}.png"
+    with open(upload_dir / fname, "wb") as f:
+        f.write(content)
+    return {"success": True, "url": f"/api/static/uploads/{fname}", "filename": fname}

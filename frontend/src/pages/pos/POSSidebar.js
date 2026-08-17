@@ -4,6 +4,8 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Search, Plus, Package, Barcode, Tag } from 'lucide-react';
+import { toast } from 'sonner';
+import CameraBarcodeScanner from '../../components/forms/CameraBarcodeScanner';
 
 export default function POSSidebar({
   searchInputRef, searchQuery, setSearchQuery,
@@ -38,6 +40,24 @@ export default function POSSidebar({
   }, [products, sidebarFamily, searchQuery]);
 
   const showFamilyDrop = sidebarFamily !== 'all' && searchQuery.length === 0 && familyProducts.length > 0;
+
+  // p149: مسح الباركود بالكاميرا — نفس منطق الماسح الفعلي: تطابق تام يضيف للسلة، وإلا نعبّئ البحث
+  const handleCameraScan = (code) => {
+    const product = products.find(p =>
+      p.barcode === code ||
+      (Array.isArray(p.additional_barcodes) && p.additional_barcodes.includes(code)) ||
+      p.article_code === code ||
+      p.code === code
+    );
+    if (product) {
+      addToCart(product);
+      toast.success(`${product.name_ar || product.name_en || product.name}`);
+    } else {
+      setSearchQuery(code);
+      setShowSearchResults(true);
+      toast.error(language === 'ar' ? `المنتج غير موجود: ${code}` : `Produit introuvable : ${code}`);
+    }
+  };
 
   return (
     <div className="hidden md:flex md:col-span-2 flex-col gap-2" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
@@ -75,6 +95,9 @@ export default function POSSidebar({
             data-testid="pos-search-input"
           />
           <Barcode className="absolute top-1/2 -translate-y-1/2 end-2 h-4 w-4 text-muted-foreground/50" />
+          <span className="absolute top-1/2 -translate-y-1/2 end-6 z-10">
+            <CameraBarcodeScanner language={language} onDetected={handleCameraScan} testId="pos-camera-scan-btn" />
+          </span>
           {showFamilyDrop && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto search-results-dropdown">
               {familyProducts.map((product) => (

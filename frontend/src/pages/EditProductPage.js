@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../com
 import { toast } from 'sonner';
 import ProductImagesInput from '../components/forms/ProductImagesInput';
 import AiImagePicker from '../components/forms/AiImagePicker';
+import CameraBarcodeScanner from '../components/forms/CameraBarcodeScanner';
 import {
   ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree,
   Calculator, Trash2, Package, Tag, Warehouse, ShieldAlert, Barcode, CalendarDays,
@@ -95,6 +96,7 @@ export default function EditProductPage() {
     tax_rate: '0',
     internal_notes: '',
     is_blocked: false,
+    allow_online_payment: true,  // p149
     fixed_price: false,
     force_qty_entry: false,
     force_price_entry: false,
@@ -146,6 +148,7 @@ export default function EditProductPage() {
           tax_rate: p.tax_rate?.toString() || '0',
           internal_notes: p.internal_notes || '',
           is_blocked: p.is_blocked || false,
+          allow_online_payment: p.allow_online_payment !== false,  // p149
           fixed_price: p.fixed_price || false,
           force_qty_entry: p.force_qty_entry || false,
           force_price_entry: p.force_price_entry || false,
@@ -443,6 +446,7 @@ export default function EditProductPage() {
         tax_rate: parseFloat(formData.tax_rate) || 0,
         internal_notes: formData.internal_notes,
         is_blocked: formData.is_blocked,
+        allow_online_payment: formData.allow_online_payment,  // p149
         fixed_price: formData.fixed_price,
         force_qty_entry: formData.force_qty_entry,
         force_price_entry: formData.force_price_entry,
@@ -579,10 +583,13 @@ export default function EditProductPage() {
                     <div className="col-span-2 space-y-1">
                       <div className="flex items-center justify-between">
                         <Label className="text-xs">{t.barcode}</Label>
-                        <Button type="button" variant="ghost" size="sm" onClick={generateBarcode} disabled={generatingBarcode} className="h-5 px-1 text-xs">
-                          {generatingBarcode ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                          {t.generateBarcode}
-                        </Button>
+                        <span className="flex items-center gap-1">
+                          <CameraBarcodeScanner language={language} onDetected={(code) => setFormData(prev => ({ ...prev, barcode: code }))} testId="barcode-camera-btn" />
+                          <Button type="button" variant="ghost" size="sm" onClick={generateBarcode} disabled={generatingBarcode} className="h-5 px-1 text-xs">
+                            {generatingBarcode ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                            {t.generateBarcode}
+                          </Button>
+                        </span>
                       </div>
                       <Input name="barcode" value={formData.barcode} onChange={handleChange} className="h-9 font-mono" data-testid="barcode-input" />
                     </div>
@@ -754,6 +761,7 @@ export default function EditProductPage() {
                       { key: 'force_qty_entry', label_ar: 'إدخال الكمية إلزامي', label_fr: 'Saisie qté obligatoire', desc_ar: 'يطلب من الكاشير إدخال الكمية يدوياً', desc_fr: 'Demande la saisie manuelle de la qté' },
                       { key: 'force_price_entry', label_ar: 'إدخال السعر إلزامي', label_fr: 'Saisie prix obligatoire', desc_ar: 'يطلب إدخال السعر عند كل عملية بيع', desc_fr: 'Demande la saisie du prix à chaque vente' },
                       { key: 'serial_number_tracking', label_ar: 'تتبع الرقم التسلسلي', label_fr: 'Suivi n° de série', desc_ar: 'يطلب إدخال رقم تسلسلي عند البيع', desc_fr: 'Demande le n° de série à chaque vente' },
+                      { key: 'allow_online_payment', label_ar: 'السماح بالدفع الإلكتروني', label_fr: 'Paiement en ligne', desc_ar: 'يظهر خيار الدفع الإلكتروني لهذا المنتج في المتجر', desc_fr: 'Affiche le paiement en ligne pour ce produit' },
                     ].map(opt => (
                       <div key={opt.key} className={`flex items-center justify-between p-3 rounded-lg border ${opt.danger && formData[opt.key] ? 'border-red-200 bg-red-50 dark:bg-red-950/20' : 'border-border'}`}>
                         <div>

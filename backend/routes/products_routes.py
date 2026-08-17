@@ -119,6 +119,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "qty_per_package": p.qty_per_package or 1,
             "is_non_stockable": p.is_non_stockable or False,
             "is_blocked": p.is_blocked or False,
+            "allow_online_payment": p.allow_online_payment if p.allow_online_payment is not None else True,  # p149
             "fixed_price": p.fixed_price or False,
             "force_qty_entry": p.force_qty_entry or False,
             "force_price_entry": p.force_price_entry or False,

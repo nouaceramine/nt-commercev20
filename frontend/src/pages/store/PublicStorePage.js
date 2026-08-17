@@ -1038,6 +1038,12 @@ export default function PublicStorePage() {
   const [customerInfo, setCustomerInfo] = useState({
     name: '', phone: '', email: '', wilaya: '', commune: '', address: '', notes: '', delivery_type: 'home'
   });
+  const [paymentMethod, setPaymentMethod] = useState('cod');  // p149
+  // p149: إن أُغلق COD وبقي الإلكتروني وحده — يصبح هو الافتراضي
+  useEffect(() => {
+    if (store?.online_payment_enabled && store?.cod_enabled === false) setPaymentMethod('online');
+    if (!store?.online_payment_enabled) setPaymentMethod('cod');
+  }, [store]);
 
   // Load cart from localStorage
   useEffect(() => {
@@ -1106,7 +1112,8 @@ export default function PublicStorePage() {
         name: product.name_ar || product.name,
         price: priceOf(product),
         image_url: product.image_url,
-        quantity: 1
+        quantity: 1,
+        allow_online_payment: product.allow_online_payment !== false  // p149
       }]);
     }
     trackPixel('AddToCart', { content_name: product.name_ar || product.name, value: priceOf(product), currency: 'DZD' });
@@ -1166,7 +1173,7 @@ export default function PublicStorePage() {
         delivery_fee: deliveryFee,
         total: grandTotal,
         notes: customerInfo.notes,
-        payment_method: 'cod',
+        payment_method: paymentMethod,  // p149
         utm: getUtm()
       };
       const response = await apiClient.post(`/shop/${slug}/order`, orderData);
@@ -1621,8 +1628,32 @@ export default function PublicStorePage() {
                   </div>
                 </div>
 
-                <button type="submit" className="nc-submit-btn" disabled={submitting}>
-                  {submitting ? '⏳ جاري الإرسال...' : '✅ تأكيد الطلب (الدفع عند الاستلام)'}
+                {store?.online_payment_enabled && (
+                  <div className="nc-form-group" data-testid="payment-method-group">
+                    <label>طريقة الدفع *</label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      {store?.cod_enabled !== false && (
+                        <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', border: `2px solid ${paymentMethod === 'cod' ? '#059669' : '#e5e7eb'}`, borderRadius: '0.5rem', cursor: 'pointer' }}>
+                          <input type="radio" name="payment_method" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} data-testid="pay-cod" />
+                          <span>💵 الدفع عند الاستلام</span>
+                        </label>
+                      )}
+                      {cart.every(it => it.allow_online_payment !== false) ? (
+                        <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', border: `2px solid ${paymentMethod === 'online' ? '#059669' : '#e5e7eb'}`, borderRadius: '0.5rem', cursor: 'pointer' }}>
+                          <input type="radio" name="payment_method" checked={paymentMethod === 'online'} onChange={() => setPaymentMethod('online')} data-testid="pay-online" />
+                          <span>💳 الدفع الإلكتروني</span>
+                        </label>
+                      ) : (
+                        <span style={{ flex: 1, fontSize: '0.8rem', color: '#9ca3af', padding: '0.75rem', border: '2px dashed #e5e7eb', borderRadius: '0.5rem' }} data-testid="pay-online-disabled">
+                          💳 الدفع الإلكتروني غير متاح لبعض منتجات السلة
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <button type="submit" className="nc-submit-btn" disabled={submitting} data-testid="submit-order-btn">
+                  {submitting ? '⏳ جاري الإرسال...' : paymentMethod === 'online' ? '✅ تأكيد الطلب (دفع إلكتروني)' : '✅ تأكيد الطلب (الدفع عند الاستلام)'}
                 </button>
               </form>
             </>

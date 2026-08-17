@@ -31,6 +31,7 @@ class ProductCreate(BaseModel):
     is_non_stockable: Optional[bool] = False
     # Sales flags
     is_blocked: Optional[bool] = False
+    allow_online_payment: Optional[bool] = True  # p149: السماح بالدفع الإلكتروني لهذا المنتج في المتجر
     fixed_price: Optional[bool] = False
     force_qty_entry: Optional[bool] = False
     force_price_entry: Optional[bool] = False
@@ -108,6 +109,7 @@ class ProductUpdate(BaseModel):
     article_code: Optional[str] = None  # كود المنتج
     family_id: Optional[str] = None
     use_average_price: Optional[bool] = None
+    allow_online_payment: Optional[bool] = None  # p149
     color: Optional[str] = None
     sizes: Optional[List[str]] = None
     has_variants: Optional[bool] = None

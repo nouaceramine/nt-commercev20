@@ -137,6 +137,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         wa_confirm_enabled: bool = False  # p101: WhatsApp auto-confirmation before shipping
         cart_recovery_enabled: bool = True    # p107: auto WhatsApp reminder for abandoned carts (needs active WhatsApp integration)
         cart_recovery_delay_hours: int = 3    # p107: send reminder after this many hours
+        online_payment_enabled: bool = False  # p149: مفتاح عرض الدفع الإلكتروني في المتجر
+        visible_family_ids: List[str] = []    # p149: عائلات تُعرض تلقائياً في المتجر (فارغ = المنتجات المختارة يدوياً فقط)
 
     class StoreOrder(BaseModel):
         customer_name: str
@@ -559,11 +561,18 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         store_products = await tenant_db_inst.store_products.find({"is_active": True}, {"_id": 0}).to_list(1000)
         product_ids = [sp["product_id"] for sp in store_products]
 
+        # p149: family-level visibility — selected families auto-include ALL their products
+        _vis_fams = [f for f in (settings.get("visible_family_ids") or []) if f]
+        _query = {"id": {"$in": product_ids}}
+        if _vis_fams:
+            _query = {"$or": [{"id": {"$in": product_ids}}, {"family_id": {"$in": _vis_fams}}]}
+
         products = await tenant_db_inst.products.find(
-            {"id": {"$in": product_ids}},
+            _query,
             {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
              "purchase_price": 1, "image_url": 1, "description_ar": 1,
-             "description_en": 1, "quantity": 1, "family_id": 1, "barcode": 1}
+             "description_en": 1, "quantity": 1, "family_id": 1, "barcode": 1,
+             "allow_online_payment": 1}
         ).to_list(1000)
         # المتوفر أولاً ثم النافد (يظهر بشارة «نفذت الكمية» في الواجهة)
         products.sort(key=lambda p: (p.get("quantity", 0) <= 0, p.get("name_ar") or ""))
@@ -658,6 +667,20 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             raise HTTPException(status_code=404, detail="Store not available")
         if settings.get("min_order_amount", 0) > 0 and order.subtotal < settings["min_order_amount"]:
             raise HTTPException(status_code=400, detail=f"Minimum order amount is {settings['min_order_amount']}")
+        # p149: payment-method policy — online only if store enabled AND every item allows it
+        if order.payment_method == "online":
+            if not settings.get("online_payment_enabled"):
+                raise HTTPException(status_code=400, detail="الدفع الإلكتروني غير مفعّل في هذا المتجر")
+            _pids = [i.get("product_id") for i in order.items if i.get("product_id")]
+            if _pids:
+                _blocked = await tenant_db_inst.products.count_documents(
+                    {"id": {"$in": _pids}, "allow_online_payment": False})
+                if _blocked:
+                    raise HTTPException(status_code=400, detail="بعض منتجات السلة لا تقبل الدفع الإلكتروني — اختر الدفع عند الاستلام")
+        else:
+            if not settings.get("cod_enabled", True):
+                raise HTTPException(status_code=400, detail="الدفع عند الاستلام غير متاح في هذا المتجر")
+            order.payment_method = "cod"
         # p69: server-side delivery fee from tenant rates — never trust the client
         _rates = {r["id"]: r for r in await tenant_db_inst.delivery_rates.find({}, {"_id": 0}).to_list(100)}
         _rate = _rates.get(str(order.delivery_wilaya).zfill(2))

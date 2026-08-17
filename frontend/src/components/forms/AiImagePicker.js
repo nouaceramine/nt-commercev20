@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { ImagePlus, Loader2, ExternalLink } from 'lucide-react';
+import { ImagePlus, Loader2, ExternalLink, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '../../lib/apiClient';
 
@@ -13,14 +13,18 @@ import apiClient from '../../lib/apiClient';
 const AiImagePicker = ({ getName, language, onPick, maxReached }) => {
   const isAr = language === 'ar';
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [open, setOpen] = useState(false);
   const [images, setImages] = useState([]);
   const [query, setQuery] = useState('');
 
+  const errDetail = (e, fallback) =>
+    e?.response?.data?.detail || fallback;
+
   const fetchImages = async () => {
     const name = (getName() || '').trim();
     if (!name) {
-      toast.error(isAr ? 'أدخل اسم المنتج أولاً' : "Entrez le nom du produit d'abord");
+      toast.error(isAr ? 'أدخل اسم المنتج أولاً ثم اضغط الزر' : "Entrez le nom du produit d'abord");
       return;
     }
     setLoading(true);
@@ -31,12 +35,43 @@ const AiImagePicker = ({ getName, language, onPick, maxReached }) => {
         setQuery(res.data.query || '');
         setOpen(true);
       } else {
-        toast.error(isAr ? 'لم يتم العثور على صور مناسبة' : 'Aucune image trouvée');
+        const serverErr = res.data.error;
+        toast.error(
+          (isAr ? 'لم يتم العثور على صور مناسبة — جرّب اسماً أدق أو أبسط' : 'Aucune image trouvée — essayez un nom plus simple') +
+          (serverErr ? ` (${serverErr})` : '')
+        );
       }
     } catch (e) {
-      toast.error(isAr ? 'فشل جلب الصور' : 'Échec du chargement des images');
+      toast.error(errDetail(e, isAr ? 'فشل جلب الصور — تحقق من الاتصال ثم أعد المحاولة' : 'Échec du chargement des images'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // p149: توليد صورة حقيقية بالذكاء الاصطناعي (Gemini image -> OpenAI) — تُحفظ في uploads وتُضاف مباشرة
+  const generateImage = async () => {
+    const name = (getName() || '').trim();
+    if (!name) {
+      toast.error(isAr ? 'أدخل اسم المنتج أولاً ثم اضغط الزر' : "Entrez le nom du produit d'abord");
+      return;
+    }
+    if (maxReached) {
+      toast.error(isAr ? 'الحد الأقصى للصور' : 'Nombre maximum d\'images atteint');
+      return;
+    }
+    setGenerating(true);
+    try {
+      const res = await apiClient.post('/ai/generate-product-image', { name }, { timeout: 120000 });
+      if (res.data.success && res.data.url) {
+        onPick(res.data.url);
+        toast.success(isAr ? 'تم توليد الصورة وإضافتها ✨' : 'Image générée et ajoutée ✨');
+      } else {
+        toast.error(isAr ? 'فشل توليد الصورة' : 'Échec de la génération');
+      }
+    } catch (e) {
+      toast.error(errDetail(e, isAr ? 'فشل توليد الصورة' : 'Échec de la génération'), { duration: 6000 });
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -64,6 +99,19 @@ const AiImagePicker = ({ getName, language, onPick, maxReached }) => {
       >
         {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImagePlus className="h-3 w-3" />}
         {isAr ? 'صور AI' : 'Images IA'}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={generateImage}
+        disabled={generating || loading}
+        className="h-5 px-1 text-xs"
+        data-testid="ai-generate-btn"
+        title={isAr ? 'توليد صورة جديدة بالذكاء الاصطناعي' : 'Générer une image par IA'}
+      >
+        {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+        {isAr ? 'توليد AI' : 'Générer IA'}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
