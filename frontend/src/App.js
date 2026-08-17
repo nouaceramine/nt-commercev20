@@ -2,7 +2,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -253,6 +253,35 @@ const PublicRoute = ({ children }) => {
 
 // Home route: shows LandingPage for unauthenticated visitors,
 // otherwise routes to the correct dashboard per role.
+// p152: custom-domain storefront — subscriber domains render their store at /
+const PLATFORM_HOSTS = ['nt-commerce.net', 'www.nt-commerce.net', '168.231.81.154', 'localhost', '127.0.0.1'];
+const isCustomDomain = () => !PLATFORM_HOSTS.includes(window.location.hostname);
+
+const CustomDomainStore = () => {
+  const [slug, setSlug] = useState(null);
+  const [fail, setFail] = useState(false);
+  useEffect(() => {
+    apiClient.get(`/shop/by-domain?host=${encodeURIComponent(window.location.hostname)}`)
+      .then(r => setSlug(r.data.store_slug))
+      .catch(() => setFail(true));
+  }, []);
+  if (fail) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'sans-serif' }}>
+        <p data-testid="custom-domain-notfound">المتجر غير متاح حالياً</p>
+      </div>
+    );
+  }
+  if (!slug) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="animate-spin" style={{ width: 40, height: 40, border: '4px solid #ddd', borderTopColor: '#3b82f6', borderRadius: '50%' }} />
+      </div>
+    );
+  }
+  return <PublicStorePage overrideSlug={slug} />;
+};
+
 const HomeRouter = () => {
   const { isAuthenticated, loading, isSuperAdmin, isAgent } = useAuth();
 
@@ -584,7 +613,7 @@ function AppRoutes() {
       {/* `/` shows landing page for guests; dashboard for authenticated users */}
       <Route
         path="/"
-        element={<HomeRouter />}
+        element={isCustomDomain() ? <CustomDomainStore /> : <HomeRouter />}  // p152
       />
       <Route
         path="/pos"

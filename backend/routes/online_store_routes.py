@@ -2,7 +2,7 @@
 Online Store & WooCommerce Integration Routes
 Extracted from server.py
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -269,6 +269,36 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if docs:
             await db.delivery_rates.insert_many(docs)
         return {"saved": len(docs)}
+
+    @router.get("/shop/by-domain")
+    async def shop_by_domain(request: Request, host: str = ""):
+        """Resolve a custom domain to a tenant store slug (public).
+
+        The SPA is served on the subscriber's domain but calls the API on
+        nt-commerce.net, so the domain arrives as ?host=. When a real Host
+        header matches (direct origin traffic), that is used instead.
+        """
+        h = _norm_domain(request.headers.get("host", ""))
+        if h in _PLATFORM_HOSTS or not h:
+            h = _norm_domain(host)
+        if not h or h in _PLATFORM_HOSTS:
+            raise HTTPException(status_code=400, detail="دومين النظام — استخدم رابط المتجر العادي")
+        doc = await main_db.custom_domains.find_one({"domain": h})
+        if not doc and h.startswith("www."):
+            doc = await main_db.custom_domains.find_one({"domain": h[4:]})
+        if not doc:
+            doc = await main_db.custom_domains.find_one({"domain": f"www.{h}"})
+        if not doc:
+            raise HTTPException(status_code=404, detail="هذا الدومين غير مسجل في المنصة")
+        mapping = await main_db.store_slugs.find_one({"tenant_id": doc["tenant_id"], "enabled": True}, {"_id": 0})
+        if not mapping:
+            raise HTTPException(status_code=404, detail="المتجر غير متاح حالياً")
+        if doc.get("status") != "active":
+            await main_db.custom_domains.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"status": "active", "verified_at": datetime.now(timezone.utc).isoformat()}},
+            )
+        return {"store_slug": mapping["store_slug"], "domain": h}
 
     @router.get("/shop/{store_slug}/delivery-rates")
     async def public_delivery_rates(store_slug: str):
@@ -1325,5 +1355,83 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             slug_mapping.get("tenant_id", "")
         )
         return {"tracked": True}
+
+
+    # ── p152: Custom domains (Cloudflare for SaaS) ──
+    import re as _re_dom
+
+    _PLATFORM_HOSTS = {"nt-commerce.net", "www.nt-commerce.net", "168.231.81.154", "localhost", "127.0.0.1"}
+
+    def _norm_domain(d):
+        d = (d or "").strip().lower()
+        d = _re_dom.sub(r"^https?://", "", d).split("/")[0].split(":")[0].strip(".")
+        return d
+
+    @router.get("/store/custom-domain")
+    async def get_custom_domain(admin: dict = Depends(get_tenant_admin)):
+        tenant_id = admin.get("tenant_id") or "platform"
+        doc = await main_db.custom_domains.find_one({"tenant_id": tenant_id}, {"_id": 0})
+        if not doc:
+            return {"domain": "", "status": "none"}
+        return doc
+
+    @router.post("/store/custom-domain")
+    async def set_custom_domain(data: dict, admin: dict = Depends(get_tenant_admin)):
+        tenant_id = admin.get("tenant_id") or "platform"
+        domain = _norm_domain(data.get("domain"))
+        if not domain or not _re_dom.match(r"^([a-z0-9-]+\.)+[a-z]{2,}$", domain):
+            raise HTTPException(status_code=400, detail="صيغة الدومين غير صحيحة — مثال: shop.example.dz")
+        if domain.endswith("nt-commerce.net") or domain in _PLATFORM_HOSTS:
+            raise HTTPException(status_code=400, detail="دومين النظام لا يحتاج تسجيلاً")
+        mapping = await main_db.store_slugs.find_one({"tenant_id": tenant_id, "enabled": True}, {"_id": 0})
+        if not mapping:
+            raise HTTPException(status_code=400, detail="فعّل المتجر وحدد رابطه المختصر أولاً من إعدادات المتجر")
+        existing = await main_db.custom_domains.find_one({"domain": domain})
+        if existing and existing.get("tenant_id") != tenant_id:
+            raise HTTPException(status_code=400, detail="هذا الدومين مسجل لمشترك آخر")
+        now = datetime.now(timezone.utc).isoformat()
+        old = await main_db.custom_domains.find_one({"tenant_id": tenant_id}, {"_id": 0})
+        status = "pending" if not old or old.get("domain") != domain else old.get("status", "pending")
+        await main_db.custom_domains.update_one(
+            {"tenant_id": tenant_id},
+            {"$set": {"domain": domain, "tenant_id": tenant_id, "status": status, "updated_at": now},
+             "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+        return {
+            "domain": domain,
+            "status": status,
+            "cname_target": "nt-commerce.net",
+            "instructions_ar": f"أضف سجل CNAME في DNS الدومين: {domain} → nt-commerce.net ثم اضغط «فحص DNS»",
+        }
+
+    @router.delete("/store/custom-domain")
+    async def delete_custom_domain(admin: dict = Depends(get_tenant_admin)):
+        tenant_id = admin.get("tenant_id") or "platform"
+        await main_db.custom_domains.delete_one({"tenant_id": tenant_id})
+        return {"deleted": True}
+
+    @router.post("/store/custom-domain/check")
+    async def check_custom_domain(admin: dict = Depends(get_tenant_admin)):
+        tenant_id = admin.get("tenant_id") or "platform"
+        doc = await main_db.custom_domains.find_one({"tenant_id": tenant_id}, {"_id": 0})
+        if not doc or not doc.get("domain"):
+            raise HTTPException(status_code=404, detail="لا يوجد دومين مسجل")
+        import asyncio as _asyncio
+        import socket as _socket
+        try:
+            loop = _asyncio.get_event_loop()
+            await loop.run_in_executor(None, _socket.getaddrinfo, doc["domain"], 443)
+            resolved = True
+        except Exception:
+            resolved = False
+        status = doc.get("status", "pending")
+        if resolved and status == "pending":
+            status = "dns_ok"
+            await main_db.custom_domains.update_one(
+                {"tenant_id": tenant_id},
+                {"$set": {"status": status, "dns_ok_at": datetime.now(timezone.utc).isoformat()}},
+            )
+        return {"domain": doc["domain"], "resolved": resolved, "status": status}
 
     return router

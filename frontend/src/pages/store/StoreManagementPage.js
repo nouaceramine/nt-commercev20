@@ -94,6 +94,9 @@ export default function StoreManagementPage() {
     store_shipping_companies: []    // p150
   });
   const [shippingProviders, setShippingProviders] = useState([]);  // p150
+  const [cdDomain, setCdDomain] = useState('');      // p152: custom domain
+  const [cdInfo, setCdInfo] = useState(null);        // p152
+  const [cdBusy, setCdBusy] = useState(false);       // p152
   const [allFamilies, setAllFamilies] = useState([]);  // p149: لاختيار العائلات الظاهرة
   const [products, setProducts] = useState([]);
   const [storeProducts, setStoreProducts] = useState([]);
@@ -124,7 +127,69 @@ export default function StoreManagementPage() {
 
   useEffect(() => {
     fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
+
+  // p152: load custom domain record
+  useEffect(() => {
+    apiClient.get('/store/custom-domain')
+      .then(res => {
+        if (res.data && res.data.domain) {
+          setCdInfo(res.data);
+          setCdDomain(res.data.domain);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // p152: custom domain handlers
+  const saveCustomDomain = async () => {
+    if (!cdDomain.trim()) {
+      toast.error(language === 'ar' ? 'أدخل الدومين أولاً' : 'Entrez le domaine');
+      return;
+    }
+    setCdBusy(true);
+    try {
+      const res = await apiClient.post('/store/custom-domain', { domain: cdDomain.trim() });
+      setCdInfo(res.data);
+      setCdDomain(res.data.domain);
+      toast.success(language === 'ar' ? 'حُفظ الدومين — اتبع تعليمات DNS أدناه' : 'Domaine enregistré');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (language === 'ar' ? 'فشل حفظ الدومين' : 'Échec'));
+    } finally {
+      setCdBusy(false);
+    }
+  };
+
+  const checkCustomDomain = async () => {
+    setCdBusy(true);
+    try {
+      const res = await apiClient.post('/store/custom-domain/check');
+      setCdInfo(prev => ({ ...prev, status: res.data.status }));
+      if (res.data.resolved) {
+        toast.success(language === 'ar' ? 'DNS يعمل — سيُفعَّل الدومين بعد إعداد Cloudflare' : 'DNS OK');
+      } else {
+        toast.warning(language === 'ar' ? 'DNS لم ينتشر بعد — أعد الفحص بعد دقائق' : 'DNS pas encore propagé');
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Error');
+    } finally {
+      setCdBusy(false);
+    }
+  };
+
+  const deleteCustomDomain = async () => {
+    setCdBusy(true);
+    try {
+      await apiClient.delete('/store/custom-domain');
+      setCdInfo(null);
+      setCdDomain('');
+      toast.success(language === 'ar' ? 'أُزيل الدومين' : 'Domaine supprimé');
+    } catch (e) {
+      toast.error(language === 'ar' ? 'فشل الحذف' : 'Échec');
+    } finally {
+      setCdBusy(false);
+    }
+  }; // eslint-disable-line react-hooks/exhaustive-deps
 
   // p145: load smart tools state (silent failures — advisory features)
   useEffect(() => {
@@ -947,6 +1012,68 @@ export default function StoreManagementPage() {
                 </div>
               </>
             )}
+
+            {/* p152: Custom domain */}
+            <Card data-testid="custom-domain-card">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-blue-500" />
+                  {language === 'ar' ? 'دومين خاص بالمتجر' : 'Domaine personnalisé'}
+                </CardTitle>
+                <CardDescription>
+                  {language === 'ar'
+                    ? 'اربط متجرك بدومينك الخاص (shop.example.dz) بدل رابط المنصة المجاني — يتطلب إعداداً من إدارة المنصة بعد ربط DNS'
+                    : 'Liez votre boutique à votre propre domaine au lieu du lien gratuit'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex gap-2 flex-wrap items-center">
+                  <Input
+                    value={cdDomain}
+                    onChange={(e) => setCdDomain(e.target.value)}
+                    placeholder="shop.example.dz"
+                    className="max-w-xs"
+                    dir="ltr"
+                    data-testid="custom-domain-input"
+                  />
+                  <Button onClick={saveCustomDomain} disabled={cdBusy} data-testid="custom-domain-save">
+                    {language === 'ar' ? 'حفظ الدومين' : 'Enregistrer'}
+                  </Button>
+                  {cdInfo?.domain && (
+                    <>
+                      <Button variant="outline" onClick={checkCustomDomain} disabled={cdBusy} data-testid="custom-domain-check">
+                        {language === 'ar' ? 'فحص DNS' : 'Vérifier DNS'}
+                      </Button>
+                      <Button variant="ghost" onClick={deleteCustomDomain} disabled={cdBusy}>
+                        {language === 'ar' ? 'إزالة' : 'Supprimer'}
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {cdInfo?.domain && (
+                  <div className="p-3 bg-muted/30 rounded-lg space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium" dir="ltr">{cdInfo.domain}</span>
+                      <Badge variant={cdInfo.status === 'active' ? 'default' : 'secondary'} data-testid="custom-domain-status">
+                        {cdInfo.status === 'active'
+                          ? (language === 'ar' ? 'مفعّل' : 'Actif')
+                          : cdInfo.status === 'dns_ok'
+                            ? (language === 'ar' ? 'DNS جاهز — بانتظار التفعيل' : 'DNS OK')
+                            : (language === 'ar' ? 'بانتظار ربط DNS' : 'En attente DNS')}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                      {language === 'ar'
+                        ? '1) في لوحة DNS الخاصة بدومينك أضف سجل CNAME: ' : '1) Ajoutez un enregistrement CNAME: '}
+                      <code className="bg-muted px-1 rounded" dir="ltr">{cdInfo.domain} → nt-commerce.net</code>
+                      {language === 'ar'
+                        ? ' — 2) اضغط «فحص DNS» — 3) تواصل مع إدارة المنصة لإكمال تفعيل الشهادة (Cloudflare)'
+                        : ' — 2) Vérifiez — 3) Contactez la plateforme pour activer le certificat'}
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* p145: Smart tools — Flash Day + WhatsApp bot + competitor watch */}
             <Card data-testid="smart-tools-card">

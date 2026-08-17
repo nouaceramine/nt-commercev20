@@ -2186,3 +2186,29 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 - map-columns: عناوين فرنسية/عربية أجنبية → مطابقة 6/6 صحيحة ai_used=true ✓
 - import/customers regression: Imported 1 records ✓ (ثم حُذف)
 - build main.b8c474e2.js markers كاملة؛ release 20260817_152303؛ الموقع 200 ✓
+
+## p152 — المرحلة 4: الدومينات الخاصة للمتاجر (2026-08-17)
+
+### المعمارية
+- nginx يخدم أي Host عبر default_server — لا تعديل مطلوب.
+- CORS: allow_origin_regex يقبل أي دومين https (المصادقة Bearer بلا كوكيز — خطر CSRF معدوم).
+- TLS للدومين الخاص يتطلب إضافة Custom Hostname في لوحة Cloudflare (يدوياً حتى يزوّدنا المستخدم بـ CF API token — عندها تُؤتمت).
+
+### التغييرات
+- Backend online_store_routes.py: سجل custom_domains في main_db +
+  GET/POST/DELETE /api/store/custom-domain + POST .../check (فحص DNS بـ getaddrinfo) +
+  GET /api/shop/by-domain?host= (عام، يحوّل الدومين → store_slug، يدعم www، تفعيل تلقائي عند أول وصول).
+  ملاحظة: /shop/by-domain سُجّل قبل /shop/{store_slug} (ترتيب المسارات).
+  إصلاح: Request أُضيف للاستيراد العلوي (استيراد محلي كان يكسر التحميل → AUTO-SKIP).
+- Backend main.py: allow_origin_regex=https أي دومين.
+- Frontend App.js: CustomDomainStore — أي hostname غير nt-commerce.net يعرض متجر المشترك على / تلقائياً.
+- Frontend PublicStorePage.js: prop overrideSlug.
+- Frontend StoreManagementPage.js: بطاقة "دومين خاص بالمتجر" — إدخال/حفظ/فحص DNS/إزالة + تعليمات CNAME + شارة الحالة (بانتظار/جاهز/مفعّل).
+
+### اختبارات حية (demo tenant، نُظّف بالكامل)
+- تسجيل دومين (تطبيع https://www/… → host) → pending + تعليمات ✓
+- by-domain?host= (بدون www) وجد سجل www.{h} → store_slug صحيح + تحوّل active ✓
+- DNS check على دومين وهمي → resolved:false بأمانة ✓ | صيغة خاطئة → 400 ✓
+- OPTIONS بأصل https://shop.example.dz → access-control-allow-origin مطابق ✓
+- الموقع 200 بالحزمة main.626ec8e7.js — release 20260817_154559 ✓
+- demo tenant: slugs 0, domains 0, settings 0, products 0, sales 0 ✓

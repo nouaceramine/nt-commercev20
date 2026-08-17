@@ -1018,8 +1018,9 @@ const WILAYAS = [
   { id: '22', name: 'سيدي بلعباس' },
 ];
 
-export default function PublicStorePage() {
-  const { slug } = useParams();
+export default function PublicStorePage({ overrideSlug } = {}) {
+  const { slug: paramSlug } = useParams();
+  const slug = overrideSlug || paramSlug;  // p152: custom-domain storefront
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [store, setStore] = useState(null);

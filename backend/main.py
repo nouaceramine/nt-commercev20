@@ -91,6 +91,7 @@ app.add_middleware(APMMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://nt-commerce.net", "https://www.nt-commerce.net", "http://168.231.81.154", "http://168.231.81.154:8001"],
+    allow_origin_regex=r"^https://([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d+)?$",  # p152: subscriber custom domains (https only)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
