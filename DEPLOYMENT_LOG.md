@@ -2273,3 +2273,28 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 
 ### نسخة احتياطية
 /opt/ntcommerce/backups/p155_agents/auth_users_routes.py
+
+## p156 — تأكيد بريد المشتركين الجدد برمز تحقق (2026-08-17)
+
+### قبل
+- التسجيل في /saas/register ينشئ الحساب ويدخل المشترك مباشرة دون أي تحقق من ملكية البريد.
+
+### بعد
+1. **registration_routes.py**:
+   - tenant_doc يُنشأ بـ `email_verified: False`.
+   - بعد التهيئة تُرسل رسالة رمز 6 أرقام (collection `email_verifications`، TTL 10 دقائق، 5 محاولات، حذف الرموز القديمة عند كل طلب).
+   - الرد يتضمن `requires_email_verification: true`.
+   - `POST /saas/verify-email` — تحقق compare_digest + عداد محاولات + تعيين email_verified.
+   - `POST /saas/resend-verification` (محدود 3/دقيقة، رد عام ضد الاستكشاف).
+   - `tenant_login` يرفض غير المؤكدين 403 (الحسابات القديمة بدون الحقل غير متأثرة).
+2. **auth_users_routes.py**: نفس المنع في unified-login (فرع المستأجرين).
+3. **RegisterPage.js**: خطوة ثالثة «تأكيد البريد» — لا يدخل المشترك لوحته قبل إدخال الرمز (testids: reg-verify-code-input/submit/resend).
+4. **VerifyEmailPage.js** جديدة على /verify-email — مسار استرجاع لمن فقد الرمز (إدخال بريد+رمز+إعادة إرسال).
+5. **App.js**: مسار /verify-email.
+
+### اختبار (10/10 عبر سكربت داخل الحاوية)
+تسجيل ← requires_verif ✓ | الحقل False ✓ | tenant-login محظور 403 ✓ | unified-login محظور 403 ✓ | الرمز في DB مع انتهاء ✓ | رمز خاطئ 400 ✓ | رمز صحيح 200 ✓ | الحقل True ✓ | الدخول بعد التأكيد 200 ✓ | إعادة الإرسال على حساب مؤكد: رد عام بدون إرسال ✓
+الرسالة وصلت فعلياً إلى بريد المالك (plus-alias). مستأجر الاختبار حُذف بالكامل (وثيقة + قاعدة + identity_registry).
+
+### نسخة احتياطية
+/opt/ntcommerce/backups/p156_emailverify/ — النشر: release 20260817_192604

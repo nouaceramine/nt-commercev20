@@ -137,6 +137,7 @@ import SmartNotificationsPage from "./pages/SmartNotificationsPage";
 // Landing & SaaS Pages
 import LandingPage from "./pages/landing/LandingPage";
 import SaasRegisterPage from "./pages/landing/RegisterPage";
+import VerifyEmailPage from "./pages/landing/VerifyEmailPage"; // p156
 import PricingPage from "./pages/landing/PricingPage";
 import SaasAdminPage from "./pages/admin/SaasAdminPage";
 import FeatureFlagsPage from "./pages/admin/FeatureFlagsPage";
@@ -341,6 +342,7 @@ function AppRoutes() {
       {/* Landing & SaaS Public Routes */}
       <Route path="/landing" element={<LandingPage />} />
       <Route path="/register" element={<SaasRegisterPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} /> {/* p156 */}
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/shop/:slug" element={<PublicStorePage />} />
       <Route path="/shop/:slug/product/:productId" element={<ProductDetailPage />} />

@@ -320,6 +320,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                 if bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8')):
                     if not tenant.get("is_active", True):
                         raise HTTPException(status_code=403, detail="الحساب معطل")
+                    # p156: block unverified subscribers (legacy tenants have no flag)
+                    if tenant.get("email_verified") is False:
+                        raise HTTPException(status_code=403, detail="يجب تأكيد بريدك الإلكتروني أولاً — أدخل الرمز المرسل إليك عند التسجيل في صفحة /verify-email")
                     _clear_failed_login(email)
 
                     # Check subscription

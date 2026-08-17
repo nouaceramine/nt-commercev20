@@ -17,6 +17,52 @@ from middleware.rate_limit import rate_limit as _rate_limited  # noqa: E402
 
 router = APIRouter(tags=["SaaS Registration"])
 
+# ── p156: email verification for new subscribers ──────────────────────────
+from pydantic import BaseModel  # noqa: E402
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
+async def _send_verification_code(tenant_id: str, email: str, name: str = "") -> None:
+    """p156: create a 6-digit verification code (10-min TTL) and email it."""
+    import secrets as _sec
+    now = datetime.now(timezone.utc)
+    code = f"{_sec.randbelow(1000000):06d}"
+    await db.email_verifications.delete_many({"email": email})
+    await db.email_verifications.insert_one({
+        "_id": str(uuid.uuid4()),
+        "email": email,
+        "tenant_id": tenant_id,
+        "code": code,
+        "attempts": 0,
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=10)).isoformat(),
+    })
+    try:
+        from services.email_service import send_email as _send_mail
+        await _send_mail(
+            email,
+            "رمز تأكيد البريد — NT Commerce",
+            html=(
+                "<div dir='rtl' style='font-family:Arial,sans-serif;padding:24px;max-width:480px'>"
+                "<h2 style='color:#1e40af;margin:0 0 12px'>أهلاً بك في NT Commerce</h2>"
+                f"<p style='color:#334155'>مرحباً {name or ''} — أكّد بريدك الإلكتروني لتفعيل حسابك. الرمز صالح 10 دقائق:</p>"
+                f"<div style='font-size:32px;letter-spacing:8px;font-weight:bold;text-align:center;"
+                f"background:#f1f5f9;border-radius:12px;padding:16px;margin:16px 0;direction:ltr'>{code}</div>"
+                "<p style='color:#94a3b8;font-size:12px'>إن لم تنشئ حساباً تجاهل هذه الرسالة.</p>"
+                "</div>"
+            ),
+        )
+    except Exception as _exc:
+        print(f"[REG] verification email send failed: {_exc}")
+
 
 def _max_tenants() -> int:
     """Return the configured ceiling for active tenants. 0 = unlimited."""
@@ -79,6 +125,7 @@ async def register_tenant(tenant: TenantCreate):
         "plan_id": tenant.plan_id,
         "agent_id": tenant.agent_id if hasattr(tenant, 'agent_id') and tenant.agent_id else None,
         "is_active": True,
+        "email_verified": False,  # p156: must confirm email before login
         "is_trial": True,
         "trial_ends_at": trial_ends_at.isoformat(),
         "subscription_type": "monthly",
@@ -126,6 +173,9 @@ async def register_tenant(tenant: TenantCreate):
                     "$inc": {"total_earnings": commission, "pending_earnings": commission}
                 })
 
+    # p156: email the verification code — login stays blocked until confirmed
+    await _send_verification_code(tenant_id, tenant.email, tenant.name)
+
     access_token = create_access_token({
         "sub": tenant_id,
         "email": tenant.email,
@@ -138,7 +188,8 @@ async def register_tenant(tenant: TenantCreate):
         "access_token": access_token,
         "token_type": "bearer",
         "tenant_id": tenant_id,
-        "message": "تم إنشاء حسابك بنجاح! لديك 14 يوماً تجريبية.",
+        "requires_email_verification": True,  # p156
+        "message": "تم إنشاء حسابك بنجاح! أرسلنا رمز تأكيد إلى بريدك الإلكتروني.",
         "trial_ends_at": trial_ends_at.isoformat()
     }
 
@@ -155,6 +206,10 @@ async def tenant_login(request: Request, login_data: AgentLoginRequest):
 
     if not tenant.get("is_active", True):
         raise HTTPException(status_code=403, detail="الحساب معطل")
+
+    # p156: block login until the signup email is verified (legacy accounts have no flag)
+    if tenant.get("email_verified") is False:
+        raise HTTPException(status_code=403, detail="يجب تأكيد بريدك الإلكتروني أولاً — أدخل الرمز المرسل إليك عند التسجيل في صفحة /verify-email")
 
     access_token = create_access_token({
         "sub": tenant["id"],
@@ -177,3 +232,38 @@ async def tenant_login(request: Request, login_data: AgentLoginRequest):
             "company_name": tenant.get("company_name", "")
         }
     }
+
+
+@router.post("/saas/verify-email")
+@_rate_limited(os.environ.get("RATE_LIMIT_LOGIN", "10/minute"))
+async def verify_email(request: Request, data: VerifyEmailRequest):
+    """p156: confirm a new subscriber's email with the 6-digit code."""
+    import secrets as _sec
+    email = data.email.strip().lower()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = await db.email_verifications.find_one({"email": email, "expires_at": {"$gt": now_iso}})
+    if not doc:
+        raise HTTPException(status_code=400, detail="الرمز منتهي أو لم يُطلب — اطلب رمزاً جديداً")
+    if doc.get("attempts", 0) >= 5:
+        raise HTTPException(status_code=429, detail="تجاوزت عدد المحاولات — اطلب رمزاً جديداً")
+    if not _sec.compare_digest(data.code.strip(), doc["code"]):
+        await db.email_verifications.update_one({"_id": doc["_id"]}, {"$inc": {"attempts": 1}})
+        remaining = 4 - doc.get("attempts", 0)
+        raise HTTPException(status_code=400, detail=f"رمز التحقق غير صحيح — تبقّى {remaining} من المحاولات")
+    await db.saas_tenants.update_one(
+        {"id": doc["tenant_id"]},
+        {"$set": {"email_verified": True, "email_verified_at": now_iso}},
+    )
+    await db.email_verifications.delete_many({"email": email})
+    return {"verified": True, "message": "تم تأكيد بريدك الإلكتروني بنجاح — يمكنك الآن استخدام حسابك"}
+
+
+@router.post("/saas/resend-verification")
+@_rate_limited("3/minute")
+async def resend_verification(request: Request, data: ResendVerificationRequest):
+    """p156: resend the verification code (generic response — anti-enumeration)."""
+    email = data.email.strip().lower()
+    tenant = await db.saas_tenants.find_one({"email": email_ci(email)})
+    if tenant and tenant.get("email_verified") is False:
+        await _send_verification_code(tenant["id"], tenant["email"], tenant.get("name", ""))
+    return {"message": "إن كان الحساب بانتظار التأكيد فقد أرسلنا رمزاً جديداً إلى بريدك"}

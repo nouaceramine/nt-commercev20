@@ -32,6 +32,11 @@ export default function RegisterPage() {
   const [billingCycle, setBillingCycle] = useState(searchParams.get('cycle') || 'monthly');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // p156: email verification step
+  const [regToken, setRegToken] = useState(null);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -96,17 +101,60 @@ export default function RegisterPage() {
       });
       
       toast.success('تم إنشاء حسابك بنجاح!');
-      
+
+      // p156: require email verification before entering
+      if (response.data.requires_email_verification) {
+        setRegToken(response.data);
+        setStep(3);
+        toast.info('أرسلنا رمز تأكيد من 6 أرقام إلى بريدك الإلكتروني');
+        return;
+      }
+
       // Store token and redirect
       localStorage.setItem('token', response.data.access_token);
       localStorage.setItem('tenant_id', response.data.tenant_id);
-      
+
       // Redirect to dashboard
       navigate('/');
     } catch (error) {
       toast.error(errText(error) ||  'حدث خطأ أثناء التسجيل');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // p156: confirm the emailed 6-digit code, then enter
+  const handleVerifyEmail = async (e) => {
+    e.preventDefault();
+    if (verifyCode.trim().length !== 6) {
+      toast.error('أدخل الرمز المكوّن من 6 أرقام');
+      return;
+    }
+    setVerifying(true);
+    try {
+      await apiClient.post(`/saas/verify-email`, { email: formData.email, code: verifyCode.trim() });
+      toast.success('تم تأكيد بريدك الإلكتروني بنجاح!');
+      if (regToken) {
+        localStorage.setItem('token', regToken.access_token);
+        localStorage.setItem('tenant_id', regToken.tenant_id);
+      }
+      navigate('/');
+    } catch (error) {
+      toast.error(errText(error) || 'رمز التحقق غير صحيح');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setResending(true);
+    try {
+      await apiClient.post(`/saas/resend-verification`, { email: formData.email });
+      toast.success('أرسلنا رمزاً جديداً إلى بريدك');
+    } catch (error) {
+      toast.error(errText(error) || 'تعذّر إرسال الرمز');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -143,7 +191,7 @@ export default function RegisterPage() {
         {/* Progress Steps */}
         <div className="flex justify-center mb-12">
           <div className="flex items-center gap-4">
-            {[1, 2].map((s) => (
+            {[1, 2, 3].map((s) => (
               <div key={s} className="flex items-center">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-medium transition-all ${
                   step >= s 
@@ -153,9 +201,9 @@ export default function RegisterPage() {
                   {step > s ? <Check className="h-5 w-5" /> : s}
                 </div>
                 <span className={`mr-2 ${step >= s ? 'text-blue-600 font-medium' : 'text-gray-500'}`}>
-                  {s === 1 ? 'اختر الخطة' : 'بياناتك'}
+                  {s === 1 ? 'اختر الخطة' : s === 2 ? 'بياناتك' : 'تأكيد البريد'}
                 </span>
-                {s < 2 && <ArrowRight className="h-5 w-5 text-gray-300 mx-4" />}
+                {s < 3 && <ArrowRight className="h-5 w-5 text-gray-300 mx-4" />}
               </div>
             ))}
           </div>
@@ -404,6 +452,61 @@ export default function RegisterPage() {
                     {' '}و{' '}
                     <a href="#" className="text-blue-600 hover:underline">سياسة الخصوصية</a>
                   </p>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Step 3: Email Verification (p156) */}
+        {step === 3 && (
+          <div className="max-w-lg mx-auto" data-testid="reg-verify-step">
+            <Card className="shadow-xl">
+              <CardHeader className="text-center">
+                <div className="w-14 h-14 mx-auto mb-3 bg-blue-100 rounded-full flex items-center justify-center">
+                  <Mail className="h-7 w-7 text-blue-600" />
+                </div>
+                <CardTitle className="text-2xl">تأكيد بريدك الإلكتروني</CardTitle>
+                <CardDescription>
+                  أرسلنا رمز تحقق من 6 أرقام إلى <span dir="ltr" className="font-medium">{formData.email}</span> — صالح 10 دقائق
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleVerifyEmail} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="reg_verify_code">رمز التحقق *</Label>
+                    <Input
+                      id="reg_verify_code"
+                      data-testid="reg-verify-code-input"
+                      value={verifyCode}
+                      onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      className="text-center text-2xl tracking-[0.5em] font-bold"
+                      dir="ltr"
+                      maxLength={6}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    data-testid="reg-verify-submit"
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
+                    disabled={verifying}
+                  >
+                    {verifying ? 'جاري التحقق...' : 'تأكيد البريد وبدء التجربة'}
+                  </Button>
+                  <div className="text-center">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      data-testid="reg-verify-resend"
+                      onClick={handleResendCode}
+                      disabled={resending}
+                    >
+                      {resending ? 'جاري الإرسال...' : 'لم يصلك الرمز؟ أعد الإرسال'}
+                    </Button>
+                  </div>
                 </form>
               </CardContent>
             </Card>
