@@ -2235,3 +2235,10 @@ docs/RUNBOOKS.md: 5 سيناريوهات طوارئ (API down، Mongo down، ق�
 ### تحقق
 - internal/alert-config بمفتاح صحيح → {token,chat_id} فارغان (لم يُدخلا بعد) ✓ | بمفتاح خاطئ → 404 ✓
 - build main.18965468.js markers كاملة؛ release 20260817_172246؛ الموقع 200 ✓
+
+## p153b — توثيق دومين Resend + تفعيل المرسل الرسمي (2026-08-17)
+- سجلات Hostinger (MX×2, SPF, DKIM×3 CNAME) مضافة من المستخدم ومتحقق منها عبر dig ✓
+- سجلات Resend (DKIM TXT resend._domainkey, MX/TXT send) مضافة ومتحقق منها ✓
+- Domain nt-commerce.net في Resend: status=verified (region eu-west-1) — فُعّل عبر POST /domains/{id}/verify
+- platform_settings: sender_email=noreply@nt-commerce.net — إرسال تجريبي خارجي ناجح (gmail) ✓
+- البريد الآن: استقبال يدوي عبر Hostinger (support@) + إرسال آلي للجميع عبر Resend (noreply@)
