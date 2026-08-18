@@ -26,7 +26,7 @@ const EMPTY = {
   duration_months: '1', line_type: 'm3u', m3u_url: '', username: '', password: '',
   activation_code: '', server_name: '', supplier_name: '', cost: '', price: '',
   start_date: new Date().toISOString().slice(0, 10), reseller_id: '', reseller_name: '',
-  payment_method: 'cash', notes: '',
+  payment_method: 'cash', cost_source: 'wallet', notes: '',
 };
 
 const STATUS_STYLE = {
@@ -51,20 +51,30 @@ export default function IptvSubscriptionsPage() {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY);
+  // p166: prepaid panel balance
+  const [panelBalance, setPanelBalance] = useState(0);
+  const [cashBoxes, setCashBoxes] = useState([]);
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [topupForm, setTopupForm] = useState({ amount: '', payment_method: 'cash' });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, sv, r, c] = await Promise.all([
+      const [s, sv, r, c, pb, bx] = await Promise.all([
         apiClient.get('/digital-panel/subscriptions'),
         apiClient.get('/digital-panel/services'),
         apiClient.get('/digital-panel/resellers'),
         apiClient.get('/customers').catch(() => ({ data: [] })),
+        apiClient.get('/digital-panel/panel-balance').catch(() => ({ data: { balance: 0 } })),
+        apiClient.get('/cash-boxes').catch(() => ({ data: [] })),
       ]);
       setSubs(s.data || []);
       setServices(sv.data || []);
       setResellers(r.data || []);
       setCustomers(Array.isArray(c.data) ? c.data : (c.data?.items || []));
+      setPanelBalance(pb.data?.balance || 0);
+      const rawBoxes = Array.isArray(bx.data) ? bx.data : (bx.data?.items || []);
+      setCashBoxes(rawBoxes.filter((b) => b.id !== 'personal'));
     } catch (err) {
       // interceptor
     } finally {
@@ -155,6 +165,29 @@ export default function IptvSubscriptionsPage() {
     }
   };
 
+  // p166: fund the prepaid panel balance from a cash box
+  const doTopup = async () => {
+    const amount = parseFloat(topupForm.amount);
+    if (!amount || amount <= 0) {
+      toast.error(ar ? 'أدخل مبلغاً صحيحاً' : 'Montant invalide');
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await apiClient.post('/digital-panel/panel-balance/topup', {
+        amount, payment_method: topupForm.payment_method,
+      });
+      toast.success(ar ? `تم الشحن — الرصيد: ${r.data.balance} دج` : `Rechargé: ${r.data.balance} DA`);
+      setTopupOpen(false);
+      setTopupForm({ amount: '', payment_method: 'cash' });
+      load();
+    } catch (err) {
+      toast.error(errText(err) || (ar ? 'فشل الشحن' : 'Échec'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const copyLine = (s) => {
     const parts = [];
     if (s.m3u_url) parts.push(s.m3u_url);
@@ -186,10 +219,19 @@ export default function IptvSubscriptionsPage() {
             <Tv className="h-7 w-7 text-primary" />
             {ar ? 'اشتراكات IPTV والخدمات الرقمية' : 'Abonnements IPTV'}
           </h1>
-          <Button onClick={openCreate} className="gap-2">
-            <Plus className="h-4 w-4" />
-            {ar ? 'اشتراك جديد' : 'Nouvel abonnement'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-sm px-3 py-1.5 bg-indigo-50 border-indigo-200 text-indigo-700" data-testid="panel-balance-chip">
+              {ar ? 'رصيد البانل المسبق:' : 'Solde panel:'} {formatCurrency(panelBalance)}
+            </Badge>
+            <Button variant="outline" onClick={() => setTopupOpen(true)} className="gap-2" data-testid="panel-topup-btn">
+              <Plus className="h-4 w-4" />
+              {ar ? 'شحن رصيد البانل' : 'Recharger panel'}
+            </Button>
+            <Button onClick={openCreate} className="gap-2">
+              <Plus className="h-4 w-4" />
+              {ar ? 'اشتراك جديد' : 'Nouvel abonnement'}
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -417,6 +459,24 @@ export default function IptvSubscriptionsPage() {
               </Select>
             </div>
 
+            {!editing && (
+              <div className="space-y-1 col-span-2">
+                <Label>{ar ? 'مصدر تكلفة الشراء' : "Source du coût"}</Label>
+                <Select value={form.cost_source} onValueChange={(v) => set('cost_source', v)}>
+                  <SelectTrigger data-testid="cost-source-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="wallet">{ar ? `محفظة المنصة (الدفع عند البيع)` : 'Wallet'}</SelectItem>
+                    <SelectItem value="panel">{ar ? `رصيد البانل المسبق (${formatCurrency(panelBalance)})` : 'Panel'}</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.cost_source === 'panel' && (
+                  <p className="text-xs text-muted-foreground" data-testid="cost-source-panel-hint">
+                    {ar ? 'ستُخصم التكلفة من رصيد البانل المدفوع مسبقاً بدل محفظة المنصة' : 'Le coût sera débité du solde prépayé'}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="space-y-1 col-span-2">
               <Label>{ar ? 'ملاحظات' : 'Notes'}</Label>
               <Textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} />
@@ -428,6 +488,38 @@ export default function IptvSubscriptionsPage() {
               <Save className="h-4 w-4" />
               {saving ? (ar ? 'جاري الحفظ...' : '...') : (ar ? 'حفظ' : 'Enregistrer')}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={topupOpen} onOpenChange={setTopupOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{ar ? 'شحن رصيد البانل المدفوع مسبقاً' : 'Recharger le panel'}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            {ar ? 'عند دفعك مسبقاً لمورد البانل: يُخصم المبلغ من الصندوق ويُسجل كرصيد أصول يظهر في رأس المال.' : 'Cash → solde panel prépayé.'}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>{ar ? 'المبلغ' : 'Montant'}</Label>
+              <Input type="number" dir="ltr" value={topupForm.amount} onChange={(e) => setTopupForm((f) => ({ ...f, amount: e.target.value }))} data-testid="panel-topup-amount" />
+            </div>
+            <div className="space-y-1">
+              <Label>{ar ? 'الدفع من' : 'Caisse'}</Label>
+              <Select value={topupForm.payment_method} onValueChange={(v) => setTopupForm((f) => ({ ...f, payment_method: v }))}>
+                <SelectTrigger data-testid="panel-topup-box"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {cashBoxes.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>{b.name || b.id} ({formatCurrency(b.balance)})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setTopupOpen(false)}>{ar ? 'إلغاء' : 'Annuler'}</Button>
+            <Button onClick={doTopup} disabled={saving} data-testid="panel-topup-submit">{ar ? 'تأكيد الشحن' : 'Confirmer'}</Button>
           </div>
         </DialogContent>
       </Dialog>

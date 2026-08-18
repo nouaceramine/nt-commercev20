@@ -335,17 +335,45 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         # draws from the tenant's OWN single platform wallet (main_db.wallets), funded
         # down the chain from صاحب النظام. We debit it by the COST exactly like the
         # mobile-recharge flow — blocks (HTTP 400) when the balance is insufficient.
+        # p166: cost_source="panel" draws the cost from the PREPAID panel balance instead.
         from services.wallet_service import debit_wallet, credit_wallet
         entity_id = user.get("tenant_id") or user.get("id", "")
         cost = _to_float(doc.get("cost"))
+        cost_source = (payload.get("cost_source") or "wallet").lower()
+        if cost_source not in ("wallet", "panel"):
+            cost_source = "wallet"
+        doc["cost_source"] = cost_source
         wallet_debited = False
+        panel_debited = False
         if cost > 0:
-            await debit_wallet(
-                main_db, entity_id, cost, "digital_subscription", sub_id,
-                f"بيع اشتراك {doc['service_name'] or doc['category']}",
-                user.get("name", ""),
-            )
-            wallet_debited = True
+            if cost_source == "panel":
+                panel_doc = await db.digital_panel_balance.find_one_and_update(
+                    {"id": "default", "balance": {"$gte": cost}},
+                    {"$inc": {"balance": -cost},
+                     "$set": {"updated_at": now}},
+                    return_document=ReturnDocument.BEFORE,
+                )
+                if not panel_doc:
+                    raise HTTPException(status_code=400, detail="رصيد البانل المدفوع مسبقاً غير كافٍ — اشحنه أولاً")
+                panel_debited = True
+                try:
+                    await db.digital_panel_transactions.insert_one({
+                        "id": str(uuid.uuid4()), "type": "subscription_cost",
+                        "amount": -cost,
+                        "balance_after": round(_to_float(panel_doc.get("balance")) - cost, 2),
+                        "reference_type": "digital_subscription", "reference_id": sub_id,
+                        "notes": f"تكلفة اشتراك {doc['service_name'] or doc['category']}",
+                        "created_at": now, "created_by": user.get("name", ""),
+                    })
+                except Exception:
+                    logger.exception("panel cost ledger write failed for %s", sub_id)
+            else:
+                await debit_wallet(
+                    main_db, entity_id, cost, "digital_subscription", sub_id,
+                    f"بيع اشتراك {doc['service_name'] or doc['category']}",
+                    user.get("name", ""),
+                )
+                wallet_debited = True
 
         reseller_debited = False
 
@@ -366,6 +394,11 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
                                             sub_id, "استرجاع اشتراك فاشل", user.get("name", ""))
                     except Exception:
                         logger.exception("wallet compensation failed for %s", sub_id)
+                if panel_debited:
+                    try:
+                        await db.digital_panel_balance.update_one({"id": "default"}, {"$inc": {"balance": cost}})
+                    except Exception:
+                        logger.exception("panel compensation failed for %s", sub_id)
                 raise
 
         # Persist the subscription; refund every debit on failure.
@@ -385,6 +418,11 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
                                         sub_id, "استرجاع اشتراك فاشل", user.get("name", ""))
                 except Exception:
                     logger.exception("wallet compensation failed for %s", sub_id)
+            if panel_debited:
+                try:
+                    await db.digital_panel_balance.update_one({"id": "default"}, {"$inc": {"balance": cost}})
+                except Exception:
+                    logger.exception("panel compensation failed for %s", sub_id)
             logger.exception("subscription creation failed after debits: %s", sub_id)
             raise HTTPException(status_code=500, detail="فشل تسجيل الاشتراك") from e
 
@@ -473,6 +511,66 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         if res.deleted_count == 0:
             raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
         return {"success": True}
+
+    # ============================================================
+    # p166: Prepaid IPTV panel balance (رصيد البانل المدفوع مسبقاً)
+    # The owner can fund his supplier panel in advance from a cash box;
+    # that prepaid balance is an ASSET counted in total capital.
+    # A subscription sale may then draw its COST from this balance
+    # (cost_source="panel") instead of the platform wallet.
+    # ============================================================
+    @router.get("/panel-balance")
+    async def get_panel_balance(user: dict = Depends(require_tenant)):
+        doc = await db.digital_panel_balance.find_one({"id": "default"}, {"_id": 0})
+        return {"balance": round(_to_float((doc or {}).get("balance")), 2),
+                "updated_at": (doc or {}).get("updated_at", "")}
+
+    @router.post("/panel-balance/topup")
+    async def topup_panel_balance(payload: dict, admin: dict = Depends(get_tenant_admin)):
+        """Fund the prepaid panel balance from a cash box (cash → asset)."""
+        amount = _to_float(payload.get("amount"))
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        pm = payload.get("payment_method") or "cash"
+        now = datetime.now(timezone.utc).isoformat()
+
+        panel = await db.digital_panel_balance.find_one_and_update(
+            {"id": "default"},
+            {"$inc": {"balance": amount}, "$set": {"updated_at": now},
+             "$setOnInsert": {"id": "default", "created_at": now}},
+            upsert=True, return_document=ReturnDocument.AFTER, projection={"_id": 0},
+        )
+        try:
+            await db.cash_boxes.update_one(
+                {"id": pm},
+                {"$inc": {"balance": -amount}, "$set": {"updated_at": now}},
+            )
+            await db.transactions.insert_one({
+                "id": str(uuid.uuid4()), "cash_box_id": pm,
+                "type": "expense", "amount": amount,
+                "description": "شحن رصيد بانل IPTV المدفوع مسبقاً",
+                "reference_type": "panel_topup", "reference_id": str(uuid.uuid4()),
+                "created_at": now, "created_by": admin.get("name", ""),
+            })
+            await db.digital_panel_transactions.insert_one({
+                "id": str(uuid.uuid4()), "type": "topup", "amount": amount,
+                "balance_after": panel["balance"],
+                "payment_method": pm,
+                "notes": payload.get("notes") or "",
+                "created_at": now, "created_by": admin.get("name", ""),
+            })
+        except Exception as e:
+            try:
+                await db.digital_panel_balance.update_one({"id": "default"}, {"$inc": {"balance": -amount}})
+            except Exception:
+                logger.exception("panel topup rollback failed")
+            logger.exception("panel topup failed: %s", e)
+            raise HTTPException(status_code=500, detail="فشل شحن رصيد البانل") from e
+        return {"balance": round(_to_float(panel.get("balance")), 2)}
+
+    @router.get("/panel-balance/transactions")
+    async def panel_balance_transactions(admin: dict = Depends(get_tenant_admin)):
+        return await db.digital_panel_transactions.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
     # ============================================================
     # Platform catalog (read-only for tenants + purchase)

@@ -2441,3 +2441,20 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
   - SimManagementPage: empty-SIM stock + unit cost per slot, bonus display, new "عروض التفعيل" tab (CRUD).
   - SettingsPage: new "الميزان" tab (ScaleTab) for scale barcode config.
 **Verification**: curl — /sim/balances ✓, /sim/slots defaults ✓, offer CRUD ✓, activation (offer 2500/bonus 500/sale 2300/cost 100 → profit 200, slot 5000→2500+500 bonus, stock 10→9, sale row, cashbox +2300) ✓, IPTV sub (price 500 cost 0 → sale row + cashbox) ✓, /stats capital includes wallet+SIMs+SIM stock ✓, daily-full sections ✓, /pos/scale-config ✓. Test data fully reverted after verification. Bundle markers verified (main.3eefc87a.js + ScaleTab chunk 236.bac5138e).
+
+### p165-hotfix (2026-08-18, release 20260818_165751)
+POS crashed with "Cannot access lexical declaration before initialization" — addProductSmart useCallback was declared AFTER the barcode-scanner useEffect that lists it in its deps (TDZ). Moved the helper block above the scanner effect. Bundle main.fe2d3591.js.
+
+## p166 — Telecom stock hub: cards/SIMs/transfers + IPTV prepaid panel (2026-08-18, release 20260818_180243)
+**Before**: no stock tracking for physical scratch/idoom cards; no way to buy empty SIMs through the system; no SIM↔SIM/wallet balance transfers; no SIM topup from a cash box; IPTV cost could only be debited from the platform wallet (pay-per-sale); card stock/panel balance absent from capital and daily report.
+**After**:
+- Backend:
+  - NEW routes/recharge/card_stock_routes.py (auto-registered): card types CRUD (/cards/stock), POST /cards/purchase (تموين — weighted-average unit_cost, cash box −= total + expense transaction + card_purchases log), POST /cards/sell (atomic stock guard, sales row type card_sale with purchase_price=unit_cost → exact profit, cash box/customer debt mirror, daily session, full rollback), GET /cards/purchases.
+  - sim_routes.py: POST /sim/purchase (empty SIMs per slot, weighted-avg cost, cash box), POST /sim/slots/{id}/topup (cash box → SIM balance + balance log), POST /sim/transfer (1:1 slot↔slot, slot↔platform wallet with atomic source guard + compensation + audit logs).
+  - digital_panel_routes.py: prepaid IPTV panel balance (db.digital_panel_balance) — GET /digital-panel/panel-balance, POST .../topup (cash box → asset), GET .../transactions; create_subscription accepts cost_source=panel (debits prepaid balance instead of wallet, blocks when insufficient, refund on failure).
+  - stats_routes.py: capital += card stock value (Σ qty×unit_cost) + iptv_panel_balance; daily-full gains cards section (count/revenue/profit), excludes card_sale from POS section, total_revenue includes card sales; /stats response gains card_stock_value + iptv_panel_balance.
+- Frontend:
+  - NEW pages/TelecomStockPage.js (/telecom-stock, menu item مخزون الشحن under خدمة شحن رصيد الجوال): summary strip (wallet/SIMs/card stock/empty SIMs), tabs — cards (CRUD + تموين + sell with profit preview), empty SIMs purchase per operator, transfers + SIM topup.
+  - QuickFlexyPanel: new كروت mode — card chips with live stock, qty/price, profit preview, cash/credit sale.
+  - IptvSubscriptionsPage: panel balance chip + topup dialog; cost_source select (محفظة المنصة / رصيد البانل المسبق) on new subscriptions.
+**Verification**: curl — card CRUD ✓, تموين weighted avg (10@460 + 10@480 → avg 470) ✓, sell 2@500 → profit 60, invoice CARD00001/26, oversell blocked ✓, stats card_stock_value 8460 ✓; sim purchase/topup/transfer + insufficient-balance guards ✓; panel topup 2000, subscription cost_source=panel (balance 2000→1500, profit 300), insufficient guard ✓; daily-full cards section {count 1, revenue 1000, profit 60} ✓. Test data reverted (note: owner made a real SIM activation SIM00001 +2000 and reset the cash box mid-testing — his data preserved; a cleanup overreach on 2 unrelated open sessions was repaired). Bundle main.a798b85d.js markers verified.

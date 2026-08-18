@@ -49,6 +49,12 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
   const [simBonus, setSimBonus] = useState("");
   const [simCost, setSimCost] = useState("");
 
+  // p166: card selling (scratch/idoom/other) mode
+  const [cards, setCards] = useState([]);
+  const [pickedCard, setPickedCard] = useState(null);
+  const [cardQty, setCardQty] = useState("1");
+  const [cardPrice, setCardPrice] = useState("");
+
   // Allow parent (POSPage) to focus the input via F4
   useImperativeHandle(ref, () => ({
     focus: () => {
@@ -89,6 +95,12 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
       .then((r) => setSimOffers(Array.isArray(r.data) ? r.data : []))
       .catch(() => setSimOffers([]));
   }, [mode, simOperator]);
+  useEffect(() => {
+    if (mode !== "cards") return;
+    apiClient.get("/cards/stock")
+      .then((r) => setCards(r.data?.items || []))
+      .catch(() => setCards([]));
+  }, [mode]);
 
   // p165: SIM activation helpers
   const pickSimOffer = (o) => {
@@ -128,6 +140,42 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
       toast.error(typeof d === "string" ? d : (ar ? "فشل بيع الشريحة" : "Échec"));
     } finally { setLoading(false); }
   };
+  // p166: card sell helpers
+  const pickCard = (c) => {
+    setPickedCard(c);
+    setCardQty("1");
+    setCardPrice(String(c.sell_price || c.denomination || ""));
+  };
+  const cardProfit = pickedCard
+    ? ((parseFloat(cardPrice) || 0) - (pickedCard.unit_cost || 0)) * (parseFloat(cardQty) || 0)
+    : 0;
+
+  const submitCard = async () => {
+    if (!pickedCard) return toast.error(ar ? "اختر بطاقة" : "Choisir une carte");
+    const qty = parseFloat(cardQty);
+    if (!qty || qty <= 0) return toast.error(ar ? "أدخل الكمية" : "Quantité requise");
+    if (pay === "credit" && !customerId) return toast.error(ar ? "اختر زبوناً للبيع الآجل" : "Choisir un client");
+    setLoading(true);
+    try {
+      const res = await apiClient.post("/cards/sell", {
+        card_id: pickedCard.id,
+        quantity: qty,
+        sell_price: parseFloat(cardPrice) || undefined,
+        payment_method: pay === "credit" ? "credit" : "cash",
+        customer_id: pay === "credit" ? customerId : null,
+      });
+      toast.success(ar ? `تم بيع البطاقة — الربح: ${res.data.profit} دج` : `Vendue — profit: ${res.data.profit} DA`);
+      setPickedCard(null); setCardQty("1"); setCardPrice("");
+      setCustomerId(""); setPay("cash");
+      loadAll();
+      apiClient.get("/cards/stock").then((r) => setCards(r.data?.items || [])).catch(() => {});
+      if (onAfterSuccess) onAfterSuccess(res.data);
+    } catch (e) {
+      const d = e?.response?.data?.detail || (ar ? "فشل بيع البطاقة" : "Échec");
+      toast.error(typeof d === "string" ? d : (ar ? "فشل بيع البطاقة" : "Échec"));
+    } finally { setLoading(false); }
+  };
+
   useEffect(() => {
     if (pay === "cash") setCustomerId("");
   }, [pay]);
@@ -213,6 +261,15 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
               data-testid="mode-sim"
             >
               <CreditCard className="h-3 w-3 ml-1" /> {ar ? "شريحة" : "SIM"}
+            </Button>
+            <Button
+              size="sm"
+              variant={mode === "cards" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setMode("cards")}
+              data-testid="mode-cards"
+            >
+              <CreditCard className="h-3 w-3 ml-1" /> {ar ? "كروت" : "Cartes"}
             </Button>
           </div>
           {mode === "flexy" && operator && (
@@ -425,6 +482,49 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-3.5 w-3.5 me-1" />{ar ? "بيع وتفعيل" : "Vendre"}</>}
               </Button>
             </div>
+          </>
+        )}
+
+        {/* === Cards selling mode (p166) === */}
+        {mode === "cards" && (
+          <>
+            {cards.length === 0 ? (
+              <div className="text-center text-xs text-gray-500 py-3">
+                {ar ? "لا توجد كروت في المخزون — أضفها من صفحة مخزون الشحن" : "Pas de cartes en stock"}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 flex-wrap" data-testid="cards-list">
+                {cards.map((c) => (
+                  <button key={c.id} onClick={() => pickCard(c)} disabled={c.quantity <= 0}
+                    className={`h-8 px-2 text-xs rounded-md border transition-colors disabled:opacity-40 ${pickedCard?.id === c.id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-blue-700 border-blue-200 hover:border-blue-400"}`}
+                    data-testid={`card-pick-${c.id}`}>
+                    {c.name} · <span className="font-bold">{c.quantity}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {pickedCard && (
+              <div className={`grid gap-1.5 ${compact ? "grid-cols-3" : "grid-cols-3"}`}>
+                <div>
+                  <label className="text-[10px] text-gray-600">{ar ? "الكمية" : "Qté"}</label>
+                  <Input dir="ltr" type="number" value={cardQty} onChange={(e) => setCardQty(e.target.value)} className={`${compact ? "h-8" : "h-9"} text-sm text-center`} data-testid="card-qty" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-600">{ar ? "سعر البيع" : "Prix"}</label>
+                  <Input dir="ltr" type="number" value={cardPrice} onChange={(e) => setCardPrice(e.target.value)} className={`${compact ? "h-8" : "h-9"} text-sm text-center font-bold`} data-testid="card-price" />
+                </div>
+                <div className="flex items-end">
+                  <Button className="w-full h-8 px-2 bg-blue-600 hover:bg-blue-700 text-xs" onClick={submitCard} disabled={loading} data-testid="card-submit-btn">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-3.5 w-3.5 me-1" />{ar ? "بيع" : "Vendre"}</>}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {pickedCard && (
+              <span className={`text-xs font-bold ${cardProfit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="card-profit-preview">
+                {ar ? "الربح المتوقع:" : "Profit:"} {cardProfit.toFixed(2)} {ar ? "دج" : "DA"}
+              </span>
+            )}
           </>
         )}
 

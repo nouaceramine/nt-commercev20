@@ -152,6 +152,7 @@ export const defaultMenuSections = [
       { id: 'recharge', path: '/recharge', icon: 'Smartphone', labelAr: 'تعبئة', labelFr: 'Recharge', visible: true, minRole: 'cashier' },
       { id: 'wallet-management', path: '/wallet-management', icon: 'Wallet', labelAr: 'المحفظة', labelFr: 'Portefeuille', visible: true },
       { id: 'sim-management', path: '/sim-management', icon: 'Zap', labelAr: 'إدارة الشرائح', labelFr: 'Gestion SIM', visible: true },
+      { id: 'telecom-stock', path: '/telecom-stock', icon: 'Package', labelAr: 'مخزون الشحن', labelFr: 'Stock recharge', visible: true },
     ]
   },
   {

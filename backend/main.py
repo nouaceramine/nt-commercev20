@@ -1108,6 +1108,7 @@ _AUTO_REG_MODULES = [
     'routes.recharge.idoom_routes',
     'routes.recharge.sim_routes',
     'routes.recharge.sim_offers_routes',
+    'routes.recharge.card_stock_routes',
     # ── saas extras not covered by the aggregate router ──
     'routes.saas.event_bus_routes',
     'routes.saas.supplier_routes',

@@ -66,6 +66,7 @@ import SupplierFamiliesPage from "./pages/SupplierFamiliesPage";
 import WooCommercePage from "./pages/WooCommercePage";
 import ShippingPage from "./pages/ShippingPage";
 import SimManagementPage from "./pages/SimManagementPage";
+import TelecomStockPage from "./pages/TelecomStockPage";
 import AdvancedAnalyticsPage from "./pages/AdvancedAnalyticsPage";
 import LoyaltyPage from "./pages/LoyaltyPage";
 import WholesaleServicesPage from "./pages/WholesaleServicesPage";
@@ -931,6 +932,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute adminOnly>
             <SimManagementPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/telecom-stock"
+        element={
+          <ProtectedRoute adminOnly featureKey="recharge">
+            <TelecomStockPage />
           </ProtectedRoute>
         }
       />

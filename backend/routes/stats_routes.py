@@ -81,7 +81,12 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         sim_slots_list = await db.sim_slots.find({}, {"_id": 0}).to_list(20)
         sim_balance_total = round(sum(float(s.get("balance", 0) or 0) + float(s.get("bonus_balance", 0) or 0) for s in sim_slots_list), 2)
         sim_stock_value = round(sum(float(s.get("empty_sims", 0) or 0) * float(s.get("sim_unit_cost", 0) or 0) for s in sim_slots_list), 2)
-        capital = round(stock_value + total_cash - unboxed_expenses_today + flexy_wallet_balance + sim_balance_total + sim_stock_value, 2)
+        # ── p166: physical card stock (scratch/idoom/other) at cost + prepaid IPTV panel balance ──
+        card_stock_list = await db.card_stock.find({}, {"_id": 0, "quantity": 1, "unit_cost": 1}).to_list(500)
+        card_stock_value = round(sum(float(c.get("quantity", 0) or 0) * float(c.get("unit_cost", 0) or 0) for c in card_stock_list), 2)
+        _panel_doc = await db.digital_panel_balance.find_one({"id": "default"}, {"_id": 0, "balance": 1})
+        iptv_panel_balance = round(float((_panel_doc or {}).get("balance", 0) or 0), 2)
+        capital = round(stock_value + total_cash - unboxed_expenses_today + flexy_wallet_balance + sim_balance_total + sim_stock_value + card_stock_value + iptv_panel_balance, 2)
 
         unread_notifications = await db.notifications.count_documents({"read": False})
 
@@ -145,6 +150,8 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "flexy_wallet_balance": flexy_wallet_balance,
             "sim_balance_total": sim_balance_total,
             "sim_stock_value": sim_stock_value,
+            "card_stock_value": card_stock_value,
+            "iptv_panel_balance": iptv_panel_balance,
             "capital": capital,
             "unread_notifications": unread_notifications,
             "total_receivables": total_receivables[0]["total"] if total_receivables else 0,
@@ -497,7 +504,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
         # 1) POS / inventory sales (webstore mirror rows are counted in the ecom line)
         pos_docs = await db.sales.find({"created_at": in_day, "source": {"$ne": "webstore"},
-                                        "type": {"$nin": ["recharge_credit", "recharge_cash", "digital_subscription", "sim_activation"]}}, {"_id": 0}).to_list(5000)
+                                        "type": {"$nin": ["recharge_credit", "recharge_cash", "digital_subscription", "sim_activation", "card_sale"]}}, {"_id": 0}).to_list(5000)
         pos_active = [s for s in pos_docs if s.get("status") != "returned"]
         pos_returned = [s for s in pos_docs if s.get("status") == "returned"]
         pos_ids = [it.get("product_id") for s in pos_active for it in (s.get("items") or [])]
@@ -580,6 +587,19 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "profit": round(sum(s.get("profit") or 0 for s in sim_act_docs), 2),
         }
 
+        # p166: physical card sales (scratch/idoom/other) sold today
+        card_sale_docs = await db.sales.find({"created_at": in_day, "type": "card_sale", "status": {"$ne": "returned"}},
+                                             {"_id": 0, "total": 1, "items": 1}).to_list(3000)
+        cards_profit = 0.0
+        for s in card_sale_docs:
+            for it in (s.get("items") or []):
+                cards_profit += ((it.get("unit_price") or it.get("price") or 0) - (it.get("purchase_price") or 0)) * (it.get("quantity") or 1)
+        cards = {
+            "count": len(card_sale_docs),
+            "revenue": round(sum(s.get("total") or 0 for s in card_sale_docs), 2),
+            "profit": round(cards_profit, 2),
+        }
+
         # 5) Repairs / maintenance
         rep_received = await db.repair_tickets.count_documents({"received_at": in_day})
         rep_delivered_docs = await db.repair_tickets.find({"delivered_at": in_day}, {"_id": 0, "final_cost": 1}).to_list(2000)
@@ -630,9 +650,14 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         sim_slots2 = await db.sim_slots.find({}, {"_id": 0}).to_list(20)
         sim_balance2 = round(sum(float(s.get("balance", 0) or 0) + float(s.get("bonus_balance", 0) or 0) for s in sim_slots2), 2)
         sim_stock2 = round(sum(float(s.get("empty_sims", 0) or 0) * float(s.get("sim_unit_cost", 0) or 0) for s in sim_slots2), 2)
-        capital = round(stock_value2 + boxes_total - unboxed_exp2 + flexy_wallet2 + sim_balance2 + sim_stock2, 2)
+        # p166: card stock at cost + prepaid IPTV panel balance count toward capital
+        card_stock_list2 = await db.card_stock.find({}, {"_id": 0, "quantity": 1, "unit_cost": 1}).to_list(500)
+        card_stock_value2 = round(sum(float(c.get("quantity", 0) or 0) * float(c.get("unit_cost", 0) or 0) for c in card_stock_list2), 2)
+        _panel_doc2 = await db.digital_panel_balance.find_one({"id": "default"}, {"_id": 0, "balance": 1})
+        iptv_panel2 = round(float((_panel_doc2 or {}).get("balance", 0) or 0), 2)
+        capital = round(stock_value2 + boxes_total - unboxed_exp2 + flexy_wallet2 + sim_balance2 + sim_stock2 + card_stock_value2 + iptv_panel2, 2)
 
-        total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + digital["subs_revenue"] + sim_activations["revenue"] + repairs["revenue"], 2)
+        total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + digital["subs_revenue"] + sim_activations["revenue"] + cards["revenue"] + repairs["revenue"], 2)
 
         return {
             "date": day,
@@ -641,9 +666,12 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "expenses": expenses, "capital": capital, "cash_boxes": boxes,
             "stock_value": stock_value2,
             "sim_activations": sim_activations,
+            "cards": cards,
             "flexy_wallet_balance": flexy_wallet2,
             "sim_balance_total": sim_balance2,
             "sim_stock_value": sim_stock2,
+            "card_stock_value": card_stock_value2,
+            "iptv_panel_balance": iptv_panel2,
             "total_revenue": total_revenue,
         }
 
