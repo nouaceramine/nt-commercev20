@@ -31,7 +31,8 @@ import {
   Equal,
   Settings,
   Wallet,
-  CreditCard
+  CreditCard,
+  DollarSign
 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -57,6 +58,7 @@ export default function DashboardPage() {
     monthly_purchase_cost: 0
   });
   const [recentProducts, setRecentProducts] = useState([]);
+  const [todayProfit, setTodayProfit] = useState(0);
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletDebt, setWalletDebt] = useState(0);
   const [walletOverdue, setWalletOverdue] = useState(false);
@@ -65,12 +67,13 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes] = await Promise.all([
+        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes] = await Promise.all([
           apiClient.get(`/products`),
           apiClient.get(`/stats`).catch(() => ({ data: {} })),
           apiClient.get(`/dashboard/sales-stats`).catch(() => ({ data: null })),
           apiClient.get(`/dashboard/profit-stats`).catch(() => ({ data: null })),
-          apiClient.get(`/wallet`).catch(() => ({ data: null }))
+          apiClient.get(`/wallet`).catch(() => ({ data: null })),
+          apiClient.get(`/reports/daily-full`).catch(() => ({ data: null }))
         ]);
         
         setRecentProducts(productsRes.data.slice(0, 6));
@@ -99,6 +102,16 @@ export default function DashboardPage() {
         if (profitRes.data) {
           setProfitStats(profitRes.data);
         }
+
+        // فوائد اليوم: sum of every section's profit in the daily full report
+        if (dailyRes.data) {
+          const d = dailyRes.data;
+          setTodayProfit(
+            (d.pos?.profit || 0) + (d.recharge?.profit || 0) +
+            (d.digital?.subs_profit || 0) + (d.sim_activations?.profit || 0) +
+            (d.cards?.profit || 0)
+          );
+        }
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -124,6 +137,7 @@ export default function DashboardPage() {
     { title: language === 'ar' ? 'ديون الموردين اليوم' : "Dettes fournisseurs aujourd'hui", value: `${(stats.supplier_debt_today || 0).toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `الإجمالي الكلي: ${(stats.supplier_debt_total || 0).toFixed(0)} ${t.currency}` : `Total global: ${(stats.supplier_debt_total || 0).toFixed(0)} ${t.currency}`, icon: Truck, color: (stats.supplier_debt_today || 0) > 0 ? 'text-orange-600' : 'text-slate-600', bgColor: (stats.supplier_debt_today || 0) > 0 ? 'bg-orange-100' : 'bg-slate-100', link: '/suppliers', testId: 'supp-debt-today-card' },
     // ── Standard stats ──
     { title: t.todaySales, value: `${stats.today_sales_total?.toFixed(2) || 0} ${t.currency}`, subValue: `${stats.today_sales_count || 0} ${t.sales}`, icon: TrendingUp, color: 'text-emerald-600', bgColor: 'bg-emerald-100', link: '/sales' },
+    { title: language === 'ar' ? 'فوائد اليوم' : "Profits du jour", value: `${todayProfit.toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? 'كل الأقسام (مبيعات + خدمات)' : 'Toutes sections', icon: DollarSign, color: todayProfit > 0 ? 'text-green-600' : 'text-slate-600', bgColor: todayProfit > 0 ? 'bg-green-100' : 'bg-slate-100', link: '/daily-report', testId: 'today-profit-card' },
     { title: language === 'ar' ? 'رأس المال' : 'Capital', value: `${(stats.capital ?? stats.total_cash)?.toFixed(2) || 0} ${t.currency}`, icon: Banknote, color: 'text-blue-600', bgColor: 'bg-blue-100', link: '/cash', testId: 'capital-card' },
     { title: language === 'ar' ? 'رصيد المحفظة' : 'Solde portefeuille', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'متوفر لشحن الجوال' : 'Disponible recharge', icon: Wallet, color: 'text-teal-600', bgColor: 'bg-teal-100', link: '/recharge' },
     { title: language === 'ar' ? 'رصيد محفظة المستخدم' : 'Solde portefeuille utilisateur', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'محفظة المنصة' : 'Portefeuille plateforme', icon: Wallet, color: 'text-indigo-600', bgColor: 'bg-indigo-100', link: '/wallet-management' },
@@ -173,19 +187,19 @@ export default function DashboardPage() {
 
         {/* Stats Cards */}
         {isWidgetVisible('stats') && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {statsCards.map((stat, index) => (
             <Link key={`stat-${index}-${stat.link}`} to={stat.link}>
-              <Card className="stats-card cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-200" data-testid={`stat-card-${index}`}>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">{stat.title}</p>
-                      <p className="text-2xl font-bold mt-2">{stat.value}</p>
-                      {stat.subValue && <p className="text-sm text-muted-foreground">{stat.subValue}</p>}
+              <Card className="stats-card cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all duration-200" data-testid={`stat-card-${index}`}>
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground truncate">{stat.title}</p>
+                      <p className="text-base font-bold mt-1 truncate">{stat.value}</p>
+                      {stat.subValue && <p className="text-[11px] text-muted-foreground truncate">{stat.subValue}</p>}
                     </div>
-                    <div className={`p-4 rounded-xl ${stat.bgColor}`}>
-                      <stat.icon className={`h-6 w-6 ${stat.color}`} />
+                    <div className={`p-2 rounded-lg shrink-0 ${stat.bgColor}`}>
+                      <stat.icon className={`h-4 w-4 ${stat.color}`} />
                     </div>
                   </div>
                 </CardContent>
