@@ -2378,3 +2378,9 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 - pages/UnifiedLoginPage.js: tenant/tenant_admin post-login target /tenant/dashboard → /
 **Tests**: build Compiled with warnings (source-map noise only); live main.704bee88.js — menu labels 'Tableau abonné'/'Dashboard Intelligent' = 0 hits, legacy paths present only as redirect routes; API smoke (owner tenant JWT): /ai/financial-health, /ai/insights, /ai/daily-summary, /ai/forecast/revenue all 200; https://nt-commerce.net/ + /tenant/dashboard + /smart-dashboard all 200 on new bundle
 **Deploy**: release 20260818_082911 via scripts/deploy.sh (rollback available)
+
+## p160-hotfix — ReferenceError: Can't find variable TenantDashboardPage (2026-08-18 09:08)
+**Bug**: previous release removed the component imports but left stale route elements referencing TenantDashboardPage/SmartDashboardPage → runtime crash on load.
+**Fix**: App.js route block replaced with <Navigate to="/" replace /> redirects for /tenant/dashboard and /smart-dashboard.
+**Tests**: live main.2370959c.js — TenantDashboardPage=0, SmartDashboardPage=0 refs; /, /tenant/dashboard, /smart-dashboard all 200.
+**Deploy**: release 20260818_090818 via scripts/deploy.sh

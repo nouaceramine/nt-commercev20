@@ -359,18 +359,11 @@ function AppRoutes() {
       <Route path="/dashboard" element={<DashboardRouter />} />
       <Route path="/agent/dashboard" element={<AgentDashboardPage />} />
 
-      {/* Tenant Dashboard */}
-      <Route path="/tenant/dashboard" element={<TenantDashboardPage />} />
+      {/* p160: legacy dashboard URLs redirect to the unified dashboard */}
+      <Route path="/tenant/dashboard" element={<Navigate to="/" replace />} />
+      <Route path="/smart-dashboard" element={<Navigate to="/" replace />} />
 
       {/* AI & Smart Accounting Routes */}
-      <Route
-        path="/smart-dashboard"
-        element={
-          <ProtectedRoute>
-            <SmartDashboardPage />
-          </ProtectedRoute>
-        }
-      />
       <Route
         path="/ai-chat"
         element={
