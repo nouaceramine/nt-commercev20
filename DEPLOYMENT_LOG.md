@@ -2401,3 +2401,9 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 **Backup**: /opt/ntcommerce/backups/p162_search_pos/ (POSSidebar.js, POSPage.js)
 **Tests**: esbuild JSX parse OK; bundle main.540097e0.js — pos-search-results-list=1, pos-search-clear-btn=1
 **Deploy**: release 20260818_104811
+
+## p164 — POS column rearrangement per user sketch (2026-08-18)
+**Change**: POS grid columns reordered — [search sidebar 3] [middle 6: sell-card + QuickFlexy above the cart] [shortcuts pad 3 to the RIGHT of the cart]. POSCart wrapped in flex-1 filler; POSCart root gained flex-1. Mobile stacks: cart column then shortcuts.
+**Backup**: /opt/ntcommerce/backups/p164_poslayout/
+**Tests**: esbuild parse OK; bundle main.094cc78e.js — pos-shortcuts-col=1, pos-cart-wrap=1
+**Deploy**: release 20260818_125820

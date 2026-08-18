@@ -596,27 +596,20 @@ export default function POSPage() {
             language={language} formatCurrency={formatCurrency} isRTL={isRTL}
           />
 
-          <div className="col-span-1 md:col-span-3 flex flex-col gap-2 min-h-0 overflow-y-auto md:overflow-visible" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+          {/* p164: middle column — flexy/sell-card above the cart (layout per user sketch) */}
+          <div className="col-span-1 md:col-span-6 flex flex-col gap-2 min-h-0" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
             <div className="md:hidden flex items-center gap-2 mb-1 overflow-x-auto pb-1">
               <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowProductsDialog(true)}><Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}</Button>
               <Button size="sm" variant={cart.returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}><Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}</Button>
               <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowCustomersDialog(true)}><Users className="h-4 w-4" />{language === 'ar' ? 'زبون' : 'Client'}</Button>
             </div>
-            <POSShortcuts
-              productShortcuts={productShortcuts} products={products}
-              getShortcutProductName={getShortcutProductName} handleShortcutClick={handleShortcutClick}
-              setEditingShortcutIndex={setEditingShortcutIndex} setShortcutColor={setShortcutColor}
-              setShortcutProductId={setShortcutProductId} setShowShortcutDialog={setShowShortcutDialog}
-              SHORTCUT_COLORS={SHORTCUT_COLORS} language={language} formatCurrency={formatCurrency}
-              isRTL={isRTL} editing={editingShortcutsMode} onToggleEdit={() => setEditingShortcutsMode(!editingShortcutsMode)} onReorder={saveShortcuts}
-            />
-            <div className="flex flex-col gap-2 md:flex-1 md:min-h-0 md:overflow-y-auto" data-testid="pos-middle-scroll">
+            <div className="flex flex-col gap-2" data-testid="pos-middle-scroll">
               <Button variant="outline" className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 w-full justify-start" onClick={() => setShowSellCardDialog(true)}><CreditCard className="h-4 w-4" />{language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte'}</Button>
               <QuickFlexyPanel ref={flexyPanelRef} language={language} />
             </div>
-          </div>
 
-          <POSCart
+            <div className="flex-1 min-h-0 flex flex-col" data-testid="pos-cart-wrap">
+            <POSCart
             cart={cart.cart} customers={customers} selectedCustomer={selectedCustomer}
             setSelectedCustomer={setSelectedCustomer} customerDebt={customerDebt}
             selectedWarehouse={selectedWarehouse} setSelectedWarehouse={setSelectedWarehouse}
@@ -636,7 +629,21 @@ export default function POSPage() {
             parkCart={cart.parkCart} resumeParkedCart={cart.resumeParkedCart}
             deleteParkedCart={cart.deleteParkedCart} mixedCash={cart.mixedCash}
             setMixedCash={cart.setMixedCash} mixedBank={cart.mixedBank} setMixedBank={cart.setMixedBank}
-          />
+            />
+            </div>
+          </div>
+
+          {/* p164: shortcuts column — to the right of the cart */}
+          <div className="col-span-1 md:col-span-3 flex flex-col gap-2 min-h-0 overflow-y-auto" style={{ direction: isRTL ? 'rtl' : 'ltr' }} data-testid="pos-shortcuts-col">
+            <POSShortcuts
+              productShortcuts={productShortcuts} products={products}
+              getShortcutProductName={getShortcutProductName} handleShortcutClick={handleShortcutClick}
+              setEditingShortcutIndex={setEditingShortcutIndex} setShortcutColor={setShortcutColor}
+              setShortcutProductId={setShortcutProductId} setShowShortcutDialog={setShowShortcutDialog}
+              SHORTCUT_COLORS={SHORTCUT_COLORS} language={language} formatCurrency={formatCurrency}
+              isRTL={isRTL} editing={editingShortcutsMode} onToggleEdit={() => setEditingShortcutsMode(!editingShortcutsMode)} onReorder={saveShortcuts}
+            />
+          </div>
         </div>
 
         {/* Dialogs */}

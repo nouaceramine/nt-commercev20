@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "/static/css/main.615e0d3d.css",
-    "main.js": "/static/js/main.540097e0.js",
+    "main.css": "/static/css/main.534e625c.css",
+    "main.js": "/static/js/main.094cc78e.js",
     "static/js/525.a988c614.chunk.js": "/static/js/525.a988c614.chunk.js",
     "static/js/252.952ff296.chunk.js": "/static/js/252.952ff296.chunk.js",
     "static/js/390.d9007a79.chunk.js": "/static/js/390.d9007a79.chunk.js",
@@ -92,8 +92,8 @@
     "static/media/manrope-cyrillic-ext-600-normal.woff2": "/static/media/manrope-cyrillic-ext-600-normal.089722617bc2a1516cec.woff2",
     "static/media/manrope-cyrillic-ext-500-normal.woff2": "/static/media/manrope-cyrillic-ext-500-normal.c803169a005534ccd3ce.woff2",
     "static/media/manrope-cyrillic-ext-700-normal.woff2": "/static/media/manrope-cyrillic-ext-700-normal.4ee2708831b279ef20f1.woff2",
-    "main.615e0d3d.css.map": "/static/css/main.615e0d3d.css.map",
-    "main.540097e0.js.map": "/static/js/main.540097e0.js.map",
+    "main.534e625c.css.map": "/static/css/main.534e625c.css.map",
+    "main.094cc78e.js.map": "/static/js/main.094cc78e.js.map",
     "525.a988c614.chunk.js.map": "/static/js/525.a988c614.chunk.js.map",
     "252.952ff296.chunk.js.map": "/static/js/252.952ff296.chunk.js.map",
     "390.d9007a79.chunk.js.map": "/static/js/390.d9007a79.chunk.js.map",
@@ -105,7 +105,7 @@
     "365.48157065.chunk.js.map": "/static/js/365.48157065.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.615e0d3d.css",
-    "static/js/main.540097e0.js"
+    "static/css/main.534e625c.css",
+    "static/js/main.094cc78e.js"
   ]
 }
