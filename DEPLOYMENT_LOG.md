@@ -2503,3 +2503,33 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 
 ### النسخ الاحتياطية
 /opt/ntcommerce/backups/p167/
+
+## p168 — 2026-08-18 (release 20260818_214528)
+
+### الطلبان ٣ و ٤
+3. خانة «سعر البيع» مباشرة في شراء جديد → تحدّث سعر التجزئة + تُسجَّل في سجل الأسعار
+4. تفعيل نظام انتهاء الصلاحية (كان موجوداً بلا مدخل): خانة «تاريخ الانتهاء» في الشراء → دفعة تلقائية → إشعارات
+
+### قبل
+- سعر البيع مدفون في نافذة «تعديل الأسعار»، والتحديث من الشراء لا يصل سجل الأسعار ويكتب في حقل selling_price الثانوي
+- الدُفعات (product_lots) تُدار فقط من تبويب مخفي في تعديل المنتج → لا دفعات → لا إشعارات صلاحية
+
+### بعد
+- backend/models/schemas/trading.py: PurchaseItem يقبل retail_price + expiry_date + alert_days
+- backend/routes/purchases_routes.py: _sync_item_extras — retail_price → تحديث + سطر price_history (source: "purchase", reference: رقم الفاتورة)؛ expiry_date → إنشاء product_lots تلقائياً؛ يعمل في الإنشاء المباشر وتأكيد المسودات
+- PurchasesPage.js: patchCartItem + expiryDate في السلة + الحقول الجديدة في الـ payload
+- PurchaseDialogs.js: سطر فرعي تحت كل صنف: «سعر البيع» (retail-price-{id}) و«ينتهي في» (expiry-date-{id})
+
+### الاختبارات (curl، منتج/شراء تجريبيان حُذفا بعدها)
+- شراء 5×60 مع retail 150 وexpiry 2026-09-01: الكمية 5 ✓، purchase_price 60 ✓، retail_price 100→150 ✓
+- price_history: old 100 new 150 (+50%) source=purchase ✓
+- الدفعة أُنشئت (remaining 14 يوم) ✓ والإشعار تولّد: «تنتهي صلاحيتها خلال 14 يوم» ✓
+- التنظيف: 0 بقايا (منتج/شراء/دفعة/سجل/إشعار)
+
+### النسخ الاحتياطية
+/opt/ntcommerce/backups/p168/ (PurchasesPage.js, PurchaseDialogs.js, purchases_routes.py, trading.py)
+
+### مراحل لاحقة متفق عليها
+- تقرير «المنتجات القريبة من الانتهاء» + اقتراح تصريف
+- فئات الزبائن الخمس (وسوم sources + وسم تلقائي + تعبئة رجعية + ملف 360°)
+- توحيد المصدر (selling_price/retail_price/sell_price → مرجع واحد) على 5 مراحل

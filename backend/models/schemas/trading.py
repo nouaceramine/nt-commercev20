@@ -84,6 +84,11 @@ class PurchaseItem(BaseModel):
     # automatically updated to these values during the purchase create flow.
     selling_price: Optional[float] = None
     update_product_prices: Optional[bool] = True   # default ON so user gets the obvious behavior
+    # p168: direct sale-price column in the purchase form → retail_price + price_history
+    retail_price: Optional[float] = None
+    # p168: expiry date of the purchased lot → auto-creates a product_lots row (expiry alerts)
+    expiry_date: Optional[str] = ""
+    alert_days: Optional[int] = 30
 
 class PurchaseCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")

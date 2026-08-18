@@ -167,6 +167,7 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
         retailPrice: product.retail_price || 0,
         newWholesalePrice: product.wholesale_price || 0,
         newRetailPrice: product.retail_price || 0,
+        expiryDate: '',
         updatePrices: false,
         productImage: product.image || null
       }]);
@@ -315,6 +316,11 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
     }));
   };
 
+  // p168: generic cart patch — direct retail price / expiry date columns
+  const patchCartItem = (productId, patch) => {
+    setCart(cart.map(item => item.product_id === productId ? { ...item, ...patch } : item));
+  };
+
   const removeFromCart = (productId) => {
     setCart(cart.filter(item => item.product_id !== productId));
   };
@@ -416,6 +422,9 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
         unit_price: it.unit_price,
         total: it.total,
         selling_price: it.updatePrices && it.newRetailPrice > 0 ? it.newRetailPrice : null,
+        retail_price: it.newRetailPrice > 0 ? it.newRetailPrice : null,  // p168: سعر البيع المباشر → retail_price + سجل الأسعار
+        expiry_date: it.expiryDate || '',                                 // p168: يُنشئ دفعة صلاحية تلقائياً
+        alert_days: 30,
         update_product_prices: !!it.updatePrices || it.unit_price !== it.originalPurchasePrice,
       }));
       const purchaseData = {
@@ -768,6 +777,7 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
           setShowNewSupplierDialog={setShowNewSupplierDialog} supplierPreviousDebt={supplierPreviousDebt}
           cart={cart} updatePrice={updatePrice} updateQuantity={updateQuantity}
           removeFromCart={removeFromCart} openEditPricesDialog={openEditPricesDialog}
+          patchCartItem={patchCartItem}
           subtotal={subtotal} paymentType={paymentType} setPaymentType={setPaymentType}
           paidAmount={paidAmount} setPaidAmount={setPaidAmount}
           paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}

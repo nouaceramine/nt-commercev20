@@ -35,7 +35,7 @@ export default function PurchaseDialogs({
   addToCart, suppliers, selectedSupplier, setSelectedSupplier,
   warehouses = [], selectedWarehouse, setSelectedWarehouse,
   setShowNewSupplierDialog, supplierPreviousDebt,
-  cart, updatePrice, updateQuantity, removeFromCart, openEditPricesDialog,
+  cart, updatePrice, updateQuantity, removeFromCart, openEditPricesDialog, patchCartItem,
   subtotal, paymentType, setPaymentType, paidAmount, setPaidAmount,
   paymentMethod, setPaymentMethod, notes, setNotes,
   loading, completePurchase,
@@ -151,7 +151,8 @@ export default function PurchaseDialogs({
                   <p className="text-center text-muted-foreground py-8">{t.emptyCart}</p>
                 ) : (
                   cart.map(item => (
-                    <div key={item.product_id} className={`flex items-center gap-2 px-2 py-1.5 ${item.updatePrices ? 'bg-green-50' : ''}`}>
+                    <div key={item.product_id} className={`px-2 py-1.5 ${item.updatePrices ? 'bg-green-50' : ''}`}>
+                    <div className="flex items-center gap-2">
                       {item.productImage ? (<img src={item.productImage} alt="" className="w-8 h-8 rounded object-cover shrink-0" />) : (
                         <div className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0"><Package className="h-4 w-4 text-muted-foreground" /></div>
                       )}
@@ -171,6 +172,14 @@ export default function PurchaseDialogs({
                       </div>
                       <span className="w-16 text-center text-xs font-semibold shrink-0">{item.total.toFixed(2)}</span>
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 shrink-0" onClick={() => removeFromCart(item.product_id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
+                    {/* p168: سعر البيع المباشر + تاريخ انتهاء الدفعة */}
+                    <div className="flex items-center gap-2 mt-1 ps-10">
+                      <span className="text-[10px] text-muted-foreground shrink-0">{language === 'ar' ? 'سعر البيع' : 'Prix vente'}</span>
+                      <Input type="number" min="0" step="0.01" value={item.newRetailPrice || ''} onChange={(e) => patchCartItem(item.product_id, { newRetailPrice: parseFloat(e.target.value) || 0 })} className="w-20 h-7 text-center text-xs shrink-0" data-testid={`retail-price-${item.product_id}`} />
+                      <span className="text-[10px] text-muted-foreground shrink-0">{language === 'ar' ? 'ينتهي في' : 'Expire'}</span>
+                      <Input type="date" value={item.expiryDate || ''} onChange={(e) => patchCartItem(item.product_id, { expiryDate: e.target.value })} className="w-32 h-7 text-xs shrink-0" data-testid={`expiry-date-${item.product_id}`} />
+                    </div>
                     </div>
                   ))
                 )}

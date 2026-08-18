@@ -30,7 +30,43 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         notes: Optional[str] = None
 
     # ── Create Purchase ──
-    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True):
+    async def _sync_item_extras(product, item: dict, ref: str, now: str, admin_name: str):
+        # p168: sale price entered on the purchase → canonical retail_price + price_history;
+        #        expiry date → auto-create a product lot (feeds expiry notifications).
+        pid = product.get("id")
+        rp = item.get("retail_price")
+        if rp is not None and float(rp) > 0:
+            old_rp = float(product.get("retail_price") or 0)
+            new_rp = float(rp)
+            if new_rp != old_rp:
+                await db.products.update_one({"id": pid}, {"$set": {"retail_price": new_rp, "updated_at": now}})
+                await db.price_history.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "product_id": pid,
+                    "product_name": product.get("name_ar") or product.get("name_en") or "",
+                    "old_price": old_rp,
+                    "new_price": new_rp,
+                    "price_type": "retail_price",
+                    "change_percent": round(((new_rp - old_rp) / old_rp) * 100, 2) if old_rp else 0.0,
+                    "changed_by": admin_name,
+                    "changed_by_name": admin_name,
+                    "source": "purchase",
+                    "reference": ref,
+                    "created_at": now,
+                })
+        exp = (item.get("expiry_date") or "").strip()
+        if exp:
+            await db.product_lots.insert_one({
+                "id": str(uuid.uuid4()),
+                "product_id": pid,
+                "lot_number": ref,
+                "expiry_date": exp,
+                "quantity": float(item.get("quantity", 0) or 0),
+                "alert_days": int(item.get("alert_days") or 30),
+                "created_at": now,
+            })
+
+    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "", admin_name: str = ""):
         # sign=+1 confirm stock, sign=-1 reverse
         for item in items:
             pid = item.get("product_id")
@@ -48,6 +84,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     set_fields["selling_price"] = float(sp)
                 updates["$set"] = set_fields
             await db.products.update_one({"id": pid}, updates)
+            if sign > 0:
+                await _sync_item_extras(product, item, ref, now, admin_name)
 
     @router.post("", status_code=201)
     async def create_purchase(purchase: dict, admin: dict = Depends(require_permission("purchases.add"))):
@@ -109,6 +147,9 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 product_updates["$set"] = set_fields
 
             await db.products.update_one({"id": item.product_id}, product_updates)
+
+            if product:
+                await _sync_item_extras(product, item.model_dump(), invoice_number, now, admin.get("name", ""))
 
             if old_quantity == 0 and item.quantity > 0 and product:
                 await db.notifications.insert_one({
@@ -297,7 +338,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         if purchase_doc.get("stock_status") == "confirmed":
             return {"message": "المخزون مؤكد مسبقاً", "stock_status": "confirmed"}
         now = datetime.now(timezone.utc).isoformat()
-        await _apply_purchase_stock(purchase_doc.get("items", []), +1, now)
+        await _apply_purchase_stock(purchase_doc.get("items", []), +1, now, ref=purchase_doc.get("invoice_number", ""), admin_name=admin.get("name", ""))
         await db.purchases.update_one({"id": purchase_id}, {"$set": {"stock_status": "confirmed", "updated_at": now}})
         return {"message": "تم تأكيد المخزون", "stock_status": "confirmed"}
 
