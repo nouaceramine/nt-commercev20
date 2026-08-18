@@ -31,11 +31,26 @@ export const ORDER_STATUSES = {
   refunded:  { labelAr: 'مُستردّ',      color: 'bg-rose-100 text-rose-800 border-rose-200',     dot: 'bg-rose-500' },
 };
 
+// p167: unified full catalog (same companies as إدارة التوصيل)
 export const SHIPPING_PROVIDERS = {
-  mock:     { labelAr: 'وهمي (اختبار)' },
-  yalidine: { labelAr: 'يالدين' },
-  zr:       { labelAr: 'ZR Express' },
-  maystro:  { labelAr: 'Maystro' },
+  mock:          { labelAr: 'وهمي (اختبار)' },
+  yalidine:      { labelAr: 'ياليدين' },
+  zr:            { labelAr: 'زد آر إكسبريس' },
+  maystro:       { labelAr: 'مايسترو' },
+  ecotrack:      { labelAr: 'إيكو تراك' },
+  guepex:        { labelAr: 'قيبكس' },
+  procolis:      { labelAr: 'بروكوليس' },
+  noest:         { labelAr: 'نوست إكسبريس' },
+  anderson:      { labelAr: 'أندرسون لوجيستيك' },
+  mylers:        { labelAr: 'مايلرز' },
+  ecom_delivery: { labelAr: 'إيكوم ديليفري' },
+  elogistia:     { labelAr: 'إيلوجيستيا' },
+  yalitec:       { labelAr: 'ياليتيك' },
+  dhd:           { labelAr: 'دي إتش دي إكسبريس' },
+  conexlog:      { labelAr: 'كونيكسلوغ' },
+  coyote:        { labelAr: 'كويوت إكسبريس' },
+  algerie_poste: { labelAr: 'بريد الجزائر' },
+  other:         { labelAr: 'أخرى' },
 };
 
 // Forward state machine — must mirror STATUS_TRANSITIONS in backend constants.py

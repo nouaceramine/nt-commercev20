@@ -647,6 +647,7 @@ export default function ExpensesPage() {
                             <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                               {expense.recurring_period === 'monthly' ? (language === 'ar' ? 'شهري' : 'Mensuel') :
                                expense.recurring_period === 'weekly' ? (language === 'ar' ? 'أسبوعي' : 'Hebdo') :
+                               expense.recurring_period === 'quarterly' ? (language === 'ar' ? 'كل 3 أشهر' : 'Trimestriel') :
                                expense.recurring_period === 'yearly' ? (language === 'ar' ? 'سنوي' : 'Annuel') : ''}
                             </Badge>
                           ) : (
@@ -835,6 +836,7 @@ export default function ExpensesPage() {
                         <SelectContent>
                           <SelectItem value="weekly">{language === 'ar' ? 'أسبوعي' : 'Hebdo'}</SelectItem>
                           <SelectItem value="monthly">{language === 'ar' ? 'شهري' : 'Mensuel'}</SelectItem>
+                          <SelectItem value="quarterly">{language === 'ar' ? 'كل 3 أشهر' : 'Trimestriel'}</SelectItem>
                           <SelectItem value="yearly">{language === 'ar' ? 'سنوي' : 'Annuel'}</SelectItem>
                         </SelectContent>
                       </Select>

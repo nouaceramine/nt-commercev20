@@ -2467,3 +2467,39 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 
 ### p166-fix3 (2026-08-18, release 20260818_185047)
 اختصار «الولاء» (/ecom-hub/store/loyalty) في قسم الزبائن بالقائمة الجانبية (Layout.js، داخل isAdmin + featureKey loyalty_points ليطابق حماية المسار). Bundle main.92ea8986.js.
+
+## p167 — 2026-08-18 (release 20260818_195834)
+
+### الطلبات الستة للمستخدم
+1. أيقونات سريعة في الشريط العلوي (الجرس + صندوق الطلبات الموحد) على كل الصفحات
+2. صناديق نقدية إضافية مربوطة بالعمال (مبيعات العامل النقدية تدخل صندوقه تلقائياً)
+3. توحيد قائمة شركات الشحن (18 شركة) في كل الأماكن
+4. فترة تكلفة «كل 3 أشهر» + بطاقتا «صافي الفوائد اليوم» و«صافي فوائد الشهر» (خصم تقديري للعرض فقط)
+5. نقل WhatsApp من الصيانة إلى الرسائل والإشعارات
+6. نقل قطع الغيار من المنتجات إلى الصيانة
+
+### قبل
+- ربط شركات الشحن (ecom) يعرض 4 شركات فقط مقابل 17 في إدارة التوصيل
+- لا صناديق نقدية إضافية — 6 صناديق نظام ثابتة فقط
+- فترات التكرار: أسبوعي/شهري/سنوي فقط
+- الشريط العلوي للجوال بلا جرس ولا صندوق طلبات
+- WhatsApp تحت الصيانة، قطع الغيار تحت المنتجات
+
+### بعد
+- backend/routes/ecom/constants.py + frontend/src/pages/ecom/ecomConstants.js: SHIPPING_PROVIDERS = 18 شركة (mock, yalidine, zr, maystro, ecotrack, guepex, procolis, noest, anderson, mylers, ecom_delivery, elogistia, yalitec, dhd, conexlog, coyote, algerie_poste, other)
+- backend/routes/cashbox_routes.py: POST /cash-boxes (201)، PUT /cash-boxes/{id}/assign، DELETE /cash-boxes/{id} (حماية صناديق النظام + رصيد صفري)
+- backend/services/application/sales_service.py: البيع النقدي للعامل يُقيَّد في صندوقه المربوط (cash_box_id على وثيقة البيع → المرتجعات ترد للصندوق الصحيح)
+- backend/routes/expenses_routes.py: فترة quarterly (90 يوم) في التذكيرات + GET /expenses/estimated-cost {daily_cost, monthly_cost}
+- ExpensesPage.js: خيار «كل 3 أشهر» + شارة
+- DashboardPage.js: بطاقتا صافي الفوائد اليوم/الشهر (net-today-profit-card / net-month-profit-card)
+- CashManagementPage.js: زر «إضافة صندوق» (add-box-btn) + شارة العامل + حذف الصندوق المخصص
+- Layout.js: نقل WhatsApp وقطع الغيار في القائمة الجانبية + أيقونتا الطلبات/الإشعارات في شريط الجوال (mobile-orders-shortcut-btn)
+
+### الاختبارات (curl)
+- GET /ecom/shipping/providers → 18 شركة ✓
+- POST /cash-boxes → 201 box_4ecc4672؛ DELETE /cash-boxes/cash → 400 محمي؛ DELETE الاختبار → 200 ✓
+- مصروف quarterly 900: estimated-cost = 10/يوم و300/شهر؛ حذف → عودة 0؛ رصيد personal ثابت -30600 ✓
+- الحزمة الحية main.6372595f.js تحوي كل testids الجديدة ✓
+
+### النسخ الاحتياطية
+/opt/ntcommerce/backups/p167/

@@ -110,6 +110,17 @@ async def create_sale_op(db, s, user: dict) -> dict:
             "first_due_date": plan.first_due_date,
         }
 
+    # p167: worker-linked cash box — a worker's cash sales land in HIS box
+    resolved_cash_box = s.payment_method
+    if s.payment_method == "cash" and s.paid_amount > 0:
+        try:
+            worker_box = await db.cash_boxes.find_one(
+                {"assigned_user_id": user.get("id")}, {"_id": 0, "id": 1})
+            if worker_box:
+                resolved_cash_box = worker_box["id"]
+        except Exception:
+            resolved_cash_box = s.payment_method
+
     sale_doc = {
         "id": sale_id, "invoice_number": invoice_number,
         "code": s.code or "",
@@ -121,6 +132,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
         "paid_amount": s.paid_amount, "debt_amount": debt_amount,
         "remaining": max(0, remaining),
         "payment_method": s.payment_method, "payment_type": s.payment_type,
+        "cash_box_id": resolved_cash_box,
         "payments": ([{"amount": s.paid_amount, "method": s.payment_method, "at": now}] if s.paid_amount > 0 else []),  # p67
         "installment_plan": installment_info,
         "status": status,
@@ -170,7 +182,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
         )
 
     if s.paid_amount > 0:
-        cash_box_id = s.payment_method
+        cash_box_id = resolved_cash_box
         await db.cash_boxes.update_one({"id": cash_box_id}, {"$inc": {"balance": s.paid_amount}, "$set": {"updated_at": now}})
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,

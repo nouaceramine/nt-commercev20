@@ -32,7 +32,8 @@ import {
   RefreshCw,
   Lock,
   PiggyBank,
-  ShoppingCart
+  ShoppingCart,
+  Plus
 } from 'lucide-react';
 
 export default function CashManagementPage() {
@@ -45,15 +46,21 @@ export default function CashManagementPage() {
   const [transferData, setTransferData] = useState({
     from_box: '', to_box: '', amount: ''
   });
+  // p167: custom boxes linked to workers
+  const [users, setUsers] = useState([]);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [newBox, setNewBox] = useState({ name: '', assigned_user_id: '', opening_balance: '' });
 
   const fetchData = async () => {
     try {
-      const [boxesRes, transRes] = await Promise.all([
+      const [boxesRes, transRes, usersRes] = await Promise.all([
         apiClient.get(`/cash-boxes`),
-        apiClient.get(`/transactions`)
+        apiClient.get(`/transactions`),
+        apiClient.get(`/users`).catch(() => ({ data: [] }))
       ]);
       setCashBoxes(boxesRes.data);
       setTransactions(transRes.data);
+      setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -81,6 +88,37 @@ export default function CashManagementPage() {
       toast.error(errText(error) ||  t.somethingWentWrong);
     }
   };
+
+  // p167: create / delete custom boxes
+  const handleCreateBox = async (e) => {
+    e.preventDefault();
+    if (!newBox.name.trim()) return toast.error(language === 'ar' ? 'أدخل اسم الصندوق' : 'Nom requis');
+    try {
+      await apiClient.post(`/cash-boxes`, {
+        name: newBox.name,
+        assigned_user_id: newBox.assigned_user_id || '',
+        opening_balance: parseFloat(newBox.opening_balance) || 0,
+      });
+      toast.success(language === 'ar' ? 'تم إنشاء الصندوق' : 'Caisse créée');
+      setAddDialogOpen(false);
+      setNewBox({ name: '', assigned_user_id: '', opening_balance: '' });
+      fetchData();
+    } catch (error) {
+      toast.error(errText(error) || t.somethingWentWrong);
+    }
+  };
+
+  const handleDeleteBox = async (box) => {
+    try {
+      await apiClient.delete(`/cash-boxes/${box.id}`);
+      toast.success(language === 'ar' ? 'تم حذف الصندوق' : 'Caisse supprimée');
+      fetchData();
+    } catch (error) {
+      toast.error(errText(error) || t.somethingWentWrong);
+    }
+  };
+
+  const userName = (id) => users.find(u => u.id === id)?.name || '';
 
   const getBoxIcon = (type) => {
     switch (type) {
@@ -139,10 +177,16 @@ export default function CashManagementPage() {
               {t.totalCash}: <span className="font-semibold text-foreground">{totalBalance.toFixed(2)} {t.currency}</span>
             </p>
           </div>
-          <Button onClick={() => setTransferDialogOpen(true)} className="gap-2" data-testid="transfer-btn">
-            <ArrowRightLeft className="h-5 w-5" />
-            {t.transferFunds}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setAddDialogOpen(true)} className="gap-2" data-testid="add-box-btn">
+              <Plus className="h-5 w-5" />
+              {language === 'ar' ? 'إضافة صندوق' : 'Nouvelle caisse'}
+            </Button>
+            <Button onClick={() => setTransferDialogOpen(true)} className="gap-2" data-testid="transfer-btn">
+              <ArrowRightLeft className="h-5 w-5" />
+              {t.transferFunds}
+            </Button>
+          </div>
         </div>
 
         {/* Cash Boxes */}
@@ -162,6 +206,16 @@ export default function CashManagementPage() {
                         <p className="text-xs text-muted-foreground mt-1" data-testid="personal-box-hint">
                           {language === 'ar' ? 'مال شخصي — خارج رأس المال الإجمالي' : 'Argent personnel — hors capital'}
                         </p>
+                      )}
+                      {box.assigned_user_id && (
+                        <p className="text-xs text-blue-600 mt-1" data-testid={`box-worker-${box.id}`}>
+                          {language === 'ar' ? `العامل: ${userName(box.assigned_user_id)}` : `Employé: ${userName(box.assigned_user_id)}`}
+                        </p>
+                      )}
+                      {box.custom && box.balance === 0 && (
+                        <button onClick={() => handleDeleteBox(box)} className="text-xs text-red-500 hover:underline mt-1" data-testid={`box-delete-${box.id}`}>
+                          {language === 'ar' ? 'حذف الصندوق' : 'Supprimer'}
+                        </button>
                       )}
                     </div>
                     <div className={`p-4 rounded-xl ${getBoxColor(box.type)}`}>
@@ -216,6 +270,57 @@ export default function CashManagementPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Add Box Dialog (p167) */}
+        <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? 'إضافة صندوق نقدي جديد' : 'Nouvelle caisse'}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleCreateBox} className="space-y-4">
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'اسم الصندوق' : 'Nom'}</Label>
+                <Input
+                  value={newBox.name}
+                  onChange={(e) => setNewBox({ ...newBox, name: e.target.value })}
+                  placeholder={language === 'ar' ? 'مثال: صندوق العامل محمد' : ''}
+                  required
+                  data-testid="new-box-name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'العامل المرتبط (اختياري)' : 'Employé lié (optionnel)'}</Label>
+                <Select value={newBox.assigned_user_id || '__none'} onValueChange={(v) => setNewBox({ ...newBox, assigned_user_id: v === '__none' ? '' : v })}>
+                  <SelectTrigger data-testid="new-box-worker">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">{language === 'ar' ? 'بدون ربط' : 'Aucun'}</SelectItem>
+                    {users.map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {language === 'ar' ? 'عند الربط: المبيعات النقدية التي يسجلها هذا العامل تدخل هذا الصندوق تلقائياً' : 'Ventes cash de cet employé → cette caisse'}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>{language === 'ar' ? 'رصيد افتتاحي (اختياري)' : 'Solde initial'}</Label>
+                <Input
+                  type="number" min="0" step="0.01"
+                  value={newBox.opening_balance}
+                  onChange={(e) => setNewBox({ ...newBox, opening_balance: e.target.value })}
+                  data-testid="new-box-balance"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <Button type="button" variant="outline" onClick={() => setAddDialogOpen(false)}>{t.cancel}</Button>
+                <Button type="submit" data-testid="create-box-btn">{language === 'ar' ? 'إنشاء' : 'Créer'}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         {/* Transfer Dialog */}
         <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>

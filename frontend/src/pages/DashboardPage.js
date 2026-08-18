@@ -59,6 +59,7 @@ export default function DashboardPage() {
   });
   const [recentProducts, setRecentProducts] = useState([]);
   const [todayProfit, setTodayProfit] = useState(0);
+  const [recurringCost, setRecurringCost] = useState({ daily: 0, monthly: 0 });
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletDebt, setWalletDebt] = useState(0);
   const [walletOverdue, setWalletOverdue] = useState(false);
@@ -67,13 +68,14 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes] = await Promise.all([
+        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes] = await Promise.all([
           apiClient.get(`/products`),
           apiClient.get(`/stats`).catch(() => ({ data: {} })),
           apiClient.get(`/dashboard/sales-stats`).catch(() => ({ data: null })),
           apiClient.get(`/dashboard/profit-stats`).catch(() => ({ data: null })),
           apiClient.get(`/wallet`).catch(() => ({ data: null })),
-          apiClient.get(`/reports/daily-full`).catch(() => ({ data: null }))
+          apiClient.get(`/reports/daily-full`).catch(() => ({ data: null })),
+          apiClient.get(`/expenses/estimated-cost`).catch(() => ({ data: null }))
         ]);
         
         setRecentProducts(productsRes.data.slice(0, 6));
@@ -101,6 +103,14 @@ export default function DashboardPage() {
         
         if (profitRes.data) {
           setProfitStats(profitRes.data);
+        }
+
+        // p167: estimated daily/monthly share of recurring costs (display-only)
+        if (recCostRes.data) {
+          setRecurringCost({
+            daily: recCostRes.data.daily_cost || 0,
+            monthly: recCostRes.data.monthly_cost || 0
+          });
         }
 
         // فوائد اليوم: sum of every section's profit in the daily full report
@@ -138,6 +148,8 @@ export default function DashboardPage() {
     // ── Standard stats ──
     { title: t.todaySales, value: `${stats.today_sales_total?.toFixed(2) || 0} ${t.currency}`, subValue: `${stats.today_sales_count || 0} ${t.sales}`, icon: TrendingUp, color: 'text-emerald-600', bgColor: 'bg-emerald-100', link: '/sales' },
     { title: language === 'ar' ? 'فوائد اليوم' : "Profits du jour", value: `${todayProfit.toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? 'كل الأقسام (مبيعات + خدمات)' : 'Toutes sections', icon: DollarSign, color: todayProfit > 0 ? 'text-green-600' : 'text-slate-600', bgColor: todayProfit > 0 ? 'bg-green-100' : 'bg-slate-100', link: '/daily-report', testId: 'today-profit-card' },
+    { title: language === 'ar' ? 'صافي الفوائد اليوم' : "Bénéfice net du jour", value: `${(todayProfit - recurringCost.daily).toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `بعد خصم التكاليف اليومية المقدرة (${recurringCost.daily.toFixed(0)})` : `Après coûts journaliers estimés (${recurringCost.daily.toFixed(0)})`, icon: DollarSign, color: (todayProfit - recurringCost.daily) > 0 ? 'text-emerald-600' : 'text-slate-600', bgColor: (todayProfit - recurringCost.daily) > 0 ? 'bg-emerald-100' : 'bg-slate-100', link: '/daily-report', testId: 'net-today-profit-card' },
+    { title: language === 'ar' ? 'صافي فوائد الشهر' : 'Bénéfice net du mois', value: `${((profitStats.monthly_profit || 0) - recurringCost.monthly).toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `بعد خصم التكاليف الشهرية المقدرة (${recurringCost.monthly.toFixed(0)})` : `Après coûts mensuels estimés (${recurringCost.monthly.toFixed(0)})`, icon: TrendingUp, color: ((profitStats.monthly_profit || 0) - recurringCost.monthly) > 0 ? 'text-emerald-600' : 'text-slate-600', bgColor: ((profitStats.monthly_profit || 0) - recurringCost.monthly) > 0 ? 'bg-emerald-100' : 'bg-slate-100', link: '/reports', testId: 'net-month-profit-card' },
     { title: language === 'ar' ? 'رأس المال' : 'Capital', value: `${(stats.capital ?? stats.total_cash)?.toFixed(2) || 0} ${t.currency}`, icon: Banknote, color: 'text-blue-600', bgColor: 'bg-blue-100', link: '/cash', testId: 'capital-card' },
     { title: language === 'ar' ? 'رصيد المحفظة' : 'Solde portefeuille', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'متوفر لشحن الجوال' : 'Disponible recharge', icon: Wallet, color: 'text-teal-600', bgColor: 'bg-teal-100', link: '/recharge' },
     { title: language === 'ar' ? 'رصيد محفظة المستخدم' : 'Solde portefeuille utilisateur', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'محفظة المنصة' : 'Portefeuille plateforme', icon: Wallet, color: 'text-indigo-600', bgColor: 'bg-indigo-100', link: '/wallet-management' },

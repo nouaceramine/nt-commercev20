@@ -60,11 +60,27 @@ STATUS_TRANSITIONS = {
 }
 
 # ─── Shipping providers (Algeria-first) ─────────────────────────────────────
+# p167: unified with ALGERIAN_SHIPPING_COMPANIES (shipping_loyalty_routes) — every
+# place that lists shipping companies now shows the same full catalog.
 SHIPPING_PROVIDERS = {
-    "mock":     {"label_ar": "وهمي (للاختبار)",   "label_en": "Mock",     "real": False},
-    "yalidine": {"label_ar": "يالدين",            "label_en": "Yalidine", "real": False},
-    "zr":       {"label_ar": "ZR Express",         "label_en": "ZR",       "real": False},
-    "maystro":  {"label_ar": "Maystro",            "label_en": "Maystro",  "real": False},
+    "mock":          {"label_ar": "وهمي (للاختبار)",   "label_en": "Mock",             "real": False},
+    "yalidine":      {"label_ar": "ياليدين",           "label_en": "Yalidine",         "real": False},
+    "zr":            {"label_ar": "زد آر إكسبريس",      "label_en": "ZR Express",       "real": False},
+    "maystro":       {"label_ar": "مايسترو",           "label_en": "Maystro",           "real": False},
+    "ecotrack":      {"label_ar": "إيكو تراك",         "label_en": "EcoTrack",          "real": False},
+    "guepex":        {"label_ar": "قيبكس",             "label_en": "Guepex",            "real": False},
+    "procolis":      {"label_ar": "بروكوليس",          "label_en": "Procolis",          "real": False},
+    "noest":         {"label_ar": "نوست إكسبريس",       "label_en": "NOEST Express",     "real": False},
+    "anderson":      {"label_ar": "أندرسون لوجيستيك",   "label_en": "Anderson",          "real": False},
+    "mylers":        {"label_ar": "مايلرز",            "label_en": "Mylers",            "real": False},
+    "ecom_delivery": {"label_ar": "إيكوم ديليفري",      "label_en": "Ecom Delivery",     "real": False},
+    "elogistia":     {"label_ar": "إيلوجيستيا",         "label_en": "Elogistia",         "real": False},
+    "yalitec":       {"label_ar": "ياليتيك",           "label_en": "Yalitec",           "real": False},
+    "dhd":           {"label_ar": "دي إتش دي إكسبريس",  "label_en": "DHD Express",       "real": False},
+    "conexlog":      {"label_ar": "كونيكسلوغ",          "label_en": "Conexlog",          "real": False},
+    "coyote":        {"label_ar": "كويوت إكسبريس",      "label_en": "Coyote Express",    "real": False},
+    "algerie_poste": {"label_ar": "بريد الجزائر",       "label_en": "Algérie Poste",     "real": False},
+    "other":         {"label_ar": "أخرى",              "label_en": "Other",             "real": False},
 }
 
 SHIPPING_PROVIDER_KEYS = set(SHIPPING_PROVIDERS.keys())

@@ -462,7 +462,6 @@ export const Layout = ({ children }) => {
         { path: '/barcode-print', icon: QrCode, label: language === 'ar' ? 'الباركود' : 'Codes-barres', subFeature: 'barcode', featureKey: 'barcode' },
         { path: '/bulk-price-update', icon: DollarSign, label: t.bulkPriceUpdate },
         { path: '/price-history', icon: History, label: language === 'ar' ? 'سجل الأسعار' : 'Historique prix' },
-        { path: '/repairs/parts', icon: Package, label: language === 'ar' ? 'قطع الغيار' : 'Pièces' },
         { path: '/defective-goods', icon: PackageX, label: language === 'ar' ? 'بضائع معيبة' : 'Défectueux' },
       ]
     },
@@ -594,10 +593,8 @@ export const Layout = ({ children }) => {
       items: [
         { path: '/repairs', icon: Wrench, label: language === 'ar' ? 'الصيانة' : 'Réparations', subFeature: 'repair_tickets' },
         { path: '/repairs/new', icon: Smartphone, label: language === 'ar' ? 'استقبال جهاز' : 'Réception' },
+        { path: '/repairs/parts', icon: Package, label: language === 'ar' ? 'قطع الغيار' : 'Pièces' },
         { path: '/defective-goods', icon: PackageX, label: language === 'ar' ? 'بضائع معيبة' : 'Défectueux' },
-        ...(isAdmin ? [
-          { path: '/whatsapp', icon: MessageSquare, label: 'WhatsApp' },
-        ] : [])
       ]
     },
     {
@@ -641,6 +638,7 @@ export const Layout = ({ children }) => {
           { path: '/smart-notifications', icon: Bell, label: language === 'ar' ? 'إشعارات ذكية' : 'Notif. IA' },
           { path: '/email-notifications', icon: Mail, label: language === 'ar' ? 'إشعارات البريد' : 'Email', subFeature: 'email_notifications' },
           { path: '/internal-chat', icon: MessageCircle, label: language === 'ar' ? 'الدردشة' : 'Chat' },
+          { path: '/whatsapp', icon: MessageSquare, label: 'WhatsApp' },
         ] : [])
       ]
     }
@@ -834,6 +832,21 @@ export const Layout = ({ children }) => {
           </div>
           
           <div className="flex items-center gap-1">
+            {/* p167: quick icons — unified orders inbox + notifications (mobile header) */}
+            <button
+              onClick={() => navigate('/ecom-hub')}
+              className="relative p-2 hover:bg-muted rounded-lg"
+              data-testid="mobile-orders-shortcut-btn"
+              title={language === 'ar' ? 'صندوق الطلبات الموحَّد' : 'Boîte de commandes unifiée'}
+            >
+              <ShoppingBag className="h-5 w-5" />
+              {pendingStoreOrders > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold" data-testid="mobile-orders-shortcut-badge">
+                  {pendingStoreOrders}
+                </span>
+              )}
+            </button>
+            <NotificationBell />
             <button
               onClick={toggleTheme}
               className="p-2 hover:bg-muted rounded-lg"

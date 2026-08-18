@@ -19,6 +19,73 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         await init_cash_boxes()
         return await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
 
+    # ============ p167: custom cash boxes linked to workers ============
+
+    class CashBoxCreate(BaseModel):
+        name: str
+        name_fr: Optional[str] = ""
+        assigned_user_id: Optional[str] = ""   # worker whose cash sales land here
+        opening_balance: float = 0
+
+    class CashBoxAssign(BaseModel):
+        assigned_user_id: Optional[str] = ""
+
+    @router.post("/cash-boxes", status_code=201)
+    async def create_cash_box(body: CashBoxCreate, admin: dict = Depends(get_tenant_admin)):
+        """Create an extra cash box, optionally linked to a worker (مبيعاته النقدية تدخل صندوقه)."""
+        name = (body.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="اسم الصندوق مطلوب")
+        if body.assigned_user_id:
+            existing = await db.cash_boxes.find_one({"assigned_user_id": body.assigned_user_id})
+            if existing:
+                raise HTTPException(status_code=400, detail=f"هذا العامل مرتبط مسبقاً بصندوق «{existing.get('name')}»")
+        now = datetime.now(timezone.utc).isoformat()
+        box = {
+            "id": f"box_{uuid.uuid4().hex[:8]}",
+            "name": name,
+            "name_fr": body.name_fr or name,
+            "type": "cash",
+            "custom": True,
+            "assigned_user_id": body.assigned_user_id or "",
+            "balance": float(body.opening_balance or 0),
+            "created_at": now,
+            "updated_at": now,
+            "created_by": admin.get("name", ""),
+        }
+        await db.cash_boxes.insert_one(dict(box))
+        box.pop("_id", None)
+        return box
+
+    @router.put("/cash-boxes/{box_id}/assign")
+    async def assign_cash_box(box_id: str, body: CashBoxAssign, admin: dict = Depends(get_tenant_admin)):
+        """Link/unlink a worker to a cash box."""
+        box = await db.cash_boxes.find_one({"id": box_id})
+        if not box:
+            raise HTTPException(status_code=404, detail="صندوق غير موجود")
+        if body.assigned_user_id:
+            existing = await db.cash_boxes.find_one({"assigned_user_id": body.assigned_user_id, "id": {"$ne": box_id}})
+            if existing:
+                raise HTTPException(status_code=400, detail=f"هذا العامل مرتبط مسبقاً بصندوق «{existing.get('name')}»")
+        await db.cash_boxes.update_one(
+            {"id": box_id},
+            {"$set": {"assigned_user_id": body.assigned_user_id or "", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        return {"message": "تم تحديث ربط الصندوق"}
+
+    @router.delete("/cash-boxes/{box_id}")
+    async def delete_cash_box(box_id: str, admin: dict = Depends(get_tenant_admin)):
+        """Delete a custom box only (built-ins are protected); balance must be zero."""
+        box = await db.cash_boxes.find_one({"id": box_id})
+        if not box:
+            raise HTTPException(status_code=404, detail="صندوق غير موجود")
+        if not box.get("custom"):
+            raise HTTPException(status_code=400, detail="لا يمكن حذف الصناديق الأساسية للنظام")
+        if float(box.get("balance", 0) or 0) != 0:
+            raise HTTPException(status_code=400, detail="لا يمكن حذف صندوق فيه رصيد — حوّل الرصيد أولاً")
+        await db.cash_boxes.delete_one({"id": box_id})
+        return {"success": True}
+
     class TransferBody(BaseModel):
         from_box: str
         to_box: str

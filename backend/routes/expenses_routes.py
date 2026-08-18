@@ -103,6 +103,8 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
                 except ValueError: next_due = last_date.replace(month=nm, year=ny, day=28)
             elif period == "weekly":
                 next_due = last_date + timedelta(days=7)
+            elif period == "quarterly":
+                next_due = last_date + timedelta(days=90)
             elif period == "yearly":
                 next_due = last_date.replace(year=last_date.year + 1)
             else:
@@ -112,6 +114,20 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
                 reminders.append({"expense_id": exp["id"], "title": exp["title"], "category": exp["category"], "amount": exp["amount"], "due_date": next_due.isoformat(), "days_until_due": days_until, "is_urgent": days_until <= 1})
         reminders.sort(key=lambda x: x["days_until_due"])
         return reminders
+
+    @router.get("/estimated-cost")
+    async def get_estimated_cost(user: dict = Depends(require_permission("expenses.view"))):
+        # p167: estimated daily/monthly cost of recurring expenses (display-only deduction on the dashboard)
+        recurring = await db.expenses.find({"recurring": True}, {"_id": 0, "amount": 1, "recurring_period": 1}).to_list(200)
+        per_days = {"weekly": 7.0, "monthly": 30.0, "quarterly": 90.0, "yearly": 365.0}
+        daily = 0.0
+        monthly = 0.0
+        for exp in recurring:
+            amount = float(exp.get("amount") or 0)
+            days = per_days.get(exp.get("recurring_period") or "monthly", 30.0)
+            daily += amount / days
+            monthly += amount * 30.0 / days
+        return {"daily_cost": round(daily, 2), "monthly_cost": round(monthly, 2), "recurring_count": len(recurring)}
 
     @router.post("")
     async def create_expense(expense: ExpenseCreate, user: dict = Depends(require_permission("expenses.add"))):
