@@ -2407,3 +2407,9 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 **Backup**: /opt/ntcommerce/backups/p164_poslayout/
 **Tests**: esbuild parse OK; bundle main.094cc78e.js — pos-shortcuts-col=1, pos-cart-wrap=1
 **Deploy**: release 20260818_125820
+
+## p164b — POS layout exact match to user sketch (2026-08-18)
+**Changes**: POSSidebar search card = input only (removed family chips + add-product button + family dropdown logic); POSCart accepts children + onAddProduct — blue '+ إضافة منتج' button at end of cart header row; sell-card + QuickFlexy moved INSIDE the cart column between header controls and items table (pos-flexy-strip); shortcuts remain separate column right of cart (p164)
+**Backup**: /opt/ntcommerce/backups/p164_poslayout/
+**Tests**: esbuild parse OK x3; bundle main.93d00754.js — pos-add-product-btn=1, pos-flexy-strip=1, pos-shortcuts-col=1
+**Deploy**: release 20260818_131406

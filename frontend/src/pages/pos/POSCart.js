@@ -39,6 +39,7 @@ export default function POSCart({
   installmentPlan,
   parkedCarts, parkCart, resumeParkedCart, deleteParkedCart,
   mixedCash, setMixedCash, mixedBank, setMixedBank,
+  children, onAddProduct
 }) {
   const [noteItemId, setNoteItemId] = useState(null);
   const [showParkedDialog, setShowParkedDialog] = useState(false);
@@ -122,6 +123,12 @@ export default function POSCart({
             </Badge>
           )}
 
+          {onAddProduct && (
+            <Button onClick={onAddProduct} size="sm" className="h-8 gap-1 text-xs" data-testid="pos-add-product-btn">
+              {language === 'ar' ? '+ إضافة منتج' : '+ Ajouter'}
+            </Button>
+          )}
+
           {/* Parked carts indicator */}
           {parkedCarts?.length > 0 && (
             <button
@@ -133,6 +140,8 @@ export default function POSCart({
             </button>
           )}
         </div>
+
+        {children}
 
         {/* ── Products Table (Desktop) ── */}
         <div className="flex-1 overflow-auto">

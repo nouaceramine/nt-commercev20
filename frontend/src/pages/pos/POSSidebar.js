@@ -14,32 +14,10 @@ export default function POSSidebar({
   taskMenuItems, activeTask, handleTaskClick, returnMode,
   language, formatCurrency, isRTL,
 }) {
-  const [sidebarFamily, setSidebarFamily] = useState('all');
 
-  const sidebarFamilies = useMemo(() => {
-    const seen = new Set();
-    const list = [];
-    products.forEach(p => {
-      const key = p.family_id || p.family_name;
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        list.push({ id: p.family_id || p.family_name, name: p.family_name || p.family_id });
-      }
-    });
-    return list.slice(0, 10);
-  }, [products]);
 
-  const familySearchResults = useMemo(() => {
-    if (searchQuery.length >= 1 || sidebarFamily === 'all') return searchResults;
-    return searchResults.filter(p => (p.family_id || p.family_name) === sidebarFamily);
-  }, [searchResults, sidebarFamily, searchQuery]);
 
-  const familyProducts = useMemo(() => {
-    if (sidebarFamily === 'all' || searchQuery.length >= 1) return [];
-    return products.filter(p => (p.family_id || p.family_name) === sidebarFamily).slice(0, 8);
-  }, [products, sidebarFamily, searchQuery]);
 
-  const showFamilyDrop = sidebarFamily !== 'all' && searchQuery.length === 0 && familyProducts.length > 0;
 
   // p149: مسح الباركود بالكاميرا — نفس منطق الماسح الفعلي: تطابق تام يضيف للسلة، وإلا نعبّئ البحث
   const handleCameraScan = (code) => {
@@ -97,65 +75,7 @@ export default function POSSidebar({
           <span className="absolute top-1/2 -translate-y-1/2 end-2 z-10">
             <CameraBarcodeScanner language={language} onDetected={handleCameraScan} testId="pos-camera-scan-btn" />
           </span>
-          {showFamilyDrop && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto search-results-dropdown">
-              {familyProducts.map((product) => (
-                <button
-                  key={product.id}
-                  onClick={() => { addToCart(product); }}
-                  className="w-full flex items-center gap-2 p-2 hover:bg-muted text-start transition-colors border-b last:border-b-0"
-                >
-                  <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center shrink-0">
-                    <Package className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{language === 'ar' ? (product.name_ar || product.name_en) : (product.name_en || product.name_ar)}</p>
-                    <p className="text-xs text-muted-foreground">{product.article_code || product.barcode} — {formatCurrency(product.retail_price)}</p>
-                  </div>
-                  <Badge variant="outline" className="text-xs shrink-0">{product.quantity || 0}</Badge>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
-        {/* Family quick-filter chips */}
-        {sidebarFamilies.length > 0 && (
-          <div className="flex gap-1 flex-wrap mb-1.5 mt-1">
-            <button
-              onClick={() => setSidebarFamily('all')}
-              className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors shrink-0 ${
-                sidebarFamily === 'all'
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-background text-muted-foreground border-border hover:border-primary/50'
-              }`}
-            >
-              {language === 'ar' ? 'الكل' : 'Tout'}
-            </button>
-            {sidebarFamilies.map(f => (
-              <button
-                key={f.id}
-                onClick={() => setSidebarFamily(sidebarFamily === f.id ? 'all' : f.id)}
-                className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors shrink-0 max-w-[80px] truncate ${
-                  sidebarFamily === f.id
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-background text-muted-foreground border-border hover:border-primary/50'
-                }`}
-                title={f.name}
-              >
-                {f.name}
-              </button>
-            ))}
-          </div>
-        )}
-        <Button
-          size="sm"
-          className="w-full gap-1"
-          onClick={() => setShowProductsDialog(true)}
-          data-testid="add-product-btn"
-        >
-          <Plus className="h-4 w-4" />
-          {language === 'ar' ? 'إضافة منتج' : 'Ajouter'}
-        </Button>
       </Card>
 
       <Card className="flex-1 overflow-hidden">

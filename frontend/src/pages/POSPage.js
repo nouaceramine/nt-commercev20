@@ -603,13 +603,9 @@ export default function POSPage() {
               <Button size="sm" variant={cart.returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}><Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}</Button>
               <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowCustomersDialog(true)}><Users className="h-4 w-4" />{language === 'ar' ? 'زبون' : 'Client'}</Button>
             </div>
-            <div className="flex flex-col gap-2" data-testid="pos-middle-scroll">
-              <Button variant="outline" className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 w-full justify-start" onClick={() => setShowSellCardDialog(true)}><CreditCard className="h-4 w-4" />{language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte'}</Button>
-              <QuickFlexyPanel ref={flexyPanelRef} language={language} />
-            </div>
-
             <div className="flex-1 min-h-0 flex flex-col" data-testid="pos-cart-wrap">
             <POSCart
+              onAddProduct={() => setShowProductsDialog(true)}
             cart={cart.cart} customers={customers} selectedCustomer={selectedCustomer}
             setSelectedCustomer={setSelectedCustomer} customerDebt={customerDebt}
             selectedWarehouse={selectedWarehouse} setSelectedWarehouse={setSelectedWarehouse}
@@ -629,7 +625,13 @@ export default function POSPage() {
             parkCart={cart.parkCart} resumeParkedCart={cart.resumeParkedCart}
             deleteParkedCart={cart.deleteParkedCart} mixedCash={cart.mixedCash}
             setMixedCash={cart.setMixedCash} mixedBank={cart.mixedBank} setMixedBank={cart.setMixedBank}
-            />
+            >
+              {/* p164b: sell card + flexy inside the cart column, between header and items table */}
+              <div className="p-2 border-b flex flex-col gap-2" data-testid="pos-flexy-strip">
+                <Button variant="outline" className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 w-full justify-start" onClick={() => setShowSellCardDialog(true)}><CreditCard className="h-4 w-4" />{language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte'}</Button>
+                <QuickFlexyPanel ref={flexyPanelRef} language={language} />
+              </div>
+            </POSCart>
             </div>
           </div>
 
