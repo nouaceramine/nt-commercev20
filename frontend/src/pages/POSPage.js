@@ -577,13 +577,13 @@ export default function POSPage() {
               </Badge>
             )}
           </div>
-          <div className="bg-primary text-primary-foreground text-base sm:text-xl font-bold px-3 py-1.5 rounded-lg shadow">
+          <div className="flex-1 min-w-[260px]">
+            <POSSessionBar {...session} language={language} formatCurrency={formatCurrency} t={t} isRTL={isRTL} compact />
+          </div>
+          <div className="bg-primary text-primary-foreground text-base sm:text-xl font-bold px-3 py-1.5 rounded-lg shadow whitespace-nowrap">
             {formatCurrency(total)} {t.currency}
           </div>
         </div>
-
-        {/* Session Bar */}
-        <POSSessionBar {...session} language={language} formatCurrency={formatCurrency} t={t} isRTL={isRTL} />
 
         {/* Main Grid */}
         <div className={`flex-1 grid grid-cols-1 md:grid-cols-12 gap-2 min-h-0 ${isRTL ? 'direction-ltr' : ''}`} style={{ direction: 'ltr' }}>
@@ -627,9 +627,11 @@ export default function POSPage() {
             setMixedCash={cart.setMixedCash} mixedBank={cart.mixedBank} setMixedBank={cart.setMixedBank}
             >
               {/* p164b: sell card + flexy inside the cart column, between header and items table */}
-              <div className="p-2 border-b flex flex-col gap-2" data-testid="pos-flexy-strip">
-                <Button variant="outline" className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 w-full justify-start" onClick={() => setShowSellCardDialog(true)}><CreditCard className="h-4 w-4" />{language === 'ar' ? 'بيع كرت تعبئة' : 'Vendre une carte'}</Button>
-                <QuickFlexyPanel ref={flexyPanelRef} language={language} />
+              <div className="p-2 border-b flex items-stretch gap-1.5" data-testid="pos-flexy-strip">
+                <Button variant="outline" data-testid="pos-sell-card-btn" className="h-auto px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 border-blue-500 text-blue-600 hover:bg-blue-50 text-[10px] leading-tight" onClick={() => setShowSellCardDialog(true)}><CreditCard className="h-4 w-4" /><span>{language === 'ar' ? 'بيع كرت تعبئة' : 'Carte'}</span></Button>
+                <div className="flex-1 min-w-0">
+                  <QuickFlexyPanel ref={flexyPanelRef} language={language} compact />
+                </div>
               </div>
             </POSCart>
             </div>

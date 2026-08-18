@@ -11,13 +11,13 @@ export default function POSSessionBar({
   setShowSessionDialog, setShowSessionDetailsDialog,
   setClosingCash, cashBoxBalance, setShowCloseSessionDialog,
   fetchSessionStats,
-  language, formatCurrency, t, isStaleSession,
+  language, formatCurrency, t, isStaleSession, compact = false,
 }) {
   if (checkingSession) return null;
 
   return (
-    <Card className={`mb-2 ${hasOpenSession ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-amber-500 bg-amber-50 dark:bg-amber-950/20'}`}>
-      <CardContent className="p-3">
+    <Card className={`${compact ? '' : 'mb-2'} ${hasOpenSession ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-amber-500 bg-amber-50 dark:bg-amber-950/20'}`}>
+      <CardContent className={compact ? "p-1.5" : "p-3"}>
         {hasOpenSession && currentSession ? (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-wrap">

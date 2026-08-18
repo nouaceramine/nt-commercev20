@@ -25,7 +25,7 @@ const OPERATORS = {
 };
 const QUICK_AMOUNTS = [100, 200, 500, 1000, 2000];
 
-const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", onAfterSuccess }, ref) {
+const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", onAfterSuccess, compact = false }, ref) {
   const ar = language === "ar";
   const [mode, setMode] = useState("flexy");  // flexy | idoom
   const [phone, setPhone] = useState("");
@@ -126,7 +126,7 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
 
   return (
     <Card className="border-blue-200 bg-blue-50/40" data-testid="quick-flexy-panel">
-      <CardContent className="p-3 space-y-2">
+      <CardContent className={compact ? "p-2 space-y-1.5" : "p-3 space-y-2"}>
         {/* Mode tabs */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex gap-1" role="tablist">
@@ -155,7 +155,60 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
         </div>
 
         {/* === Flexy mode === */}
-        {mode === "flexy" && (
+        {mode === "flexy" && compact && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <Input
+                ref={phoneRef}
+                dir="ltr"
+                type="tel"
+                maxLength={10}
+                placeholder={ar ? "06xxxxxxxx" : "Numéro"}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ""))}
+                className="text-center font-mono text-sm h-8 flex-1 min-w-[90px]"
+                data-testid="flexy-phone-input"
+              />
+              <Input
+                dir="ltr" type="number" placeholder={ar ? "المبلغ" : "Montant"}
+                value={amount} onChange={(e) => setAmount(e.target.value)}
+                className="text-center font-bold h-8 w-20 shrink-0 text-sm"
+                data-testid="flexy-amount-input"
+              />
+              <Button className="h-8 px-2.5 shrink-0" onClick={submitFlexy} disabled={loading || !phone || !amount} data-testid="flexy-submit-btn">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              {QUICK_AMOUNTS.map((a) => (
+                <Button
+                  key={a} size="sm"
+                  variant={parseFloat(amount) === a ? "default" : "outline"}
+                  className="h-7 text-xs font-bold px-1.5"
+                  onClick={() => setAmount(String(a))}
+                  data-testid={`flexy-quick-${a}`}
+                >{a}</Button>
+              ))}
+              <span className="text-xs text-gray-600 mx-1">{ar ? "الدفع:" : "Paiement:"}</span>
+              <Button size="sm" variant={pay === "cash" ? "default" : "outline"} className="h-7 text-xs px-2" onClick={() => setPay("cash")} data-testid="pay-cash">{ar ? "نقدي" : "Cash"}</Button>
+              <Button size="sm" variant={pay === "credit" ? "default" : "outline"} className="h-7 text-xs px-2" onClick={() => setPay("credit")} data-testid="pay-credit">{ar ? "آجل" : "Crédit"}</Button>
+              {pay === "credit" && (
+                <select
+                  className="border rounded px-1.5 text-xs h-7 flex-1 min-w-[110px] bg-white"
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                  data-testid="credit-customer-select"
+                >
+                  <option value="">{ar ? "-- اختر زبوناً --" : "-- Choisir --"}</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}{c.phone ? ` (${c.phone})` : ""}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </>
+        )}
+        {mode === "flexy" && !compact && (
           <>
             <div className="grid grid-cols-12 gap-2">
               <div className="col-span-6">
@@ -246,6 +299,7 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
         )}
 
         {/* Payment method + credit customer picker */}
+        {(!compact || mode === "idoom") && (
         <div className="flex items-center gap-1 flex-wrap pt-1 border-t">
           <span className="text-xs text-gray-600 mr-1">{ar ? "الدفع:" : "Paiement:"}</span>
           <Button size="sm" variant={pay === "cash" ? "default" : "outline"} className="h-7 text-xs flex-1 min-w-[60px]" onClick={() => setPay("cash")} data-testid="pay-cash">{ar ? "نقدي" : "Cash"}</Button>
@@ -264,9 +318,10 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
             </select>
           )}
         </div>
+        )}
 
         {recent.length > 0 && (
-          <div className="border-t pt-2 mt-1 space-y-1">
+          <div className={compact ? "border-t pt-1 space-y-0.5" : "border-t pt-2 mt-1 space-y-1"}>
             {recent.map((r) => (
               <div key={r.id} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2 truncate">

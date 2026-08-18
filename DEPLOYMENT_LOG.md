@@ -2413,3 +2413,11 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 **Backup**: /opt/ntcommerce/backups/p164_poslayout/
 **Tests**: esbuild parse OK x3; bundle main.93d00754.js — pos-add-product-btn=1, pos-flexy-strip=1, pos-shortcuts-col=1
 **Deploy**: release 20260818_131406
+
+## p164c — POS one-screen layout (2026-08-18, release 20260818_135235)
+**Before**: session bar was a separate full-width row under the header; QuickFlexyPanel used 4+ rows (h-10 inputs, separate payment row); cart items table started too low → page required vertical scroll.
+**After**:
+- QuickFlexyPanel.js: new `compact` prop — flexy mode collapses to 2 rows (row1: phone flex-1 h-8 + amount w-20 h-8 + send h-8; row2: quick-amount chips h-7 + الدفع نقدي/آجل + conditional credit customer select inline). Payment row hidden in compact flexy mode (merged). Recent list tighter (pt-1). Idoom mode unchanged.
+- POSSessionBar.js: new `compact` prop — removes mb-2, CardContent p-1.5.
+- POSPage.js: POSSessionBar(compact) merged into the page header row between title/badges and the total box (standalone row removed); flexy strip = narrow vertical sell-card button (pos-sell-card-btn) + compact panel side-by-side (flex items-stretch).
+**Verification**: esbuild syntax OK ×3; bundle main.a0a561ac.js contains pos-sell-card-btn, quick-flexy-panel, pos-flexy-strip, pos-shortcuts-col, flexy-phone-input, pay-credit, credit-customer-select, compact.
