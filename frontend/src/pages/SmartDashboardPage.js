@@ -49,7 +49,8 @@ import {
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
-export default function SmartDashboardPage() {
+// p160: content extracted so it can be embedded in the unified DashboardPage (/)
+export function SmartDashboardContent() {
   const { t, isRTL, language } = useLanguage();
   const { user } = useAuth();
   const { formatCurrency, formatNumber, formatDate, formatPercent } = useDateFormat();
@@ -121,19 +122,16 @@ export default function SmartDashboardPage() {
 
   if (loading) {
     return (
-      <Layout>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-center">
-            <div className="spinner mx-auto mb-4" />
-            <p className="text-muted-foreground">{language === 'ar' ? 'جاري تحميل لوحة التحكم الذكية...' : 'Chargement du tableau de bord intelligent...'}</p>
-          </div>
+      <div className="flex items-center justify-center min-h-[40vh]">
+        <div className="text-center">
+          <div className="spinner mx-auto mb-4" />
+          <p className="text-muted-foreground">{language === 'ar' ? 'جاري تحميل لوحة التحكم الذكية...' : 'Chargement du tableau de bord intelligent...'}</p>
         </div>
-      </Layout>
+      </div>
     );
   }
 
   return (
-    <Layout>
       <div className="space-y-6 animate-fade-in" data-testid="smart-dashboard">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -473,6 +471,14 @@ export default function SmartDashboardPage() {
           </Card>
         )}
       </div>
+  );
+}
+
+// p160: standalone route kept as a thin wrapper (backward compatibility)
+export default function SmartDashboardPage() {
+  return (
+    <Layout>
+      <SmartDashboardContent />
     </Layout>
   );
 }

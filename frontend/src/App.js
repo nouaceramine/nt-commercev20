@@ -92,7 +92,7 @@ import PermissionsPage from "./pages/PermissionsPage";
 import SystemUpdatesPage from "./pages/SystemUpdatesPage";
 import AgentDashboardPage from "./pages/AgentDashboardPage";
 import UnifiedLoginPage from "./pages/UnifiedLoginPage";
-import TenantDashboardPage from "./pages/TenantDashboardPage";
+// p160: TenantDashboardPage merged into DashboardPage (route redirects to /)
 import EmailNotificationsPage from "./pages/EmailNotificationsPage";
 import PaymentsPage from "./pages/PaymentsPage";
 
@@ -109,7 +109,7 @@ import EcomAdsTab from "./pages/ecom/EcomAdsTab";
 import EcomShippingTab from "./pages/ecom/EcomShippingTab";
 
 // AI & Smart Accounting Pages
-import SmartDashboardPage from "./pages/SmartDashboardPage";
+// p160: SmartDashboardPage merged into DashboardPage (route redirects to /)
 import AIChatPage from "./pages/AIChatPage";
 import AIAgentsPage from "./pages/AIAgentsPage";
 import DateTimeSettingsPage from "./pages/DateTimeSettingsPage";
@@ -327,8 +327,8 @@ const DashboardRouter = () => {
   }
   if (isSuperAdmin) return <Navigate to="/saas-admin" replace />;
   if (isAgent) return <Navigate to="/agent/dashboard" replace />;
-  if (isTenant) return <Navigate to="/tenant/dashboard" replace />;
-  // admin / cashier / demo → main dashboard
+  // p160: tenants also land on the unified dashboard (no separate /tenant/dashboard)
+  // admin / cashier / demo / tenant → main dashboard
   return (
     <ProtectedRoute>
       <DashboardPage />

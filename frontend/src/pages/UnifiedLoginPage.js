@@ -199,7 +199,7 @@ export default function UnifiedLoginPage() {
     } else if (role === 'agent') {
       target = '/agent/dashboard';
     } else if (role === 'tenant' || role === 'tenant_admin') {
-      target = '/tenant/dashboard';
+      target = '/'; // p160: unified dashboard
     }
     setLoginSuccess({ type: result.user_type, name: (result.user && result.user.name) || '' });
     setTimeout(function() {

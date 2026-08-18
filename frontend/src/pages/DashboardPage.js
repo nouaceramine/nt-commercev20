@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { SmartNotifications } from '../components/SmartNotifications';
+import { SmartDashboardContent } from './SmartDashboardPage'; // p160: unified dashboard
 import { DashboardCustomizer, useDashboardWidgets } from '../components/DashboardCustomizer';
 import { 
   Package, 
@@ -474,6 +475,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         )}
+
+        {/* p160: Smart (AI) dashboard merged into this single page */}
+        <SmartDashboardContent />
 
         {/* Dashboard Customizer Dialog */}
         <DashboardCustomizer 

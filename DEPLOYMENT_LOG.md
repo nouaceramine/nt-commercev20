@@ -2365,3 +2365,16 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 
 ### النسخ الاحتياطية
 /opt/ntcommerce/backups/p159_bdvimport/ (mongodump قبل الاستيراد + TSV المصدر + السكربتات + التقرير)
+
+## p160 — Unified tenant dashboard (2026-08-18)
+**Request**: merge the 3 tenant dashboards (لوحة التحكم /, لوحة تحكم المشترك /tenant/dashboard, لوحة التحكم الذكية /smart-dashboard) into ONE page without duplications.
+**Backup**: /opt/ntcommerce/backups/p160_dashboard/ (6 files)
+**Changes**:
+- pages/SmartDashboardPage.js: extracted SmartDashboardContent (no Layout wrapper; bare-spinner loading); default export now thin Layout wrapper (backward compat)
+- pages/DashboardPage.js: imports SmartDashboardContent, renders it before DashboardCustomizer dialog → single unified dashboard at /
+- components/Layout.js: removed /tenant/dashboard + /smart-dashboard menu entries (home section now has only /)
+- config/sidebarMenu.js: removed smart-dashboard item (canonical menu mirror)
+- App.js: /tenant/dashboard and /smart-dashboard → <Navigate to="/" replace>; DashboardRouter no longer redirects tenants to /tenant/dashboard; removed unused imports
+- pages/UnifiedLoginPage.js: tenant/tenant_admin post-login target /tenant/dashboard → /
+**Tests**: build Compiled with warnings (source-map noise only); live main.704bee88.js — menu labels 'Tableau abonné'/'Dashboard Intelligent' = 0 hits, legacy paths present only as redirect routes; API smoke (owner tenant JWT): /ai/financial-health, /ai/insights, /ai/daily-summary, /ai/forecast/revenue all 200; https://nt-commerce.net/ + /tenant/dashboard + /smart-dashboard all 200 on new bundle
+**Deploy**: release 20260818_082911 via scripts/deploy.sh (rollback available)

@@ -13,7 +13,6 @@ export const defaultMenuSections = [
     isCustom: false,
     items: [
       { id: 'dashboard', path: '/', icon: 'LayoutDashboard', labelAr: 'لوحة التحكم', labelFr: 'Tableau de bord', visible: true },
-      { id: 'smart-dashboard', path: '/smart-dashboard', icon: 'Star', labelAr: 'لوحة التحكم الذكية', labelFr: 'Dashboard Intelligent', visible: true },
     ]
   },
   {

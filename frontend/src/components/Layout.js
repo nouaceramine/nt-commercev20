@@ -433,8 +433,6 @@ export const Layout = ({ children }) => {
       icon: LayoutDashboard,
       items: [
         { path: '/', icon: LayoutDashboard, label: t.dashboard },
-        { path: '/tenant/dashboard', icon: Store, label: language === 'ar' ? 'لوحة تحكم المشترك' : 'Tableau abonné' },
-        { path: '/smart-dashboard', icon: Sparkles, label: language === 'ar' ? 'لوحة التحكم الذكية' : 'Dashboard Intelligent' },
       ]
     },
     {
