@@ -2464,3 +2464,6 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 
 ### p166-fix2 (2026-08-18, release 20260818_183115)
 لوحة التحكم — إحصاءات سريعة: بطاقة جديدة «فوائد اليوم» (today-profit-card) تجمع ربح كل الأقسام من /reports/daily-full (pos.profit + recharge.profit + digital.subs_profit + sim_activations.profit + cards.profit)، رابطها /daily-report. المربعات صُغّرت لأربعة في السطر (grid-cols-2/3/4، gap-3، p-3، قيم text-base، أيقونات h-4) بدل 3 × p-6. Bundle main.dda0f67b.js.
+
+### p166-fix3 (2026-08-18, release 20260818_185047)
+اختصار «الولاء» (/ecom-hub/store/loyalty) في قسم الزبائن بالقائمة الجانبية (Layout.js، داخل isAdmin + featureKey loyalty_points ليطابق حماية المسار). Bundle main.92ea8986.js.

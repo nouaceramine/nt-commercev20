@@ -444,6 +444,9 @@ export const Layout = ({ children }) => {
         { path: '/customers', icon: Users, label: t.customers, subFeature: 'customer_list' },
         { path: '/customer-families', icon: FolderTree, label: language === 'ar' ? 'عائلات الزبائن' : 'Familles clients', subFeature: 'customer_families' },
         { path: '/customer-debts', icon: CreditCard, label: t.customerDebts, subFeature: 'customer_debts', featureKey: 'credit_sales' },
+        ...(isAdmin ? [
+          { path: '/ecom-hub/store/loyalty', icon: Award, label: language === 'ar' ? 'الولاء' : 'Fidélité', featureKey: 'loyalty_points' },
+        ] : [])
       ]
     },
     {
