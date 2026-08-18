@@ -299,7 +299,7 @@ export default function POSPage() {
       const seq = ++searchSeqRef.current;
       const timer = setTimeout(async () => {
         try {
-          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=12`);
+          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=20`);
           if (seq === searchSeqRef.current && Array.isArray(res.data?.results)) {
             setSearchResults(res.data.results);
             setShowSearchResults(true);
@@ -596,7 +596,7 @@ export default function POSPage() {
             language={language} formatCurrency={formatCurrency} isRTL={isRTL}
           />
 
-          <div className="col-span-1 md:col-span-4 flex flex-col gap-2 min-h-0 overflow-y-auto md:overflow-visible" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+          <div className="col-span-1 md:col-span-3 flex flex-col gap-2 min-h-0 overflow-y-auto md:overflow-visible" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
             <div className="md:hidden flex items-center gap-2 mb-1 overflow-x-auto pb-1">
               <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowProductsDialog(true)}><Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}</Button>
               <Button size="sm" variant={cart.returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}><Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}</Button>

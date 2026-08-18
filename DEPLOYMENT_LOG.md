@@ -2394,3 +2394,10 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 **Tests**: quick-search exact barcode=1 hit, alias barcode=1 hit w/ aliases in payload, name search=57; /products?search=<alias>=1; /api/stats capital=15,327,181.80 (stock 15,327,181.80 + boxes 0 − unboxed 0); openapi: verify-email, resend-verification, quick-search, stats LIVE; bundle main.f3f46a1b.js — quick-search, document.hidden, capital-card, additional_barcodes present; TenantDashboardPage=0
 **Deploy**: release 20260818_100522
 **Audit (7 days)**: demo agent active in saas_agents (5 perms); p155 2FA line present; email verification endpoints live (all 4 tenants verified=True); owner NT-0004 Enterprise+override; BDV10 import intact (7,415 products, 36,695 sales, 1,357 purchases, 1,422 sessions, 126 counts, 7,435 movements, 1,735 debt_payments); p160 unified dashboard live
+
+## p163 — POS search results fill sidebar as large cards (2026-08-18)
+**Problem**: POS search box cramped in narrow col-span-2 sidebar (icons only visible), results as small dropdown — user could not search products to add to cart.
+**Fix (user-chosen option 1)**: POSSidebar.js — while typing, the مهام البيع card switches to نتائج البحث mode: large clear product cards (bold name, code/barcode, bold price, stock badge), one tap adds to cart + toast; ✕ clears search; empty state keeps create-product link; old small dropdown removed; decorative Barcode icon removed (more input room); sidebar widened col-span-2→3, middle column 4→3; POSPage server search limit 12→20
+**Backup**: /opt/ntcommerce/backups/p162_search_pos/ (POSSidebar.js, POSPage.js)
+**Tests**: esbuild JSX parse OK; bundle main.540097e0.js — pos-search-results-list=1, pos-search-clear-btn=1
+**Deploy**: release 20260818_104811
