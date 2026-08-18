@@ -2462,5 +2462,5 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 ### p166-fix1 (2026-08-18, release 20260818_181934)
 مخزون الشحن لم يظهر في القائمة الجانبية: القائمة الفعلية تُبنى من tenantNavSections داخل Layout.js (وليس config/sidebarMenu.js الذي يُستخدم لصلاحيات الكاشير فقط). أُضيف العنصر /telecom-stock في قسم services داخل Layout.js ضمن كتلة isAdmin (يطابق ProtectedRoute adminOnly). لا توجد sidebar_order محفوظة في user_settings لهذا المستأجر. Bundle main.30b4053e.js.
 
-### p166-fix2 (2026-08-18, release 20260818_183430)
+### p166-fix2 (2026-08-18, release 20260818_183115)
 لوحة التحكم — إحصاءات سريعة: بطاقة جديدة «فوائد اليوم» (today-profit-card) تجمع ربح كل الأقسام من /reports/daily-full (pos.profit + recharge.profit + digital.subs_profit + sim_activations.profit + cards.profit)، رابطها /daily-report. المربعات صُغّرت لأربعة في السطر (grid-cols-2/3/4، gap-3، p-3، قيم text-base، أيقونات h-4) بدل 3 × p-6. Bundle main.dda0f67b.js.
