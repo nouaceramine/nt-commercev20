@@ -563,6 +563,7 @@ export const Layout = ({ children }) => {
         { path: '/wallet-management', icon: Wallet, label: language === 'ar' ? 'المحفظة' : 'Portefeuille', featureKey: 'wallet' },
         ...(isAdmin ? [
           { path: '/sim-management', icon: Zap, label: language === 'ar' ? 'إدارة الشرائح' : 'Gestion SIM' },
+          { path: '/telecom-stock', icon: Package, label: language === 'ar' ? 'مخزون الشحن' : 'Stock recharge' },
         ] : [])
       ]
     },
