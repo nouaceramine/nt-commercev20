@@ -15,7 +15,7 @@ class ProductCreate(BaseModel):
     tariff_b: Optional[float] = 0
     tariff_c: Optional[float] = 0
     tariff_d: Optional[float] = 0
-    quantity: int = 0
+    quantity: float = 0
     image_url: Optional[str] = ""
     images: Optional[List[str]] = []  # معرض الصور: حتى 5 صور (الأولى = الغلاف)
     compatible_models: List[str] = []
@@ -37,6 +37,9 @@ class ProductCreate(BaseModel):
     force_qty_entry: Optional[bool] = False
     force_price_entry: Optional[bool] = False
     serial_number_tracking: Optional[bool] = False
+    # p165: weight-scale products (ميزان)
+    sold_by_weight: Optional[bool] = False  # يُباع بالوزن — نقطة البيع تطلب الوزن
+    scale_plu: Optional[str] = ""  # كود المنتج (PLU) في باركود الميزان
     # Extra
     tax_rate: Optional[float] = 0
     internal_notes: Optional[str] = ""
@@ -102,7 +105,7 @@ class ProductUpdate(BaseModel):
     wholesale_price: Optional[float] = None
     retail_price: Optional[float] = None
     super_wholesale_price: Optional[float] = None
-    quantity: Optional[int] = None
+    quantity: Optional[float] = None
     image_url: Optional[str] = None
     compatible_models: Optional[List[str]] = None
     low_stock_threshold: Optional[int] = None
@@ -116,6 +119,8 @@ class ProductUpdate(BaseModel):
     sizes: Optional[List[str]] = None
     has_variants: Optional[bool] = None
     variants: Optional[List[dict]] = None
+    sold_by_weight: Optional[bool] = None  # p165
+    scale_plu: Optional[str] = None  # p165
 
     @field_validator('name_en')
     @classmethod

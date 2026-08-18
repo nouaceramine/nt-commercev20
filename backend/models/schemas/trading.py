@@ -7,7 +7,7 @@ class SaleItem(BaseModel):
     product_id: Optional[str] = None
     product_name: str
     barcode: Optional[str] = ""
-    quantity: int
+    quantity: float
     unit_price: float
     discount: float = 0
     purchase_price: Optional[float] = None

@@ -105,6 +105,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     recharge_inserted = False
     cashbox_updated = False
     txn_inserted = False
+    sale_cash_inserted = False
     bridge_task_inserted = False
     is_credit_sale = recharge.payment_method == "credit"
     try:
@@ -160,6 +161,32 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 "created_by": user["name"],
             })
             txn_inserted = True
+
+            # p165: record the cash recharge in the sales journal too (المبيعات اليومية والسجل)
+            # purchase_price = cost → profit reports compute amount − cost = commission automatically
+            sale_id_cash = str(uuid.uuid4())
+            await db.sales.insert_one({
+                "id": sale_id_cash,
+                "invoice_number": f"FLEXY-{recharge_id[:6].upper()}",
+                "items": [{
+                    "product_id": None,
+                    "product_name": f"شحن {operator_config['name']} - {recharge.phone_number}",
+                    "name": f"شحن {operator_config['name']} - {recharge.phone_number}",
+                    "quantity": 1, "unit_price": recharge.amount, "price": recharge.amount,
+                    "purchase_price": cost, "discount": 0, "total": recharge.amount,
+                    "is_recharge": True, "recharge_id": recharge_id,
+                }],
+                "subtotal": recharge.amount, "discount": 0, "discount_total": 0, "tax_total": 0,
+                "total": recharge.amount, "paid_amount": recharge.amount, "debt_amount": 0,
+                "remaining": 0, "payment_method": recharge.payment_method, "payment_type": "cash",
+                "payments": [{"amount": recharge.amount, "method": recharge.payment_method, "at": now}],
+                "customer_id": recharge.customer_id or None, "customer_name": customer_name,
+                "type": "recharge_cash", "source": "pos_quick_flexy",
+                "status": "paid",
+                "user_id": user.get("id"), "user_name": user.get("name", ""),
+                "created_at": now, "created_by": user.get("name", ""),
+            })
+            sale_cash_inserted = True
             # Also update daily_sessions for cash sales
             try:
                 await db.daily_sessions.update_one(
@@ -225,6 +252,11 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 await db.transactions.delete_one({"id": txn_record_id})
             except Exception:
                 logger.exception("Rollback: failed to delete transaction %s", txn_record_id)
+        if sale_cash_inserted:
+            try:
+                await db.sales.delete_one({"invoice_number": f"FLEXY-{recharge_id[:6].upper()}", "type": "recharge_cash"})
+            except Exception:
+                logger.exception("Rollback: failed to delete cash sale row for recharge %s", recharge_id)
         if cashbox_updated:
             try:
                 await db.cash_boxes.update_one(

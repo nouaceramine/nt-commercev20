@@ -388,6 +388,68 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             logger.exception("subscription creation failed after debits: %s", sub_id)
             raise HTTPException(status_code=500, detail="فشل تسجيل الاشتراك") from e
 
+        # p165: record the subscription sale in the sales journal + cashbox + daily session
+        # purchase_price = cost → profit reports compute price − cost automatically
+        try:
+            pm = doc.get("payment_method") or "cash"
+            is_debt = pm in ("debt", "reseller")
+            sale_id = str(uuid.uuid4())
+            await db.sales.insert_one({
+                "id": sale_id,
+                "invoice_number": f"IPTV-{sub_id[:6].upper()}",
+                "items": [{
+                    "product_id": None,
+                    "product_name": f"اشتراك {doc.get('service_name') or doc.get('category')} ({doc.get('duration_months')} شهر)",
+                    "quantity": 1, "unit_price": doc["price"], "price": doc["price"],
+                    "purchase_price": doc["cost"], "discount": 0, "total": doc["price"],
+                    "is_subscription": True, "subscription_id": sub_id,
+                }],
+                "subtotal": doc["price"], "discount": 0, "discount_total": 0, "tax_total": 0,
+                "total": doc["price"],
+                "paid_amount": 0 if is_debt else doc["price"],
+                "debt_amount": doc["price"] if is_debt else 0,
+                "remaining": doc["price"] if is_debt else 0,
+                "payment_method": "cash" if pm == "cash" else pm,
+                "payment_type": "credit" if is_debt else "cash",
+                "payments": [] if is_debt else [{"amount": doc["price"], "method": "cash", "at": now}],
+                "customer_id": doc.get("customer_id") or None,
+                "customer_name": doc.get("customer_name") or ("موزع: " + doc.get("reseller_name", "") if pm == "reseller" else "عميل نقدي"),
+                "type": "digital_subscription", "source": "digital_panel",
+                "status": "unpaid" if is_debt else "paid",
+                "user_id": user.get("id"), "user_name": user.get("name", ""),
+                "created_at": now, "created_by": user.get("name", ""),
+            })
+            if is_debt and doc.get("customer_id"):
+                # mirror debt on the customer record (reseller debt lives in the reseller ledger)
+                await db.customers.update_one(
+                    {"id": doc["customer_id"]},
+                    {"$inc": {"total_purchases": doc["price"], "balance": doc["price"], "total_debt": doc["price"]}},
+                )
+            if not is_debt:
+                # cash sale → money enters the main cash box
+                await db.cash_boxes.update_one(
+                    {"id": "cash"},
+                    {"$inc": {"balance": doc["price"]}, "$set": {"updated_at": now}},
+                )
+                await db.transactions.insert_one({
+                    "id": str(uuid.uuid4()), "cash_box_id": "cash",
+                    "type": "income", "amount": doc["price"],
+                    "description": f"اشتراك {doc.get('service_name') or doc.get('category')} - {doc.get('customer_name') or 'عميل نقدي'}",
+                    "reference_type": "digital_subscription", "reference_id": sub_id,
+                    "created_at": now, "created_by": user.get("name", ""),
+                })
+            try:
+                await db.daily_sessions.update_one(
+                    {"user_id": user.get("id"), "status": "open"},
+                    {"$inc": {"total_sales": doc["price"],
+                              ("credit_sales" if is_debt else "cash_sales"): doc["price"],
+                              "sales_count": 1}},
+                )
+            except Exception:
+                pass
+        except Exception:
+            logger.exception("p165: failed to journal subscription sale %s (subscription itself is saved)", sub_id)
+
         doc.pop("_id", None)
         doc["status"] = _sub_status(doc.get("end_date"))
         return doc

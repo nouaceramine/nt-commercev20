@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import uuid
 
 
-def build_sim_router(db, get_tenant_admin):
+def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=None):
     router = APIRouter()
 
     # ============ SIM BALANCE MANAGEMENT ============
@@ -29,9 +29,9 @@ def build_sim_router(db, get_tenant_admin):
         if not slots:
             # Create default slots
             default_slots = [
-                {"slot_id": 1, "operator": "موبيليس", "phone": "", "balance": 0, "last_updated": "", "prefix": "06"},
-                {"slot_id": 2, "operator": "جازي", "phone": "", "balance": 0, "last_updated": "", "prefix": "07"},
-                {"slot_id": 3, "operator": "أوريدو", "phone": "", "balance": 0, "last_updated": "", "prefix": "05"}
+                {"slot_id": 1, "operator": "موبيليس", "phone": "", "balance": 0, "bonus_balance": 0, "empty_sims": 0, "sim_unit_cost": 100, "last_updated": "", "prefix": "06"},
+                {"slot_id": 2, "operator": "جازي", "phone": "", "balance": 0, "bonus_balance": 0, "empty_sims": 0, "sim_unit_cost": 100, "last_updated": "", "prefix": "07"},
+                {"slot_id": 3, "operator": "أوريدو", "phone": "", "balance": 0, "bonus_balance": 0, "empty_sims": 0, "sim_unit_cost": 100, "last_updated": "", "prefix": "05"}
             ]
             await db.sim_slots.insert_many(default_slots)
             slots = await db.sim_slots.find({}, {"_id": 0}).to_list(10)
@@ -84,5 +84,29 @@ def build_sim_router(db, get_tenant_admin):
         """Get balance change history for a SIM slot"""
         logs = await db.sim_balance_logs.find({"slot_id": slot_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
         return logs
+
+    # ============ p165: POS balances (flexy wallet + SIM slots) ============
+
+    @router.get("/sim/balances")
+    async def get_sim_balances(user: dict = Depends(require_tenant)):
+        """POS display: platform recharge/IPTV wallet + all operator SIM balances."""
+        slots = await db.sim_slots.find({}, {"_id": 0}).to_list(20)
+        sim_total = round(sum(float(s.get("balance", 0) or 0) for s in slots), 2)
+        bonus_total = round(sum(float(s.get("bonus_balance", 0) or 0) for s in slots), 2)
+        wallet_balance = 0.0
+        try:
+            if main_db is not None:
+                entity_id = user.get("tenant_id") or user.get("id", "")
+                w = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0, "balance": 1})
+                wallet_balance = round(float((w or {}).get("balance", 0) or 0), 2)
+        except Exception:
+            wallet_balance = 0.0
+        return {
+            "wallet_balance": wallet_balance,
+            "sim_slots": slots,
+            "sim_total": sim_total,
+            "bonus_total": bonus_total,
+            "sim_grand_total": round(sim_total + bonus_total, 2),
+        }
 
     return router

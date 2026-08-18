@@ -941,7 +941,7 @@ async def get_public_features() -> dict:
 # ============ LEGACY ROUTES — round 2 (dashboard & wallet & POS settings) ============
 try:
     from routes.pos_settings_routes import create_pos_settings_routes
-    pos_settings_router = create_pos_settings_routes(db, main_db, get_current_user, get_super_admin)
+    pos_settings_router = create_pos_settings_routes(db, main_db, get_current_user, get_super_admin, get_tenant_admin=get_tenant_admin)
     app.include_router(pos_settings_router, prefix="/api", tags=["POS Settings"])
     print("[INIT] POS settings routes registered")
 except Exception as _e:
@@ -949,7 +949,7 @@ except Exception as _e:
 
 try:
     from routes.stats_routes import create_stats_routes
-    stats_router = create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, init_cash_boxes)
+    stats_router = create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, init_cash_boxes, main_db=main_db)
     app.include_router(stats_router, prefix="/api", tags=["Stats"])
     print("[INIT] Stats routes registered")
 except Exception as _e:
@@ -1107,6 +1107,7 @@ _AUTO_REG_MODULES = [
     'routes.recharge.delivery_settings_routes',
     'routes.recharge.idoom_routes',
     'routes.recharge.sim_routes',
+    'routes.recharge.sim_offers_routes',
     # ── saas extras not covered by the aggregate router ──
     'routes.saas.event_bus_routes',
     'routes.saas.supplier_routes',

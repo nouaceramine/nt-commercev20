@@ -9,7 +9,7 @@
 import { lazy } from 'react';
 import {
   Shield, Database, MessageCircle, Printer, Usb, 
-  Mail, Volume2, Settings, Image, Wifi
+  Mail, Volume2, Settings, Image, Wifi, Scale
 } from 'lucide-react';
 import { BackupSystem } from '../components/BackupSystem';
 
@@ -23,6 +23,7 @@ const SoundTab = lazy(() => import('../pages/settings/SoundTab'));
 const SystemTab = lazy(() => import('../pages/settings/SystemTab'));
 const BrandingTab = lazy(() => import('../pages/settings/BrandingTab'));
 const BridgeTab = lazy(() => import('../pages/settings/BridgeTab'));
+const ScaleTab = lazy(() => import('../pages/settings/ScaleTab'));
 
 /**
  * Tab configuration registry.
@@ -121,6 +122,16 @@ const TABS_CONFIG = [
     condition: () => true,
   },
   {
+    id: 'scale',
+    icon: Scale,
+    labelKey: 'scale',
+    labelAr: 'الميزان',
+    labelFr: 'Balance',
+    component: ScaleTab,
+    needsSuspense: true,
+    condition: () => true,
+  },
+  {
     id: 'bridge',
     icon: Wifi,
     labelKey: 'bridge',
@@ -162,6 +173,7 @@ export function getGridCols(visibleTabsCount) {
     8: 'grid-cols-8',
     9: 'grid-cols-9',
     10: 'grid-cols-10',
+    11: 'grid-cols-11',
   };
   return gridMap[visibleTabsCount] || 'grid-cols-9';
 }

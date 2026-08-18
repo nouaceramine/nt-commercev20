@@ -15,7 +15,7 @@ import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
-import { Loader2, Smartphone, CheckCircle2, XCircle, Send, Wifi } from "lucide-react";
+import { Loader2, Smartphone, CheckCircle2, XCircle, Send, Wifi, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
 const OPERATORS = {
@@ -38,6 +38,16 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
   const [loading, setLoading] = useState(false);
   const [recent, setRecent] = useState([]);
   const phoneRef = useRef(null);
+
+  // p165: balances display + SIM-card activation tab
+  const [balances, setBalances] = useState(null);
+  const [simOperator, setSimOperator] = useState("ooredoo");
+  const [simOffers, setSimOffers] = useState([]);
+  const [simOffer, setSimOffer] = useState(null);
+  const [simOfferValue, setSimOfferValue] = useState("");
+  const [simSalePrice, setSimSalePrice] = useState("");
+  const [simBonus, setSimBonus] = useState("");
+  const [simCost, setSimCost] = useState("");
 
   // Allow parent (POSPage) to focus the input via F4
   useImperativeHandle(ref, () => ({
@@ -67,10 +77,57 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
         count: r.count,
       })).filter(x => x.denomination);
       setIdoomDenoms(idoom);
+      const bal = await apiClient.get("/sim/balances").catch(() => null);
+      if (bal) setBalances(bal.data);
     } catch (_e) { /* ignore */ }
   };
 
   useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    if (mode !== "sim") return;
+    apiClient.get("/sim/offers", { params: { operator: simOperator } })
+      .then((r) => setSimOffers(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setSimOffers([]));
+  }, [mode, simOperator]);
+
+  // p165: SIM activation helpers
+  const pickSimOffer = (o) => {
+    setSimOffer(o);
+    setSimOfferValue(String(o.offer_value ?? ""));
+    setSimSalePrice(String(o.default_sale_price ?? ""));
+    setSimBonus(String(o.typical_bonus ?? ""));
+    setSimCost(String(o.sim_cost ?? ""));
+  };
+  const simProfit = (parseFloat(simSalePrice) || 0) + (parseFloat(simBonus) || 0)
+    - (parseFloat(simOfferValue) || 0) - (parseFloat(simCost) || 0);
+
+  const submitSim = async () => {
+    const salePrice = parseFloat(simSalePrice);
+    if (!salePrice || salePrice <= 0) return toast.error(ar ? "أدخل سعر البيع" : "Prix de vente requis");
+    if (pay === "credit" && !customerId) return toast.error(ar ? "اختر زبوناً للبيع الآجل" : "Choisir un client");
+    setLoading(true);
+    try {
+      const res = await apiClient.post("/sim/activations", {
+        operator: simOperator,
+        offer_id: simOffer?.id || "",
+        offer_name: simOffer?.name || (ar ? "تفعيل يدوي" : "Activation manuelle"),
+        offer_value: parseFloat(simOfferValue) || 0,
+        bonus: parseFloat(simBonus) || 0,
+        sale_price: salePrice,
+        sim_cost: parseFloat(simCost) || 0,
+        payment_type: pay,
+        customer_id: pay === "credit" ? customerId : null,
+      });
+      toast.success(ar ? `تم بيع الشريحة — الربح: ${res.data.profit} دج` : `SIM vendue — profit: ${res.data.profit} DA`);
+      setSimOffer(null); setSimOfferValue(""); setSimSalePrice(""); setSimBonus(""); setSimCost("");
+      setCustomerId(""); setPay("cash");
+      loadAll();
+      if (onAfterSuccess) onAfterSuccess(res.data);
+    } catch (e) {
+      const d = e?.response?.data?.detail || (ar ? "فشل بيع الشريحة" : "Échec");
+      toast.error(typeof d === "string" ? d : (ar ? "فشل بيع الشريحة" : "Échec"));
+    } finally { setLoading(false); }
+  };
   useEffect(() => {
     if (pay === "cash") setCustomerId("");
   }, [pay]);
@@ -148,11 +205,32 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
             >
               <Wifi className="h-3 w-3 ml-1" /> Idoom
             </Button>
+            <Button
+              size="sm"
+              variant={mode === "sim" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setMode("sim")}
+              data-testid="mode-sim"
+            >
+              <CreditCard className="h-3 w-3 ml-1" /> {ar ? "شريحة" : "SIM"}
+            </Button>
           </div>
           {mode === "flexy" && operator && (
             <Badge className={`${operator.color} text-white`} data-testid="detected-operator">{operator.name}</Badge>
           )}
         </div>
+
+        {/* p165: flexy/IPTV wallet + SIM balances */}
+        {balances && (
+          <div className="flex items-center gap-1.5 flex-wrap text-[11px]" data-testid="flexy-balances">
+            <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold">
+              {ar ? "محفظة الشحن/IPTV:" : "Wallet:"} {balances.wallet_balance} {ar ? "دج" : "DA"}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold" data-testid="sim-balances-box">
+              {ar ? "رصيد الشرائح:" : "SIMs:"} {balances.sim_total}{balances.bonus_total ? ` (+${balances.bonus_total} ${ar ? "بونيس" : "bonus"})` : ""} {ar ? "دج" : "DA"}
+            </span>
+          </div>
+        )}
 
         {/* === Flexy mode === */}
         {mode === "flexy" && compact && (
@@ -298,8 +376,60 @@ const QuickFlexyPanel = forwardRef(function QuickFlexyPanel({ language = "ar", o
           </>
         )}
 
+        {/* === SIM card activation mode (p165) === */}
+        {mode === "sim" && (
+          <>
+            <div className="flex items-center gap-1 flex-wrap">
+              {[["mobilis", ar ? "موبيليس" : "Mobilis", "bg-green-500"], ["djezzy", ar ? "جازي" : "Djezzy", "bg-red-500"], ["ooredoo", ar ? "أوريدو" : "Ooredoo", "bg-orange-500"]].map(([key, label, color]) => (
+                <button key={key} onClick={() => { setSimOperator(key); setSimOffer(null); }}
+                  className={`h-7 px-2 text-xs rounded-md border flex items-center gap-1 transition-colors ${simOperator === key ? `${color} text-white border-transparent` : "bg-white border-gray-300 hover:border-gray-400"}`}
+                  data-testid={`sim-op-${key}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {simOffers.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {simOffers.map((o) => (
+                  <button key={o.id} onClick={() => pickSimOffer(o)}
+                    className={`h-7 px-2 text-xs rounded-md border transition-colors ${simOffer?.id === o.id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-blue-700 border-blue-200 hover:border-blue-400"}`}
+                    data-testid={`sim-offer-${o.id}`}>
+                    {o.name} · {o.offer_value}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className={`grid gap-1.5 ${compact ? "grid-cols-4" : "grid-cols-2"}`}>
+              <div>
+                <label className="text-[10px] text-gray-600">{ar ? "قيمة العرض (تُخصم من رصيدك)" : "Valeur offre"}</label>
+                <Input dir="ltr" type="number" value={simOfferValue} onChange={(e) => { setSimOfferValue(e.target.value); setSimOffer(null); }} className={`${compact ? "h-8" : "h-9"} text-sm text-center`} data-testid="sim-offer-value" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-600">{ar ? "سعر البيع للزبون" : "Prix vente"}</label>
+                <Input dir="ltr" type="number" value={simSalePrice} onChange={(e) => setSimSalePrice(e.target.value)} className={`${compact ? "h-8" : "h-9"} text-sm text-center font-bold`} data-testid="sim-sale-price" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-600">{ar ? "البونيس المستلم" : "Bonus reçu"}</label>
+                <Input dir="ltr" type="number" value={simBonus} onChange={(e) => setSimBonus(e.target.value)} className={`${compact ? "h-8" : "h-9"} text-sm text-center`} data-testid="sim-bonus" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-600">{ar ? "تكلفة الشريحة" : "Coût SIM"}</label>
+                <Input dir="ltr" type="number" value={simCost} onChange={(e) => setSimCost(e.target.value)} className={`${compact ? "h-8" : "h-9"} text-sm text-center`} data-testid="sim-cost" />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className={`text-xs font-bold ${simProfit >= 0 ? "text-emerald-700" : "text-red-600"}`} data-testid="sim-profit-preview">
+                {ar ? "الربح المتوقع:" : "Profit:"} {simProfit.toFixed(2)} {ar ? "دج" : "DA"}
+              </span>
+              <Button className="h-8 px-3 bg-blue-600 hover:bg-blue-700 text-xs" onClick={submitSim} disabled={loading} data-testid="sim-submit-btn">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-3.5 w-3.5 me-1" />{ar ? "بيع وتفعيل" : "Vendre"}</>}
+              </Button>
+            </div>
+          </>
+        )}
+
         {/* Payment method + credit customer picker */}
-        {(!compact || mode === "idoom") && (
+        {(!compact || mode !== "flexy") && (
         <div className="flex items-center gap-1 flex-wrap pt-1 border-t">
           <span className="text-xs text-gray-600 mr-1">{ar ? "الدفع:" : "Paiement:"}</span>
           <Button size="sm" variant={pay === "cash" ? "default" : "outline"} className="h-7 text-xs flex-1 min-w-[60px]" onClick={() => setPay("cash")} data-testid="pay-cash">{ar ? "نقدي" : "Cash"}</Button>

@@ -30,7 +30,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def create_pos_settings_routes(db, main_db, get_current_user, get_super_admin) -> APIRouter:
+def create_pos_settings_routes(db, main_db, get_current_user, get_super_admin, get_tenant_admin=None) -> APIRouter:
     """db is the tenant_db (each call uses the request-scoped context)."""
     router = APIRouter(tags=["pos-settings"])
 
@@ -87,5 +87,30 @@ def create_pos_settings_routes(db, main_db, get_current_user, get_super_admin) -
             upsert=True,
         )
         return {"ok": True, "count": len(cleaned)}
+
+    # ── p165: weight-scale barcode configuration (per tenant) ──
+    # Label scales print EAN-13: prefix (2 digits) + PLU + weight + check digit.
+
+    @router.get("/pos/scale-config")
+    async def get_scale_config(user: dict = Depends(get_current_user)) -> dict:
+        doc = await db.pos_scale_config.find_one({"id": "default"}, {"_id": 0})
+        if not doc:
+            return {"enabled": False, "prefix": "21", "plu_digits": 5, "weight_digits": 5, "weight_decimals": 3}
+        return doc
+
+    @router.put("/pos/scale-config")
+    async def save_scale_config(payload: dict, user: dict = Depends(get_current_user)) -> dict:
+        doc = {
+            "id": "default",
+            "enabled": bool(payload.get("enabled", False)),
+            "prefix": str(payload.get("prefix", "21"))[:2],
+            "plu_digits": int(payload.get("plu_digits", 5)),
+            "weight_digits": int(payload.get("weight_digits", 5)),
+            "weight_decimals": int(payload.get("weight_decimals", 3)),
+            "updated_at": _now(),
+        }
+        await db.pos_scale_config.update_one({"id": "default"}, {"$set": doc}, upsert=True)
+        doc.pop("_id", None)
+        return doc
 
     return router

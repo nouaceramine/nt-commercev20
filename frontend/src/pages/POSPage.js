@@ -112,6 +112,13 @@ export default function POSPage() {
   const [customProduct, setCustomProduct] = useState({ name: '', price: '', qty: 1 });
   const [customerFamilyFilter, setCustomerFamilyFilter] = useState(null);
   const [showSellCardDialog, setShowSellCardDialog] = useState(false);
+  // p165: weight-scale support
+  const [scaleCfg, setScaleCfg] = useState(null);
+  const [weightProduct, setWeightProduct] = useState(null);
+  const [weightValue, setWeightValue] = useState('');
+  useEffect(() => {
+    apiClient.get('/pos/scale-config').then(r => setScaleCfg(r.data)).catch(() => {});
+  }, []);
   const [showPrintDocDialog, setShowPrintDocDialog] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const flexyPanelRef = useRef(null);
@@ -333,12 +340,42 @@ export default function POSPage() {
       if (e.key === 'Enter' && barcodeBuffer.length >= 3) {
         e.preventDefault();
         const barcode = barcodeBuffer.trim();
+        // p165: weight-embedded scale barcode — prefix + PLU + weight (grams) + check digit
+        if (scaleCfg?.enabled && barcode.length === 13 && barcode.startsWith(scaleCfg.prefix || '21')) {
+          const pluRaw = barcode.substr(2, scaleCfg.plu_digits || 5);
+          const wRaw = barcode.substr(2 + (scaleCfg.plu_digits || 5), scaleCfg.weight_digits || 5);
+          const weightKg = parseInt(wRaw, 10) / Math.pow(10, scaleCfg.weight_decimals ?? 3);
+          const plu = String(parseInt(pluRaw, 10));
+          const matchPlu = (x) => x.scale_plu && (x.scale_plu === pluRaw || String(parseInt(x.scale_plu, 10)) === plu);
+          const addWeighted = (p) => {
+            if (!p.name) p.name = p.name_ar || p.name_en;
+            cart.addItem(p, { overrideQty: weightKg });
+            toast.success(`${p.name} — ${weightKg} ${language === 'ar' ? 'كغ' : 'kg'}`);
+          };
+          const lp = products.find(matchPlu);
+          if (lp) { addWeighted(lp); }
+          else {
+            (async () => {
+              try {
+                const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(plu)}&limit=5`);
+                const p2 = (res.data?.results || []).find(matchPlu);
+                if (p2) addWeighted(p2);
+                else toast.error(language === 'ar' ? `منتج الميزان غير موجود (PLU: ${plu})` : `PLU introuvable: ${plu}`);
+              } catch (err) {
+                toast.error(language === 'ar' ? `منتج الميزان غير موجود (PLU: ${plu})` : `PLU introuvable: ${plu}`);
+              }
+            })();
+          }
+          setBarcodeBuffer('');
+          setSearchQuery('');
+          return;
+        }
         const product = products.find(p =>
           p.barcode === barcode ||
           (Array.isArray(p.additional_barcodes) && p.additional_barcodes.includes(barcode)) ||
           p.article_code === barcode
         );
-        if (product) { cart.addItem(product); toast.success(`${product.name_ar || product.name_en || product.name}`); }
+        if (product) { addProductSmart(product); toast.success(`${product.name_ar || product.name_en || product.name}`); }
         else {
           // p162: server-side fallback — scanned code may belong to a product beyond the locally loaded list
           (async () => {
@@ -350,7 +387,7 @@ export default function POSPage() {
                 (Array.isArray(x.additional_barcodes) && x.additional_barcodes.includes(barcode)) ||
                 (x.article_code || '').toLowerCase() === barcode.toLowerCase()
               ) || list[0];
-              if (p2) { cart.addItem(p2); toast.success(`${p2.name_ar || p2.name_en}`); }
+              if (p2) { addProductSmart(p2); toast.success(`${p2.name_ar || p2.name_en}`); }
               else { toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`); }
             } catch (err) {
               toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`);
@@ -372,7 +409,25 @@ export default function POSPage() {
       document.removeEventListener('keydown', handleBarcodeInput);
       if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
     };
-  }, [barcodeBuffer, products, language, cart]);
+  }, [barcodeBuffer, products, language, cart, scaleCfg, addProductSmart]);
+
+  // p165: smart add — sold-by-weight products ask for the weight first
+  const addProductSmart = useCallback((product, opts = {}) => {
+    if (!product) return;
+    if (!product.name) product.name = product.name_ar || product.name_en;
+    if (product.sold_by_weight && opts.overrideQty == null) {
+      setWeightProduct(product); setWeightValue(''); return;
+    }
+    cart.addItem(product, opts);
+  }, [cart]);
+
+  const confirmWeight = () => {
+    const w = parseFloat(weightValue);
+    if (!w || w <= 0) { toast.error(language === 'ar' ? 'أدخل وزناً صحيحاً' : 'Poids invalide'); return; }
+    cart.addItem(weightProduct, { overrideQty: w });
+    toast.success(`${weightProduct?.name || ''} — ${w} ${language === 'ar' ? 'كغ' : 'kg'}`);
+    setWeightProduct(null); setWeightValue('');
+  };
 
   // === Filtered Products ===
   const filteredProducts = products.filter(p => {
@@ -524,7 +579,7 @@ export default function POSPage() {
   };
 
   const handleShortcutClick = (shortcut, index) => {
-    if (shortcut.productId) { const product = products.find(p => p.id === shortcut.productId); if (product) cart.addItem(product); }
+    if (shortcut.productId) { const product = products.find(p => p.id === shortcut.productId); if (product) addProductSmart(product); }
     else { setEditingShortcutIndex(index); setShortcutColor(shortcut.color || SHORTCUT_COLORS[index % SHORTCUT_COLORS.length]); setShortcutProductId(''); setShowShortcutDialog(true); }
   };
 
@@ -590,7 +645,7 @@ export default function POSPage() {
           <POSSidebar
             searchInputRef={searchInputRef} searchQuery={searchQuery} setSearchQuery={setSearchQuery}
             showSearchResults={showSearchResults} setShowSearchResults={setShowSearchResults}
-            searchResults={searchResults} products={products} addToCart={cart.addItem}
+            searchResults={searchResults} products={products} addToCart={addProductSmart}
             setShowProductsDialog={setShowProductsDialog} taskMenuItems={taskMenuItems}
             activeTask={activeTask} handleTaskClick={handleTaskClick} returnMode={cart.returnMode}
             language={language} formatCurrency={formatCurrency} isRTL={isRTL}
@@ -655,7 +710,7 @@ export default function POSPage() {
           showProductsDialog={showProductsDialog} setShowProductsDialog={setShowProductsDialog}
           searchQuery={searchQuery} setSearchQuery={setSearchQuery} selectedFamily={selectedFamily}
           setSelectedFamily={setSelectedFamily} families={families} filteredProducts={filteredProducts}
-          addToCart={cart.addItem} language={language} formatCurrency={formatCurrency} priceType={priceType}
+          addToCart={addProductSmart} language={language} formatCurrency={formatCurrency} priceType={priceType}
           showCustomersDialog={showCustomersDialog} setShowCustomersDialog={setShowCustomersDialog}
           customers={customers} setSelectedCustomer={setSelectedCustomer}
           setShowNewCustomerDialog={setShowNewCustomerDialog} showNoteDialog={showNoteDialog}
@@ -739,6 +794,22 @@ export default function POSPage() {
               <Button variant="outline" onClick={() => { setShowInstallmentDialog(false); cart.setPaymentType('cash'); }}>{language === 'ar' ? 'إلغاء' : 'Annuler'}</Button>
               <Button onClick={() => setShowInstallmentDialog(false)} className="gap-2"><CalendarDays className="h-4 w-4" />{language === 'ar' ? 'تأكيد الخطة' : 'Confirmer'}</Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* p165: manual weight entry for sold-by-weight products */}
+        <Dialog open={!!weightProduct} onOpenChange={(o) => { if (!o) setWeightProduct(null); }}>
+          <DialogContent className="max-w-xs">
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? 'إدخال الوزن' : 'Saisir le poids'}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm font-semibold">{weightProduct?.name || weightProduct?.name_ar}</p>
+            <Input type="number" step="0.001" min="0" value={weightValue} onChange={(e) => setWeightValue(e.target.value)}
+              placeholder={language === 'ar' ? 'الوزن بالكيلوغرام (مثال: 0.750)' : 'Poids en kg'}
+              autoFocus dir="ltr" className="text-center text-lg"
+              onKeyDown={(e) => { if (e.key === 'Enter') confirmWeight(); }}
+              data-testid="weight-input" />
+            <Button onClick={confirmWeight} className="w-full" data-testid="weight-confirm-btn">{language === 'ar' ? 'إضافة للسلة' : 'Ajouter'}</Button>
           </DialogContent>
         </Dialog>
 

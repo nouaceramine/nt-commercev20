@@ -2421,3 +2421,23 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 - POSSessionBar.js: new `compact` prop — removes mb-2, CardContent p-1.5.
 - POSPage.js: POSSessionBar(compact) merged into the page header row between title/badges and the total box (standalone row removed); flexy strip = narrow vertical sell-card button (pos-sell-card-btn) + compact panel side-by-side (flex items-stretch).
 **Verification**: esbuild syntax OK ×3; bundle main.a0a561ac.js contains pos-sell-card-btn, quick-flexy-panel, pos-flexy-strip, pos-shortcuts-col, flexy-phone-input, pay-credit, credit-customer-select, compact.
+
+## p165 — Recharge/IPTV journaling + SIM offers + scale support (2026-08-18, release 20260818_162440)
+**Before**: cash recharges never appeared in the sales journal (only credit ones did); IPTV subscriptions appeared nowhere (no sale row, no cashbox, no session counters); SIM slot balances existed but were invisible in POS and excluded from capital; no scale support; no SIM-card offer/activation workflow.
+**After**:
+- Backend:
+  - recharge_service.py: cash recharges now also insert a sales row (type recharge_cash, purchase_price=cost so profit = commission) with full saga rollback.
+  - digital_panel_routes.py: create_subscription journals a sales row (type digital_subscription, purchase_price=cost), cash box + transaction for cash, customer debt mirror for debt, daily-session counters (failure logged, subscription kept).
+  - sim_routes.py: GET /sim/balances (require_tenant) — platform wallet + SIM slots + bonus totals; default slots gain bonus_balance/empty_sims/sim_unit_cost.
+  - NEW routes/recharge/sim_offers_routes.py: offers CRUD (/sim/offers[/all]) + POST/GET /sim/activations — profit = sale_price + bonus − offer_value − sim_cost; deducts offer_value from operator SIM balance, adds bonus to bonus_balance, decrements empty_sims (blocks at 0), journals sale (purchase_price = offer_value+sim_cost−bonus), cashbox/debt, session counters, balance logs, full rollback.
+  - stats_routes.py: capital += flexy/IPTV platform wallet + Σ SIM (balance+bonus) + Σ empty-SIM stock value; response gains flexy_wallet_balance/sim_balance_total/sim_stock_value; daily-full report: POS section excludes service-sale types (fixes old recharge_credit double-count), digital section gains subs_* (IPTV), new sim_activations section, same capital formula, total_revenue includes IPTV subs + SIM activations.
+  - catalog.py/trading.py: product sold_by_weight + scale_plu fields; quantities float (kg decimals).
+  - products.py: quick-search matches scale_plu, projects scale fields, ranks exact PLU first.
+  - pos_settings_routes.py: GET/PUT /pos/scale-config (prefix/plu/weight digits/decimals).
+- Frontend:
+  - QuickFlexyPanel: balances row (wallet + SIMs incl. bonus) refreshed after every op; new "شريحة" tab — operator chips, offer chips, editable offer-value/sale-price/bonus/cost, live profit preview, cash/credit + customer, submit → /sim/activations.
+  - POSPage: scale barcode parsing in scanner path (prefix+PLU+weight → add with kg quantity); sold_by_weight products open a weight-entry dialog; all add paths routed via addProductSmart.
+  - Add/EditProductPage: "يُباع بالوزن" switch + PLU input (vente tab).
+  - SimManagementPage: empty-SIM stock + unit cost per slot, bonus display, new "عروض التفعيل" tab (CRUD).
+  - SettingsPage: new "الميزان" tab (ScaleTab) for scale barcode config.
+**Verification**: curl — /sim/balances ✓, /sim/slots defaults ✓, offer CRUD ✓, activation (offer 2500/bonus 500/sale 2300/cost 100 → profit 200, slot 5000→2500+500 bonus, stock 10→9, sale row, cashbox +2300) ✓, IPTV sub (price 500 cost 0 → sale row + cashbox) ✓, /stats capital includes wallet+SIMs+SIM stock ✓, daily-full sections ✓, /pos/scale-config ✓. Test data fully reverted after verification. Bundle markers verified (main.3eefc87a.js + ScaleTab chunk 236.bac5138e).

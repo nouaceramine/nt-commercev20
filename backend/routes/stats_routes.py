@@ -11,7 +11,7 @@ from services.reporting import (
 )
 
 
-def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, init_cash_boxes, CURRENCY="DZD") -> dict:
+def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, init_cash_boxes, CURRENCY="DZD", main_db=None) -> dict:
     from utils.permissions import create_cashier_block
     router = APIRouter(tags=["stats-reports"])
     block_cashier = create_cashier_block(get_current_user)
@@ -68,7 +68,20 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(1)
         unboxed_expenses_today = round(unboxed_exp_agg[0]["total"], 2) if unboxed_exp_agg else 0
-        capital = round(stock_value + total_cash - unboxed_expenses_today, 2)
+
+        # ── p165: flexy/IPTV platform wallet + operator SIM balances count toward capital ──
+        flexy_wallet_balance = 0.0
+        try:
+            if main_db is not None:
+                _ent = admin.get("tenant_id") or admin.get("id", "")
+                _w = await main_db.wallets.find_one({"entity_id": _ent}, {"_id": 0, "balance": 1})
+                flexy_wallet_balance = round(float((_w or {}).get("balance", 0) or 0), 2)
+        except Exception:
+            flexy_wallet_balance = 0.0
+        sim_slots_list = await db.sim_slots.find({}, {"_id": 0}).to_list(20)
+        sim_balance_total = round(sum(float(s.get("balance", 0) or 0) + float(s.get("bonus_balance", 0) or 0) for s in sim_slots_list), 2)
+        sim_stock_value = round(sum(float(s.get("empty_sims", 0) or 0) * float(s.get("sim_unit_cost", 0) or 0) for s in sim_slots_list), 2)
+        capital = round(stock_value + total_cash - unboxed_expenses_today + flexy_wallet_balance + sim_balance_total + sim_stock_value, 2)
 
         unread_notifications = await db.notifications.count_documents({"read": False})
 
@@ -129,6 +142,9 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "total_cash": total_cash, "cash_boxes": cash_boxes,
             "stock_value": stock_value,
             "unboxed_expenses_today": unboxed_expenses_today,
+            "flexy_wallet_balance": flexy_wallet_balance,
+            "sim_balance_total": sim_balance_total,
+            "sim_stock_value": sim_stock_value,
             "capital": capital,
             "unread_notifications": unread_notifications,
             "total_receivables": total_receivables[0]["total"] if total_receivables else 0,
@@ -480,7 +496,8 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         in_day = {"$gte": day, "$lt": next_day}
 
         # 1) POS / inventory sales (webstore mirror rows are counted in the ecom line)
-        pos_docs = await db.sales.find({"created_at": in_day, "source": {"$ne": "webstore"}}, {"_id": 0}).to_list(5000)
+        pos_docs = await db.sales.find({"created_at": in_day, "source": {"$ne": "webstore"},
+                                        "type": {"$nin": ["recharge_credit", "recharge_cash", "digital_subscription", "sim_activation"]}}, {"_id": 0}).to_list(5000)
         pos_active = [s for s in pos_docs if s.get("status") != "returned"]
         pos_returned = [s for s in pos_docs if s.get("status") == "returned"]
         pos_ids = [it.get("product_id") for s in pos_active for it in (s.get("items") or [])]
@@ -541,12 +558,26 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         for d in dig_docs:
             tpe = d.get("product_type") or "OTHER"
             by_type[tpe] = by_type.get(tpe, 0) + 1
+        # p165: IPTV/digital panel subscriptions sold today (the real IPTV sales line)
+        subs_docs = await db.digital_subscriptions.find({"created_at": in_day}, {"_id": 0, "price": 1, "profit": 1, "category": 1}).to_list(3000)
+        subs_revenue = round(sum(s.get("price") or 0 for s in subs_docs), 2)
         digital = {
             "count": len(dig_docs),
             "completed_count": len(dig_done),
             "revenue": round(sum(d.get("amount") or 0 for d in dig_done), 2),
             "pending_count": len([d for d in dig_docs if d.get("status") == "PENDING"]),
             "by_type": by_type,
+            "subs_count": len(subs_docs),
+            "subs_revenue": subs_revenue,
+            "subs_profit": round(sum(s.get("profit") or 0 for s in subs_docs), 2),
+        }
+
+        # p165: SIM card activations sold today
+        sim_act_docs = await db.sim_activations.find({"created_at": in_day}, {"_id": 0, "sale_price": 1, "profit": 1}).to_list(3000)
+        sim_activations = {
+            "count": len(sim_act_docs),
+            "revenue": round(sum(s.get("sale_price") or 0 for s in sim_act_docs), 2),
+            "profit": round(sum(s.get("profit") or 0 for s in sim_act_docs), 2),
         }
 
         # 5) Repairs / maintenance
@@ -586,9 +617,22 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(1)
         unboxed_exp2 = round(unboxed_exp_agg2[0]["total"], 2) if unboxed_exp_agg2 else 0
-        capital = round(stock_value2 + boxes_total - unboxed_exp2, 2)
 
-        total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + repairs["revenue"], 2)
+        # p165: capital also counts the flexy/IPTV wallet and operator SIM balances
+        flexy_wallet2 = 0.0
+        try:
+            if main_db is not None:
+                _ent2 = admin.get("tenant_id") or admin.get("id", "")
+                _w2 = await main_db.wallets.find_one({"entity_id": _ent2}, {"_id": 0, "balance": 1})
+                flexy_wallet2 = round(float((_w2 or {}).get("balance", 0) or 0), 2)
+        except Exception:
+            flexy_wallet2 = 0.0
+        sim_slots2 = await db.sim_slots.find({}, {"_id": 0}).to_list(20)
+        sim_balance2 = round(sum(float(s.get("balance", 0) or 0) + float(s.get("bonus_balance", 0) or 0) for s in sim_slots2), 2)
+        sim_stock2 = round(sum(float(s.get("empty_sims", 0) or 0) * float(s.get("sim_unit_cost", 0) or 0) for s in sim_slots2), 2)
+        capital = round(stock_value2 + boxes_total - unboxed_exp2 + flexy_wallet2 + sim_balance2 + sim_stock2, 2)
+
+        total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + digital["subs_revenue"] + sim_activations["revenue"] + repairs["revenue"], 2)
 
         return {
             "date": day,
@@ -596,6 +640,10 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "digital": digital, "repairs": repairs,
             "expenses": expenses, "capital": capital, "cash_boxes": boxes,
             "stock_value": stock_value2,
+            "sim_activations": sim_activations,
+            "flexy_wallet_balance": flexy_wallet2,
+            "sim_balance_total": sim_balance2,
+            "sim_stock_value": sim_stock2,
             "total_revenue": total_revenue,
         }
 

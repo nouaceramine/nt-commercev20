@@ -278,6 +278,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 "$or": [
                     {"barcode": q},
                     {"additional_barcodes": q},
+                    {"scale_plu": q},
                     {"article_code": {"$regex": f"^{q}", "$options": "i"}},
                     {"name_ar": {"$regex": q, "$options": "i"}},
                     {"name_en": {"$regex": q, "$options": "i"}},
@@ -301,7 +302,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         search_query = {"$and": conditions} if conditions else {}
         projection = {
             "_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "barcode": 1,
-            "additional_barcodes": 1,
+            "additional_barcodes": 1, "scale_plu": 1, "sold_by_weight": 1,
             "article_code": 1, "retail_price": 1, "wholesale_price": 1,
             "super_wholesale_price": 1, "purchase_price": 1,
             "tariff_a": 1, "tariff_b": 1, "tariff_c": 1, "tariff_d": 1,
@@ -326,6 +327,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
         def sort_key(p) -> dict:
             if q and p.get("barcode") == q:
+                return 0
+            if q and p.get("scale_plu") == q:
                 return 0
             if q and q in (p.get("additional_barcodes") or []):
                 return 0

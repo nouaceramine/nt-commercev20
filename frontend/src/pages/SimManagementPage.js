@@ -35,7 +35,9 @@ import {
   RefreshCw,
   Zap,
   Save,
-  Wallet
+  Wallet,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 
 export default function SimManagementPage() {
@@ -57,9 +59,73 @@ export default function SimManagementPage() {
   const [recharging, setRecharging] = useState(false);
   const [detectedOperator, setDetectedOperator] = useState(null);
 
+  // p165: SIM activation offers catalog
+  const [offers, setOffers] = useState([]);
+  const [showOfferDialog, setShowOfferDialog] = useState(false);
+  const [editingOffer, setEditingOffer] = useState(null);
+  const emptyOfferForm = { operator: 'ooredoo', name: '', offer_value: '', default_sale_price: '', sim_cost: 100, typical_bonus: '' };
+  const [offerForm, setOfferForm] = useState(emptyOfferForm);
+
   useEffect(() => {
     fetchSlots();
+    fetchOffers();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchOffers = async () => {
+    try {
+      const r = await apiClient.get('/sim/offers/all');
+      setOffers(Array.isArray(r.data) ? r.data : []);
+    } catch (e) {
+      setOffers([]);
+    }
+  };
+
+  const openNewOffer = () => { setEditingOffer(null); setOfferForm(emptyOfferForm); setShowOfferDialog(true); };
+  const openEditOffer = (o) => {
+    setEditingOffer(o);
+    setOfferForm({ operator: o.operator, name: o.name, offer_value: o.offer_value, default_sale_price: o.default_sale_price, sim_cost: o.sim_cost, typical_bonus: o.typical_bonus });
+    setShowOfferDialog(true);
+  };
+
+  const saveOffer = async () => {
+    if (!offerForm.name.trim() || !(parseFloat(offerForm.offer_value) > 0)) {
+      toast.error(language === 'ar' ? 'أدخل اسم العرض وقيمته' : 'Nom et valeur requis');
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      operator: offerForm.operator,
+      name: offerForm.name.trim(),
+      offer_value: parseFloat(offerForm.offer_value) || 0,
+      default_sale_price: parseFloat(offerForm.default_sale_price) || 0,
+      sim_cost: parseFloat(offerForm.sim_cost) || 0,
+      typical_bonus: parseFloat(offerForm.typical_bonus) || 0,
+    };
+    try {
+      if (editingOffer) {
+        await apiClient.put(`/sim/offers/${editingOffer.id}`, payload);
+      } else {
+        await apiClient.post('/sim/offers', payload);
+      }
+      toast.success(language === 'ar' ? 'تم حفظ العرض' : 'Offre enregistrée');
+      setShowOfferDialog(false);
+      fetchOffers();
+    } catch (error) {
+      toast.error(errText(error) || t.error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteOffer = async (id) => {
+    try {
+      await apiClient.delete(`/sim/offers/${id}`);
+      toast.success(language === 'ar' ? 'تم حذف العرض' : 'Offre supprimée');
+      fetchOffers();
+    } catch (error) {
+      toast.error(t.error);
+    }
+  };
 
   const fetchSlots = async () => {
     try {
@@ -204,6 +270,10 @@ export default function SimManagementPage() {
               <Zap className="h-4 w-4" />
               {language === 'ar' ? 'شحن الرصيد' : 'Recharge'}
             </TabsTrigger>
+            <TabsTrigger value="offers" className="gap-2" data-testid="offers-tab">
+              <CreditCard className="h-4 w-4" />
+              {language === 'ar' ? 'عروض التفعيل' : 'Offres'}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="slots" className="space-y-6 mt-6">
@@ -248,6 +318,31 @@ export default function SimManagementPage() {
                       <p className="text-xs text-muted-foreground mb-1">{language === 'ar' ? 'الرصيد الحالي' : 'Solde actuel'}</p>
                       <p className="text-3xl font-bold">{(slot.balance || 0).toFixed(2)}</p>
                       <p className="text-xs text-muted-foreground">{t.currency}</p>
+                      <p className="text-xs text-emerald-600 font-semibold mt-1">
+                        {language === 'ar' ? 'البونيس' : 'Bonus'}: {(slot.bonus_balance || 0).toFixed(2)} {t.currency}
+                      </p>
+                    </div>
+
+                    {/* p165: empty-SIM stock + unit cost */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">{language === 'ar' ? 'شرائح فارغة (مخزون)' : 'SIMs vierges'}</Label>
+                        <Input type="number" min="0" value={slot.empty_sims || 0}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value) || 0;
+                            setSlots(slots.map(s => s.slot_id === slot.slot_id ? { ...s, empty_sims: v } : s));
+                          }}
+                          className="mt-1" dir="ltr" data-testid={`sim-stock-${slot.slot_id}`} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">{language === 'ar' ? 'تكلفة الشريحة' : 'Coût SIM'}</Label>
+                        <Input type="number" min="0" value={slot.sim_unit_cost || 0}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value) || 0;
+                            setSlots(slots.map(s => s.slot_id === slot.slot_id ? { ...s, sim_unit_cost: v } : s));
+                          }}
+                          className="mt-1" dir="ltr" />
+                      </div>
                     </div>
                     
                     <div className="flex gap-2">
@@ -269,7 +364,7 @@ export default function SimManagementPage() {
                     
                     <Button 
                       className="w-full"
-                      onClick={() => updateSlot(slot.slot_id, { phone: slot.phone, operator: slot.operator })}
+                      onClick={() => updateSlot(slot.slot_id, { phone: slot.phone, operator: slot.operator, empty_sims: slot.empty_sims || 0, sim_unit_cost: slot.sim_unit_cost || 0 })}
                       disabled={saving}
                     >
                       <Save className="h-4 w-4 me-2" />
@@ -405,7 +500,116 @@ export default function SimManagementPage() {
               </CardContent>
             </Card>
           </TabsContent>
+        {/* p165: Offers catalog tab */}
+        <TabsContent value="offers" className="space-y-4 mt-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <CardTitle>{language === 'ar' ? 'عروض تفعيل الشرائح' : "Offres d'activation"}</CardTitle>
+                    <CardDescription>
+                      {language === 'ar'
+                        ? 'الربح = سعر البيع + البونيس − قيمة العرض − تكلفة الشريحة'
+                        : 'Profit = prix + bonus − valeur − coût'}
+                    </CardDescription>
+                  </div>
+                  <Button onClick={openNewOffer} className="gap-1" data-testid="add-offer-btn">
+                    <Plus className="h-4 w-4" />
+                    {language === 'ar' ? 'عرض جديد' : 'Nouvelle offre'}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {offers.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-6">
+                    {language === 'ar' ? 'لا توجد عروض بعد — أضف عروض كل متعامل' : 'Aucune offre'}
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{language === 'ar' ? 'المتعامل' : 'Opérateur'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'العرض' : 'Offre'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'قيمة العرض' : 'Valeur'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'سعر البيع' : 'Prix'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'البونيس المتوقع' : 'Bonus'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'تكلفة الشريحة' : 'Coût SIM'}</TableHead>
+                        <TableHead></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {offers.map(o => (
+                        <TableRow key={o.id} data-testid={`offer-row-${o.id}`}>
+                          <TableCell><Badge variant="secondary">{o.operator_name || o.operator}</Badge></TableCell>
+                          <TableCell className="font-semibold">{o.name}</TableCell>
+                          <TableCell>{o.offer_value} {t.currency}</TableCell>
+                          <TableCell>{o.default_sale_price} {t.currency}</TableCell>
+                          <TableCell className="text-emerald-600">{o.typical_bonus} {t.currency}</TableCell>
+                          <TableCell>{o.sim_cost} {t.currency}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => openEditOffer(o)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteOffer(o.id)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
+
+        {/* p165: Offer add/edit dialog */}
+        <Dialog open={showOfferDialog} onOpenChange={setShowOfferDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{editingOffer ? (language === 'ar' ? 'تعديل العرض' : "Modifier") : (language === 'ar' ? 'عرض جديد' : 'Nouvelle offre')}</DialogTitle>
+              <DialogDescription>
+                {language === 'ar' ? 'قيمة العرض تُخصم من رصيد شريحتك الأساسية عند التفعيل' : "La valeur est débitée de votre SIM principale"}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label>{language === 'ar' ? 'المتعامل' : 'Opérateur'}</Label>
+                <select className="w-full border rounded-md px-3 py-2 mt-1 bg-background" value={offerForm.operator}
+                  onChange={(e) => setOfferForm({ ...offerForm, operator: e.target.value })} data-testid="offer-operator">
+                  <option value="mobilis">{language === 'ar' ? 'موبيليس' : 'Mobilis'}</option>
+                  <option value="djezzy">{language === 'ar' ? 'جازي' : 'Djezzy'}</option>
+                  <option value="ooredoo">{language === 'ar' ? 'أوريدو' : 'Ooredoo'}</option>
+                </select>
+              </div>
+              <div>
+                <Label>{language === 'ar' ? 'اسم العرض' : "Nom de l'offre"}</Label>
+                <Input value={offerForm.name} onChange={(e) => setOfferForm({ ...offerForm, name: e.target.value })} className="mt-1" data-testid="offer-name" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>{language === 'ar' ? 'قيمة العرض (تُخصم منك)' : 'Valeur (débitée)'}</Label>
+                  <Input type="number" dir="ltr" value={offerForm.offer_value} onChange={(e) => setOfferForm({ ...offerForm, offer_value: e.target.value })} className="mt-1" data-testid="offer-value" />
+                </div>
+                <div>
+                  <Label>{language === 'ar' ? 'سعر البيع للزبون' : 'Prix de vente'}</Label>
+                  <Input type="number" dir="ltr" value={offerForm.default_sale_price} onChange={(e) => setOfferForm({ ...offerForm, default_sale_price: e.target.value })} className="mt-1" />
+                </div>
+                <div>
+                  <Label>{language === 'ar' ? 'البونيس المتوقع' : 'Bonus attendu'}</Label>
+                  <Input type="number" dir="ltr" value={offerForm.typical_bonus} onChange={(e) => setOfferForm({ ...offerForm, typical_bonus: e.target.value })} className="mt-1" />
+                </div>
+                <div>
+                  <Label>{language === 'ar' ? 'تكلفة الشريحة الفارغة' : 'Coût SIM'}</Label>
+                  <Input type="number" dir="ltr" value={offerForm.sim_cost} onChange={(e) => setOfferForm({ ...offerForm, sim_cost: e.target.value })} className="mt-1" />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" onClick={() => setShowOfferDialog(false)} className="flex-1">{language === 'ar' ? 'إلغاء' : 'Annuler'}</Button>
+                <Button onClick={saveOffer} disabled={saving} className="flex-1" data-testid="offer-save-btn">{t.save}</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Balance Update Dialog */}
         <Dialog open={showBalanceDialog} onOpenChange={setShowBalanceDialog}>

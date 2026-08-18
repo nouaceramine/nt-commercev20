@@ -32,6 +32,7 @@ const SoundTab = lazy(() => import('./settings/SoundTab'));
 const SystemTab = lazy(() => import('./settings/SystemTab'));
 const BrandingTab = lazy(() => import('./settings/BrandingTab'));
 const BridgeTab = lazy(() => import('./settings/BridgeTab'));
+const ScaleTab = lazy(() => import('./settings/ScaleTab'));
 
 const TabLoader = () => <LoadingState className="h-32" />;
 
@@ -47,6 +48,7 @@ const TAB_COMPONENTS = {
   sound: SoundTab,
   system: SystemTab,
   bridge: BridgeTab,
+  scale: ScaleTab,
 };
 
 export default function SettingsPage() {

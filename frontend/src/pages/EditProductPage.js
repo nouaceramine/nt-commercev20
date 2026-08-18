@@ -103,6 +103,8 @@ export default function EditProductPage() {
     force_qty_entry: false,
     force_price_entry: false,
     serial_number_tracking: false,
+    sold_by_weight: false,
+    scale_plu: '',
     additional_barcodes: [],
     color: '',
     sizes_text: '',
@@ -156,6 +158,8 @@ export default function EditProductPage() {
           force_qty_entry: p.force_qty_entry || false,
           force_price_entry: p.force_price_entry || false,
           serial_number_tracking: p.serial_number_tracking || false,
+          sold_by_weight: p.sold_by_weight || false,
+          scale_plu: p.scale_plu || '',
           additional_barcodes: Array.isArray(p.additional_barcodes) ? p.additional_barcodes : [],
           color: p.color || '',
           sizes_text: Array.isArray(p.sizes) ? p.sizes.join(', ') : '',
@@ -457,6 +461,8 @@ export default function EditProductPage() {
         force_qty_entry: formData.force_qty_entry,
         force_price_entry: formData.force_price_entry,
         serial_number_tracking: formData.serial_number_tracking,
+        sold_by_weight: formData.sold_by_weight,
+        scale_plu: formData.scale_plu || '',
         color: formData.color || '',
         sizes: (formData.sizes_text || '').split(',').map(s => s.trim()).filter(s => s),
         has_variants: formData.has_variants || false,
@@ -767,6 +773,7 @@ export default function EditProductPage() {
                       { key: 'force_qty_entry', label_ar: 'إدخال الكمية إلزامي', label_fr: 'Saisie qté obligatoire', desc_ar: 'يطلب من الكاشير إدخال الكمية يدوياً', desc_fr: 'Demande la saisie manuelle de la qté' },
                       { key: 'force_price_entry', label_ar: 'إدخال السعر إلزامي', label_fr: 'Saisie prix obligatoire', desc_ar: 'يطلب إدخال السعر عند كل عملية بيع', desc_fr: 'Demande la saisie du prix à chaque vente' },
                       { key: 'serial_number_tracking', label_ar: 'تتبع الرقم التسلسلي', label_fr: 'Suivi n° de série', desc_ar: 'يطلب إدخال رقم تسلسلي عند البيع', desc_fr: 'Demande le n° de série à chaque vente' },
+                      { key: 'sold_by_weight', label_ar: 'يُباع بالوزن (ميزان)', label_fr: 'Vendu au poids', desc_ar: 'نقطة البيع تطلب الوزن عند الإضافة، وتقرأ باركود الميزان الوزني', desc_fr: 'La caisse demande le poids et lit les codes-barres poids' },
                       { key: 'allow_online_payment', label_ar: 'السماح بالدفع الإلكتروني', label_fr: 'Paiement en ligne', desc_ar: 'يظهر خيار الدفع الإلكتروني لهذا المنتج في المتجر', desc_fr: 'Affiche le paiement en ligne pour ce produit' },
                     ].map(opt => (
                       <div key={opt.key} className={`flex items-center justify-between p-3 rounded-lg border ${opt.danger && formData[opt.key] ? 'border-red-200 bg-red-50 dark:bg-red-950/20' : 'border-border'}`}>
@@ -778,6 +785,14 @@ export default function EditProductPage() {
                       </div>
                     ))}
                   </div>
+
+                  {formData.sold_by_weight && (
+                    <div className="border rounded-lg p-3 space-y-2" data-testid="scale-plu-row">
+                      <Label>{isAr ? 'كود المنتج في الميزان (PLU)' : 'Code PLU (balance)'}</Label>
+                      <p className="text-[11px] text-muted-foreground">{isAr ? 'نفس الكود المبرمج في الميزان لهذا المنتج — يظهر داخل الباركود الوزني المطبوع' : 'Le code programmé dans la balance, présent dans le code-barres poids'}</p>
+                      <Input name="scale_plu" value={formData.scale_plu || ''} onChange={handleChange} dir="ltr" placeholder="10025" data-testid="scale-plu-input" />
+                    </div>
+                  )}
 
                   {shippingProviders.length > 0 && (
                     <div className="border rounded-lg p-3 space-y-2" data-testid="shipping-provider-row">
