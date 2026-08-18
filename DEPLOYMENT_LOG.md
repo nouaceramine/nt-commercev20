@@ -2384,3 +2384,13 @@ BDV10.dblx (Microsoft Access، 46MB، نسخة حديثة من حاسوب الم
 **Fix**: App.js route block replaced with <Navigate to="/" replace /> redirects for /tenant/dashboard and /smart-dashboard.
 **Tests**: live main.2370959c.js — TenantDashboardPage=0, SmartDashboardPage=0 refs; /, /tenant/dashboard, /smart-dashboard all 200.
 **Deploy**: release 20260818_090818 via scripts/deploy.sh
+
+## p162 — Barcode-linked search + POS server search + real capital + orders auto-refresh (2026-08-18)
+**Backup**: /opt/ntcommerce/backups/p162_search_pos/ (products_routes.py, POSPage.js, POSSidebar.js, stats_routes.py, DashboardPage.js, EcomHubPage.js)
+**p162a — barcode search everywhere**: products_routes.py — added additional_barcodes regex to /products search, /products/paginated search, /products/quick-search $or; projection now returns additional_barcodes; sort_key ranks exact barcode/alias/article_code first
+**p162b — POS search across full DB**: POSPage.js — search effect = instant local filter + debounced (250ms) server quick-search (race-guarded), barcode scanner Enter falls back to server lookup when product not in locally loaded 1000; grid filter includes additional_barcodes
+**p162c — real capital algorithm**: stats_routes.py /stats + daily-report — capital = Σ(purchase_price × quantity) [stock_value] + Σ cash_boxes excl. personal − today's expenses NOT charged to any box (boxed expenses already reduced balances — no double count; USD expenses excluded — deducted at purchase). Response adds stock_value, unboxed_expenses_today, capital. DashboardPage capital card now shows stats.capital
+**p162d — ecom orders auto-appear**: EcomHubPage.js — silent refresh (orders+summary) every 20s, skips when tab hidden, no spinner (StoreManagementPage already had it)
+**Tests**: quick-search exact barcode=1 hit, alias barcode=1 hit w/ aliases in payload, name search=57; /products?search=<alias>=1; /api/stats capital=15,327,181.80 (stock 15,327,181.80 + boxes 0 − unboxed 0); openapi: verify-email, resend-verification, quick-search, stats LIVE; bundle main.f3f46a1b.js — quick-search, document.hidden, capital-card, additional_barcodes present; TenantDashboardPage=0
+**Deploy**: release 20260818_100522
+**Audit (7 days)**: demo agent active in saas_agents (5 perms); p155 2FA line present; email verification endpoints live (all 4 tenants verified=True); owner NT-0004 Enterprise+override; BDV10 import intact (7,415 products, 36,695 sales, 1,357 purchases, 1,422 sessions, 126 counts, 7,435 movements, 1,735 debt_payments); p160 unified dashboard live

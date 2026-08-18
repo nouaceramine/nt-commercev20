@@ -281,7 +281,8 @@ export default function POSPage() {
     else setCustomerDebt(0);
   }, [selectedCustomer]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // === Search effect ===
+  // === Search effect (p162: local instant filter + debounced full-DB server search) ===
+  const searchSeqRef = useRef(0);
   useEffect(() => {
     if (searchQuery.length >= 1) {
       const query = searchQuery.toLowerCase();
@@ -289,10 +290,23 @@ export default function POSPage() {
         p.name_ar?.toLowerCase().includes(query) ||
         p.name_en?.toLowerCase().includes(query) ||
         p.article_code?.toLowerCase().includes(query) ||
-        p.barcode?.toLowerCase().includes(query)
+        p.barcode?.toLowerCase().includes(query) ||
+        (Array.isArray(p.additional_barcodes) && p.additional_barcodes.some(b => b && b.toLowerCase().includes(query)))
       ).slice(0, 10);
       setSearchResults(filtered);
       setShowSearchResults(true);
+      // Server-side search across ALL products (local list is capped at 1000)
+      const seq = ++searchSeqRef.current;
+      const timer = setTimeout(async () => {
+        try {
+          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=12`);
+          if (seq === searchSeqRef.current && Array.isArray(res.data?.results)) {
+            setSearchResults(res.data.results);
+            setShowSearchResults(true);
+          }
+        } catch (e) { /* keep local results on error */ }
+      }, 250);
+      return () => clearTimeout(timer);
     } else {
       setSearchResults([]);
       setShowSearchResults(false);
@@ -324,8 +338,25 @@ export default function POSPage() {
           (Array.isArray(p.additional_barcodes) && p.additional_barcodes.includes(barcode)) ||
           p.article_code === barcode
         );
-        if (product) { cart.addItem(product); toast.success(`${product.name}`); }
-        else { toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`); }
+        if (product) { cart.addItem(product); toast.success(`${product.name_ar || product.name_en || product.name}`); }
+        else {
+          // p162: server-side fallback — scanned code may belong to a product beyond the locally loaded list
+          (async () => {
+            try {
+              const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(barcode)}&limit=5`);
+              const list = res.data?.results || [];
+              const p2 = list.find(x =>
+                x.barcode === barcode ||
+                (Array.isArray(x.additional_barcodes) && x.additional_barcodes.includes(barcode)) ||
+                (x.article_code || '').toLowerCase() === barcode.toLowerCase()
+              ) || list[0];
+              if (p2) { cart.addItem(p2); toast.success(`${p2.name_ar || p2.name_en}`); }
+              else { toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`); }
+            } catch (err) {
+              toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`);
+            }
+          })();
+        }
         setBarcodeBuffer('');
         setSearchQuery('');
         return;
@@ -349,6 +380,7 @@ export default function POSPage() {
       p.name_ar?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.name_en?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (Array.isArray(p.additional_barcodes) && p.additional_barcodes.some(b => b && b.toLowerCase().includes(searchQuery.toLowerCase()))) ||
       p.article_code?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesFamily = selectedFamily === 'all' || p.family_id === selectedFamily;
     return matchesSearch && matchesFamily;

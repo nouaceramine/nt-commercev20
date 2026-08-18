@@ -110,6 +110,30 @@ export default function EcomHubPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // p162d: silent auto-refresh every 20s — new store orders appear without manual reload
+  const silentRefresh = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ limit: '100' });
+      if (activeStatus !== 'all') params.append('status', activeStatus);
+      if (channelFilter !== 'all') params.append('channel', channelFilter);
+      if (search.trim()) params.append('search', search.trim());
+      const [ordersRes, summaryRes] = await Promise.all([
+        apiClient.get(`/ecom/orders?${params.toString()}`),
+        apiClient.get('/ecom/orders/summary'),
+      ]);
+      setOrders(ordersRes.data.items || []);
+      setTotal(ordersRes.data.total || 0);
+      setSummary(summaryRes.data);
+    } catch { /* silent polling — never surfaces errors */ }
+  }, [activeStatus, channelFilter, search]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!document.hidden) silentRefresh();
+    }, 20000);
+    return () => clearInterval(t);
+  }, [silentRefresh]);
+
   // p145: load smart insights once (failures are silent — insights are advisory)
   useEffect(() => {
     (async () => {

@@ -47,6 +47,29 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
         cash_boxes = await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
         total_cash = sum(b.get("balance", 0) for b in cash_boxes if b.get("id") != "personal")  # p68: personal money is outside business capital
+
+        # ── p162: Real capital ──
+        # capital = stock value at purchase cost + business cash boxes (excl. personal)
+        #           − today's expenses NOT charged to any box (boxed expenses already reduced balances → no double count)
+        stock_val_agg = await db.products.aggregate([
+            {"$group": {"_id": None, "total": {"$sum": {"$multiply": [
+                {"$convert": {"input": "$purchase_price", "to": "double", "onError": 0, "onNull": 0}},
+                {"$convert": {"input": "$quantity", "to": "double", "onError": 0, "onNull": 0}}
+            ]}}}}
+        ]).to_list(1)
+        stock_value = round(stock_val_agg[0]["total"], 2) if stock_val_agg else 0
+        next_day = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+        unboxed_exp_agg = await db.expenses.aggregate([
+            {"$match": {
+                "date": {"$gte": today, "$lt": next_day},
+                "$or": [{"payment_method": {"$exists": False}}, {"payment_method": None}, {"payment_method": ""}],
+                "currency": {"$ne": "USD"},
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]).to_list(1)
+        unboxed_expenses_today = round(unboxed_exp_agg[0]["total"], 2) if unboxed_exp_agg else 0
+        capital = round(stock_value + total_cash - unboxed_expenses_today, 2)
+
         unread_notifications = await db.notifications.count_documents({"read": False})
 
         total_receivables = await db.debts.aggregate([
@@ -104,6 +127,9 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "today_sales_total": today_sales[0]["total"] if today_sales else 0,
             "today_sales_count": today_sales[0]["count"] if today_sales else 0,
             "total_cash": total_cash, "cash_boxes": cash_boxes,
+            "stock_value": stock_value,
+            "unboxed_expenses_today": unboxed_expenses_today,
+            "capital": capital,
             "unread_notifications": unread_notifications,
             "total_receivables": total_receivables[0]["total"] if total_receivables else 0,
             "total_payables": total_payables[0]["total"] if total_payables else 0,
@@ -542,7 +568,25 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         ]).to_list(1)
         expenses = {"total": round(exp_agg[0]["total"], 2), "count": exp_agg[0]["count"]} if exp_agg else {"total": 0, "count": 0}
         boxes = await db.cash_boxes.find({}, {"_id": 0, "id": 1, "name": 1, "balance": 1}).to_list(50)
-        capital = round(sum(b.get("balance", 0) for b in boxes if b.get("id") != "personal"), 2)
+        # p162: unified real-capital formula — stock value at cost + business boxes − unboxed today expenses
+        boxes_total = round(sum(b.get("balance", 0) for b in boxes if b.get("id") != "personal"), 2)
+        stock_val_agg2 = await db.products.aggregate([
+            {"$group": {"_id": None, "total": {"$sum": {"$multiply": [
+                {"$convert": {"input": "$purchase_price", "to": "double", "onError": 0, "onNull": 0}},
+                {"$convert": {"input": "$quantity", "to": "double", "onError": 0, "onNull": 0}}
+            ]}}}}
+        ]).to_list(1)
+        stock_value2 = round(stock_val_agg2[0]["total"], 2) if stock_val_agg2 else 0
+        unboxed_exp_agg2 = await db.expenses.aggregate([
+            {"$match": {
+                "date": in_day,
+                "$or": [{"payment_method": {"$exists": False}}, {"payment_method": None}, {"payment_method": ""}],
+                "currency": {"$ne": "USD"},
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]).to_list(1)
+        unboxed_exp2 = round(unboxed_exp_agg2[0]["total"], 2) if unboxed_exp_agg2 else 0
+        capital = round(stock_value2 + boxes_total - unboxed_exp2, 2)
 
         total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + repairs["revenue"], 2)
 
@@ -551,6 +595,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "pos": pos, "ecom": ecom, "recharge": recharge,
             "digital": digital, "repairs": repairs,
             "expenses": expenses, "capital": capital, "cash_boxes": boxes,
+            "stock_value": stock_value2,
             "total_revenue": total_revenue,
         }
 

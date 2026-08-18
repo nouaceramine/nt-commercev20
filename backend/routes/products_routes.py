@@ -165,6 +165,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 {"description_ar": {"$regex": search, "$options": "i"}},
                 {"compatible_models": {"$regex": search, "$options": "i"}},
                 {"barcode": {"$regex": search, "$options": "i"}},
+                {"additional_barcodes": {"$regex": search, "$options": "i"}},
                 {"article_code": {"$regex": search, "$options": "i"}}
             ]
         if model:
@@ -231,6 +232,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 {"description_ar": {"$regex": search, "$options": "i"}},
                 {"compatible_models": {"$regex": search, "$options": "i"}},
                 {"barcode": {"$regex": search, "$options": "i"}},
+                {"additional_barcodes": {"$regex": search, "$options": "i"}},
                 {"article_code": {"$regex": search, "$options": "i"}}
             ]
         if model:
@@ -280,6 +282,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                     {"name_ar": {"$regex": q, "$options": "i"}},
                     {"name_en": {"$regex": q, "$options": "i"}},
                     {"barcode": {"$regex": q, "$options": "i"}},
+                    {"additional_barcodes": {"$regex": q, "$options": "i"}},
                 ]
             })
         if family_id:
@@ -298,6 +301,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         search_query = {"$and": conditions} if conditions else {}
         projection = {
             "_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "barcode": 1,
+            "additional_barcodes": 1,
             "article_code": 1, "retail_price": 1, "wholesale_price": 1,
             "super_wholesale_price": 1, "purchase_price": 1,
             "tariff_a": 1, "tariff_b": 1, "tariff_c": 1, "tariff_d": 1,
@@ -322,6 +326,10 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
         def sort_key(p) -> dict:
             if q and p.get("barcode") == q:
+                return 0
+            if q and q in (p.get("additional_barcodes") or []):
+                return 0
+            if q and p.get("article_code", "").lower() == q.lower():
                 return 0
             if q and p.get("article_code", "").lower().startswith(q.lower()):
                 return 1
