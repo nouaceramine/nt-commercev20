@@ -320,6 +320,24 @@ export default function POSPage() {
     }
   }, [searchQuery, products]);
 
+  // p165: smart add — sold-by-weight products ask for the weight first
+  const addProductSmart = useCallback((product, opts = {}) => {
+    if (!product) return;
+    if (!product.name) product.name = product.name_ar || product.name_en;
+    if (product.sold_by_weight && opts.overrideQty == null) {
+      setWeightProduct(product); setWeightValue(''); return;
+    }
+    cart.addItem(product, opts);
+  }, [cart]);
+
+  const confirmWeight = () => {
+    const w = parseFloat(weightValue);
+    if (!w || w <= 0) { toast.error(language === 'ar' ? 'أدخل وزناً صحيحاً' : 'Poids invalide'); return; }
+    cart.addItem(weightProduct, { overrideQty: w });
+    toast.success(`${weightProduct?.name || ''} — ${w} ${language === 'ar' ? 'كغ' : 'kg'}`);
+    setWeightProduct(null); setWeightValue('');
+  };
+
   // === Barcode Scanner ===
   const [barcodeBuffer, setBarcodeBuffer] = useState('');
   const barcodeTimeoutRef = useRef(null);
@@ -410,24 +428,6 @@ export default function POSPage() {
       if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
     };
   }, [barcodeBuffer, products, language, cart, scaleCfg, addProductSmart]);
-
-  // p165: smart add — sold-by-weight products ask for the weight first
-  const addProductSmart = useCallback((product, opts = {}) => {
-    if (!product) return;
-    if (!product.name) product.name = product.name_ar || product.name_en;
-    if (product.sold_by_weight && opts.overrideQty == null) {
-      setWeightProduct(product); setWeightValue(''); return;
-    }
-    cart.addItem(product, opts);
-  }, [cart]);
-
-  const confirmWeight = () => {
-    const w = parseFloat(weightValue);
-    if (!w || w <= 0) { toast.error(language === 'ar' ? 'أدخل وزناً صحيحاً' : 'Poids invalide'); return; }
-    cart.addItem(weightProduct, { overrideQty: w });
-    toast.success(`${weightProduct?.name || ''} — ${w} ${language === 'ar' ? 'كغ' : 'kg'}`);
-    setWeightProduct(null); setWeightValue('');
-  };
 
   // === Filtered Products ===
   const filteredProducts = products.filter(p => {
