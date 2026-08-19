@@ -185,7 +185,7 @@ BUSINESS_PROFILES = [
         "icon": "Pizza",
         "desc_ar": "بيع سريع عبر العداد، منتجات غير مخزنة",
         "features_off": ["recharge", "iptv", "maintenance", "barcode", "credit_sales"],
-        "features_on": [],
+        "features_on": ["restaurant"],  # p186: tables + kitchen orders
         "families": ["بيتزا", "ساندويتشات", "مشروبات", "حلويات", "وجبات", "مقبلات"],
     },
     {
@@ -239,7 +239,7 @@ _BY_KEY = {p["key"]: p for p in BUSINESS_PROFILES}
 KNOWN_FEATURE_KEYS = [
     "ai_bots", "backup", "barcode", "credit_sales", "customers", "ecommerce_hub",
     "inventory", "iptv", "loyalty_points", "maintenance", "pos", "recharge",
-    "reports", "wallet", "rental",
+    "reports", "wallet", "rental", "restaurant",
 ]
 
 

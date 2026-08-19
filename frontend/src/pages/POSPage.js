@@ -18,6 +18,7 @@ import {
   List, FolderTree, FileText, ArrowDownToLine,
   ArrowUpFromLine, BarChart3, ScrollText, CalendarDays,
   Tag, Printer, PackagePlus, History, CreditCard, PauseCircle, Undo2 as UndoIcon,
+  UtensilsCrossed, ChefHat,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -44,6 +45,7 @@ import { PaymentDetails } from '../models/PaymentDetails';
 import POSDialogs from './pos/POSDialogs';
 import POSSessionBar from './pos/POSSessionBar';
 import POSSidebar from './pos/POSSidebar';
+import { useAuth } from '../contexts/AuthContext';
 import POSShortcuts from './pos/POSShortcuts';
 import POSCart from './pos/POSCart';
 import PrintDocumentDialog from '../components/print/PrintDocumentDialog';
@@ -122,6 +124,14 @@ export default function POSPage() {
     apiClient.get('/pos/scale-config').then(r => setScaleCfg(r.data)).catch(() => {});
   }, []);
   const [showPrintDocDialog, setShowPrintDocDialog] = useState(false);
+  // p186: restaurant mode (tables + kitchen orders)
+  const { isAdmin: isAdminUser, isFeatureEnabled } = useAuth();
+  const restaurantOn = isFeatureEnabled('restaurant');
+  const [restTables, setRestTables] = useState([]);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [showTableDialog, setShowTableDialog] = useState(false);
+  const [newTableName, setNewTableName] = useState('');
+  const [newTableSeats, setNewTableSeats] = useState('4');
   const [showCalculator, setShowCalculator] = useState(false);
   const flexyPanelRef = useRef(null);
   const [showSearchResults, setShowSearchResults] = useState(false);
@@ -486,6 +496,62 @@ export default function POSPage() {
     };
   }, [barcodeBuffer, products, language, cart, scaleCfg, addProductSmart]);
 
+  // === p186: Restaurant mode ===
+  const fetchTables = useCallback(async () => {
+    if (!restaurantOn) return;
+    try { const r = await apiClient.get('/restaurant/tables'); setRestTables(r.data || []); } catch (e) { /* silent */ }
+  }, [restaurantOn]);
+
+  useEffect(() => { if (restaurantOn) fetchTables(); }, [restaurantOn, fetchTables]);
+
+  const createTable = async () => {
+    if (!newTableName.trim()) return;
+    try {
+      await apiClient.post('/restaurant/tables', { name: newTableName.trim(), seats: parseInt(newTableSeats) || 4 });
+      setNewTableName('');
+      fetchTables();
+      toast.success(language === 'ar' ? 'أُضيفت الطاولة' : 'Table ajoutee');
+    } catch (e) { toast.error(errText(e)); }
+  };
+
+  const printKitchenTicket = (order) => {
+    try {
+      const w = window.open('', '_blank', 'width=320,height=500');
+      if (!w) return;
+      const rows = (order.items || []).map(it =>
+        '<tr><td style="padding:4px;font-weight:bold;vertical-align:top">' + it.quantity + 'x</td><td style="padding:4px">' +
+        it.product_name +
+        (it.variant ? ' (' + [it.variant.color, it.variant.size].filter(Boolean).join('/') + ')' : '') +
+        (it.note ? '<br/><small>-- ' + it.note + '</small>' : '') + '</td></tr>'
+      ).join('');
+      w.document.write(
+        '<html dir="rtl"><head><meta charset="utf-8"><title>' + order.code + '</title></head>' +
+        '<body style="font-family:monospace;font-size:14px">' +
+        '<h2 style="text-align:center;margin:4px">' + (language === 'ar' ? 'طلب مطبخ' : 'Ticket cuisine') + '</h2>' +
+        '<div style="text-align:center">' + order.code + ' — ' + new Date().toLocaleTimeString() + '</div>' +
+        '<div style="text-align:center;font-size:20px;font-weight:bold">' + (order.table_name || (language === 'ar' ? 'سفري' : 'A emporter')) + '</div>' +
+        '<hr/><table style="width:100%">' + rows + '</table>' +
+        (order.notes ? '<hr/><div>' + order.notes + '</div>' : '') +
+        '<scr' + 'ipt>window.print();setTimeout(function(){window.close();},400);</scr' + 'ipt></body></html>'
+      );
+      w.document.close();
+    } catch (e) { /* silent */ }
+  };
+
+  const sendToKitchen = async () => {
+    if (cart.cart.length === 0) { toast.error(language === 'ar' ? 'السلة فارغة' : 'Panier vide'); return; }
+    try {
+      const payload = {
+        table_id: selectedTable ? selectedTable.id : null,
+        items: cart.cart.map(i => ({ product_name: i.product_name, quantity: i.quantity, note: i.note || null, variant: i.variant || null })),
+      };
+      const r = await apiClient.post('/restaurant/kitchen-orders', payload);
+      toast.success(language === 'ar' ? 'أُرسل الطلب للمطبخ ' + r.data.code : 'Envoye en cuisine ' + r.data.code);
+      printKitchenTicket(r.data);
+      fetchTables();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
   // === Filtered Products ===
   const filteredProducts = products.filter(p => {
     const matchesSearch = !searchQuery ||
@@ -558,6 +624,11 @@ export default function POSPage() {
       toast.success(language === 'ar' ? 'تم البيع بنجاح' : 'Vente effectuee');
       setLastSaleId(response.data.id);
       setLastSaleInvoice(response.data.invoice_number);
+      // p186: restaurant checkout — link sale + free the table
+      if (restaurantOn && selectedTable) {
+        apiClient.post('/restaurant/tables/' + selectedTable.id + '/checkout', { sale_id: response.data.id }).catch(() => {});
+        setSelectedTable(null);
+      }
 
       if (receiptSettings?.auto_print) {
         printThermalReceipt(response.data.id, receiptSettings?.thermal_printer_size || '80mm');
@@ -629,6 +700,8 @@ export default function POSPage() {
     'print-last': () => lastSaleId ? setInlineTask('lastreceipt') : toast.info(language === 'ar' ? 'لا يوجد' : 'Aucune'),  // p180: يعرض آخر وصل داخل اللوحة مع زر طباعة
     'reports': () => setInlineTask('reports'),  // p177: inline
     'history': () => setInlineTask('history'),  // p179: R.Lynx periods — sidebar fetches per period
+    'table': () => { fetchTables(); setShowTableDialog(true); },  // p186
+    'kitchen': () => sendToKitchen(),  // p186
   };
 
   const handleTaskClick = (taskId) => {
@@ -649,6 +722,10 @@ export default function POSPage() {
     { id: 'withdraw', icon: ArrowUpFromLine, label: language === 'ar' ? 'سحب' : 'Retrait', shortcut: '9' },
     { id: 'park', icon: PauseCircle, label: language === 'ar' ? 'وضع في الانتظار' : 'Mettre en attente', shortcut: '' },
     { id: 'print-last', icon: Printer, label: language === 'ar' ? 'طباعة آخر فاتورة' : 'Impr. dernière', shortcut: 'P' },
+    ...(restaurantOn ? [  // p186
+      { id: 'table', icon: UtensilsCrossed, label: (language === 'ar' ? 'طاولة' : 'Table') + (selectedTable ? ': ' + selectedTable.name : ''), shortcut: '', highlight: !!selectedTable },
+      { id: 'kitchen', icon: ChefHat, label: language === 'ar' ? 'إرسال للمطبخ' : 'Cuisine', shortcut: '' },
+    ] : []),
     { id: 'reports', icon: BarChart3, label: language === 'ar' ? 'تقارير الحصة' : 'Rapports session', shortcut: 'R' },
     { id: 'history', icon: ScrollText, label: language === 'ar' ? 'السجل' : 'Historique', shortcut: 'H' },
   ];
@@ -918,6 +995,39 @@ export default function POSPage() {
               onKeyDown={(e) => { if (e.key === 'Enter') confirmWeight(); }}
               data-testid="weight-input" />
             <Button onClick={confirmWeight} className="w-full" data-testid="weight-confirm-btn">{language === 'ar' ? 'إضافة للسلة' : 'Ajouter'}</Button>
+          </DialogContent>
+        </Dialog>
+
+        {/* p186: restaurant table picker */}
+        <Dialog open={showTableDialog} onOpenChange={setShowTableDialog}>
+          <DialogContent className="max-w-md" data-testid="table-picker-dialog">
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? 'اختيار الطاولة' : 'Choisir une table'}</DialogTitle>
+            </DialogHeader>
+            <div className="grid grid-cols-3 gap-2 max-h-72 overflow-y-auto">
+              <Button variant={!selectedTable ? 'default' : 'outline'} className="h-auto flex-col py-3" data-testid="table-option-none"
+                onClick={() => { setSelectedTable(null); setShowTableDialog(false); }}>
+                <span className="font-bold">{language === 'ar' ? 'بدون طاولة' : 'Sans table'}</span>
+              </Button>
+              {restTables.map((t, i) => (
+                <Button key={t.id} variant={selectedTable && selectedTable.id === t.id ? 'default' : 'outline'} className="h-auto flex-col py-2"
+                  data-testid={'table-option-' + i}
+                  onClick={() => { setSelectedTable(t); setShowTableDialog(false); }}>
+                  <span className="font-bold text-sm">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t.seats} {language === 'ar' ? 'مقاعد' : 'places'}{t.status === 'occupied' ? ' • ' + (language === 'ar' ? 'مشغولة' : 'occupee') : ''}
+                  </span>
+                </Button>
+              ))}
+            </div>
+            {isAdminUser && (
+              <div className="flex gap-2 items-center border-t pt-2">
+                <Input value={newTableName} onChange={(e) => setNewTableName(e.target.value)}
+                  placeholder={language === 'ar' ? 'اسم طاولة جديدة' : 'Nouvelle table'} data-testid="table-name-input" />
+                <Input type="number" min="1" value={newTableSeats} onChange={(e) => setNewTableSeats(e.target.value)} className="w-20" dir="ltr" />
+                <Button onClick={createTable} data-testid="table-create-btn">{language === 'ar' ? 'إضافة' : 'Ajouter'}</Button>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 

@@ -2832,3 +2832,13 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - backend/core/business_profiles.py (rental في KNOWN_FEATURE_KEYS + features_on للملفين)
 - frontend/src/pages/RentalsPage.js (جديد)، App.js، Layout.js (قسم الكراء)، contexts/AuthContext.js (opt-in)
 - Backups: /opt/ntcommerce/backups/p185/
+
+## p186 — وضع المطعم: طاولات + طلبات المطبخ (2026-08-19)
+**قبل:** لا يوجد أي دعم للمطاعم — POS بيع مباشر فقط.
+**بعد:**
+- backend/routes/restaurant_routes.py (جديد، مُسجّل في _AUTO_REG_MODULES): طاولات CRUD (كتابة admin) + طلبات مطبخ (إنشاء/إلحاق تلقائي بنفس الطاولة/حالات pending→preparing→served|cancelled) + checkout يربط البيع ويحرّر الطاولة. حذف طاولة مشغولة ممنوع.
+- FIX أثناء الاختبار: collections كانت تُلتقط وقت إنشاء المصنع → كانت ترتبط بـ main_db (كشفها اختبار حي: طلبان في ntcommerce بدل قاعدة المستأجر، حُذفا). الآن تُحلّ لكل طلب عبر db.restaurant_tables / db.kitchen_orders.
+- ميزة "restaurant" opt-in: main.py OPT_IN_FEATURES + AuthContext + KNOWN_FEATURE_KEYS؛ ملف المطعم يفعّلها تلقائياً.
+- POSPage: زر "طاولة" (مُبرز عند الاختيار) + زر "إرسال للمطبخ" + نافذة اختيار الطاولات (إنشاء طاولة للأدمن) + تذكرة مطبخ قابلة للطباعة + تحرير الطاولة تلقائياً بعد إتمام البيع.
+- اختبارات curl: دورة كاملة (إنشاء/إلحاق/حالة/checkout/حظر حذف مشغولة) + تحقق من التوجيه لقاعدة المستأجر. بدون بيانات تجريبية متبقية.
+- release 20260819_224313 — bundle main.4bdeb721.js
