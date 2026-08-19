@@ -38,6 +38,8 @@ export default function RegisterPage() {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   
+  const [businessProfiles, setBusinessProfiles] = useState([]);
+  const [businessType, setBusinessType] = useState('retail');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -56,6 +58,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     fetchPlans();
+    apiClient.get('/saas/business-profiles').then(r => setBusinessProfiles(r.data.profiles || [])).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPlans = async () => {
@@ -97,7 +100,8 @@ export default function RegisterPage() {
         company_name: formData.company_name,
         password: formData.password,
         plan_id: selectedPlan,
-        subscription_type: billingCycle
+        subscription_type: billingCycle,
+        business_type: businessType
       });
       
       toast.success('تم إنشاء حسابك بنجاح!');
@@ -377,6 +381,21 @@ export default function RegisterPage() {
                         className="pr-10"
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="business_type">نوع النشاط التجاري *</Label>
+                    <Select value={businessType} onValueChange={setBusinessType}>
+                      <SelectTrigger data-testid="register-business-type">
+                        <SelectValue placeholder="اختر نوع نشاطك" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {businessProfiles.map(bp => (
+                          <SelectItem key={bp.key} value={bp.key}>{bp.name_ar}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500">سيُكيَّف النظام تلقائياً حسب نشاطك (الميزات والقوائم والعائلات)</p>
                   </div>
 
                   <div className="space-y-2">

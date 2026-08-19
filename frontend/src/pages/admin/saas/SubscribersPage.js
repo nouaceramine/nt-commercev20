@@ -84,9 +84,10 @@ export default function SubscribersPage() {
   const [tenantDialogOpen, setTenantDialogOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [businessProfiles, setBusinessProfiles] = useState([]);
   const [tenantForm, setTenantForm] = useState({
     name: '', email: '', phone: '', company_name: '', password: '',
-    plan_id: '', subscription_type: 'monthly', business_type: 'retailer', role: 'admin',
+    plan_id: '', subscription_type: 'monthly', business_type: 'retail', role: 'admin',
   });
 
   // — Extend dialog
@@ -138,7 +139,8 @@ export default function SubscribersPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    apiClient.get('/saas/business-profiles').then(r => setBusinessProfiles(r.data.profiles || [])).catch(() => {}); fetchData(); }, []);
 
   const filteredTenants = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -588,13 +590,17 @@ export default function SubscribersPage() {
               <div className="space-y-1">
                 <Label className="text-xs">التصنيف</Label>
                 <Select value={tenantForm.business_type} onValueChange={v => setTenantForm({ ...tenantForm, business_type: v })}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm" data-testid="business-type-select"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="retailer">تاجر تجزئة</SelectItem>
-                    <SelectItem value="wholesaler">تاجر جملة</SelectItem>
-                    <SelectItem value="distributor">موزع</SelectItem>
+                    {businessProfiles.map(bp => (
+                      <SelectItem key={bp.key} value={bp.key}>{bp.name_ar}</SelectItem>
+                    ))}
+                    {!businessProfiles.some(bp => bp.key === tenantForm.business_type) && tenantForm.business_type && (
+                      <SelectItem value={tenantForm.business_type}>{tenantForm.business_type}</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
+                <p className="text-[11px] text-muted-foreground">تغيير النشاط يكيّف ميزات المشترك تلقائياً (تُطبَّق عند حفظ التعديل)</p>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">الصلاحية</Label>

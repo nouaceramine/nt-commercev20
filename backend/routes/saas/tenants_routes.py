@@ -325,6 +325,27 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
         await init_tenant_database(tenant_id)
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
 
+    # p183: apply the chosen business-activity profile (features + starter families)
+    try:
+        from core.business_profiles import profile_features, profile_families
+        from config.database import get_tenant_db as _get_tdb
+        from utils.ids import new_id as _new_id
+        _bt = tenant_doc.get("business_type") or "retail"
+        _feats = profile_features(_bt)
+        if _feats:
+            await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"features_override": _feats}})
+        _fams = profile_families(_bt)
+        if _fams:
+            _tdb = _get_tdb(tenant_id)
+            if await _tdb.product_families.count_documents({}) == 0:
+                await _tdb.product_families.insert_many([
+                    {"id": _new_id(), "name_ar": _fn, "name_en": _fn, "name_fr": _fn,
+                     "created_at": now.isoformat()}
+                    for _fn in _fams
+                ])
+    except Exception as _bp_err:
+        print(f"[TENANT] business profile apply failed (non-fatal): {_bp_err}")
+
     # Create PENDING commission for the agent if this tenant has one
     agent_id = tenant_doc.get("agent_id")
     if agent_id:
@@ -383,6 +404,15 @@ async def update_tenant(tenant_id: str, updates: TenantUpdate, admin: dict = Dep
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": update_data})
+
+    # p183: changing the activity re-adapts the tenant's features automatically
+    if update_data.get("business_type") and update_data["business_type"] != tenant.get("business_type"):
+        try:
+            from core.business_profiles import apply_business_profile
+            await apply_business_profile(db, tenant_id, update_data["business_type"])
+        except Exception as _bp_err:
+            print(f"[TENANTS] business profile apply failed (non-fatal): {_bp_err}")
+
     updated = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
 
     plan = await db.saas_plans.find_one({"id": updated.get("plan_id")}, {"_id": 0, "name_ar": 1})

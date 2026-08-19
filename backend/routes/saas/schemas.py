@@ -118,6 +118,7 @@ class TenantCreate(BaseModel):
 
 
 class TenantUpdate(BaseModel):
+    business_type: Optional[str] = None
     name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None

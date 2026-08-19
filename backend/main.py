@@ -1125,6 +1125,7 @@ _AUTO_REG_MODULES = [
     'routes.saas.autoheal_routes',  # p54: AutoHeal engine API
     'routes.wallet.wallet_billing_routes',
     'routes.partners_routes',  # p182: partners & profit distribution
+    'routes.saas.business_profiles_routes',  # p183: business activity profiles
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

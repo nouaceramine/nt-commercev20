@@ -2740,3 +2740,36 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - توزيع كامل بحصص صحيحة ✓، حماية التكرار 409 ✓
 - سحب أرباح 50k ✓، منع السحب فوق المستحقات ✓، منع حذف شريك له تاريخ ✓، تعطيل شريك ينقل 100% للنشط ✓
 - تنظيف كل بيانات الاختبار من القاعدة بعدها ✓
+
+---
+
+## p183 — 2026-08-19 — المرحلة 1: ملفات النشاط التجاري (Business Profiles)
+**Release:** 20260819_205729 — Bundle: main.74600a25.js
+
+### قبل
+- حقل business_type موجود لكنه مجرد ملصق (3 قيم: retailer/wholesaler/distributor) لا يغيّر أي ميزة.
+- حقل business_type غير موجود أصلاً في TenantUpdate — قائمة «التصنيف» في صفحة المشتركين كانت ميتة.
+
+### بعد
+1. **core/business_profiles.py**: 23 ملف نشاط (22 فئة مستهدفة + تجزئة عامة)، كل ملف: اسم عربي/فرنسي + أيقونة + features_off/features_on (مفاتيح قوائم الواجهة) + عائلات منتجات أولية + أسماء مستعارة للقيم القديمة (retailer→retail...).
+2. **endpoints جديدة**: GET /saas/business-profiles (عمومي)، GET/POST /saas/tenants/{id}/business-profile (مشرف عام).
+3. **التسجيل العام (/register)**: خطوة «نوع النشاط التجاري» → يُحفظ ويُطبَّق ملفه فوراً: features_override على وثيقة المشترك + بذر عائلات المنتجات إن كانت القاعدة فارغة.
+4. **إنشاء مشترك من لوحة المشرف**: نفس التطبيق التلقائي.
+5. **تغيير النشاط لمشترك قائم** (PUT /saas/tenants/{id}): يعيد تكييف الميزات تلقائياً (دمج — مفاتيح الملف تغلب، تعديلات المشرف اليدوية الأخرى محفوظة).
+6. TenantUpdate يقبل business_type الآن.
+7. صفحة المشتركين: قائمة 23 نشاطاً ديناميكية من API + تنبيه أن التغيير يكيّف الميزات.
+
+### الاختبار
+- GET العمومي: 23 ملفاً ✓
+- apply electronics على المشترك الحقيقي: {recharge:false, iptv:false, maintenance:true} ✓ ثم **استعادة وثيقته الأصلية فوراً** (retailer + {has_woocommerce:true}) ✓
+- PUT business_type=restaurant → تكييف تلقائي ✓ ثم استعادة ✓
+- قيمة غير معروفة → 400 ✓
+
+### الملفات
+- backend/core/business_profiles.py (جديد)، backend/routes/saas/business_profiles_routes.py (جديد، مسجل في main.py)
+- backend/routes/saas/registration_routes.py، tenants_routes.py، schemas.py
+- frontend: SubscribersPage.js، landing/RegisterPage.js
+- Backups: /opt/ntcommerce/backups/p183/
+
+### ملاحظة تشغيلية
+- تطبيق ملف على مشترك قائم يعطّل ميزات قد يستخدمها — واجهة المشرف تنبّه لذلك، والاستعادة يدوية عبر تبديل الميزات.

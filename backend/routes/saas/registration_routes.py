@@ -163,6 +163,29 @@ async def register_tenant(tenant: TenantCreate):
         await init_tenant_database(tenant_id)
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
 
+    # p183: apply the chosen business-activity profile — feature overrides on the
+    # tenant doc (menus/routes adapt at first login) + starter product families
+    # seeded only if the fresh tenant DB has none yet.
+    try:
+        from core.business_profiles import profile_features, profile_families
+        from config.database import get_tenant_db as _get_tdb
+        _bt = tenant_doc.get("business_type") or "retail"
+        _feats = profile_features(_bt)
+        if _feats:
+            await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"features_override": _feats}})
+        _fams = profile_families(_bt)
+        if _fams:
+            _tdb = _get_tdb(tenant_id)
+            if await _tdb.product_families.count_documents({}) == 0:
+                _now_iso = now.isoformat()
+                await _tdb.product_families.insert_many([
+                    {"id": new_id(), "name_ar": _fn, "name_en": _fn, "name_fr": _fn,
+                     "created_at": _now_iso}
+                    for _fn in _fams
+                ])
+    except Exception as _bp_err:
+        print(f"[REG] business profile apply failed (non-fatal): {_bp_err}")
+
     if tenant_doc.get("agent_id"):
         agent = await db.saas_agents.find_one({"id": tenant_doc["agent_id"]})
         if agent:
