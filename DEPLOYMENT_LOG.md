@@ -2641,3 +2641,8 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - Layout: أيقونة نقطة البيع (header-pos-btn) في الشريط العلوي المكتبي بجانب FR/عربي + نسخة للجوال (mobile-header-pos-btn)
 **الحزمة الحية:** main.96d4519b.js — تحوي header-pos-btn وstore-products-family-filter وlimit=50000 ✓
 **النسخ الاحتياطية:** /opt/ntcommerce/backups/p175/
+
+## p176 — اختصارات POS: شبكة 2×8 (2026-08-19, release 20260819_123840)
+**قبل:** شبكة الاختصارات 3 أعمدة × 6 صفوف (18 خانة).
+**بعد:** عمودان أفقياً × 8 صفوف عمودياً (16 خانة) — grid-cols-2 + slice(0,16). الحزمة الحية main.6e68bc88.js تحوي grid-cols-2 ✓
+**النسخة الاحتياطية:** /opt/ntcommerce/backups/p176/

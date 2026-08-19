@@ -82,8 +82,8 @@ export default function POSShortcuts({
               {ar ? 'اسحب لإعادة الترتيب — انقر X لحذف' : 'Glisser-déposer — X pour supprimer'}
             </p>
           )}
-          <div className="grid grid-cols-3 gap-1">
-            {productShortcuts.slice(0, 18).map((shortcut, index) => {
+          <div className="grid grid-cols-2 gap-1">  {/* p176: 2 أفقياً × 8 عمودياً */}
+            {productShortcuts.slice(0, 16).map((shortcut, index) => {  // p176: 2×8 = 16 slots
               const productName = getShortcutProductName(shortcut);
               const product = shortcut.productId ? products.find(p => p.id === shortcut.productId) : null;
               const bgColor = shortcut.productId ? shortcut.color : undefined;
