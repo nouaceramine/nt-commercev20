@@ -684,7 +684,7 @@ export default function POSPage() {
           />
 
           {/* p164: middle column — flexy/sell-card above the cart (layout per user sketch) */}
-          <div className="col-span-1 md:col-span-6 flex flex-col gap-2 min-h-0" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+          <div className="col-span-1 md:col-span-7 flex flex-col gap-2 min-h-0" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>  {/* p178: was 6 — كسب مساحة الاختصارات */}
             <div className="md:hidden flex items-center gap-2 mb-1 overflow-x-auto pb-1">
               <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowProductsDialog(true)}><Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}</Button>
               <Button size="sm" variant={cart.returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}><Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}</Button>
@@ -725,7 +725,7 @@ export default function POSPage() {
           </div>
 
           {/* p164: shortcuts column — to the right of the cart */}
-          <div className="col-span-1 md:col-span-3 flex flex-col gap-2 min-h-0 overflow-y-auto" style={{ direction: isRTL ? 'rtl' : 'ltr' }} data-testid="pos-shortcuts-col">
+          <div className="col-span-1 md:col-span-2 flex flex-col gap-2 min-h-0 overflow-y-auto" style={{ direction: isRTL ? 'rtl' : 'ltr' }} data-testid="pos-shortcuts-col">  {/* p178: عمود أضيق */}
             <POSShortcuts
               productShortcuts={productShortcuts} products={products}
               getShortcutProductName={getShortcutProductName} handleShortcutClick={handleShortcutClick}

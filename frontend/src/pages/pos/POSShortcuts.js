@@ -60,8 +60,8 @@ export default function POSShortcuts({
 
   return (
     <div className="hidden md:block shrink-0" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
-      <Card className="h-full">
-        <CardHeader className="p-2 pb-1 flex flex-row items-center justify-between">
+      <Card>  {/* p178: fit-content — لا تملأ العمود */}
+        <CardHeader className="p-1.5 pb-0.5 flex flex-row items-center justify-between">  {/* p178: compact */}
           <CardTitle className="text-xs text-muted-foreground">
             {ar ? 'اختصارات' : 'Raccourcis'}
           </CardTitle>
@@ -76,13 +76,13 @@ export default function POSShortcuts({
             {editing ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
           </Button>
         </CardHeader>
-        <CardContent className="p-1.5 pt-0">
+        <CardContent className="p-1 pt-0">
           {editing && (
             <p className="text-[9px] text-amber-600 mb-1 text-center">
               {ar ? 'اسحب لإعادة الترتيب — انقر X لحذف' : 'Glisser-déposer — X pour supprimer'}
             </p>
           )}
-          <div className="grid grid-cols-2 gap-1">  {/* p176: 2 أفقياً × 8 عمودياً */}
+          <div className="grid grid-cols-2 gap-0.5">  {/* p176: 2 أفقياً × 8 عمودياً — p178: مدمجة */}
             {productShortcuts.slice(0, 16).map((shortcut, index) => {  // p176: 2×8 = 16 slots
               const productName = getShortcutProductName(shortcut);
               const product = shortcut.productId ? products.find(p => p.id === shortcut.productId) : null;
@@ -107,7 +107,7 @@ export default function POSShortcuts({
                       setShowShortcutDialog(true);
                     }}
                     style={{ backgroundColor: bgColor }}
-                    className={`w-full py-1.5 px-1 rounded text-[9px] font-medium text-center leading-tight transition-all h-12 flex flex-col items-center justify-center gap-0.5 ${
+                    className={`w-full py-0.5 px-1 rounded text-[9px] font-medium text-center leading-tight transition-all h-9 flex flex-col items-center justify-center gap-0 ${
                       shortcut.productId
                         ? 'text-foreground hover:opacity-90 shadow-sm'
                         : 'bg-muted text-muted-foreground hover:bg-muted/80 border border-dashed'
@@ -117,7 +117,7 @@ export default function POSShortcuts({
                   >
                     {shortcut.productId ? (
                       <>
-                        <Package className="h-4 w-4 shrink-0" />
+                        <Package className="h-3 w-3 shrink-0" />
                         <span className="line-clamp-1 w-full px-0.5">{productName.split(' ')[0]}</span>
                         {product?.retail_price && (
                           <span className="text-[8px] opacity-80">{formatCurrency(product.retail_price)}</span>
@@ -125,7 +125,7 @@ export default function POSShortcuts({
                       </>
                     ) : (
                       <>
-                        <Plus className="h-4 w-4 opacity-40" />
+                        <Plus className="h-3 w-3 opacity-40" />
                         <span className="text-[8px] opacity-50">{index + 1}</span>
                       </>
                     )}
