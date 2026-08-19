@@ -128,6 +128,7 @@ export default function POSPage() {
   const [receiptSettings, setReceiptSettings] = useState(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [lastSaleId, setLastSaleId] = useState(null);
+  const [inlineTask, setInlineTask] = useState(null);  // p177: مهام البيع تظهر داخل لوحة المهام بدل النوافذ المنبثقة
   const [lastSaleInvoice, setLastSaleInvoice] = useState(null);
 
   // === Offline POS (idea 11): queue sales when network drops, sync on reconnect ===
@@ -561,19 +562,19 @@ export default function POSPage() {
 
   // === Task Menu (Refactored: Replace Switch with lookup) ===
   const taskHandlers = {
-    'articles': () => setShowProductsDialog(true),
-    'families': () => { setSelectedFamily('all'); setShowProductsDialog(true); },
-    'customers': () => { setCustomerFamilyFilter(null); setShowCustomersDialog(true); },
-    'customer-families': () => { setCustomerFamilyFilter('_all_families'); setShowCustomersDialog(true); },
+    'articles': () => setInlineTask('articles'),  // p177: inline
+    'families': () => setInlineTask('families'),  // p177: inline
+    'customers': () => { setCustomerFamilyFilter(null); setInlineTask('customers'); },  // p177: inline
+    'customer-families': () => { setCustomerFamilyFilter('_all_families'); setInlineTask('customer-families'); },  // p177: inline
     'custom-product': () => { setCustomProduct({ name: '', price: '', qty: 1 }); setShowCustomProductDialog(true); },
     'price-type': () => setPriceType(prev => nextTier(prev)),
     'note': () => setShowNoteDialog(true),
     'return': () => cart.toggleReturnMode(),
     'deposit': () => { setCashOperation({ type: 'deposit', amount: 0, note: '' }); setShowCashDialog(true); },
     'withdraw': () => { setCashOperation({ type: 'withdraw', amount: 0, note: '' }); setShowCashDialog(true); },
-    'print-last': () => lastSaleId ? setShowPrintDialog(true) : toast.info(language === 'ar' ? 'لا يوجد' : 'Aucune'),
-    'reports': () => setShowPosReportsDialog(true),
-    'history': () => { fetchSalesHistory(); setShowHistoryDialog(true); },
+    'print-last': () => lastSaleId ? printThermalReceipt(lastSaleId, receiptSettings?.thermal_printer_size || '80mm') : toast.info(language === 'ar' ? 'لا يوجد' : 'Aucune'),  // p177: طباعة مباشرة بلا نافذة
+    'reports': () => setInlineTask('reports'),  // p177: inline
+    'history': () => { fetchSalesHistory(); setInlineTask('history'); },  // p177: inline
   };
 
   const handleTaskClick = (taskId) => {
@@ -667,7 +668,7 @@ export default function POSPage() {
         </div>
 
         {/* Main Grid */}
-        <div className={`flex-1 grid grid-cols-1 md:grid-cols-12 gap-2 min-h-0 ${isRTL ? 'direction-ltr' : ''}`} style={{ direction: 'ltr' }}>
+        <div className={`flex-1 grid grid-cols-1 md:grid-cols-12 md:grid-rows-[minmax(0,1fr)] gap-2 min-h-0 ${isRTL ? 'direction-ltr' : ''}`} style={{ direction: 'ltr' }}>  {/* p177: صف ثابت — الصفحة لا تتمدد مهما كثرت النتائج */}
           <POSSidebar
             searchInputRef={searchInputRef} searchQuery={searchQuery} setSearchQuery={setSearchQuery}
             showSearchResults={showSearchResults} setShowSearchResults={setShowSearchResults}
@@ -675,6 +676,11 @@ export default function POSPage() {
             setShowProductsDialog={setShowProductsDialog} taskMenuItems={taskMenuItems}
             activeTask={activeTask} handleTaskClick={handleTaskClick} returnMode={cart.returnMode}
             language={language} formatCurrency={formatCurrency} isRTL={isRTL}
+            inlineTask={inlineTask} setInlineTask={setInlineTask}
+            families={families} customers={customers} customerFamilies={customerFamilies}
+            selectedCustomer={selectedCustomer} setSelectedCustomer={setSelectedCustomer}
+            salesHistory={salesHistory} historyLoading={historyLoading}
+            currentSession={session.currentSession} sessionStats={session.sessionStats}
           />
 
           {/* p164: middle column — flexy/sell-card above the cart (layout per user sketch) */}
