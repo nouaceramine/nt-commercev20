@@ -574,7 +574,7 @@ export default function POSPage() {
     'withdraw': () => { setCashOperation({ type: 'withdraw', amount: 0, note: '' }); setShowCashDialog(true); },
     'print-last': () => lastSaleId ? printThermalReceipt(lastSaleId, receiptSettings?.thermal_printer_size || '80mm') : toast.info(language === 'ar' ? 'لا يوجد' : 'Aucune'),  // p177: طباعة مباشرة بلا نافذة
     'reports': () => setInlineTask('reports'),  // p177: inline
-    'history': () => { fetchSalesHistory(); setInlineTask('history'); },  // p177: inline
+    'history': () => setInlineTask('history'),  // p179: R.Lynx periods — sidebar fetches per period
   };
 
   const handleTaskClick = (taskId) => {
@@ -681,6 +681,7 @@ export default function POSPage() {
             selectedCustomer={selectedCustomer} setSelectedCustomer={setSelectedCustomer}
             salesHistory={salesHistory} historyLoading={historyLoading}
             currentSession={session.currentSession} sessionStats={session.sessionStats}
+            printThermalReceipt={printThermalReceipt} thermalSize={receiptSettings?.thermal_printer_size || '80mm'}
           />
 
           {/* p164: middle column — flexy/sell-card above the cart (layout per user sketch) */}

@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
-import { Search, Plus, Package, ArrowUp, ArrowDown, FolderTree, UserPlus } from 'lucide-react';
+import { Search, Plus, Package, ArrowUp, ArrowDown, FolderTree, UserPlus, Printer, CalendarDays } from 'lucide-react';
 import { toast } from 'sonner';
 import CameraBarcodeScanner from '../../components/forms/CameraBarcodeScanner';
 import SaleDetailDialog from '../../components/sales/SaleDetailDialog';
+import apiClient from '../../lib/apiClient';
 
 /**
  * p177: لوحة مهام البيع — نافذة داخلية ثابتة الارتفاع بأسهم تمرير ▲▼
@@ -23,6 +24,7 @@ export default function POSSidebar({
   selectedCustomer, setSelectedCustomer,
   salesHistory = [], historyLoading = false,
   currentSession, sessionStats,
+  printThermalReceipt, thermalSize = '80mm',
 }) {
   const ar = language === 'ar';
   const listRef = useRef(null);
@@ -31,10 +33,20 @@ export default function POSSidebar({
   const [custSearch, setCustSearch] = useState('');             // filter inside customers list
   const [activeCustFam, setActiveCustFam] = useState(null);     // customer family chip
   const [detailSaleId, setDetailSaleId] = useState(null);       // history → sale detail
+  // p179: السجل بفلسفة R.Lynx — فترات → معاملات → وصل
+  const [histStage, setHistStage] = useState('periods');        // periods | custom | list | receipt
+  const [histPeriodLabel, setHistPeriodLabel] = useState('');
+  const [histSales, setHistSales] = useState([]);
+  const [histLoading, setHistLoading] = useState(false);
+  const [histSearch, setHistSearch] = useState('');
+  const [histFrom, setHistFrom] = useState('');
+  const [histTo, setHistTo] = useState('');
+  const [receiptSale, setReceiptSale] = useState(null);
 
   // reset sub-state when switching tasks
   useEffect(() => {
     setInlineFamilyId(null); setProdSearch(''); setCustSearch(''); setActiveCustFam(null);
+    setHistStage('periods'); setHistSales([]); setHistSearch(''); setReceiptSale(null); setHistFrom(''); setHistTo('');
     listRef.current?.scrollTo({ top: 0 });
   }, [inlineTask]);
 
@@ -125,6 +137,73 @@ export default function POSSidebar({
       )}
     </button>
   );
+
+  // p179: فترات السجل — R.Lynx style
+  const dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const dayEnd = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+
+  const HIST_PERIODS = [
+    { key: 'today',       label: ar ? 'اليوم' : "Aujourd'hui" },
+    { key: 'yesterday',   label: ar ? 'أمس' : 'Hier' },
+    { key: 'week',        label: ar ? 'هذا الأسبوع' : 'Cette semaine' },
+    { key: 'last7',       label: ar ? 'آخر 7 أيام' : '7 derniers jours' },
+    { key: 'last15',      label: ar ? 'آخر 15 يوماً' : '15 derniers jours' },
+    { key: 'month',       label: ar ? 'هذا الشهر' : 'Ce mois' },
+    { key: 'last30',      label: ar ? 'آخر 30 يوماً' : '30 derniers jours' },
+    { key: 'session',     label: ar ? 'الحصة الحالية' : 'Session en cours' },
+    { key: 'lastsession', label: ar ? 'آخر حصة مغلقة' : 'Dernière session clôturée' },
+    { key: 'custom',      label: ar ? 'بفترة مخصصة...' : 'Par période...' },
+  ];
+
+  const loadSalesRange = async (from, to, label) => {
+    setHistLoading(true); setHistSales([]); setHistStage('list'); setHistPeriodLabel(label); setHistSearch('');
+    try {
+      let url = '/sales?';
+      if (from) url += `start_date=${encodeURIComponent(from.toISOString())}&`;
+      if (to) url += `end_date=${encodeURIComponent(to.toISOString())}`;
+      const res = await apiClient.get(url);
+      setHistSales(Array.isArray(res.data) ? res.data : []);
+    } catch { toast.error(ar ? 'فشل تحميل السجل' : 'Échec du chargement'); }
+    finally { setHistLoading(false); }
+  };
+
+  const pickPeriod = async (key, label) => {
+    const now = new Date();
+    if (key === 'custom') { setHistStage('custom'); return; }
+    if (key === 'session') {
+      if (!currentSession) { toast.info(ar ? 'لا توجد حصة مفتوحة' : 'Aucune session ouverte'); return; }
+      return loadSalesRange(new Date(currentSession.opened_at), null, label);
+    }
+    if (key === 'lastsession') {
+      try {
+        const res = await apiClient.get('/daily-sessions');
+        const closed = (Array.isArray(res.data) ? res.data : []).find(x => x.status === 'closed');
+        if (!closed) { toast.info(ar ? 'لا توجد حصة مغلقة' : 'Aucune session clôturée'); return; }
+        return loadSalesRange(new Date(closed.opened_at), closed.closed_at ? new Date(closed.closed_at) : null, label);
+      } catch { toast.error(ar ? 'فشل' : 'Échec'); return; }
+    }
+    const d = dayStart(now);
+    if (key === 'today') return loadSalesRange(d, dayEnd(now), label);
+    if (key === 'yesterday') { const y = dayStart(now); y.setDate(y.getDate() - 1); return loadSalesRange(y, dayEnd(y), label); }
+    if (key === 'week') { const w = dayStart(now); w.setDate(w.getDate() - ((w.getDay() + 6) % 7)); return loadSalesRange(w, dayEnd(now), label); }
+    if (key === 'last7') { d.setDate(d.getDate() - 6); return loadSalesRange(d, dayEnd(now), label); }
+    if (key === 'last15') { d.setDate(d.getDate() - 14); return loadSalesRange(d, dayEnd(now), label); }
+    if (key === 'month') return loadSalesRange(new Date(now.getFullYear(), now.getMonth(), 1), dayEnd(now), label);
+    if (key === 'last30') { d.setDate(d.getDate() - 29); return loadSalesRange(d, dayEnd(now), label); }
+  };
+
+  const openReceipt = async (saleId) => {
+    try {
+      const res = await apiClient.get(`/sales/${saleId}`);
+      setReceiptSale(res.data); setHistStage('receipt');
+      listRef.current?.scrollTo({ top: 0 });
+    } catch { toast.error(ar ? 'فشل فتح الوصل' : 'Échec'); }
+  };
+
+  const histBack = () => {
+    if (histStage === 'receipt') { setReceiptSale(null); setHistStage('list'); }
+    else if (histStage === 'list' || histStage === 'custom') setHistStage('periods');
+  };
 
   // ===== inline task contents =====
   const renderInlineTask = () => {
@@ -260,32 +339,133 @@ export default function POSSidebar({
           </div>
         );
 
-      case 'history':
+      case 'history': {
+        const q = histSearch.toLowerCase();
+        const shown = histSales.filter(sale =>
+          !q || (sale.customer_name || '').toLowerCase().includes(q) ||
+          (sale.invoice_number || '').toLowerCase().includes(q) || (sale.code || '').toLowerCase().includes(q)
+        );
+
+        // — المستوى 1: قائمة الفترات
+        if (histStage === 'periods') {
+          return (
+            <div className="space-y-0.5" data-testid="hist-periods-list">
+              {HIST_PERIODS.map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => pickPeriod(p.key, p.label)}
+                  className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors hover:bg-muted text-muted-foreground hover:text-foreground"
+                  data-testid={`hist-period-${p.key}`}
+                >
+                  <CalendarDays className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span className="flex-1 text-start">{p.label}</span>
+                </button>
+              ))}
+            </div>
+          );
+        }
+
+        // — المستوى 2: فترة مخصصة (من / إلى)
+        if (histStage === 'custom') {
+          return (
+            <div className="space-y-2 p-1" data-testid="hist-custom-range">
+              <div>
+                <label className="text-[10px] text-muted-foreground">{ar ? 'من:' : 'Entre:'}</label>
+                <input type="date" value={histFrom} onChange={e => setHistFrom(e.target.value)}
+                  className="w-full mt-0.5 px-2 py-1.5 text-xs border rounded-md bg-background" data-testid="hist-from-date" />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground">{ar ? 'إلى:' : 'Et:'}</label>
+                <input type="date" value={histTo} onChange={e => setHistTo(e.target.value)}
+                  className="w-full mt-0.5 px-2 py-1.5 text-xs border rounded-md bg-background" data-testid="hist-to-date" />
+              </div>
+              <div className="flex gap-1.5">
+                <Button size="sm" className="flex-1 h-8 text-xs" data-testid="hist-custom-ok"
+                  disabled={!histFrom || !histTo}
+                  onClick={() => loadSalesRange(dayStart(new Date(histFrom)), dayEnd(new Date(histTo)), `${histFrom} ← ${histTo}`)}>
+                  {ar ? 'تأكيد' : 'Ok'}
+                </Button>
+                <Button size="sm" variant="outline" className="flex-1 h-8 text-xs" onClick={() => setHistStage('periods')} data-testid="hist-custom-cancel">
+                  {ar ? 'إلغاء' : 'Annuler'}
+                </Button>
+              </div>
+            </div>
+          );
+        }
+
+        // — المستوى 4: معاينة الوصل داخل اللوحة
+        if (histStage === 'receipt' && receiptSale) {
+          const sale = receiptSale;
+          return (
+            <div className="space-y-1" data-testid="hist-receipt-view">
+              <div className="border rounded-lg p-2 bg-muted/30 text-center">
+                <p className="font-mono text-xs font-bold">{sale.invoice_number || sale.code}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {new Date(sale.created_at).toLocaleDateString(ar ? 'ar-DZ' : 'fr-FR')} | {new Date(sale.created_at).toLocaleTimeString(ar ? 'ar-DZ' : 'fr-FR')}
+                </p>
+                <p className="text-xs font-bold mt-0.5">{sale.customer_name || (ar ? 'زبون عابر' : 'Client passant')}</p>
+              </div>
+              <div className="border rounded-lg overflow-hidden">
+                {(sale.items || []).map((it, idx) => (
+                  <div key={idx} className="px-2 py-1 border-b last:border-b-0 text-xs">
+                    <p className="font-medium leading-tight">{it.product_name}</p>
+                    <div className="flex justify-between text-muted-foreground mt-0.5">
+                      <span>{it.quantity} × {formatCurrency(it.unit_price)}</span>
+                      <span className="font-semibold text-foreground">{formatCurrency(it.total ?? (it.quantity * it.unit_price))}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="border rounded-lg p-2 text-xs space-y-0.5">
+                <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'المجموع الفرعي' : 'Sous-total'}</span><span>{formatCurrency(sale.subtotal || 0)}</span></div>
+                {(sale.discount || 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'التخفيض' : 'Remise'}</span><span>-{formatCurrency(sale.discount)}</span></div>}
+                {(sale.delivery_fee || 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'التوصيل' : 'Livraison'}</span><span>{formatCurrency(sale.delivery_fee)}</span></div>}
+                <div className="flex justify-between font-bold text-sm pt-0.5 border-t"><span>{ar ? 'الإجمالي' : 'Total'}</span><span className="text-primary">{formatCurrency(sale.total || 0)}</span></div>
+              </div>
+              <Button size="sm" className="w-full h-8 gap-1.5 text-xs" data-testid="hist-print-btn"
+                onClick={() => printThermalReceipt && printThermalReceipt(sale.id, thermalSize)}>
+                <Printer className="h-3.5 w-3.5" />{ar ? 'طباعة' : 'Imprimer'}
+              </Button>
+            </div>
+          );
+        }
+
+        // — المستوى 3: قائمة المعاملات بخانة بحث
         return (
           <div className="space-y-1" data-testid="inline-history-list">
-            {historyLoading ? (
+            <Input
+              value={histSearch}
+              onChange={e => setHistSearch(e.target.value)}
+              placeholder={ar ? 'بحث في المعاملات...' : 'Rechercher transaction...'}
+              className="h-8 text-xs mb-1"
+              data-testid="hist-search-input"
+            />
+            {histLoading ? (
               <p className="p-6 text-center text-muted-foreground text-sm">{ar ? 'جاري التحميل...' : 'Chargement...'}</p>
-            ) : salesHistory.length === 0 ? (
-              <p className="p-6 text-center text-muted-foreground text-sm">{ar ? 'لا مبيعات بعد' : 'Aucune vente'}</p>
-            ) : salesHistory.map(sale => (
+            ) : shown.length === 0 ? (
+              <p className="p-6 text-center text-muted-foreground text-sm">{ar ? 'لا معاملات في هذه الفترة' : 'Aucune transaction'}</p>
+            ) : shown.map(sale => (
               <button
                 key={sale.id}
-                onClick={() => setDetailSaleId(sale.id)}
+                onClick={() => openReceipt(sale.id)}
                 className="w-full p-2 rounded-lg border hover:border-primary hover:bg-primary/5 text-start transition-colors"
-                data-testid={`inline-sale-${sale.id}`}
+                data-testid={`hist-sale-${sale.id}`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs font-bold">{sale.invoice_number || sale.code}</span>
-                  <span className="text-sm font-bold text-primary shrink-0">{formatCurrency(sale.total)}</span>
+                  <span className="font-bold text-xs truncate">{sale.customer_name || (ar ? 'زبون عابر' : 'Client passant')}</span>
+                  <span className="text-xs font-bold text-primary shrink-0">{formatCurrency(sale.total)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 mt-0.5">
-                  <span className="text-xs text-muted-foreground truncate">{sale.customer_name || (ar ? 'زبون عابر' : 'Client passant')}</span>
-                  <span className="text-[10px] text-muted-foreground shrink-0">{new Date(sale.created_at).toLocaleDateString()}</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">{sale.invoice_number || sale.code}</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0">
+                    {new Date(sale.created_at).toLocaleDateString(ar ? 'ar-DZ' : 'fr-FR')} | {new Date(sale.created_at).toLocaleTimeString(ar ? 'ar-DZ' : 'fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
               </button>
             ))}
           </div>
         );
+      }
 
       default:
         return null;
@@ -350,14 +530,14 @@ export default function POSSidebar({
             ) : inlineTask ? (
               <CardTitle className="text-xs font-medium text-primary flex items-center gap-1 flex-1" data-testid="inline-task-title">
                 <button
-                  onClick={() => setInlineTask(null)}
+                  onClick={() => { if (inlineTask === 'history' && histStage !== 'periods') histBack(); else setInlineTask(null); }}
                   className="text-muted-foreground hover:text-foreground px-1 text-sm"
-                  title={ar ? 'رجوع لمهام البيع' : 'Retour'}
+                  title={ar ? 'رجوع' : 'Retour'}
                   data-testid="inline-task-back-btn"
                 >
                   {ar ? '→' : '←'}
                 </button>
-                <span>{TASK_TITLES[inlineTask] || ''}</span>
+                <span>{TASK_TITLES[inlineTask] || ''}{inlineTask === 'history' && histPeriodLabel && histStage !== 'periods' ? ` | ${histPeriodLabel}` : ''}</span>
               </CardTitle>
             ) : (
               <CardTitle className="text-xs font-medium text-muted-foreground flex-1">
