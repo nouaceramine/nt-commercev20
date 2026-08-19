@@ -104,7 +104,7 @@ BUSINESS_PROFILES = [
         "icon": "Car",
         "desc_ar": "عقود كراء وحجوزات (وحدة الكراء — قريباً)",
         "features_off": ["recharge", "iptv", "maintenance", "barcode", "inventory", "loyalty_points"],
-        "features_on": [],
+        "features_on": ["rental"],
         "families": ["كراء يومي", "كراء طويل المدى", "خدمات إضافية"],
     },
     {
@@ -113,7 +113,7 @@ BUSINESS_PROFILES = [
         "icon": "Building",
         "desc_ar": "عقارات وعقود شهرية (وحدة الكراء — قريباً)",
         "features_off": ["recharge", "iptv", "maintenance", "barcode", "inventory", "loyalty_points"],
-        "features_on": [],
+        "features_on": ["rental"],
         "families": ["شقق", "محلات تجارية", "مستودعات", "خدمات الوكالة"],
     },
     {
@@ -239,7 +239,7 @@ _BY_KEY = {p["key"]: p for p in BUSINESS_PROFILES}
 KNOWN_FEATURE_KEYS = [
     "ai_bots", "backup", "barcode", "credit_sales", "customers", "ecommerce_hub",
     "inventory", "iptv", "loyalty_points", "maintenance", "pos", "recharge",
-    "reports", "wallet",
+    "reports", "wallet", "rental",
 ]
 
 
