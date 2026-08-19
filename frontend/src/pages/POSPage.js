@@ -306,7 +306,7 @@ export default function POSPage() {
       const seq = ++searchSeqRef.current;
       const timer = setTimeout(async () => {
         try {
-          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=20`);
+          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=50`);  // p174: was 20
           if (seq === searchSeqRef.current && Array.isArray(res.data?.results)) {
             setSearchResults(res.data.results);
             setShowSearchResults(true);

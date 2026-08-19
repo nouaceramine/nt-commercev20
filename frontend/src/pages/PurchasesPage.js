@@ -28,6 +28,8 @@ import { SupplierDebtsTab } from './purchases/SupplierDebtsTab';
 export default function PurchasesPage() {
   const { t, language, isRTL } = useLanguage();
   const searchInputRef = useRef(null);
+  const remoteSearchSeqRef = useRef(0);  // p174: search race guard
+  const [remoteProducts, setRemoteProducts] = useState(null);  // p174: server results (whole catalog)
   
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -135,7 +137,20 @@ export default function PurchasesPage() {
     setSupplierDebts(Object.values(debts));
   };
 
-const filteredProducts = Array.isArray(products) ? products.filter(p => {
+// p174: server-side product search — local list is capped, quick-search covers the whole catalog
+  useEffect(() => {
+    if (!searchQuery) { setRemoteProducts(null); return; }
+    const seq = ++remoteSearchSeqRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=50`);
+        if (seq === remoteSearchSeqRef.current) setRemoteProducts(res.data?.results || []);
+      } catch { /* keep local fallback */ }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const filteredProducts = (searchQuery && Array.isArray(remoteProducts)) ? remoteProducts : (Array.isArray(products) ? products.filter(p => {
     const query = searchQuery.toLowerCase();
     return (
       p.name_ar?.toLowerCase().includes(query) ||
@@ -143,7 +158,7 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
       p.barcode?.toLowerCase().includes(query) ||
       p.article_code?.toLowerCase().includes(query)
     );
-  }) : [];
+  }) : []);
 
   const addToCart = (product) => {
     const safeCart = Array.isArray(cart) ? cart : [];

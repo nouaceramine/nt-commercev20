@@ -153,7 +153,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     # ── Get Products ──
     @router.get("")
-    async def get_products(search: Optional[str] = None, model: Optional[str] = None, barcode: Optional[str] = None, family_id: Optional[str] = None, user: dict = Depends(require_permission("products.view"))):
+    async def get_products(search: Optional[str] = None, model: Optional[str] = None, barcode: Optional[str] = None, family_id: Optional[str] = None, limit: int = 1000, user: dict = Depends(require_permission("products.view"))):
         query = {}
         if barcode:
             query["$or"] = [{"barcode": barcode}, {"additional_barcodes": barcode}]
@@ -181,7 +181,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             else:
                 query["family_id"] = family_id
 
-        products = await db.products.find(query, {"_id": 0}).to_list(1000)
+        products = await db.products.find(query, {"_id": 0}).to_list(max(1, min(limit, 10000)))  # p174: honor limit (GlobalSearchModal passes 5)
 
         family_ids = list(set(p.get("family_id") for p in products if p.get("family_id") and not p.get("family_name")))
         families_map = {}

@@ -2618,3 +2618,14 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 
 ### النسخ الاحتياطية
 /opt/ntcommerce/backups/p173/ (trading.py, customer_robot.py, POSPage.js, PurchasesPage.js)
+
+## p174 — توحيد خانات البحث + إصلاح حدّ الـ20 منتجاً (2026-08-19, release 20260819_120022)
+**قبل:** نقطة البيع: quick-search limit=20 (لا يظهر أكثر من 20 نتيجة رغم وجود مئات المطابقات). حوار الشراء: slice(0,20) فوق مصفوفة محلية محدودة بـ1000 منتج. GET /products يتجاهل بارامتر limit (to_list(1000) ثابت).
+**بعد:**
+- backend/routes/products_routes.py: GET /products يحترم limit (افتراضي 1000، سقف 10000). اختبار curl: ?limit=5 → 5 نتائج ✓
+- POSPage.js: quick-search limit=20 → limit=50 (خانة البحث فقط؛ الباركود يبقى limit=5)
+- PurchasesPage.js: بحث خادمي مؤجّل (250ms) عبر quick-search limit=50 مع remoteProducts + حارس تسابق — البحث الآن يشمل كامل الكتالوج (7415 منتجاً) وليس أول 1000 فقط؛ الفلترة المحلية تبقى احتياطاً
+- PurchaseDialogs.js: slice(0,20) → slice(0,50)
+- quick-search هو المسار الموحّد الوحيد للبحث الغني (باركود/PLU/كود/اسم regex) — مستخدم في POS + المشتريات + البحث الشامل
+**اختبار:** quick-search بمقطع اسم حقيقي limit=50 → 50 نتيجة من أصل 625 مطابقة ✓؛ الحزمة الحية main.67a5cbbd.js تحوي limit=50 ×5 ✓
+**النسخ الاحتياطية:** /opt/ntcommerce/backups/p174/
