@@ -17,7 +17,7 @@ import {
   Plus, Undo2, Users, Barcode,
   List, FolderTree, FileText, ArrowDownToLine,
   ArrowUpFromLine, BarChart3, ScrollText, CalendarDays,
-  Tag, Printer, PackagePlus, History, CreditCard,
+  Tag, Printer, PackagePlus, History, CreditCard, PauseCircle, Undo2 as UndoIcon,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -128,6 +128,7 @@ export default function POSPage() {
   const [receiptSettings, setReceiptSettings] = useState(null);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [lastSaleId, setLastSaleId] = useState(null);
+  const [debtsMap, setDebtsMap] = useState({});  // p180: customer_id → total remaining debt
   const [inlineTask, setInlineTask] = useState(null);  // p177: مهام البيع تظهر داخل لوحة المهام بدل النوافذ المنبثقة
   const [lastSaleInvoice, setLastSaleInvoice] = useState(null);
 
@@ -223,6 +224,7 @@ export default function POSPage() {
     fetchProducts();
     fetchCustomers();
     fetchFamilies();
+    fetchDebtsMap();  // p180
     fetchCustomerFamilies();
     fetchBlacklist();
     fetchWilayas();
@@ -256,6 +258,25 @@ export default function POSPage() {
   const fetchSaleCode = async () => {
     try { const res = await apiClient.get('/sales/generate-code'); setSaleCode(res.data.code); } catch (e) { console.error(e); }
   };
+  // p180: خريطة ديون الزبائن لشارات القائمة
+  const fetchDebtsMap = async () => {
+    try {
+      const res = await apiClient.get('/debts');
+      const map = {};
+      (Array.isArray(res.data) ? res.data : []).forEach(d => {
+        if (d.party_type === 'customer' && (d.remaining_amount || 0) > 0) {
+          map[d.party_id] = (map[d.party_id] || 0) + d.remaining_amount;
+        }
+      });
+      setDebtsMap(map);
+    } catch (e) { console.error(e); }
+  };
+
+  // p180: تحديث منتج محلياً بعد تعديله من لوحة POS
+  const handleProductUpdated = (updated) => {
+    setProducts(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
+  };
+
   const fetchSalesHistory = async () => {
     setHistoryLoading(true);
     try { const res = await apiClient.get('/sales?limit=20'); setSalesHistory(res.data.sales || res.data || []); } catch (e) { console.error(e); }
@@ -552,9 +573,13 @@ export default function POSPage() {
   const handleCashOperation = async () => {
     if (!cashOperation.amount || cashOperation.amount <= 0) { toast.error(language === 'ar' ? 'أدخل مبلغاً' : 'Entrez un montant'); return; }
     try {
-      const endpoint = cashOperation.type === 'deposit' ? '/cash/deposit' : '/cash/withdraw';
-      await apiClient.post(endpoint, { amount: cashOperation.amount, note: cashOperation.note, box_id: 'cash' });
-      toast.success(language === 'ar' ? 'تمت العملية' : 'Operation effectuee');
+      // p180: سحب = من الصندوق إلى «المال الخاص» — إيداع = العكس (المسارات القديمة كانت 404)
+      await apiClient.post('/cash-boxes/transfer', cashOperation.type === 'deposit'
+        ? { from_box: 'personal', to_box: 'cash', amount: cashOperation.amount }
+        : { from_box: 'cash', to_box: 'personal', amount: cashOperation.amount });
+      toast.success(language === 'ar'
+        ? (cashOperation.type === 'deposit' ? 'أُودع من مالك الخاص إلى الصندوق' : 'سُحب من الصندوق إلى مالك الخاص')
+        : 'Operation effectuee');
       setShowCashDialog(false);
       setCashOperation({ type: 'deposit', amount: 0, note: '' });
     } catch (error) { toast.error(errText(error) ||  'Error'); }
@@ -570,9 +595,10 @@ export default function POSPage() {
     'price-type': () => setPriceType(prev => nextTier(prev)),
     'note': () => setShowNoteDialog(true),
     'return': () => cart.toggleReturnMode(),
+    'park': () => cart.parkCart(selectedCustomer),  // p180: الزبون في الانتظار
     'deposit': () => { setCashOperation({ type: 'deposit', amount: 0, note: '' }); setShowCashDialog(true); },
     'withdraw': () => { setCashOperation({ type: 'withdraw', amount: 0, note: '' }); setShowCashDialog(true); },
-    'print-last': () => lastSaleId ? printThermalReceipt(lastSaleId, receiptSettings?.thermal_printer_size || '80mm') : toast.info(language === 'ar' ? 'لا يوجد' : 'Aucune'),  // p177: طباعة مباشرة بلا نافذة
+    'print-last': () => lastSaleId ? setInlineTask('lastreceipt') : toast.info(language === 'ar' ? 'لا يوجد' : 'Aucune'),  // p180: يعرض آخر وصل داخل اللوحة مع زر طباعة
     'reports': () => setInlineTask('reports'),  // p177: inline
     'history': () => setInlineTask('history'),  // p179: R.Lynx periods — sidebar fetches per period
   };
@@ -593,6 +619,7 @@ export default function POSPage() {
     { id: 'return', icon: Undo2, label: language === 'ar' ? 'إرجاع' : 'Retour', shortcut: '7' },
     { id: 'deposit', icon: ArrowDownToLine, label: language === 'ar' ? 'إيداع' : 'Dépôt', shortcut: '8' },
     { id: 'withdraw', icon: ArrowUpFromLine, label: language === 'ar' ? 'سحب' : 'Retrait', shortcut: '9' },
+    { id: 'park', icon: PauseCircle, label: language === 'ar' ? 'وضع في الانتظار' : 'Mettre en attente', shortcut: '' },
     { id: 'print-last', icon: Printer, label: language === 'ar' ? 'طباعة آخر فاتورة' : 'Impr. dernière', shortcut: 'P' },
     { id: 'reports', icon: BarChart3, label: language === 'ar' ? 'تقارير الحصة' : 'Rapports session', shortcut: 'R' },
     { id: 'history', icon: ScrollText, label: language === 'ar' ? 'السجل' : 'Historique', shortcut: 'H' },
@@ -646,6 +673,16 @@ export default function POSPage() {
   return (
     <Layout>
       <div className="h-[calc(100vh-120px)] flex flex-col" data-testid="pos-page">
+        {/* p180: شريط أحمر عريض أثناء وضع الإرجاع */}
+        {cart.returnMode && (
+          <div className="bg-red-600 text-white text-center text-sm font-bold py-1.5 px-3 rounded-md mb-1 flex items-center justify-center gap-3 shrink-0" data-testid="return-mode-banner">
+            <UndoIcon className="h-4 w-4" />
+            <span>{language === 'ar' ? 'وضع الإرجاع مفعّل — المنتجات تُضاف بالسالب (−1)' : 'Mode retour actif — articles ajoutés en négatif (−1)'}</span>
+            <button onClick={() => cart.toggleReturnMode()} className="bg-white/20 hover:bg-white/30 rounded px-2 py-0.5 text-xs" data-testid="return-mode-exit-btn">
+              {language === 'ar' ? 'خروج' : 'Quitter'}
+            </button>
+          </div>
+        )}
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 gap-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -682,6 +719,7 @@ export default function POSPage() {
             salesHistory={salesHistory} historyLoading={historyLoading}
             currentSession={session.currentSession} sessionStats={session.sessionStats}
             printThermalReceipt={printThermalReceipt} thermalSize={receiptSettings?.thermal_printer_size || '80mm'}
+            lastSaleId={lastSaleId} debtsMap={debtsMap} onProductUpdated={handleProductUpdated}
           />
 
           {/* p164: middle column — flexy/sell-card above the cart (layout per user sketch) */}

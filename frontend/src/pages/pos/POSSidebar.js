@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
-import { Search, Plus, Package, ArrowUp, ArrowDown, FolderTree, UserPlus, Printer, CalendarDays } from 'lucide-react';
+import { Search, Plus, Package, ArrowUp, ArrowDown, FolderTree, UserPlus, Printer, CalendarDays, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import CameraBarcodeScanner from '../../components/forms/CameraBarcodeScanner';
 import SaleDetailDialog from '../../components/sales/SaleDetailDialog';
@@ -25,6 +25,7 @@ export default function POSSidebar({
   salesHistory = [], historyLoading = false,
   currentSession, sessionStats,
   printThermalReceipt, thermalSize = '80mm',
+  lastSaleId, debtsMap = {}, onProductUpdated,
 }) {
   const ar = language === 'ar';
   const listRef = useRef(null);
@@ -42,6 +43,18 @@ export default function POSSidebar({
   const [histFrom, setHistFrom] = useState('');
   const [histTo, setHistTo] = useState('');
   const [receiptSale, setReceiptSale] = useState(null);
+  const [editProduct, setEditProduct] = useState(null);        // p180: quick-edit dialog
+  const [editForm, setEditForm] = useState({});
+  const [editSaving, setEditSaving] = useState(false);
+
+  // p180: «طباعة آخر فاتورة» — تحميل آخر وصل وعرضه داخل اللوحة
+  useEffect(() => {
+    if (inlineTask === 'lastreceipt' && lastSaleId) {
+      apiClient.get(`/sales/${lastSaleId}`)
+        .then(r => setReceiptSale(r.data))
+        .catch(() => toast.error(ar ? 'فشل فتح الوصل' : 'Échec'));
+    }
+  }, [inlineTask, lastSaleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // reset sub-state when switching tasks
   useEffect(() => {
@@ -79,6 +92,7 @@ export default function POSSidebar({
     'customer-families': ar ? 'عائلات الزبائن' : 'Familles clients',
     'reports': ar ? 'تقارير الحصة' : 'Rapports session',
     'history': ar ? 'السجل' : 'Historique',
+    'lastreceipt': ar ? 'آخر فاتورة' : 'Derniere facture',
   };
 
   // product row shared by search results / articles / families views
@@ -100,8 +114,42 @@ export default function POSSidebar({
       <Badge variant={(product.quantity || 0) > 0 ? 'secondary' : 'destructive'} className="text-xs shrink-0">
         {product.quantity || 0}
       </Badge>
+      {/* p180: اختصار تعديل المنتج — على كل منتج */}
+      <span
+        role="button"
+        onClick={(e) => { e.stopPropagation(); setEditProduct(product); setEditForm({
+          name_ar: product.name_ar || '', barcode: product.barcode || '',
+          retail_price: product.retail_price ?? 0, wholesale_price: product.wholesale_price ?? 0,
+          purchase_price: product.purchase_price ?? 0, quantity: product.quantity ?? 0,
+        }); }}
+        className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
+        title={ar ? 'تعديل المنتج' : 'Modifier'}
+        data-testid={`edit-product-${product.id}`}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </span>
     </button>
   );
+
+  // p180: حفظ التعديل السريع
+  const saveQuickEdit = async () => {
+    if (!editProduct) return;
+    setEditSaving(true);
+    try {
+      const payload = {
+        name_ar: editForm.name_ar, barcode: editForm.barcode,
+        retail_price: parseFloat(editForm.retail_price) || 0,
+        wholesale_price: parseFloat(editForm.wholesale_price) || 0,
+        purchase_price: parseFloat(editForm.purchase_price) || 0,
+        quantity: parseFloat(editForm.quantity) || 0,
+      };
+      await apiClient.put(`/products/${editProduct.id}`, payload);
+      if (onProductUpdated) onProductUpdated({ ...editProduct, ...payload });
+      toast.success(ar ? 'تم حفظ التعديل' : 'Modifié');
+      setEditProduct(null);
+    } catch { toast.error(ar ? 'فشل الحفظ' : 'Échec'); }
+    finally { setEditSaving(false); }
+  };
 
   const filteredInlineProducts = products.filter(p => {
     const q = prodSearch.toLowerCase();
@@ -121,22 +169,38 @@ export default function POSSidebar({
     toast.success(ar ? `الزبون: ${c.name}` : `Client : ${c.name}`);
   };
 
-  const CustomerRow = ({ c }) => (
-    <button
-      key={c.id}
-      onClick={() => pickCustomer(c)}
-      className={`w-full p-2.5 rounded-lg border text-start flex items-center justify-between gap-2 transition-colors hover:border-primary hover:bg-primary/5 ${selectedCustomer === c.id ? 'border-primary bg-primary/10' : ''}`}
-      data-testid={`inline-customer-${c.id}`}
-    >
-      <div className="min-w-0">
-        <p className="font-medium text-sm truncate">{c.name}</p>
-        <p className="text-xs text-muted-foreground">{c.phone}</p>
-      </div>
-      {c.family_name && (
-        <span className="text-[10px] bg-primary/10 text-primary rounded-full px-1.5 py-0.5 shrink-0">{c.family_name}</span>
-      )}
-    </button>
-  );
+  const CustomerRow = ({ c }) => {
+    const debt = debtsMap[c.id] || 0;                 // p180: ديون الزبون
+    const points = c.loyalty_points || 0;             // p180: نقاط الولاء
+    return (
+      <button
+        key={c.id}
+        onClick={() => pickCustomer(c)}
+        className={`w-full p-2.5 rounded-lg border text-start flex items-center justify-between gap-2 transition-colors hover:border-primary hover:bg-primary/5 ${selectedCustomer === c.id ? 'border-primary bg-primary/10' : ''}`}
+        data-testid={`inline-customer-${c.id}`}
+      >
+        <div className="min-w-0">
+          <p className="font-medium text-sm truncate">{c.name}</p>
+          <p className="text-xs text-muted-foreground">{c.phone}</p>
+          <div className="flex gap-1 mt-0.5 flex-wrap">
+            {debt > 0 && (
+              <span className="text-[10px] bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 rounded-full px-1.5 py-0.5" data-testid={`cust-debt-${c.id}`}>
+                {ar ? 'دين' : 'Dette'}: {formatCurrency(debt)}
+              </span>
+            )}
+            {points > 0 && (
+              <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 rounded-full px-1.5 py-0.5" data-testid={`cust-points-${c.id}`}>
+                ⭐ {points}
+              </span>
+            )}
+          </div>
+        </div>
+        {c.family_name && (
+          <span className="text-[10px] bg-primary/10 text-primary rounded-full px-1.5 py-0.5 shrink-0">{c.family_name}</span>
+        )}
+      </button>
+    );
+  };
 
   // p179: فترات السجل — R.Lynx style
   const dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -204,6 +268,40 @@ export default function POSSidebar({
     if (histStage === 'receipt') { setReceiptSale(null); setHistStage('list'); }
     else if (histStage === 'list' || histStage === 'custom') setHistStage('periods');
   };
+
+  // p180: عرض الوصل داخل اللوحة — مشترك بين السجل و«طباعة آخر فاتورة»
+  const renderReceipt = (sale) => (
+    <div className="space-y-1" data-testid="hist-receipt-view">
+      <div className="border rounded-lg p-2 bg-muted/30 text-center">
+        <p className="font-mono text-xs font-bold">{sale.invoice_number || sale.code}</p>
+        <p className="text-[10px] text-muted-foreground">
+          {new Date(sale.created_at).toLocaleDateString(ar ? 'ar-DZ' : 'fr-FR')} | {new Date(sale.created_at).toLocaleTimeString(ar ? 'ar-DZ' : 'fr-FR')}
+        </p>
+        <p className="text-xs font-bold mt-0.5">{sale.customer_name || (ar ? 'زبون عابر' : 'Client passant')}</p>
+      </div>
+      <div className="border rounded-lg overflow-hidden">
+        {(sale.items || []).map((it, idx) => (
+          <div key={idx} className="px-2 py-1 border-b last:border-b-0 text-xs">
+            <p className="font-medium leading-tight">{it.product_name}</p>
+            <div className="flex justify-between text-muted-foreground mt-0.5">
+              <span>{it.quantity} × {formatCurrency(it.unit_price)}</span>
+              <span className="font-semibold text-foreground">{formatCurrency(it.total ?? (it.quantity * it.unit_price))}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="border rounded-lg p-2 text-xs space-y-0.5">
+        <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'المجموع الفرعي' : 'Sous-total'}</span><span>{formatCurrency(sale.subtotal || 0)}</span></div>
+        {(sale.discount || 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'التخفيض' : 'Remise'}</span><span>-{formatCurrency(sale.discount)}</span></div>}
+        {(sale.delivery_fee || 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'التوصيل' : 'Livraison'}</span><span>{formatCurrency(sale.delivery_fee)}</span></div>}
+        <div className="flex justify-between font-bold text-sm pt-0.5 border-t"><span>{ar ? 'الإجمالي' : 'Total'}</span><span className="text-primary">{formatCurrency(sale.total || 0)}</span></div>
+      </div>
+      <Button size="sm" className="w-full h-8 gap-1.5 text-xs" data-testid="hist-print-btn"
+        onClick={() => printThermalReceipt && printThermalReceipt(sale.id, thermalSize)}>
+        <Printer className="h-3.5 w-3.5" />{ar ? 'طباعة' : 'Imprimer'}
+      </Button>
+    </div>
+  );
 
   // ===== inline task contents =====
   const renderInlineTask = () => {
@@ -393,41 +491,9 @@ export default function POSSidebar({
           );
         }
 
-        // — المستوى 4: معاينة الوصل داخل اللوحة
+        // — المستوى 4: معاينة الوصل داخل اللوحة (العرض المشترك p180)
         if (histStage === 'receipt' && receiptSale) {
-          const sale = receiptSale;
-          return (
-            <div className="space-y-1" data-testid="hist-receipt-view">
-              <div className="border rounded-lg p-2 bg-muted/30 text-center">
-                <p className="font-mono text-xs font-bold">{sale.invoice_number || sale.code}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {new Date(sale.created_at).toLocaleDateString(ar ? 'ar-DZ' : 'fr-FR')} | {new Date(sale.created_at).toLocaleTimeString(ar ? 'ar-DZ' : 'fr-FR')}
-                </p>
-                <p className="text-xs font-bold mt-0.5">{sale.customer_name || (ar ? 'زبون عابر' : 'Client passant')}</p>
-              </div>
-              <div className="border rounded-lg overflow-hidden">
-                {(sale.items || []).map((it, idx) => (
-                  <div key={idx} className="px-2 py-1 border-b last:border-b-0 text-xs">
-                    <p className="font-medium leading-tight">{it.product_name}</p>
-                    <div className="flex justify-between text-muted-foreground mt-0.5">
-                      <span>{it.quantity} × {formatCurrency(it.unit_price)}</span>
-                      <span className="font-semibold text-foreground">{formatCurrency(it.total ?? (it.quantity * it.unit_price))}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="border rounded-lg p-2 text-xs space-y-0.5">
-                <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'المجموع الفرعي' : 'Sous-total'}</span><span>{formatCurrency(sale.subtotal || 0)}</span></div>
-                {(sale.discount || 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'التخفيض' : 'Remise'}</span><span>-{formatCurrency(sale.discount)}</span></div>}
-                {(sale.delivery_fee || 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{ar ? 'التوصيل' : 'Livraison'}</span><span>{formatCurrency(sale.delivery_fee)}</span></div>}
-                <div className="flex justify-between font-bold text-sm pt-0.5 border-t"><span>{ar ? 'الإجمالي' : 'Total'}</span><span className="text-primary">{formatCurrency(sale.total || 0)}</span></div>
-              </div>
-              <Button size="sm" className="w-full h-8 gap-1.5 text-xs" data-testid="hist-print-btn"
-                onClick={() => printThermalReceipt && printThermalReceipt(sale.id, thermalSize)}>
-                <Printer className="h-3.5 w-3.5" />{ar ? 'طباعة' : 'Imprimer'}
-              </Button>
-            </div>
-          );
+          return renderReceipt(receiptSale);
         }
 
         // — المستوى 3: قائمة المعاملات بخانة بحث
@@ -466,6 +532,12 @@ export default function POSSidebar({
           </div>
         );
       }
+
+      case 'lastreceipt':  // p180: طباعة آخر فاتورة — تعرض الوصل أولاً
+        if (!receiptSale) {
+          return <p className="py-8 text-center text-muted-foreground text-sm">{ar ? 'جاري التحميل...' : 'Chargement...'}</p>;
+        }
+        return renderReceipt(receiptSale);
 
       default:
         return null;
@@ -615,6 +687,40 @@ export default function POSSidebar({
           )}
         </CardContent>
       </Card>
+
+      {/* p180: نافذة التعديل السريع على المنتج */}
+      {editProduct && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setEditProduct(null)}>
+          <div className="bg-card border rounded-xl shadow-xl w-full max-w-sm p-4 space-y-2" onClick={e => e.stopPropagation()} data-testid="quick-edit-dialog">
+            <p className="font-bold text-sm">{ar ? 'تعديل سريع: ' : 'Modifier : '}{editProduct.name_ar || editProduct.name_en}</p>
+            {[
+              { k: 'name_ar', label: ar ? 'الاسم' : 'Nom', type: 'text' },
+              { k: 'barcode', label: ar ? 'الباركود' : 'Code-barres', type: 'text' },
+              { k: 'retail_price', label: ar ? 'سعر التجزئة' : 'Prix detail', type: 'number' },
+              { k: 'wholesale_price', label: ar ? 'سعر الجملة' : 'Prix gros', type: 'number' },
+              { k: 'purchase_price', label: ar ? 'سعر الشراء' : 'Prix achat', type: 'number' },
+              { k: 'quantity', label: ar ? 'الكمية' : 'Quantité', type: 'number' },
+            ].map(f => (
+              <div key={f.k} className="flex items-center gap-2">
+                <label className="w-24 text-xs text-muted-foreground shrink-0">{f.label}</label>
+                <Input
+                  type={f.type}
+                  value={editForm[f.k] ?? ''}
+                  onChange={e => setEditForm(prev => ({ ...prev, [f.k]: e.target.value }))}
+                  className="h-8 text-sm"
+                  data-testid={`quick-edit-${f.k}`}
+                />
+              </div>
+            ))}
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1 h-8 text-xs" onClick={() => setEditProduct(null)}>{ar ? 'إلغاء' : 'Annuler'}</Button>
+              <Button className="flex-1 h-8 text-xs" onClick={saveQuickEdit} disabled={editSaving} data-testid="quick-edit-save">
+                {ar ? 'حفظ' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* p177: تفاصيل فاتورة من السجل الداخلي */}
       <SaleDetailDialog

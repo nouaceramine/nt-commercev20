@@ -97,7 +97,8 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
         from_cash_box = await db.cash_boxes.find_one({"id": from_box})
-        if not from_cash_box or from_cash_box["balance"] < amount:
+        # p180: صندوق «المال الخاص» يجوز أن يسالب — مال المالك من جيبه
+        if not from_cash_box or (from_box != 'personal' and from_cash_box["balance"] < amount):
             raise HTTPException(status_code=400, detail="Insufficient balance")
         now = datetime.now(timezone.utc).isoformat()
         await db.cash_boxes.update_one({"id": from_box}, {"$inc": {"balance": -amount}, "$set": {"updated_at": now}})

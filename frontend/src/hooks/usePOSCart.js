@@ -132,7 +132,7 @@ export function usePOSCart({ language, toast }) {
     setReturnMode(false);
   }, []);
 
-  const parkCart = useCallback(() => {
+  const parkCart = useCallback((customerId = null) => {  // p180: يحفظ الزبون مع السلة
     if (cart.length === 0) return;
     const snapshot = {
       id: Date.now(),
@@ -140,6 +140,7 @@ export function usePOSCart({ language, toast }) {
       cart: [...cart],
       discount,
       saleNote,
+      customerId,
     };
     const updated = [...parkedCarts, snapshot];
     setParkedCarts(updated);

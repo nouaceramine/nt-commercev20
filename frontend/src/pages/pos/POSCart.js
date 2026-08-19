@@ -118,10 +118,16 @@ export default function POSCart({
           </Select>
 
           {selectedCustomer && customerDebt > 0 && (
-            <Badge variant="destructive" className="text-xs">
+            <Badge variant="destructive" className="text-xs" data-testid="cart-customer-debt">
               {language === 'ar' ? 'دين:' : 'Dette:'} {formatCurrency(customerDebt)}
             </Badge>
           )}
+          {/* p180: نقاط الولاء للزبون المختار */}
+          {selectedCustomer && (() => { const c = customers.find(x => x.id === selectedCustomer); const pts = c?.loyalty_points || 0; return pts > 0 ? (
+            <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-700 border-amber-300" data-testid="cart-customer-points">
+              ⭐ {pts} {language === 'ar' ? 'نقطة' : 'pts'}
+            </Badge>
+          ) : null; })()}
 
           {onAddProduct && (
             <Button onClick={onAddProduct} size="sm" className="h-8 gap-1 text-xs" data-testid="pos-add-product-btn">
@@ -444,7 +450,7 @@ export default function POSCart({
               {/* Park cart */}
               <Button
                 variant="outline"
-                onClick={parkCart}
+                onClick={() => parkCart(selectedCustomer)}  // p180: الزبون يُحفظ مع السلة
                 disabled={cart.length === 0}
                 className="h-9 px-2 gap-1 text-amber-600 border-amber-300 hover:bg-amber-50"
                 title={language === 'ar' ? 'حفظ السلة مؤقتاً' : 'Mettre en attente'}
@@ -500,7 +506,7 @@ export default function POSCart({
                     </p>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <Button size="sm" className="h-8 gap-1" onClick={() => { resumeParkedCart(p.id); setShowParkedDialog(false); }}>
+                    <Button size="sm" className="h-8 gap-1" onClick={() => { resumeParkedCart(p.id); setSelectedCustomer(p.customerId || null); setShowParkedDialog(false); }}>  {/* p180: استرجاع الزبون */}
                       <PlayCircle className="h-3.5 w-3.5" />
                       {language === 'ar' ? 'استئناف' : 'Reprendre'}
                     </Button>

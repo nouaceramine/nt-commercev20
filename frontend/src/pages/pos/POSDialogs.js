@@ -1,6 +1,6 @@
 import { errText } from '../../lib/errorText';
 import { getTierPrice } from '../../lib/priceTiers';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import apiClient from '../../lib/apiClient';
 import SaleDetailDialog from '../../components/sales/SaleDetailDialog';
@@ -83,6 +83,21 @@ export default function POSDialogs({
   const [selectedHistorySaleId, setSelectedHistorySaleId] = useState(null);
   const [showSaleDetail, setShowSaleDetail] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
+  // p180: أرصدة الصندوق النقدي والمال الخاص داخل نافذة سحب/إيداع
+  const [boxBalances, setBoxBalances] = useState(null);
+  useEffect(() => {
+    if (showCashDialog) {
+      apiClient.get('/cash-boxes')
+        .then(r => {
+          const boxes = Array.isArray(r.data) ? r.data : [];
+          setBoxBalances({
+            cash: (boxes.find(b => b.id === 'cash') || {}).balance ?? 0,
+            personal: (boxes.find(b => b.id === 'personal') || {}).balance ?? 0,
+          });
+        })
+        .catch(() => setBoxBalances(null));
+    }
+  }, [showCashDialog]);
   const [activeCustFamily, setActiveCustFamily] = useState(null);
 
   return (
@@ -240,9 +255,21 @@ export default function POSDialogs({
       <Dialog open={showCashDialog} onOpenChange={setShowCashDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{cashOperation.type === 'deposit' ? (language === 'ar' ? 'إيداع في الصندوق' : 'Depot en caisse') : (language === 'ar' ? 'سحب من الصندوق' : 'Retrait de caisse')}</DialogTitle>
+            <DialogTitle>{cashOperation.type === 'deposit' ? (language === 'ar' ? 'إيداع: من مالي الخاص ← الصندوق' : 'Depot: perso vers caisse') : (language === 'ar' ? 'سحب: من الصندوق ← مالي الخاص' : 'Retrait: caisse vers perso')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {boxBalances && (
+              <div className="flex gap-2 text-xs" data-testid="cash-boxes-balances">
+                <div className="flex-1 p-2 rounded-lg bg-muted/50 text-center">
+                  <p className="text-muted-foreground">{language === 'ar' ? 'الصندوق النقدي' : 'Caisse'}</p>
+                  <p className="font-bold">{boxBalances.cash.toLocaleString()} {language === 'ar' ? 'دج' : 'DA'}</p>
+                </div>
+                <div className="flex-1 p-2 rounded-lg bg-muted/50 text-center">
+                  <p className="text-muted-foreground">{language === 'ar' ? 'المال الخاص' : 'Argent personnel'}</p>
+                  <p className="font-bold">{boxBalances.personal.toLocaleString()} {language === 'ar' ? 'دج' : 'DA'}</p>
+                </div>
+              </div>
+            )}
             <div><Label>{language === 'ar' ? 'المبلغ' : 'Montant'}</Label><Input type="number" value={cashOperation.amount || ''} onChange={(e) => setCashOperation(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))} placeholder="0.00" /></div>
             <div><Label>{language === 'ar' ? 'ملاحظة' : 'Note'}</Label><Input value={cashOperation.note} onChange={(e) => setCashOperation(prev => ({ ...prev, note: e.target.value }))} placeholder={language === 'ar' ? 'سبب العملية...' : "Raison de l'operation..."} /></div>
             <div className="flex gap-2">
