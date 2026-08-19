@@ -402,6 +402,14 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
 
     await db.ecom_orders.insert_one(doc)
 
+    # p170: tag/create customer category (زبون التجارة الإلكترونية)
+    try:
+        from services.customer_sources import tag_customer_source, SOURCE_ECOM
+        _c = doc.get("customer") or {}
+        await tag_customer_source(db, SOURCE_ECOM, phone=_c.get("phone", ""), name=_c.get("name", ""), address=_c.get("address", ""))
+    except Exception:
+        pass
+
     # p100: feed the shared network
     try:
         from services.application.ecom_order_service import reputation_on_create

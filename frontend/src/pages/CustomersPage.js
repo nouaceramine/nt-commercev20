@@ -52,6 +52,34 @@ import {
   TableRow,
 } from '../components/ui/table';
 
+// p170: customer category sources (زبون واحد قد يحمل عدة فئات)
+const SOURCE_FILTERS = [
+  { key: 'all', ar: 'الكل', fr: 'Tous' },
+  { key: 'pos', ar: 'زبائن المحل', fr: 'Clients magasin' },
+  { key: 'recharge', ar: 'شحن الرصيد', fr: 'Recharge' },
+  { key: 'digital', ar: 'الخدمات الرقمية', fr: 'Services numériques' },
+  { key: 'repairs', ar: 'الصيانة', fr: 'Réparation' },
+  { key: 'ecom', ar: 'التجارة الإلكترونية', fr: 'E-commerce' },
+];
+
+const SOURCE_STYLES = {
+  pos: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  recharge: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400',
+  digital: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
+  repairs: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  ecom: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
+};
+
+const SourceBadges = ({ sources, language }) => {
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  const meta = Object.fromEntries(SOURCE_FILTERS.filter(f => f.key !== 'all').map(f => [f.key, f]));
+  return sources.filter(src => meta[src]).map(src => (
+    <Badge key={src} className={`${SOURCE_STYLES[src]} text-[10px] px-1.5 py-0`} data-testid={`source-badge-${src}`}>
+      {language === 'ar' ? meta[src].ar : meta[src].fr}
+    </Badge>
+  ));
+};
+
 export default function CustomersPage() {
   const { t, language, isRTL } = useLanguage();
   
@@ -66,6 +94,7 @@ export default function CustomersPage() {
   
   // View mode and sorting
   const [viewMode, setViewMode] = useState(localStorage.getItem('customersViewMode') || 'grid');
+  const [sourceFilter, setSourceFilter] = useState('all');
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   
@@ -200,6 +229,7 @@ export default function CustomersPage() {
     try {
       const params = new URLSearchParams();
       if (searchQuery) params.set('search', searchQuery);
+      if (sourceFilter !== 'all') params.set('source', sourceFilter);
       params.set('page', currentPage.toString());
       params.set('page_size', itemsPerPage.toString());
       
@@ -210,7 +240,7 @@ export default function CustomersPage() {
       console.error('Error fetching customers:', error);
       // Fallback to non-paginated endpoint
       try {
-        const params = searchQuery ? `?search=${encodeURIComponent(searchQuery)}` : '';
+        const params = `?${searchQuery ? `search=${encodeURIComponent(searchQuery)}&` : ''}${sourceFilter !== 'all' ? `source=${sourceFilter}` : ''}`;
         const response = await apiClient.get(`/customers${params}`);
         setCustomers(response.data);
         setTotalItems(response.data.length);
@@ -251,7 +281,7 @@ export default function CustomersPage() {
     fetchCustomers();
     fetchBlacklist();
     fetchCustomerFamilies();
-  }, [searchQuery, currentPage, itemsPerPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchQuery, currentPage, itemsPerPage, sourceFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (e, createNew = false) => {
     e?.preventDefault();
@@ -386,6 +416,19 @@ export default function CustomersPage() {
         {/* Search & Filter */}
         <Card>
           <CardContent className="p-4">
+            {/* p170: فئات الزبائن */}
+            <div className="flex items-center gap-2 flex-wrap mb-3" data-testid="customer-source-filters">
+              {SOURCE_FILTERS.map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => { setSourceFilter(f.key); setCurrentPage(1); }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${sourceFilter === f.key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}
+                  data-testid={`source-filter-${f.key}`}
+                >
+                  {language === 'ar' ? f.ar : f.fr}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-4 flex-wrap">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className={`absolute top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
@@ -528,6 +571,7 @@ export default function CustomersPage() {
                               {customer.customer_type === 'vip' && (
                                 <Badge className="bg-amber-100 text-amber-700 text-xs">VIP</Badge>
                               )}
+                              <SourceBadges sources={customer.sources} language={language} />
                               {customer.customer_type === 'new' && (
                                 <Badge className="bg-blue-100 text-blue-700 text-xs">{language === 'ar' ? 'جديد' : 'Nouveau'}</Badge>
                               )}
@@ -633,6 +677,7 @@ export default function CustomersPage() {
                             {customer.customer_type === 'vip' && (
                               <Badge className="bg-amber-100 text-amber-700 text-xs">VIP</Badge>
                             )}
+                            <SourceBadges sources={customer.sources} language={language} />
                             {customer.customer_type === 'new' && (
                               <Badge className="bg-blue-100 text-blue-700 text-xs">{language === 'ar' ? 'جديد' : 'Nouveau'}</Badge>
                             )}

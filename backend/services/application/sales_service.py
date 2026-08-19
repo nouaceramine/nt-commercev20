@@ -31,6 +31,9 @@ async def create_sale_op(db, s, user: dict) -> dict:
         customer = await db.customers.find_one({"id": s.customer_id})
         if customer:
             customer_name = customer["name"]
+        # p170: tag customer category (زبون المحل)
+        from services.customer_sources import tag_customer_source, SOURCE_POS
+        await tag_customer_source(db, SOURCE_POS, customer_id=s.customer_id)
 
     if s.payment_type in ["credit", "partial"] and not s.customer_id:
         raise HTTPException(status_code=400, detail="Customer required for credit sale")

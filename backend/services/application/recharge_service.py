@@ -57,6 +57,9 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
         customer = await db.customers.find_one({"id": recharge.customer_id}, {"_id": 0, "name": 1})
         if customer:
             customer_name = customer["name"]
+        # p170: tag customer category (زبون شحن الرصيد)
+        from services.customer_sources import tag_customer_source, SOURCE_RECHARGE
+        await tag_customer_source(db, SOURCE_RECHARGE, customer_id=recharge.customer_id)
 
     # Generate USSD code
     ussd_template = operator_config["ussd"].get(recharge.recharge_type, "")

@@ -84,6 +84,9 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
             "created_at": now,
         }
         await db.repair_tickets.insert_one(ticket)
+        # p170: tag/create customer category (زبون الصيانة)
+        from services.customer_sources import tag_customer_source, SOURCE_REPAIRS
+        await tag_customer_source(db, SOURCE_REPAIRS, phone=ticket.get("customer_phone", ""), name=ticket.get("customer_name", ""))
         await db.repair_history.insert_one({
             "id": str(uuid.uuid4()),
             "repair_ticket_id": ticket_id,
@@ -115,6 +118,9 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.repair_tickets.insert_one(ticket)
+        # p170: tag/create customer category (زبون الصيانة)
+        from services.customer_sources import tag_customer_source, SOURCE_REPAIRS
+        await tag_customer_source(db, SOURCE_REPAIRS, phone=ticket.get("customer_phone", ""), name=ticket.get("customer_name", ""))
         await db.repair_history.insert_one({
             "id": str(uuid.uuid4()),
             "repair_ticket_id": ticket["id"],
@@ -413,6 +419,10 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
 
         # Customer: link by phone, auto-create when there is debt to track
         customer = await db.customers.find_one({"phone": ticket.get("customer_phone", "")}, {"_id": 0})
+        # p170: tag customer category (زبون الصيانة)
+        if customer:
+            from services.customer_sources import tag_customer_source, SOURCE_REPAIRS
+            await tag_customer_source(db, SOURCE_REPAIRS, customer_id=customer["id"])
         if not customer and remaining > 0:
             customer = {
                 "id": str(uuid.uuid4()),
@@ -424,6 +434,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
                 "balance": 0, "total_debt": 0, "total_purchases": 0,
                 "is_active": True,
                 "notes": f"أُنشئ تلقائياً من تذكرة صيانة {ticket.get('ticket_number', '')}",
+                "sources": ["repairs"],
                 "created_at": now,
             }
             await db.customers.insert_one(customer)

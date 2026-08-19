@@ -349,6 +349,12 @@ async def tiktok_webhook(tenant_id: str, integration_id: str, request: Request):
         "created_at": now, "updated_at": now, "created_by": "tiktok-webhook",
     }
     await db.ecom_orders.insert_one(doc)
+    # p170: tag/create customer category (زبون التجارة الإلكترونية)
+    try:
+        from services.customer_sources import tag_customer_source, SOURCE_ECOM
+        await tag_customer_source(db, SOURCE_ECOM, phone=parsed.get("customer_phone", ""), name=parsed.get("customer_name", ""), address=parsed.get("address", ""))
+    except Exception:
+        pass
     await db.ecom_integrations.update_one(
         {"id": integration_id},
         {"$inc": {"stats.orders": 1}, "$set": {"last_sync_at": now, "mode": "live"}},

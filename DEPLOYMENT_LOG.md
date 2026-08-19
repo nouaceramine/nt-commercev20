@@ -2547,3 +2547,20 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 
 ### النسخ الاحتياطية
 /opt/ntcommerce/backups/p169/ (products_routes.py, App.js, Layout.js)
+
+## p170 — 2026-08-19 (release 20260819_014346)
+
+### فئات الزبائن الخمس (pos / recharge / digital / repairs / ecom)
+- backend/services/customer_sources.py (جديد): tag_customer_source — وسم بالهوية أو الهاتف، إنشاء سجل مصغّر عند الهاتف+الاسم (ecom)، لا يرمي استثناءات أبداً (لا يكسر العمليات)
+- وسم تلقائي عند: البيع POS (sales_service)، شحن الرصيد نقد/آجل (recharge_service)، اشتراك IPTV (digital_panel)، تفعيل SIM (sim_offers)، بيع البطاقات (card_stock)، تذكرة الصيانة إنشاء+دفع (repair_routes، والوثيقة المُنشأة تلقائياً تحمل sources:["repairs"])، طلبات المتجر والويب هوك (ecom orders + webhooks — إنشاء الزبون إن لم يوجد)
+- customers_routes: GET /customers و /paginated يقبلان ?source= ; الإنشاء اليدوي يهيئ sources: []
+- التعبئة الرجعية (/tmp/backfill_sources.py): tagged=179 (pos) + created=1 (ecom)؛ العدّادات: pos 179، ecom 1، بدون فئة 13
+- CustomersPage.js: شريط فلاتر الفئات (customer-source-filters) + شارات ملونة لكل فئة في الجدول والبطاقات (SourceBadges)
+
+### الاختبارات
+- GET /customers/paginated?source=pos → total 179 ✓
+- import services.customer_sources داخل الحاوية ✓
+- الحزمة الحية تحوي customer-source-filters ✓
+
+### النسخ الاحتياطية
+/opt/ntcommerce/backups/p170/ (9 ملفات backend + CustomersPage.js)

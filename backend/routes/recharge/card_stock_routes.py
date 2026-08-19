@@ -298,6 +298,11 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
             })
             sale_inserted = True
 
+            # p170: tag customer category (زبون شحن الرصيد)
+            if payload.customer_id:
+                from services.customer_sources import tag_customer_source, SOURCE_RECHARGE
+                await tag_customer_source(db, SOURCE_RECHARGE, customer_id=payload.customer_id)
+
             if is_credit:
                 await db.customers.update_one(
                     {"id": payload.customer_id},

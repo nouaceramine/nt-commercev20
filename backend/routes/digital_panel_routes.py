@@ -457,6 +457,10 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
                 "user_id": user.get("id"), "user_name": user.get("name", ""),
                 "created_at": now, "created_by": user.get("name", ""),
             })
+            # p170: tag customer category (زبون الخدمات الرقمية)
+            if doc.get("customer_id"):
+                from services.customer_sources import tag_customer_source, SOURCE_DIGITAL
+                await tag_customer_source(db, SOURCE_DIGITAL, customer_id=doc["customer_id"])
             if is_debt and doc.get("customer_id"):
                 # mirror debt on the customer record (reseller debt lives in the reseller ledger)
                 await db.customers.update_one(
