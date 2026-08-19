@@ -29,6 +29,7 @@ export default function POSCart({
   updateCartItemNote,
   removeFromCart, clearCart,
   subtotal, total, discount, setDiscount,
+  loyalty = null,  // p181
   discountMode, setDiscountMode,
   loading, hasOpenSession, completeSale,
   language, formatCurrency, t, isRTL,
@@ -443,6 +444,24 @@ export default function POSCart({
                 <p className="text-[10px] text-muted-foreground">{language === 'ar' ? 'الإجمالي' : 'Total'}</p>
                 <p className="text-base sm:text-lg font-bold text-primary">{formatCurrency(total)}</p>
               </div>
+              {/* p181: صرف نقاط الولاء كتخفيض */}
+              {loyalty?.canRedeem && (
+                <button
+                  onClick={loyalty.onToggle}
+                  className={`flex flex-col items-center px-2 py-1 rounded-lg border text-[10px] transition-colors ${
+                    loyalty.redeemActive
+                      ? 'bg-amber-100 border-amber-400 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                      : 'border-dashed border-amber-300 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                  }`}
+                  title={language === 'ar' ? 'صرف نقاط الولاء كتخفيض' : 'Utiliser les points'}
+                  data-testid="loyalty-redeem-toggle"
+                >
+                  <span>⭐ {language === 'ar' ? `${loyalty.points} نقطة` : `${loyalty.points} pts`}</span>
+                  <span className="font-bold">{loyalty.redeemActive
+                    ? `−${formatCurrency(loyalty.redeemAmount)}`
+                    : (language === 'ar' ? 'صرف' : 'Utiliser')}</span>
+                </button>
+              )}
             </div>
 
             {/* Buttons */}
@@ -497,12 +516,19 @@ export default function POSCart({
               const itemCount = p.cart?.reduce((s, i) => s + (i.quantity || 0), 0) || 0;
               const cartTotal = p.cart?.reduce((s, i) => s + (i.total || 0), 0) - (p.discount || 0);
               const timeLabel = new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              // p181: المدة المنقضية منذ الحفظ
+              const elapsedMin = Math.max(0, Math.floor((Date.now() - new Date(p.timestamp).getTime()) / 60000));
+              const elapsedLabel = elapsedMin < 1
+                ? (language === 'ar' ? 'الآن' : "a l'instant")
+                : elapsedMin < 60
+                  ? (language === 'ar' ? `منذ ${elapsedMin} د` : `il y a ${elapsedMin} min`)
+                  : (language === 'ar' ? `منذ ${Math.floor(elapsedMin / 60)}س ${elapsedMin % 60}د` : `il y a ${Math.floor(elapsedMin / 60)}h${elapsedMin % 60}`);
               return (
                 <div key={p.id} className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">{cust?.name || (language === 'ar' ? 'زبون عام' : 'Client général')}</p>
                     <p className="text-xs text-muted-foreground">
-                      {itemCount} {language === 'ar' ? 'صنف' : 'articles'} — {cartTotal?.toLocaleString()} DA — {timeLabel}
+                      {itemCount} {language === 'ar' ? 'صنف' : 'articles'} — {cartTotal?.toLocaleString()} DA — {timeLabel} <span className="text-amber-600 font-semibold">({elapsedLabel})</span>
                     </p>
                   </div>
                   <div className="flex gap-1 shrink-0">

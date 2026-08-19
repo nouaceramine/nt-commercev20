@@ -83,6 +83,7 @@ export default function POSPage() {
 
   // تطبيق فئة سعر الزبون تلقائياً عند اختياره (الافتراضي: تجزئة)
   useEffect(() => {
+    setRedeemActive(false);  // p181
     if (!selectedCustomer) return;
     const cust = customers.find(c => c.id === selectedCustomer);
     if (cust?.price_tier && cust.price_tier !== priceType) setPriceType(cust.price_tier);
@@ -129,6 +130,8 @@ export default function POSPage() {
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [lastSaleId, setLastSaleId] = useState(null);
   const [debtsMap, setDebtsMap] = useState({});  // p180: customer_id → total remaining debt
+  const [loyaltySettings, setLoyaltySettings] = useState(null);  // p181
+  const [redeemActive, setRedeemActive] = useState(false);       // p181: صرف النقاط كتخفيض
   const [inlineTask, setInlineTask] = useState(null);  // p177: مهام البيع تظهر داخل لوحة المهام بدل النوافذ المنبثقة
   const [lastSaleInvoice, setLastSaleInvoice] = useState(null);
 
@@ -225,6 +228,7 @@ export default function POSPage() {
     fetchCustomers();
     fetchFamilies();
     fetchDebtsMap();  // p180
+    apiClient.get('/loyalty/settings').then(r => setLoyaltySettings(r.data)).catch(() => {});  // p181
     fetchCustomerFamilies();
     fetchBlacklist();
     fetchWilayas();
@@ -503,6 +507,11 @@ export default function POSPage() {
   const completeSale = async () => {
     if (!session.hasOpenSession) { toast.error(language === 'ar' ? 'يجب فتح حصة' : 'Ouvrez une session'); return; }
     if (cart.cart.length === 0) { toast.error(language === 'ar' ? 'السلة فارغة' : 'Panier vide'); return; }
+    // p181: في وضع الإرجاع يجب أن يكون الإجمالي سالباً — منع فاتورة موجبة خطأً
+    if (cart.returnMode && (cart.subtotal - cart.discount) >= 0) {
+      toast.error(language === 'ar' ? 'وضع الإرجاع مفعّل: لا يمكن إتمام فاتورة موجبة — أضف منتجات بالسالب أو ألغِ وضع الإرجاع' : 'Mode retour actif: total doit etre negatif');
+      return;
+    }
     if (cart.paymentType !== 'cash' && !selectedCustomer) { toast.error(language === 'ar' ? 'اختر زبوناً' : 'Selectionnez un client'); return; }
 
     setLoading(true);
@@ -514,7 +523,7 @@ export default function POSPage() {
         cart.paymentType === 'credit' ? PaymentDetails.credit()
         : cart.paymentType === 'installment' ? PaymentDetails.installment(cart.installmentPlan || { down_payment: cart.paidAmount || 0 })
         : cart.paymentType === 'mixed' ? PaymentDetails.mixed(Number(cart.mixedCash) || 0, Number(cart.mixedBank) || 0)
-        : PaymentDetails.cash(Number(cart.paidAmount) || cart.subtotal);
+        : PaymentDetails.cash(Number(cart.paidAmount) || (cart.subtotal - cart.discount - redeemAmount));  // p181
 
       saleData = {
         code: saleCode,
@@ -531,8 +540,9 @@ export default function POSPage() {
           note: item.note || '',
         })),
         subtotal: cart.subtotal,
-        discount: cart.discount,
-        total: cart.subtotal - cart.discount,
+        discount: cart.discount + redeemAmount,  // p181: خصم النقاط مدمج
+        total: cart.subtotal - cart.discount - redeemAmount,
+        loyalty_redeem: pointsUsed > 0 ? { points: pointsUsed, amount: redeemAmount } : null,  // p181
         ...payment.toJSON(),
         notes: cart.saleNote,
         delivery: delivery.toApiPayload(language),
@@ -547,6 +557,18 @@ export default function POSPage() {
         printThermalReceipt(response.data.id, receiptSettings?.thermal_printer_size || '80mm');
       } else if (receiptSettings?.show_print_dialog !== false) {
         setShowPrintDialog(true);
+      }
+
+      // p181: خصم النقاط المستعملة من رصيد الزبون
+      if (pointsUsed > 0 && selectedCustomer) {
+        apiClient.post('/loyalty/redeem', {
+          customer_id: selectedCustomer, points: pointsUsed, sale_id: response.data.id,
+          notes: `خصم ${redeemAmount} دج من فاتورة POS`,
+        }).then(() => {
+          setCustomers(prev => prev.map(c => c.id === selectedCustomer ? { ...c, loyalty_points: (c.loyalty_points || 0) - pointsUsed } : c));
+          toast.success(language === 'ar' ? `صُرفت ${pointsUsed} نقطة ولاء (−${redeemAmount} دج)` : `${pointsUsed} pts utilises`);
+        }).catch(() => {});
+        setRedeemActive(false);
       }
 
       cart.clear();
@@ -669,6 +691,14 @@ export default function POSPage() {
 
   // === Computed ===
   const total = cart.subtotal - cart.discount + (delivery.enabled ? delivery.fee : 0);
+  // p181: صرف نقاط الولاء كتخفيض
+  const custPoints = customers.find(c => c.id === selectedCustomer)?.loyalty_points || 0;
+  const pointsValue = loyaltySettings?.points_value || 0.1;
+  const minRedeem = loyaltySettings?.min_redeem_points || 100;
+  const canRedeem = !!(loyaltySettings?.enabled && selectedCustomer && custPoints >= minRedeem && total > 0 && !cart.returnMode);
+  const redeemAmount = (redeemActive && canRedeem) ? Math.min(custPoints * pointsValue, total) : 0;
+  const pointsUsed = redeemAmount > 0 ? Math.min(custPoints, Math.round(redeemAmount / pointsValue)) : 0;
+  const totalWithRedeem = total - redeemAmount;
 
   return (
     <Layout>
@@ -739,9 +769,10 @@ export default function POSPage() {
             setShowNewCustomerDialog={setShowNewCustomerDialog}
             updateCartItemQuantity={cart.updateItemQuantity} updateCartItemPrice={cart.updateItemPrice}
             updateCartItemDiscount={cart.updateItemDiscount} removeFromCart={cart.removeItem}
-            clearCart={cart.clear} subtotal={cart.subtotal} total={total} discount={cart.discount}
+            clearCart={cart.clear} subtotal={cart.subtotal} total={totalWithRedeem} discount={cart.discount}
             setDiscount={cart.setDiscount} loading={loading} hasOpenSession={session.hasOpenSession}
             completeSale={completeSale} language={language} formatCurrency={formatCurrency}
+            loyalty={{ enabled: !!loyaltySettings?.enabled, points: custPoints, pointsUsed, redeemAmount, redeemActive, canRedeem, onToggle: () => setRedeemActive(v => !v) }}
             t={t} isRTL={isRTL} paymentType={cart.paymentType} setPaymentType={cart.setPaymentType}
             paymentMethod={cart.paymentMethod} setPaymentMethod={cart.setPaymentMethod}
             paidAmount={cart.paidAmount} setPaidAmount={cart.setPaidAmount}
