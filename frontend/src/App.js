@@ -82,6 +82,7 @@ import RepairReceptionPage from "./pages/RepairReceptionPage";
 import RepairTrackingPage from "./pages/RepairTrackingPage";
 import SparePartsPage from "./pages/SparePartsPage";
 import ExpensesPage from "./pages/ExpensesPage";
+import PartnersPage from "./pages/PartnersPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AdvancedSalesReportPage from "./pages/AdvancedSalesReportPage";
 import SalesPermissionsPage from "./pages/SalesPermissionsPage";
@@ -1078,6 +1079,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ExpensesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partners"
+        element={
+          <ProtectedRoute>
+            <PartnersPage />
           </ProtectedRoute>
         }
       />

@@ -75,7 +75,8 @@ import {
   Tv,
   Boxes,
   Calendar,
-  Activity
+  Activity,
+  Handshake
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -513,6 +514,7 @@ export const Layout = ({ children }) => {
       icon: Wallet,
       items: [
         { path: '/cash', icon: Wallet, label: t.cashManagement },
+        { path: '/partners', icon: Handshake, label: language === 'ar' ? 'الشركاء والأرباح' : 'Associés & bénéfices' },
         { path: '/debts', icon: Receipt, label: t.debts },
         { path: '/tax-reports', icon: FileText, label: language === 'ar' ? 'الضرائب' : 'Taxes' },
         { path: '/currencies', icon: Coins, label: language === 'ar' ? 'العملات' : 'Devises' },
