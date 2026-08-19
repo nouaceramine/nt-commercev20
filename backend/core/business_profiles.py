@@ -129,9 +129,9 @@ BUSINESS_PROFILES = [
         "key": "production",
         "name_ar": "مؤسسات الإنتاج", "name_fr": "Production",
         "icon": "Factory",
-        "desc_ar": "إنتاج وتحويل مواد أولية (وصفات الإنتاج — قريباً)",
+        "desc_ar": "إنتاج وتحويل مواد أولية مع وصفات الإنتاج",
         "features_off": ["recharge", "iptv", "maintenance", "loyalty_points"],
-        "features_on": [],
+        "features_on": ["production"],  # p188: BOM recipes
         "families": ["مواد أولية", "منتجات نهائية", "تغليف وتعبئة", "نصف مصنع"],
     },
     {
@@ -239,7 +239,7 @@ _BY_KEY = {p["key"]: p for p in BUSINESS_PROFILES}
 KNOWN_FEATURE_KEYS = [
     "ai_bots", "backup", "barcode", "credit_sales", "customers", "ecommerce_hub",
     "inventory", "iptv", "loyalty_points", "maintenance", "pos", "recharge",
-    "reports", "wallet", "rental", "restaurant",
+    "reports", "wallet", "rental", "restaurant", "production",
 ]
 
 

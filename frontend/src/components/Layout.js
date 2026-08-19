@@ -77,7 +77,7 @@ import {
   Calendar,
   Activity,
   Handshake,
-  KeyRound
+  KeyRound, Factory
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -506,6 +506,15 @@ export const Layout = ({ children }) => {
       icon: KeyRound,
       items: [
         { path: '/rentals', icon: KeyRound, label: language === 'ar' ? 'الكراء' : 'Location' },
+      ]
+    },
+    {
+      id: 'production',
+      featureKey: 'production',
+      title: language === 'ar' ? 'الإنتاج' : 'Production',
+      icon: Factory,
+      items: [
+        { path: '/production', icon: Factory, label: language === 'ar' ? 'الإنتاج' : 'Production' },
       ]
     },
     {

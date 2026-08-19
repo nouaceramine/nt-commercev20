@@ -84,6 +84,7 @@ import SparePartsPage from "./pages/SparePartsPage";
 import ExpensesPage from "./pages/ExpensesPage";
 import PartnersPage from "./pages/PartnersPage";
 import RentalsPage from "./pages/RentalsPage";
+import ProductionPage from "./pages/ProductionPage";  // p188
 import NotificationsPage from "./pages/NotificationsPage";
 import AdvancedSalesReportPage from "./pages/AdvancedSalesReportPage";
 import SalesPermissionsPage from "./pages/SalesPermissionsPage";
@@ -1096,6 +1097,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="rental">
             <RentalsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/production"
+        element={
+          <ProtectedRoute featureKey="production">
+            <ProductionPage />
           </ProtectedRoute>
         }
       />

@@ -124,7 +124,7 @@ export const AuthProvider = ({ children }) => {
    * mention them — i.e. they must be explicitly enabled (super-admin per-tenant).
    * Mirrors OPT_IN_FEATURES in backend main.py.
    */
-  const OPT_IN_FEATURES = new Set(['ecommerce_hub', 'rental', 'restaurant']);  // p185 rental / p186 restaurant
+  const OPT_IN_FEATURES = new Set(['ecommerce_hub', 'rental', 'restaurant', 'production']);  // p185-188 opt-ins
 
   const isFeatureEnabled = (featureKey, subFeatureKey = null) => {
     // Super admin has all features

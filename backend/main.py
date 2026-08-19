@@ -320,7 +320,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
                 if plan:
                     features_map = {**plan.get("features", {}), **tenant.get("features_override", {})}
-                    OPT_IN_FEATURES = ("ecommerce_hub", "rental", "restaurant")  # p185 rental / p186 restaurant: opt-in
+                    OPT_IN_FEATURES = ("ecommerce_hub", "rental", "restaurant", "production")  # p185-188 opt-ins
                     for opt_key in OPT_IN_FEATURES:
                         if opt_key not in features_map:
                             features_map[opt_key] = False
@@ -1129,6 +1129,7 @@ _AUTO_REG_MODULES = [
     'routes.rental_routes',  # p185: rental module (cars & properties)
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
     'routes.serials_routes',  # p187: IMEI/serial tracking
+    'routes.production_routes',  # p188: BOM / production recipes
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
