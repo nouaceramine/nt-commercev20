@@ -2533,3 +2533,17 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 - تقرير «المنتجات القريبة من الانتهاء» + اقتراح تصريف
 - فئات الزبائن الخمس (وسوم sources + وسم تلقائي + تعبئة رجعية + ملف 360°)
 - توحيد المصدر (selling_price/retail_price/sell_price → مرجع واحد) على 5 مراحل
+
+## p169 — 2026-08-19 (release 20260819_011835)
+
+### تقرير «انتهاء صلاحية المنتجات»
+- backend/routes/products_routes.py: GET /products/expiring-report?days=N — يجمع دفعات product_lots مع بيانات المنتج، يحسب الأيام المتبقية والحالة (منتهية/حرجة ≤7/تحذير ≤30/قادمة) وقيمة المخزون المهدد (كمية الدفعة × سعر الشراء) — مُسجَّل قبل /{product_id} لتفادي التظليل
+- frontend/src/pages/ExpiryReportPage.js (جديد): بطاقات ملخصة + فلتر مدة (30/60/90) + بحث + جدول الدفعات + زر «تصريف بخصم» يطبق نسبة خصم على retail_price عبر PUT /products (يُسجَّل في سجل الأسعار تلقائياً)
+- App.js: مسار /expiry-report (featureKey: inventory)؛ Layout.js: إدخال «انتهاء الصلاحية» في قسم المنتجات بعد سجل الأسعار (أيقونة CalendarClock)
+
+### الاختبارات
+- curl /products/expiring-report?days=90 → 200 بنية rows+summary ✓ (فارغ — لا دفعات حالياً)
+- الحزمة الحية main.70fbe73f.js تحوي expiry-report-page وexpiring-report ✓
+
+### النسخ الاحتياطية
+/opt/ntcommerce/backups/p169/ (products_routes.py, App.js, Layout.js)

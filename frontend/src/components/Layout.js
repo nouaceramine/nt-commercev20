@@ -58,6 +58,7 @@ import {
   Download,
   Sparkles,
   History,
+  CalendarClock,
   Building,
   Mail,
   MessageSquare,
@@ -462,6 +463,7 @@ export const Layout = ({ children }) => {
         { path: '/barcode-print', icon: QrCode, label: language === 'ar' ? 'الباركود' : 'Codes-barres', subFeature: 'barcode', featureKey: 'barcode' },
         { path: '/bulk-price-update', icon: DollarSign, label: t.bulkPriceUpdate },
         { path: '/price-history', icon: History, label: language === 'ar' ? 'سجل الأسعار' : 'Historique prix' },
+        { path: '/expiry-report', icon: CalendarClock, label: language === 'ar' ? 'انتهاء الصلاحية' : 'Expirations' },
         { path: '/defective-goods', icon: PackageX, label: language === 'ar' ? 'بضائع معيبة' : 'Défectueux' },
       ]
     },

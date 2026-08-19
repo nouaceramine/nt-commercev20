@@ -417,6 +417,59 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         ]
         return await db.products.aggregate(pipeline).to_list(1000)
 
+    # ── p169: Expiry report — lots approaching/past their expiry date ──
+    @router.get("/expiring-report")
+    async def get_expiring_report(days: int = 60, admin: dict = Depends(require_permission("products.view"))):
+        from datetime import date as _date_cls
+        today = _date_cls.today()
+        lots = await db.product_lots.find({"expiry_date": {"$ne": ""}}, {"_id": 0}).to_list(5000)
+        rows = []
+        for lot in lots:
+            try:
+                exp = datetime.fromisoformat(lot["expiry_date"]).date()
+            except Exception:
+                continue
+            remaining = (exp - today).days
+            if remaining > days:
+                continue
+            product = await db.products.find_one({"id": lot.get("product_id")}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1, "retail_price": 1, "quantity": 1, "image_url": 1, "barcode": 1})
+            if not product:
+                continue
+            qty = float(lot.get("quantity") or 0)
+            if remaining < 0:
+                status = "expired"
+            elif remaining <= 7:
+                status = "critical"
+            elif remaining <= 30:
+                status = "warning"
+            else:
+                status = "upcoming"
+            rows.append({
+                "lot_id": lot.get("id"),
+                "lot_number": lot.get("lot_number", ""),
+                "product_id": product.get("id"),
+                "product_name": product.get("name_ar") or product.get("name_en") or "",
+                "image_url": product.get("image_url", ""),
+                "barcode": product.get("barcode", ""),
+                "expiry_date": lot.get("expiry_date"),
+                "remaining_days": remaining,
+                "status": status,
+                "lot_quantity": qty,
+                "purchase_price": float(product.get("purchase_price") or 0),
+                "retail_price": float(product.get("retail_price") or 0),
+                "stock_value": round(qty * float(product.get("purchase_price") or 0), 2),
+                "alert_days": int(lot.get("alert_days") or 30),
+            })
+        rows.sort(key=lambda r: r["remaining_days"])
+        summary = {
+            "expired": sum(1 for r in rows if r["status"] == "expired"),
+            "critical": sum(1 for r in rows if r["status"] == "critical"),
+            "warning": sum(1 for r in rows if r["status"] == "warning"),
+            "upcoming": sum(1 for r in rows if r["status"] == "upcoming"),
+            "total_stock_value": round(sum(r["stock_value"] for r in rows), 2),
+        }
+        return {"rows": rows, "summary": summary, "days": days}
+
     # ── Get Single Product ──
     @router.get("/{product_id}")
     async def get_product(product_id: str, user: dict = Depends(require_permission("products.view"))):

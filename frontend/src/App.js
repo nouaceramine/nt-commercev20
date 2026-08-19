@@ -86,6 +86,7 @@ import NotificationsPage from "./pages/NotificationsPage";
 import AdvancedSalesReportPage from "./pages/AdvancedSalesReportPage";
 import SalesPermissionsPage from "./pages/SalesPermissionsPage";
 import PriceHistoryPage from "./pages/PriceHistoryPage";
+import ExpiryReportPage from "./pages/ExpiryReportPage";
 import SmartReportsPage from "./pages/SmartReportsPage";
 import EmployeeAlertsPage from "./pages/EmployeeAlertsPage";
 import FeaturesPage from "./pages/FeaturesPage";
@@ -1085,6 +1086,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="inventory">
             <PriceHistoryPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/expiry-report"
+        element={
+          <ProtectedRoute featureKey="inventory">
+            <ExpiryReportPage />
           </ProtectedRoute>
         }
       />
