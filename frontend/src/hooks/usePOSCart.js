@@ -40,8 +40,10 @@ export function usePOSCart({ language, toast }) {
   }, []);
 
   const addItem = useCallback((product, options = {}) => {
-    const { overrideQty, overridePrice, serialNumber, priceType } = options;
-    const existingItem = cart.find(item => item.product_id === product.id);
+    const { overrideQty, overridePrice, serialNumber, priceType, variant } = options;
+    // p184: variant lines are distinct cart lines (same product, different color/size)
+    const vKey = variant ? `${variant.color || ''}|${variant.size || ''}` : '';
+    const existingItem = cart.find(item => item.product_id === product.id && (item._vkey || '') === vKey);
     const basePrice = overridePrice != null ? overridePrice : getTierPrice(product, priceType);
     const qty = overrideQty != null ? overrideQty : (returnMode ? -1 : 1);
     const bypassExisting = (serialNumber && serialNumber.length > 0) || overridePrice != null;
@@ -55,10 +57,13 @@ export function usePOSCart({ language, toast }) {
           : item
       ));
     } else {
+      const vLabel = vKey ? [variant.color, variant.size].filter(Boolean).join(' / ') : '';
       setCart(prev => [...prev, {
         cart_item_id: Date.now().toString(36) + Math.random().toString(36).slice(2),
         product_id: product.id,
-        product_name: product.name,
+        product_name: product.name + (vLabel ? ` - ${vLabel}` : ''),
+        variant: variant ? { color: variant.color || '', size: variant.size || '' } : null,
+        _vkey: vKey,
         barcode: product.barcode,
         article_code: product.article_code,
         quantity: qty,
@@ -66,7 +71,7 @@ export function usePOSCart({ language, toast }) {
         discount: 0,
         discount_percent: 0,
         total: qty * basePrice,
-        available_stock: product.quantity,
+        available_stock: variant ? variant.quantity : product.quantity,
         is_return: returnMode,
         is_fixed_price: product.fixed_price || false,
         serial_number: serialNumber || '',

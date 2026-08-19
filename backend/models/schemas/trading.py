@@ -13,6 +13,7 @@ class SaleItem(BaseModel):
     purchase_price: Optional[float] = None
     total: float
     note: Optional[str] = ""
+    variant: Optional[dict] = None  # p184: {"color": ..., "size": ...} for variant products
 
 class DeliveryInfo(BaseModel):
     enabled: bool = False

@@ -44,10 +44,26 @@ async def create_sale_op(db, s, user: dict) -> dict:
     # and rejects the sale 400. Non-catalog lines (no product_id) and
     # is_non_stockable products are exempt, preserving prior semantics.
     _claim_qty = {}
+    _claim_variants = {}  # p184: (pid, color, size) -> qty
     for item in s.items:
         if item.product_id:
             _claim_qty[item.product_id] = _claim_qty.get(item.product_id, 0) + item.quantity
+            _v = getattr(item, "variant", None) or {}
+            if _v.get("color") or _v.get("size"):
+                _vk = (item.product_id, _v.get("color") or "", _v.get("size") or "")
+                _claim_variants[_vk] = _claim_variants.get(_vk, 0) + item.quantity
     _claimed = []
+    _claimed_variants = []
+
+    async def _rollback_claims():
+        for cid, cqty in _claimed:
+            await db.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
+        for vpid, vc, vsz, vqty in _claimed_variants:
+            await db.products.update_one(
+                {"id": vpid, "variants": {"$elemMatch": {"color": vc, "size": vsz}}},
+                {"$inc": {"variants.$.quantity": vqty}},
+            )
+
     for pid, qty in _claim_qty.items():
         product = await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1})
         if not product or product.get("is_non_stockable"):
@@ -57,14 +73,37 @@ async def create_sale_op(db, s, user: dict) -> dict:
             {"$inc": {"quantity": -qty}},
         )
         if res is None:
-            for cid, cqty in _claimed:
-                await db.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
+            await _rollback_claims()
             pname = product.get("name_ar") or product.get("name_en") or pid
             raise HTTPException(
                 status_code=400,
                 detail=f"مخزون غير كافٍ للمنتج '{pname}': المتاح {product.get('quantity', 0)} والمطلوب {qty}",
             )
         _claimed.append((pid, qty))
+
+    # p184: variant-level claims — after all product-level claims succeed
+    for (pid, vcolor, vsize), vqty in _claim_variants.items():
+        product = await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "has_variants": 1, "variants": 1})
+        if not product or not product.get("has_variants"):
+            continue
+        vres = await db.products.find_one_and_update(
+            {"id": pid, "variants": {"$elemMatch": {"color": vcolor, "size": vsize, "quantity": {"$gte": vqty}}}},
+            {"$inc": {"variants.$.quantity": -vqty}},
+        )
+        if vres is None:
+            await _rollback_claims()
+            pname = product.get("name_ar") or product.get("name_en") or pid
+            vlabel = " / ".join(x for x in [vcolor, vsize] if x)
+            vstock = next(
+                (v.get("quantity", 0) for v in (product.get("variants") or [])
+                 if (v.get("color") or "") == vcolor and (v.get("size") or "") == vsize),
+                0,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"مخزون غير كافٍ للمتغير «{vlabel}» من '{pname}': المتاح {vstock} والمطلوب {vqty}",
+            )
+        _claimed_variants.append((pid, vcolor, vsize, vqty))
 
     delivery_fee = 0
     delivery_info = None
@@ -229,6 +268,12 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
     now = datetime.now(timezone.utc).isoformat()
     for item in sale.get("items", []):
         await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}})
+        _v = item.get("variant") or {}  # p184
+        if _v.get("color") or _v.get("size"):
+            await db.products.update_one(
+                {"id": item["product_id"], "variants": {"$elemMatch": {"color": _v.get("color") or "", "size": _v.get("size") or ""}}},
+                {"$inc": {"variants.$.quantity": item["quantity"]}},
+            )
     if sale.get("customer_id"):
         await db.customers.update_one(
             {"id": sale["customer_id"]},
@@ -284,6 +329,12 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
 
     for item in sale["items"]:
         await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}})
+        _v = item.get("variant") or {}  # p184
+        if _v.get("color") or _v.get("size"):
+            await db.products.update_one(
+                {"id": item["product_id"], "variants": {"$elemMatch": {"color": _v.get("color") or "", "size": _v.get("size") or ""}}},
+                {"$inc": {"variants.$.quantity": item["quantity"]}},
+            )
 
     if sale.get("customer_id"):
         await db.customers.update_one(

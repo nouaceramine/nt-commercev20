@@ -116,6 +116,7 @@ export default function POSPage() {
   // p165: weight-scale support
   const [scaleCfg, setScaleCfg] = useState(null);
   const [weightProduct, setWeightProduct] = useState(null);
+  const [variantProduct, setVariantProduct] = useState(null);  // p184: variant picker
   const [weightValue, setWeightValue] = useState('');
   useEffect(() => {
     apiClient.get('/pos/scale-config').then(r => setScaleCfg(r.data)).catch(() => {});
@@ -375,6 +376,10 @@ export default function POSPage() {
   const addProductSmart = useCallback((product, opts = {}) => {
     if (!product) return;
     if (!product.name) product.name = product.name_ar || product.name_en;
+    // p184: variant products open the picker first (unless a variant was already chosen)
+    if (product.has_variants && (product.variants || []).length > 0 && !opts.variant) {
+      setVariantProduct(product); return;
+    }
     if (product.sold_by_weight && opts.overrideQty == null) {
       setWeightProduct(product); setWeightValue(''); return;
     }
@@ -538,6 +543,7 @@ export default function POSPage() {
           discount: item.discount || 0,
           total: item.total,
           note: item.note || '',
+          variant: item.variant || null,  // p184
         })),
         subtotal: cart.subtotal,
         discount: cart.discount + redeemAmount,  // p181: خصم النقاط مدمج
@@ -912,6 +918,27 @@ export default function POSPage() {
               onKeyDown={(e) => { if (e.key === 'Enter') confirmWeight(); }}
               data-testid="weight-input" />
             <Button onClick={confirmWeight} className="w-full" data-testid="weight-confirm-btn">{language === 'ar' ? 'إضافة للسلة' : 'Ajouter'}</Button>
+          </DialogContent>
+        </Dialog>
+
+        {/* p184: variant picker (color/size) */}
+        <Dialog open={!!variantProduct} onOpenChange={(o) => { if (!o) setVariantProduct(null); }}>
+          <DialogContent className="max-w-sm" data-testid="variant-picker-dialog">
+            <DialogHeader>
+              <DialogTitle>{variantProduct?.name || variantProduct?.name_ar}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">{language === 'ar' ? 'اختر المتغير (اللون / المقاس)' : 'Choisir la variante (couleur / taille)'}</p>
+            <div className="grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+              {(variantProduct?.variants || []).map((v, i) => (
+                <Button key={i} variant="outline" className="h-auto flex-col gap-1 py-3"
+                  disabled={!(v.quantity > 0) && !cart.returnMode}
+                  data-testid={`variant-option-${i}`}
+                  onClick={() => { cart.addItem(variantProduct, { variant: v }); setVariantProduct(null); }}>
+                  <span className="font-bold text-sm">{[v.color, v.size].filter(Boolean).join(' / ') || '—'}</span>
+                  <span className="text-xs text-muted-foreground">{language === 'ar' ? 'المخزون' : 'Stock'}: {v.quantity}</span>
+                </Button>
+              ))}
+            </div>
           </DialogContent>
         </Dialog>
 
