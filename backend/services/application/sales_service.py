@@ -21,6 +21,16 @@ async def generate_invoice_number(db, prefix: str) -> str:
 
 
 async def create_sale_op(db, s, user: dict) -> dict:
+    """p189: ACID wrapper — stock claims, serials, sale doc, installments,
+    notifications, customer stats, cash box and the outbox event all commit
+    atomically in one MongoDB transaction; any failure aborts everything."""
+    from config.database import client
+    async with await client.start_session() as _tx_session:
+        async with _tx_session.start_transaction():
+            return await _create_sale_impl(db, s, user, _tx_session)
+
+
+async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     """Create a sale with all side effects. Returns the sale document."""
     sale_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -57,11 +67,12 @@ async def create_sale_op(db, s, user: dict) -> dict:
 
     async def _rollback_claims():
         for cid, cqty in _claimed:
-            await db.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}})
+            await db.products.update_one({"id": cid}, {"$inc": {"quantity": cqty}}, session=_tx)
         for vpid, vc, vsz, vqty in _claimed_variants:
             await db.products.update_one(
                 {"id": vpid, "variants": {"$elemMatch": {"color": vc, "size": vsz}}},
                 {"$inc": {"variants.$.quantity": vqty}},
+                session=_tx,
             )
 
     for pid, qty in _claim_qty.items():
@@ -71,6 +82,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
         res = await db.products.find_one_and_update(
             {"id": pid, "quantity": {"$gte": qty}},
             {"$inc": {"quantity": -qty}},
+            session=_tx,
         )
         if res is None:
             await _rollback_claims()
@@ -89,6 +101,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
         vres = await db.products.find_one_and_update(
             {"id": pid, "variants": {"$elemMatch": {"color": vcolor, "size": vsize, "quantity": {"$gte": vqty}}}},
             {"$inc": {"variants.$.quantity": -vqty}},
+            session=_tx,
         )
         if vres is None:
             await _rollback_claims()
@@ -114,6 +127,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
             await db.product_serials.update_many(
                 {"serial": _sn, "status": "sold"},
                 {"$set": {"status": "in_stock", "sale_id": None, "sold_at": None, "updated_at": now}},
+                session=_tx,
             )
             continue
         _existing = await db.product_serials.find_one({"serial": _sn})
@@ -124,12 +138,13 @@ async def create_sale_op(db, s, user: dict) -> dict:
             await db.product_serials.update_one(
                 {"id": _existing["id"]},
                 {"$set": {"status": "sold", "sale_id": sale_id, "sold_at": now, "updated_at": now}},
+                session=_tx,
             )
         else:
             await db.product_serials.insert_one({
                 "id": str(uuid.uuid4()), "product_id": item.product_id, "serial": _sn,
                 "status": "sold", "sale_id": sale_id, "sold_at": now, "created_at": now,
-            })
+            }, session=_tx)
 
     delivery_fee = 0
     delivery_info = None
@@ -206,7 +221,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
         "status": status,
         "notes": s.notes or "", "created_at": now, "created_by": user["name"]
     }
-    await db.sales.insert_one(sale_doc)
+    await db.sales.insert_one(sale_doc, session=_tx)
 
     if s.payment_type == "installment" and installment_info:
         first_due = datetime.strptime(installment_info["first_due_date"], "%Y-%m-%d")
@@ -229,10 +244,10 @@ async def create_sale_op(db, s, user: dict) -> dict:
                 "paid_date": None,
                 "paid_by": None,
                 "created_at": now,
-            })
+            }, session=_tx)
 
     for item in s.items:
-        product = await db.products.find_one({"id": item.product_id})
+        product = await db.products.find_one({"id": item.product_id}, session=_tx)
         if product:
             threshold = product.get("low_stock_threshold", 10)
             if product.get("quantity", 0) < threshold:
@@ -241,50 +256,61 @@ async def create_sale_op(db, s, user: dict) -> dict:
                     "message_en": f"Low stock alert: '{product.get('name_en')}' ({product.get('quantity')} remaining)",
                     "message_ar": f"تنبيه مخزون: '{product.get('name_ar')}' ({product.get('quantity')} متبقي)",
                     "product_id": item.product_id, "read": False, "created_at": now
-                })
+                }, session=_tx)
 
     if s.customer_id:
         await db.customers.update_one(
             {"id": s.customer_id},
-            {"$inc": {"total_purchases": final_total, "balance": debt_amount, "total_debt": debt_amount}}
+            {"$inc": {"total_purchases": final_total, "balance": debt_amount, "total_debt": debt_amount}},
+            session=_tx,
         )
 
     if s.paid_amount > 0:
         cash_box_id = resolved_cash_box
-        await db.cash_boxes.update_one({"id": cash_box_id}, {"$inc": {"balance": s.paid_amount}, "$set": {"updated_at": now}})
+        await db.cash_boxes.update_one({"id": cash_box_id}, {"$inc": {"balance": s.paid_amount}, "$set": {"updated_at": now}}, session=_tx)
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,
             "type": "income", "amount": s.paid_amount,
             "description": f"مبيعات - فاتورة {invoice_number}",
             "reference_type": "sale", "reference_id": sale_id,
             "created_at": now, "created_by": user["name"]
-        })
+        }, session=_tx)
 
     sale_doc.pop("_id", None)
 
-    # EDA: emit sale.completed (dual-write, non-blocking)
-    try:
-        from services.event_bus import event_bus
-        await event_bus.publish(
-            "sale.completed",
-            {
-                "sale_id": sale_id,
-                "invoice_number": invoice_number,
-                "total": final_total,
-                "paid_amount": s.paid_amount,
-                "items": [{"product_id": it.product_id, "quantity": it.quantity, "price": it.price} for it in s.items],
-                "channel": "pos",
-            },
-            tenant_id=user.get("tenant_id") or "platform",
-            source="sales_routes",
-        )
-    except Exception:
-        pass
+    # p189: transactional outbox — the event commits atomically with the sale;
+    # the relay publishes it to the Redis bus asynchronously (at-least-once,
+    # consumers are idempotent via processed_events).
+    from services.outbox import outbox_write
+    from config.database import main_db as _main_db
+    await outbox_write(
+        _main_db,
+        "sale.completed",
+        {
+            "sale_id": sale_id,
+            "invoice_number": invoice_number,
+            "total": final_total,
+            "paid_amount": s.paid_amount,
+            "items": [{"product_id": it.product_id, "quantity": it.quantity, "price": it.unit_price} for it in s.items],
+            "channel": "pos",
+        },
+        tenant_id=user.get("tenant_id") or "platform",
+        source="sales_service",
+        session=_tx,
+    )
 
     return sale_doc
 
 
 async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
+    """p189: ACID wrapper — full reversal commits atomically in one transaction."""
+    from config.database import client
+    async with await client.start_session() as _tx_session:
+        async with _tx_session.start_transaction():
+            await _delete_sale_impl(db, sale_id, reason, user, _tx_session)
+
+
+async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> None:
     """Delete a sale: restore stock, revert customer stats, reverse cash, audit-log."""
     sale = await db.sales.find_one({"id": sale_id})
     if not sale:
@@ -293,23 +319,26 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
         raise HTTPException(status_code=400, detail="يجب إدخال سبب الحذف")
     now = datetime.now(timezone.utc).isoformat()
     for item in sale.get("items", []):
-        await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}})
+        await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
         _v = item.get("variant") or {}  # p184
         if _v.get("color") or _v.get("size"):
             await db.products.update_one(
                 {"id": item["product_id"], "variants": {"$elemMatch": {"color": _v.get("color") or "", "size": _v.get("size") or ""}}},
                 {"$inc": {"variants.$.quantity": item["quantity"]}},
+                session=_tx,
             )
         _sn = (item.get("serial_number") or "").strip()  # p187: serial back in stock
         if _sn:
             await db.product_serials.update_many(
                 {"serial": _sn, "sale_id": sale_id},
                 {"$set": {"status": "in_stock", "sale_id": None, "sold_at": None, "updated_at": now}},
+                session=_tx,
             )
     if sale.get("customer_id"):
         await db.customers.update_one(
             {"id": sale["customer_id"]},
-            {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}}
+            {"$inc": {"total_purchases": -sale.get("total", 0), "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}},
+            session=_tx,
         )
     payments_log = sale.get("payments") or []
     if payments_log:
@@ -317,20 +346,21 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
         for pay in payments_log:
             m = pay.get("method")
             if pay.get("amount", 0) > 0 and m:  # p68
-                await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": -pay["amount"]}, "$set": {"updated_at": now}})
+                await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": -pay["amount"]}, "$set": {"updated_at": now}}, session=_tx)
                 await db.transactions.insert_one({
                     "id": str(uuid.uuid4()), "cash_box_id": m,
                     "type": "expense", "amount": pay["amount"],
                     "description": f"حذف مبيعات - فاتورة {sale.get('invoice_number', '')}",
                     "reference_type": "sale_delete", "reference_id": sale_id,
                     "created_at": now, "created_by": user.get("name", "")
-                })
+                }, session=_tx)
     elif sale.get("paid_amount", 0) > 0:
         cash_box_id = sale.get("cash_box_id") or sale.get("payment_method")
         if cash_box_id:
             await db.cash_boxes.update_one(
                 {"id": cash_box_id},
-                {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}}
+                {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}},
+                session=_tx,
             )
             await db.transactions.insert_one({
                 "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,
@@ -338,7 +368,7 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
                 "description": f"حذف مبيعات - فاتورة {sale.get('invoice_number', '')}",
                 "reference_type": "sale_delete", "reference_id": sale_id,
                 "created_at": now, "created_by": user.get("name", "")
-            })
+            }, session=_tx)
     await db.audit_log.insert_one({
         "id": str(uuid.uuid4()), "action": "delete_sale",
         "entity_type": "sale", "entity_id": sale_id,
@@ -348,11 +378,29 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
         "sale_total": sale.get("total", 0),
         "snapshot": {k: v for k, v in sale.items() if k != "_id"},
         "created_at": now
-    })
-    await db.sales.delete_one({"id": sale_id})
+    }, session=_tx)
+    await db.sales.delete_one({"id": sale_id}, session=_tx)
+
+    # p189: outbox event (same transaction)
+    from services.outbox import outbox_write
+    from config.database import main_db as _main_db
+    await outbox_write(
+        _main_db, "sale.deleted",
+        {"sale_id": sale_id, "invoice_number": sale.get("invoice_number", ""), "total": sale.get("total", 0), "reason": reason},
+        tenant_id=user.get("tenant_id") or "platform",
+        source="sales_service", session=_tx,
+    )
 
 
 async def return_sale_op(db, sale_id: str, user: dict) -> None:
+    """p189: ACID wrapper — full reversal commits atomically in one transaction."""
+    from config.database import client
+    async with await client.start_session() as _tx_session:
+        async with _tx_session.start_transaction():
+            await _return_sale_impl(db, sale_id, user, _tx_session)
+
+
+async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
     """Return a sale: restore stock, revert customer stats, reverse cash."""
     sale = await db.sales.find_one({"id": sale_id})
     if not sale:
@@ -360,30 +408,34 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
     now = datetime.now(timezone.utc).isoformat()
 
     for item in sale["items"]:
-        await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}})
+        await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
         _v = item.get("variant") or {}  # p184
         if _v.get("color") or _v.get("size"):
             await db.products.update_one(
                 {"id": item["product_id"], "variants": {"$elemMatch": {"color": _v.get("color") or "", "size": _v.get("size") or ""}}},
                 {"$inc": {"variants.$.quantity": item["quantity"]}},
+                session=_tx,
             )
         _sn = (item.get("serial_number") or "").strip()  # p187: serial back in stock
         if _sn:
             await db.product_serials.update_many(
                 {"serial": _sn, "sale_id": sale_id},
                 {"$set": {"status": "in_stock", "sale_id": None, "sold_at": None, "updated_at": now}},
+                session=_tx,
             )
 
     if sale.get("customer_id"):
         await db.customers.update_one(
             {"id": sale["customer_id"]},
-            {"$inc": {"total_purchases": -sale["total"], "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}}
+            {"$inc": {"total_purchases": -sale["total"], "balance": -sale.get("remaining", 0), "total_debt": -sale.get("remaining", 0)}},
+            session=_tx,
         )
 
     if sale.get("paid_amount", 0) > 0:
         await db.cash_boxes.update_one(
             {"id": sale["payment_method"]},
-            {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}}
+            {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}},
+            session=_tx,
         )
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "cash_box_id": sale["payment_method"],
@@ -391,6 +443,16 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
             "description": f"إرجاع مبيعات - فاتورة {sale['invoice_number']}",
             "reference_type": "return", "reference_id": sale_id,
             "created_at": now, "created_by": user["name"]
-        })
+        }, session=_tx)
 
-    await db.sales.update_one({"id": sale_id}, {"$set": {"status": "returned"}})
+    await db.sales.update_one({"id": sale_id}, {"$set": {"status": "returned"}}, session=_tx)
+
+    # p189: outbox event (same transaction)
+    from services.outbox import outbox_write
+    from config.database import main_db as _main_db
+    await outbox_write(
+        _main_db, "sale.refunded",
+        {"sale_id": sale_id, "invoice_number": sale.get("invoice_number", ""), "total": sale.get("total", 0)},
+        tenant_id=user.get("tenant_id") or "platform",
+        source="sales_service", session=_tx,
+    )

@@ -513,6 +513,14 @@ async def startup_event():
     except Exception:
         pass
 
+    # p189: transactional outbox relay — drains main_db.outbox to the Redis bus
+    try:
+        from services.outbox import start_outbox_relay
+        start_outbox_relay(main_db)
+        logger.info("Outbox relay started")
+    except Exception as e:
+        logger.warning("Outbox relay start: %s", e)
+
     # Start background robots (restored — removed during the Sections refactor)
     try:
         robot_manager.initialize()
