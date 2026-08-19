@@ -27,7 +27,7 @@ import {
 import { toast } from 'sonner';
 import { 
   Users, Plus, Search, Edit, Trash2, Phone, Mail, MapPin, PlusCircle, Save, Ban, Shield, ShieldOff,
-  Grid3X3, List, ArrowUpDown, SortAsc, SortDesc, Calendar, DollarSign, ShoppingCart
+  Grid3X3, List, ArrowUpDown, SortAsc, SortDesc, Calendar, DollarSign, ShoppingCart, Eye, Radar, MessageSquare, Wrench, Smartphone, Tv, Store
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import { Pagination } from '../components/Pagination';
@@ -95,6 +95,15 @@ export default function CustomersPage() {
   // View mode and sorting
   const [viewMode, setViewMode] = useState(localStorage.getItem('customersViewMode') || 'grid');
   const [sourceFilter, setSourceFilter] = useState('all');
+  // p172: customer 360 + cross-sell radar
+  const [overviewCustomer, setOverviewCustomer] = useState(null);
+  const [overview, setOverview] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [radarOpen, setRadarOpen] = useState(false);
+  const [radarHave, setRadarHave] = useState('digital');
+  const [radarMissing, setRadarMissing] = useState('ecom');
+  const [radarData, setRadarData] = useState(null);
+  const [radarLoading, setRadarLoading] = useState(false);
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   
@@ -223,6 +232,41 @@ export default function CustomersPage() {
 
   const isBlacklisted = (phone) => {
     return phone && blacklist.some(b => b.phone === phone);
+  };
+
+  // p172: open customer 360 overview
+  const openOverview = async (customer) => {
+    setOverviewCustomer(customer);
+    setOverview(null);
+    setOverviewLoading(true);
+    try {
+      const res = await apiClient.get(`/customers/${customer.id}/overview`);
+      setOverview(res.data);
+    } catch (error) {
+      toast.error(language === 'ar' ? 'خطأ في جلب ملف الزبون' : 'Erreur de chargement');
+    } finally {
+      setOverviewLoading(false);
+    }
+  };
+
+  // p172: cross-sell radar
+  const runRadar = async () => {
+    setRadarLoading(true);
+    setRadarData(null);
+    try {
+      const res = await apiClient.get(`/customers/cross-sell?have=${radarHave}&missing=${radarMissing}&limit=200`);
+      setRadarData(res.data);
+    } catch (error) {
+      toast.error(language === 'ar' ? 'خطأ في جلب الرادار' : 'Erreur radar');
+    } finally {
+      setRadarLoading(false);
+    }
+  };
+
+  const waLink = (phone) => {
+    const d = (phone || '').replace(/[^0-9]/g, '');
+    if (!d) return null;
+    return `https://wa.me/${d.startsWith('0') ? '213' + d.slice(1) : d}`;
   };
 
   const fetchCustomers = async () => {
@@ -406,6 +450,10 @@ export default function CustomersPage() {
               title={language === 'ar' ? 'قائمة الزبائن' : 'Liste des Clients'}
               language={language}
             />
+            <Button variant="outline" onClick={() => { setRadarOpen(true); setRadarData(null); }} className="gap-2" data-testid="cross-sell-radar-btn">
+              <Radar className="h-4 w-4" />
+              {language === 'ar' ? 'رادار البيع المتقاطع' : 'Radar cross-sell'}
+            </Button>
             <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="gap-2" data-testid="add-customer-btn">
               <Plus className="h-5 w-5" />
               {t.addCustomer}
@@ -636,6 +684,9 @@ export default function CustomersPage() {
                                 )
                               )}
                               <PrintButton docType="customer" record={customer} className="h-8 w-8 p-0" />
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openOverview(customer)} data-testid={`overview-btn-${customer.id}`}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
                               <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditDialog(customer)}>
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -742,6 +793,9 @@ export default function CustomersPage() {
                             )
                           )}
                           <PrintButton docType="customer" record={customer} />
+                          <Button variant="ghost" size="sm" onClick={() => openOverview(customer)} data-testid={`overview-card-btn-${customer.id}`}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
                           <Button variant="ghost" size="sm" onClick={() => openEditDialog(customer)}>
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -947,6 +1001,127 @@ export default function CustomersPage() {
                   {language === 'ar' ? 'إضافة' : 'Ajouter'}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p172: Customer 360° overview */}
+        <Dialog open={!!overviewCustomer} onOpenChange={(open) => !open && setOverviewCustomer(null)}>
+          <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 flex-wrap">
+                <Eye className="h-5 w-5" />
+                {overviewCustomer?.name}
+                <SourceBadges sources={overviewCustomer?.sources} language={language} />
+              </DialogTitle>
+            </DialogHeader>
+            {overviewLoading ? (
+              <p className="text-center text-muted-foreground py-10">{language === 'ar' ? 'جارٍ التحميل...' : 'Chargement...'}</p>
+            ) : overview ? (
+              <div className="space-y-4" data-testid="customer-360-dialog">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {[
+                    { key: 'pos', label: language === 'ar' ? 'زبون المحل' : 'Magasin', icon: ShoppingCart, color: 'text-emerald-600', bg: 'bg-emerald-100', stat: (c) => `${c.count} ${language === 'ar' ? 'فاتورة' : 'factures'} — ${c.total.toFixed(2)}` },
+                    { key: 'recharge', label: language === 'ar' ? 'شحن الرصيد' : 'Recharge', icon: Smartphone, color: 'text-sky-600', bg: 'bg-sky-100', stat: (c) => `${c.count} ${language === 'ar' ? 'عملية' : 'opérations'} — ${c.total.toFixed(2)}` },
+                    { key: 'digital', label: language === 'ar' ? 'الخدمات الرقمية' : 'Services numériques', icon: Tv, color: 'text-violet-600', bg: 'bg-violet-100', stat: (c) => `${c.count} ${language === 'ar' ? 'اشتراك' : 'abonnements'} — ${c.total.toFixed(2)}` },
+                    { key: 'repairs', label: language === 'ar' ? 'الصيانة' : 'Réparation', icon: Wrench, color: 'text-orange-600', bg: 'bg-orange-100', stat: (c) => `${c.count} ${language === 'ar' ? 'تذكرة' : 'tickets'} — ${c.total.toFixed(2)}${c.open ? ` (${c.open} ${language === 'ar' ? 'مفتوحة' : 'ouverts'})` : ''}` },
+                    { key: 'ecom', label: language === 'ar' ? 'التجارة الإلكترونية' : 'E-commerce', icon: Store, color: 'text-pink-600', bg: 'bg-pink-100', stat: (c) => `${c.count} ${language === 'ar' ? 'طلب' : 'commandes'} — ${c.total.toFixed(2)}${c.returned ? ` (${c.returned} ${language === 'ar' ? 'مرجع' : 'retours'})` : ''}` },
+                  ].map(card => {
+                    const c = overview.categories[card.key];
+                    const active = c.count > 0;
+                    return (
+                      <Card key={card.key} className={active ? '' : 'opacity-50'} data-testid={`overview-${card.key}`}>
+                        <CardContent className="p-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className={`p-1.5 rounded-lg ${card.bg}`}><card.icon className={`h-4 w-4 ${card.color}`} /></div>
+                            <span className="text-xs font-medium">{card.label}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{active ? card.stat(c) : (language === 'ar' ? 'لا نشاط بعد' : 'Aucune activité')}</p>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-3 flex-wrap border rounded-lg p-3">
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">{language === 'ar' ? 'الرصيد/الدين:' : 'Solde/dette:'}</span>{' '}
+                    <span className={`font-bold ${overview.debts.balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{overview.debts.balance.toFixed(2)} {t.currency}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {language === 'ar' ? 'آخر نشاط:' : 'Dernière activité:'} {overview.last_activity ? overview.last_activity.slice(0, 10) : '—'}
+                  </div>
+                  {waLink(overview.customer?.phone) && (
+                    <a href={waLink(overview.customer.phone)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-green-600 hover:underline" data-testid="overview-whatsapp-link">
+                      <MessageSquare className="h-3.5 w-3.5" /> WhatsApp
+                    </a>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+
+        {/* p172: Cross-sell radar */}
+        <Dialog open={radarOpen} onOpenChange={setRadarOpen}>
+          <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Radar className="h-5 w-5" />
+                {language === 'ar' ? 'رادار البيع المتقاطع' : 'Radar de vente croisée'}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4" data-testid="cross-sell-radar-dialog">
+              <div className="flex items-end gap-2 flex-wrap">
+                <div className="space-y-1">
+                  <Label className="text-xs">{language === 'ar' ? 'زبائن لديهم' : 'Clients ayant'}</Label>
+                  <Select value={radarHave} onValueChange={setRadarHave}>
+                    <SelectTrigger className="w-40 h-9" data-testid="radar-have"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {SOURCE_FILTERS.filter(f => f.key !== 'all').map(f => (
+                        <SelectItem key={f.key} value={f.key}>{language === 'ar' ? f.ar : f.fr}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">{language === 'ar' ? 'وليس لديهم' : 'Mais pas'}</Label>
+                  <Select value={radarMissing} onValueChange={setRadarMissing}>
+                    <SelectTrigger className="w-40 h-9" data-testid="radar-missing"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {SOURCE_FILTERS.filter(f => f.key !== 'all' && f.key !== radarHave).map(f => (
+                        <SelectItem key={f.key} value={f.key}>{language === 'ar' ? f.ar : f.fr}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={runRadar} disabled={radarLoading} data-testid="radar-run-btn">
+                  {radarLoading ? (language === 'ar' ? 'جارٍ البحث...' : 'Recherche...') : (language === 'ar' ? 'ابحث' : 'Chercher')}
+                </Button>
+              </div>
+              {radarData && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">{language === 'ar' ? `${radarData.count} زبون مستهدف` : `${radarData.count} clients ciblés`}</p>
+                  {radarData.count === 0 ? (
+                    <p className="text-sm text-muted-foreground">{language === 'ar' ? 'لا توجد أهداف — كلهم يستعملون الفئتين' : 'Aucune cible'}</p>
+                  ) : (
+                    <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
+                      {radarData.customers.map(c => (
+                        <div key={c.id} className="flex items-center justify-between gap-2 px-3 py-2" data-testid={`radar-row-${c.id}`}>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{c.name}</p>
+                            <p className="text-xs text-muted-foreground" dir="ltr">{c.phone || '—'}</p>
+                          </div>
+                          {waLink(c.phone) && (
+                            <a href={waLink(c.phone)} target="_blank" rel="noreferrer" className="shrink-0 inline-flex items-center gap-1 text-xs text-green-600 hover:underline">
+                              <MessageSquare className="h-3.5 w-3.5" /> WhatsApp
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>

@@ -2588,3 +2588,18 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 
 ### النسخ الاحتياطية
 /opt/ntcommerce/backups/p171/ (4 backend + ProductsPage.js + GlobalSearchModal.js)
+
+## p172 — 2026-08-19 (release 20260819_093255)
+
+### ملف الزبون 360° + رادار البيع المتقاطع
+- customers_routes.py: GET /customers/{id}/overview — نشاط الزبون عبر الفئات الخمس (مبيعات مقسمة pos/recharge/digital حسب type، تذاكر الصيانة وطلبات المتجر بالهاتف) + الديون + آخر نشاط
+- customers_routes.py: GET /customers/cross-sell/summary (مصفوفة) و GET /customers/cross-sell?have=X&missing=Y — أهداف البيع المتقاطع ($all + $ne)
+- CustomersPage.js: زر عين (👁) لكل زبون → نافذة 360° (5 بطاقات فئات + الدين + آخر نشاط + رابط WhatsApp)؛ زر «رادار البيع المتقاطع» في الترويسة → نافذة بمعيارين (لديهم/ليس لديهم) + قائمة الأهداف مع روابط WhatsApp جاهزة (wa.me/213)
+
+### الاختبارات (curl)
+- cross-sell/summary: pos=179, ecom=1, بدون فئة=13 ✓
+- cross-sell?have=pos&missing=ecom → 3 نتائج صحيحة ✓
+- overview لزبون نشط: pos count=1000 total=19,350,535 ✓
+
+### النسخ الاحتياطية
+/opt/ntcommerce/backups/p172/ (customers_routes.py, CustomersPage.js)

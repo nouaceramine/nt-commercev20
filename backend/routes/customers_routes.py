@@ -141,6 +141,94 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         next_num = result[0]["num"] + 1 if result else 1
         return {"code": f"CL{str(next_num).zfill(4)}"}
 
+    # ── p172: Customer 360° overview — activity across all five categories ──
+    @router.get("/cross-sell/summary")
+    async def cross_sell_summary(user: dict = Depends(require_permission("customers.view"))):
+        """Counts per source + pairwise matrix (customers with X also having Y)."""
+        sources = ["pos", "recharge", "digital", "repairs", "ecom"]
+        per = {}
+        matrix = {}
+        for src in sources:
+            per[src] = await db.customers.count_documents({"sources": src})
+            row = {}
+            for other in sources:
+                if other == src:
+                    continue
+                row[other] = await db.customers.count_documents({"sources": {"$all": [src], "$ne": other}})
+            matrix[src] = row
+        uncategorized = await db.customers.count_documents({"$or": [{"sources": {"$exists": False}}, {"sources": {"$size": 0}}]})
+        return {"per_source": per, "have_without": matrix, "uncategorized": uncategorized}
+
+    @router.get("/cross-sell")
+    async def cross_sell(have: str, missing: str, limit: int = 100, user: dict = Depends(require_permission("customers.view"))):
+        """Customers in category `have` but NOT in category `missing` — cross-sell targets."""
+        rows = await db.customers.find(
+            {"sources": {"$all": [have], "$ne": missing}},
+            {"_id": 0, "id": 1, "name": 1, "phone": 1, "sources": 1, "balance": 1}
+        ).limit(min(limit, 500)).to_list(min(limit, 500))
+        return {"have": have, "missing": missing, "count": len(rows), "customers": rows}
+
+    # ── p172: Customer 360° overview ──
+    @router.get("/{customer_id}/overview")
+    async def customer_overview(customer_id: str, user: dict = Depends(require_permission("customers.view"))):
+        customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if not customer:
+            raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        phone = (customer.get("phone") or "").strip()
+        RECHARGE_TYPES = ("recharge_credit", "recharge_cash", "idoom_credit", "sim_activation", "card_sale")
+
+        pos = {"count": 0, "total": 0.0}
+        recharge = {"count": 0, "total": 0.0}
+        digital = {"count": 0, "total": 0.0}
+        last_activity = ""
+        sales = await db.sales.find(
+            {"customer_id": customer_id, "status": {"$ne": "returned"}},
+            {"_id": 0, "total": 1, "type": 1, "created_at": 1}
+        ).to_list(1000)
+        for s in sales:
+            t = s.get("type") or ""
+            bucket = digital if t == "digital_subscription" else (recharge if t in RECHARGE_TYPES else pos)
+            bucket["count"] += 1
+            bucket["total"] += float(s.get("total") or 0)
+            if (s.get("created_at") or "") > last_activity:
+                last_activity = s.get("created_at") or ""
+
+        repairs = {"count": 0, "total": 0.0, "open": 0}
+        if phone:
+            async for tk in db.repair_tickets.find({"customer_phone": phone}, {"_id": 0, "status": 1, "final_cost": 1, "estimated_cost": 1, "created_at": 1}):
+                repairs["count"] += 1
+                repairs["total"] += float(tk.get("final_cost") or tk.get("estimated_cost") or 0)
+                if tk.get("status") != "delivered":
+                    repairs["open"] += 1
+                if (tk.get("created_at") or "") > last_activity:
+                    last_activity = tk.get("created_at") or ""
+
+        ecom = {"count": 0, "total": 0.0, "delivered": 0, "returned": 0}
+        if phone:
+            async for o in db.ecom_orders.find({"customer.phone": phone}, {"_id": 0, "total": 1, "status": 1, "created_at": 1}):
+                ecom["count"] += 1
+                ecom["total"] += float(o.get("total") or 0)
+                if o.get("status") == "delivered":
+                    ecom["delivered"] += 1
+                if o.get("status") == "returned":
+                    ecom["returned"] += 1
+                if (o.get("created_at") or "") > last_activity:
+                    last_activity = o.get("created_at") or ""
+
+        for b in (pos, recharge, digital, repairs, ecom):
+            b["total"] = round(b["total"], 2)
+
+        return {
+            "customer": customer,
+            "categories": {"pos": pos, "recharge": recharge, "digital": digital, "repairs": repairs, "ecom": ecom},
+            "debts": {
+                "balance": float(customer.get("balance") or 0),
+                "total_debt": float(customer.get("total_debt") or 0),
+                "max_debt_limit": float(customer.get("max_debt_limit") or 0),
+            },
+            "last_activity": last_activity,
+        }
+
     # ── Get Single Customer ──
     @router.get("/{customer_id}")
     async def get_customer(customer_id: str, user: dict = Depends(require_permission("customers.view"))):
