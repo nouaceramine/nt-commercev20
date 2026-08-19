@@ -99,9 +99,18 @@ class CustomerRobot:
         await tdb.customer_segments.delete_many({"tenant_id": tenant["id"]})
         if segments:
             for s in segments:
+                # p173: unique id per segment — the collection has a unique `id` index;
+                # docs without it collided on null and spammed E11000 at every startup
+                s.setdefault("id", str(uuid.uuid4()))
                 s["tenant_id"] = tenant["id"]
                 s["updated_at"] = datetime.now(timezone.utc).isoformat()
-            await tdb.customer_segments.insert_many(segments)
+            try:
+                await tdb.customer_segments.insert_many(segments, ordered=False)
+            except Exception as exc:  # noqa: BLE001
+                if "E11000" in str(exc) or "duplicate key" in str(exc).lower():
+                    logger.info("customer_robot: skipped %s duplicate segments", len(segments))
+                else:
+                    raise
 
     async def _find_inactive(self, tenant, tdb) -> dict:
         """Find customers who haven't purchased in 60+ days"""

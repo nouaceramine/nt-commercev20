@@ -414,15 +414,14 @@ const filteredProducts = Array.isArray(products) ? products.filter(p => {
     try {
       // Map cart items to backend schema. The backend now syncs:
       //   purchase_price ← unit_price        (always)
-      //   selling_price  ← selling_price     (only when user enabled `updatePrices`)
+      //   retail_price   ← newRetailPrice    (p168 direct column → canonical field + price history)
       const itemsPayload = cart.map(it => ({
         product_id: it.product_id,
         product_name: it.product_name,
         quantity: it.quantity,
         unit_price: it.unit_price,
         total: it.total,
-        selling_price: it.updatePrices && it.newRetailPrice > 0 ? it.newRetailPrice : null,
-        retail_price: it.newRetailPrice > 0 ? it.newRetailPrice : null,  // p168: سعر البيع المباشر → retail_price + سجل الأسعار
+        retail_price: it.newRetailPrice > 0 ? it.newRetailPrice : null,  // p168+p173: سعر البيع الوحيد → retail_price + سجل الأسعار
         expiry_date: it.expiryDate || '',                                 // p168: يُنشئ دفعة صلاحية تلقائياً
         alert_days: 30,
         update_product_prices: !!it.updatePrices || it.unit_price !== it.originalPurchasePrice,

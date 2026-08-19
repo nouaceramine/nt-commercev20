@@ -321,6 +321,31 @@ export default function POSPage() {
   }, [searchQuery, products]);
 
   // p165: smart add — sold-by-weight products ask for the weight first
+  // p173: FEFO hint — suggest selling from the nearest-expiry lot (once per product per session)
+  const fefoToastedRef = useRef(new Set());
+  const checkFefoLot = useCallback(async (product) => {
+    try {
+      if (!product?.id || fefoToastedRef.current.has(product.id)) return;
+      const res = await apiClient.get(`/products/${product.id}/lots`);
+      const lots = (Array.isArray(res.data) ? res.data : []).filter(l =>
+        l.expiry_date && (l.quantity || 0) > 0 && l.remaining_days != null && l.remaining_days <= (l.alert_days || 30)
+      );
+      if (!lots.length) return;
+      lots.sort((a, b) => a.remaining_days - b.remaining_days);
+      const lot = lots[0];
+      fefoToastedRef.current.add(product.id);
+      const when = lot.remaining_days < 0
+        ? (language === 'ar' ? `منتهية منذ ${-lot.remaining_days} يوم!` : `expiré depuis ${-lot.remaining_days} j!`)
+        : (language === 'ar' ? `تنتهي خلال ${lot.remaining_days} يوم` : `expire dans ${lot.remaining_days} j`);
+      toast.warning(
+        language === 'ar'
+          ? `FEFO: بِع من الدفعة «${lot.lot_number || '—'}» أولاً — ${when}`
+          : `FEFO: vendre le lot «${lot.lot_number || '—'}» d'abord — ${when}`,
+        { duration: 6000 }
+      );
+    } catch { /* silent — hint only */ }
+  }, [language]);
+
   const addProductSmart = useCallback((product, opts = {}) => {
     if (!product) return;
     if (!product.name) product.name = product.name_ar || product.name_en;
@@ -328,7 +353,8 @@ export default function POSPage() {
       setWeightProduct(product); setWeightValue(''); return;
     }
     cart.addItem(product, opts);
-  }, [cart]);
+    checkFefoLot(product);
+  }, [cart, checkFefoLot]);
 
   const confirmWeight = () => {
     const w = parseFloat(weightValue);

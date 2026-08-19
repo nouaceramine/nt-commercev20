@@ -80,9 +80,9 @@ class PurchaseItem(BaseModel):
     quantity: int
     unit_price: float
     total: float
-    # Optional — when present, the product's purchase_price/selling_price are
-    # automatically updated to these values during the purchase create flow.
-    selling_price: Optional[float] = None
+    # p173: selling_price removed — retail_price (below) is the ONLY sale-price field.
+    # purchase_price always syncs from unit_price; sale price syncs to retail_price
+    # with a price_history row (see purchases_routes._sync_item_extras).
     update_product_prices: Optional[bool] = True   # default ON so user gets the obvious behavior
     # p168: direct sale-price column in the purchase form → retail_price + price_history
     retail_price: Optional[float] = None
