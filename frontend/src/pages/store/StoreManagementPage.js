@@ -118,6 +118,7 @@ export default function StoreManagementPage() {
   const [landingSaving, setLandingSaving] = useState(false);
   const [landingAi, setLandingAi] = useState(false);  // p110
   const [selectedProducts, setSelectedProducts] = useState([]);
+  const [productFamilyFilter, setProductFamilyFilter] = useState('all');  // p175: family filter for store product picker
   const [activeTab, setActiveTab] = useState('settings');
   
   // Store URL
@@ -310,7 +311,7 @@ export default function StoreManagementPage() {
       }
       
       // Fetch all products
-      const productsRes = await apiClient.get(`/products`, { headers });
+      const productsRes = await apiClient.get(`/products?limit=50000`, { headers });  // p175: full catalog — unlimited store products
       setProducts(productsRes.data);
 
       // p149: families for the store-visibility picker
@@ -470,6 +471,9 @@ export default function StoreManagementPage() {
     const s = statusMap[status] || statusMap.pending;
     return <Badge className={s.color}>{s.label}</Badge>;
   };
+
+  // p175: products shown in the picker — filtered by selected family
+  const pickerProducts = productFamilyFilter === 'all' ? products : products.filter(p => p.family_id === productFamilyFilter);
 
   return (
     <>
@@ -1184,6 +1188,22 @@ export default function StoreManagementPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {/* p175: family picker — choose a family to narrow the product list */}
+                <div className="flex items-center gap-3 mb-4 flex-wrap">
+                  <Label className="whitespace-nowrap">{language === 'ar' ? 'عائلة المنتجات' : 'Famille de produits'}</Label>
+                  <Select value={productFamilyFilter} onValueChange={setProductFamilyFilter}>
+                    <SelectTrigger className="w-64" data-testid="store-products-family-filter">
+                      <SelectValue placeholder={language === 'ar' ? 'كل العائلات' : 'Toutes les familles'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{language === 'ar' ? 'كل العائلات' : 'Toutes les familles'}</SelectItem>
+                      {allFamilies.map(f => (
+                        <SelectItem key={f.id} value={f.id}>{language === 'ar' ? (f.name_ar || f.name || '') : (f.name_en || f.name_ar || f.name || '')}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Badge variant="outline" data-testid="store-products-filtered-count">{pickerProducts.length} {language === 'ar' ? 'منتج' : 'produits'}</Badge>
+                </div>
                 <div className="rounded-lg border overflow-hidden">
                   <Table>
                     <TableHeader>
@@ -1196,7 +1216,7 @@ export default function StoreManagementPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {products.map(product => {
+                      {pickerProducts.map(product => {  // p175: family-filtered list
                         const isSelected = selectedProducts.includes(product.id);
                         return (
                           <TableRow key={product.id} className={isSelected ? 'bg-green-50 dark:bg-green-900/10' : ''}>

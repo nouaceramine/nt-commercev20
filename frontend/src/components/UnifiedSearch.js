@@ -116,7 +116,7 @@ export function UnifiedSearch({
       }
     } catch { /* noop */ }
     try {
-      const params = { limit: 15 };
+      const params = { limit: 100 };  // p175: was 15
       if (searchQuery) params.q = searchQuery;
       if (filters.family_id) params.family_id = filters.family_id;
       if (filters.stock_filter) params.stock_filter = filters.stock_filter;

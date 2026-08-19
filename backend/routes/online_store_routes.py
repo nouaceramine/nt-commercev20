@@ -211,7 +211,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.get("/store/products")
     async def get_store_products(admin: dict = Depends(get_tenant_admin)):
-        store_products = await db.store_products.find({}, {"_id": 0}).to_list(1000)
+        store_products = await db.store_products.find({}, {"_id": 0}).to_list(100000)  # p175: unlimited store products
         return store_products
 
     @router.post("/store/products")
@@ -622,7 +622,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not settings or not settings.get("enabled"):
             raise HTTPException(status_code=404, detail="Store not available")
 
-        store_products = await tenant_db_inst.store_products.find({"is_active": True}, {"_id": 0}).to_list(1000)
+        store_products = await tenant_db_inst.store_products.find({"is_active": True}, {"_id": 0}).to_list(100000)  # p175: unlimited
         product_ids = [sp["product_id"] for sp in store_products]
 
         # p149: family-level visibility — selected families auto-include ALL their products
@@ -637,7 +637,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
              "purchase_price": 1, "image_url": 1, "description_ar": 1,
              "description_en": 1, "quantity": 1, "family_id": 1, "barcode": 1,
              "allow_online_payment": 1, "shipping_provider": 1}
-        ).to_list(1000)
+        ).to_list(100000)  # p175: unlimited — every enabled product shows in the public store
         # المتوفر أولاً ثم النافد (يظهر بشارة «نفذت الكمية» في الواجهة)
         products.sort(key=lambda p: (p.get("quantity", 0) <= 0, p.get("name_ar") or ""))
 

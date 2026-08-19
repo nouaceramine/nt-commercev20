@@ -2629,3 +2629,15 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - quick-search هو المسار الموحّد الوحيد للبحث الغني (باركود/PLU/كود/اسم regex) — مستخدم في POS + المشتريات + البحث الشامل
 **اختبار:** quick-search بمقطع اسم حقيقي limit=50 → 50 نتيجة من أصل 625 مطابقة ✓؛ الحزمة الحية main.67a5cbbd.js تحوي limit=50 ×5 ✓
 **النسخ الاحتياطية:** /opt/ntcommerce/backups/p174/
+
+## p175 — نتائج بحث بلا سقف + فلتر العائلات لمنتجات المتجر + أيقونة POS بالشريط العلوي (2026-08-19, release 20260819_122814)
+**قبل:** quick-search مقيد بـlimit صغير من الواجهة (50) والحوار يقطع عند 50. منتجات المتجر: GET /products بأول 1000 فقط، store/products مقيد 1000، ولا فلتر عائلات في قائمة الاختيار. لا أيقونة POS في الشريط العلوي.
+**بعد:**
+- quick-search: limit مُثبَّت بسقف 50000 — يرجع كل المطابقات (اختبار: 625/625) ✓
+- GET /products: سقف limit مرفوع 10000 → 50000 (اختبار: ?limit=50000 → 7415 منتجاً = الكتالوج كاملاً) ✓
+- POSPage + PurchasesPage: quick-search limit=50000 — كل النتائج تظهر. PurchaseDialogs: بلا slice — كل نتيجة تُعرض. UnifiedSearch (البحث الشامل): 15 → 100
+- online_store_routes: GET /store/products + منتجات المتجر العام /shop — to_list 1000 → 100000 (تفعيل منتجات المتجر غير محدود فعلياً)
+- StoreManagementPage: جلب ?limit=50000 + خانة «عائلة المنتجات» (store-products-family-filter) فوق جدول الاختيار — تحديد العائلة يعرض منتجاتها فقط مع عدّاد
+- Layout: أيقونة نقطة البيع (header-pos-btn) في الشريط العلوي المكتبي بجانب FR/عربي + نسخة للجوال (mobile-header-pos-btn)
+**الحزمة الحية:** main.96d4519b.js — تحوي header-pos-btn وstore-products-family-filter وlimit=50000 ✓
+**النسخ الاحتياطية:** /opt/ntcommerce/backups/p175/

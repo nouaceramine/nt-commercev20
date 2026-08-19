@@ -103,7 +103,7 @@ export default function PurchaseDialogs({
                 />
               </div>
               <div className="grid grid-cols-2 gap-3 max-h-[400px] overflow-y-auto">
-                {filteredProducts.slice(0, 50).map(product => (
+                {filteredProducts.map(product => (  // p175: no slice — every match renders
                   <div key={product.id} onClick={() => addToCart(product)} className="p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
                     <p className="font-medium text-sm line-clamp-1">{language === 'ar' ? product.name_ar : product.name_en}</p>
                     {product.article_code && <p className="text-xs font-mono text-blue-600">{product.article_code}</p>}

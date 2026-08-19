@@ -181,7 +181,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             else:
                 query["family_id"] = family_id
 
-        products = await db.products.find(query, {"_id": 0}).to_list(max(1, min(limit, 10000)))  # p174: honor limit (GlobalSearchModal passes 5)
+        products = await db.products.find(query, {"_id": 0}).to_list(max(1, min(limit, 50000)))  # p175: was 10000  # p174: honor limit (GlobalSearchModal passes 5)
 
         family_ids = list(set(p.get("family_id") for p in products if p.get("family_id") and not p.get("family_name")))
         families_map = {}
@@ -267,7 +267,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     # ── Quick Search ──
     @router.get("/quick-search")
     async def quick_search_products(
-        q: str = "", limit: int = 15, family_id: Optional[str] = None,
+        q: str = "", limit: int = 15, family_id: Optional[str] = None,  # p175: limit clamped below to 50000 — search returns ALL matches
         stock_filter: Optional[str] = None, min_price: Optional[float] = None,
         max_price: Optional[float] = None, include_families: bool = False,
         user: dict = Depends(require_tenant)
@@ -313,6 +313,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "serial_number_tracking": 1, "tax_rate": 1,
         }
 
+        limit = max(1, min(limit, 50000))  # p175: no practical cap — return every match
         total = await db.products.count_documents(search_query)
         products = await db.products.find(search_query, projection).limit(limit).to_list(limit)
 

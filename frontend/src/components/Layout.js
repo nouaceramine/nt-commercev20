@@ -848,6 +848,14 @@ export const Layout = ({ children }) => {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => navigate('/pos')}
+              className="p-2 hover:bg-muted rounded-lg"
+              data-testid="mobile-header-pos-btn"
+              title={language === 'ar' ? 'نقطة البيع' : 'Point de vente'}
+            >
+              <ShoppingCart className="h-5 w-5" />
+            </button>
             <NotificationBell />
             <button
               onClick={toggleTheme}
@@ -1086,6 +1094,16 @@ export const Layout = ({ children }) => {
 
             {/* Notifications */}
             <NotificationBell />
+
+            {/* p175: POS quick icon — نقطة البيع بجانب مبدّل اللغة */}
+            <button
+              onClick={() => navigate('/pos')}
+              className="p-2 rounded-lg hover:bg-muted transition-colors"
+              data-testid="header-pos-btn"
+              title={language === 'ar' ? 'نقطة البيع' : 'Point de vente'}
+            >
+              <ShoppingCart className="h-5 w-5 text-muted-foreground" />
+            </button>
 
             {/* Language Toggle */}
             <div className="flex items-center gap-2">

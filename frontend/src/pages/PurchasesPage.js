@@ -143,7 +143,7 @@ export default function PurchasesPage() {
     const seq = ++remoteSearchSeqRef.current;
     const timer = setTimeout(async () => {
       try {
-        const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=50`);
+        const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=50000`);  // p175: ALL matches
         if (seq === remoteSearchSeqRef.current) setRemoteProducts(res.data?.results || []);
       } catch { /* keep local fallback */ }
     }, 250);
