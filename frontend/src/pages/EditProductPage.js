@@ -177,6 +177,7 @@ export default function EditProductPage() {
     fetchProduct();
     fetchFamilies();
     fetchLots();
+    fetchSerials();  // p187
     fetchSupplierLinks();
     fetchHistory();
     fetchAvailableSuppliers();
@@ -196,6 +197,35 @@ export default function EditProductPage() {
       const response = await apiClient.get(`/products/${id}/lots`);
       setLots(response.data);
     } catch {}
+  };
+
+  // p187: serial numbers manager
+  const [serials, setSerials] = useState([]);
+  const [bulkSerials, setBulkSerials] = useState('');
+
+  const fetchSerials = async () => {
+    try {
+      const response = await apiClient.get(`/serials/product/${id}`);
+      setSerials(response.data || []);
+    } catch {}
+  };
+
+  const addSerialsBulk = async () => {
+    const lines = bulkSerials.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+    try {
+      const r = await apiClient.post('/serials/register', { product_id: id, serials: lines });
+      toast.success(isAr ? `أُضيف ${r.data.added} رقم (تجاهل ${r.data.skipped_duplicates} مكرر)` : `${r.data.added} ajoutes, ${r.data.skipped_duplicates} doublons`);
+      setBulkSerials('');
+      fetchSerials();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
+  const deleteSerial = async (serialId) => {
+    try {
+      await apiClient.delete(`/serials/${serialId}`);
+      fetchSerials();
+    } catch (e) { toast.error(errText(e)); }
   };
 
   const fetchSupplierLinks = async () => {
@@ -521,6 +551,9 @@ export default function EditProductPage() {
                     )}
                   </TabsTrigger>
                   <TabsTrigger value="fournisseurs" className="text-xs gap-1"><Truck className="h-3 w-3" />{isAr ? 'الموردون' : 'Fourn.'}</TabsTrigger>
+                  {formData.serial_number_tracking && (
+                    <TabsTrigger value="serials" className="text-xs gap-1" data-testid="serials-tab"><Barcode className="h-3 w-3" />{isAr ? 'الأرقام التسلسلية' : 'N° serie'}</TabsTrigger>
+                  )}
                 </TabsList>
 
                 {/* ── TAB: GÉNÉRAL ── */}
@@ -924,6 +957,42 @@ export default function EditProductPage() {
                     </div>
                   )}
                 </TabsContent>
+
+                {/* p187: serial numbers manager */}
+                {formData.serial_number_tracking && (
+                  <TabsContent value="serials" className="space-y-4 mt-0">
+                    <p className="text-xs text-muted-foreground">{isAr ? 'سجّل أرقام IMEI/التسلسل عند الاستلام — كل رقم يُباع مرة واحدة فقط ويُتتبع في الضمان' : 'Enregistrez les IMEI/n° de serie a la reception'}</p>
+                    <div className="space-y-2">
+                      <Textarea value={bulkSerials} onChange={(e) => setBulkSerials(e.target.value)} dir="ltr" rows={3}
+                        placeholder={isAr ? 'رقم واحد في كل سطر...' : 'Un numero par ligne...'}
+                        data-testid="serials-bulk-input" />
+                      <Button type="button" size="sm" onClick={addSerialsBulk} className="gap-1" data-testid="serials-add-btn">
+                        <Plus className="h-4 w-4" />{isAr ? 'تسجيل الأرقام' : 'Enregistrer'}
+                      </Button>
+                    </div>
+                    {serials.length === 0 ? (
+                      <div className="text-center py-6 text-muted-foreground text-sm">{isAr ? 'لا أرقام مسجّلة' : 'Aucun numero'}</div>
+                    ) : (
+                      <div className="space-y-1 max-h-72 overflow-y-auto">
+                        {serials.map(sn => (
+                          <div key={sn.id} className="flex items-center justify-between p-2 border rounded-lg text-xs">
+                            <span className="font-mono font-medium" dir="ltr">{sn.serial}</span>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={sn.status === 'sold' ? 'secondary' : 'default'} className="text-[10px]">
+                                {sn.status === 'sold' ? (isAr ? 'مُباع' : 'Vendu') : (isAr ? 'في المخزون' : 'En stock')}
+                              </Badge>
+                              {sn.status !== 'sold' && (
+                                <Button type="button" variant="ghost" size="sm" onClick={() => deleteSerial(sn.id)} className="h-6 w-6 p-0 text-destructive hover:text-destructive">
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                )}
               </Tabs>
 
               <div className="flex justify-end gap-2 pt-4 border-t mt-4">

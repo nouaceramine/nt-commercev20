@@ -1128,6 +1128,7 @@ _AUTO_REG_MODULES = [
     'routes.saas.business_profiles_routes',  # p183: business activity profiles
     'routes.rental_routes',  # p185: rental module (cars & properties)
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
+    'routes.serials_routes',  # p187: IMEI/serial tracking
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

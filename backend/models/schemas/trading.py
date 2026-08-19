@@ -14,6 +14,7 @@ class SaleItem(BaseModel):
     total: float
     note: Optional[str] = ""
     variant: Optional[dict] = None  # p184: {"color": ..., "size": ...} for variant products
+    serial_number: Optional[str] = None  # p187: IMEI/serial tracking
 
 class DeliveryInfo(BaseModel):
     enabled: bool = False

@@ -105,6 +105,32 @@ async def create_sale_op(db, s, user: dict) -> dict:
             )
         _claimed_variants.append((pid, vcolor, vsize, vqty))
 
+    # p187: serial-number tracking — reject already-sold serials, mark sold
+    for item in s.items:
+        _sn = (getattr(item, "serial_number", None) or "").strip()
+        if not _sn or not item.product_id:
+            continue
+        if item.quantity < 0:  # return line: serial goes back in stock
+            await db.product_serials.update_many(
+                {"serial": _sn, "status": "sold"},
+                {"$set": {"status": "in_stock", "sale_id": None, "sold_at": None, "updated_at": now}},
+            )
+            continue
+        _existing = await db.product_serials.find_one({"serial": _sn})
+        if _existing and _existing.get("status") == "sold":
+            await _rollback_claims()
+            raise HTTPException(status_code=400, detail=f"الرقم التسلسلي «{_sn}» مُباع مسبقاً")
+        if _existing:
+            await db.product_serials.update_one(
+                {"id": _existing["id"]},
+                {"$set": {"status": "sold", "sale_id": sale_id, "sold_at": now, "updated_at": now}},
+            )
+        else:
+            await db.product_serials.insert_one({
+                "id": str(uuid.uuid4()), "product_id": item.product_id, "serial": _sn,
+                "status": "sold", "sale_id": sale_id, "sold_at": now, "created_at": now,
+            })
+
     delivery_fee = 0
     delivery_info = None
     if s.delivery and s.delivery.enabled:
@@ -274,6 +300,12 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
                 {"id": item["product_id"], "variants": {"$elemMatch": {"color": _v.get("color") or "", "size": _v.get("size") or ""}}},
                 {"$inc": {"variants.$.quantity": item["quantity"]}},
             )
+        _sn = (item.get("serial_number") or "").strip()  # p187: serial back in stock
+        if _sn:
+            await db.product_serials.update_many(
+                {"serial": _sn, "sale_id": sale_id},
+                {"$set": {"status": "in_stock", "sale_id": None, "sold_at": None, "updated_at": now}},
+            )
     if sale.get("customer_id"):
         await db.customers.update_one(
             {"id": sale["customer_id"]},
@@ -334,6 +366,12 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
             await db.products.update_one(
                 {"id": item["product_id"], "variants": {"$elemMatch": {"color": _v.get("color") or "", "size": _v.get("size") or ""}}},
                 {"$inc": {"variants.$.quantity": item["quantity"]}},
+            )
+        _sn = (item.get("serial_number") or "").strip()  # p187: serial back in stock
+        if _sn:
+            await db.product_serials.update_many(
+                {"serial": _sn, "sale_id": sale_id},
+                {"$set": {"status": "in_stock", "sale_id": None, "sold_at": None, "updated_at": now}},
             )
 
     if sale.get("customer_id"):

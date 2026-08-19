@@ -227,6 +227,7 @@ export default function POSPage() {
   const [entryQty, setEntryQty] = useState('1');
   const [entryPrice, setEntryPrice] = useState('');
   const [entrySerial, setEntrySerial] = useState('');
+  const [serialProduct, setSerialProduct] = useState(null);  // p187
 
   // Cashier info
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -389,6 +390,10 @@ export default function POSPage() {
     // p184: variant products open the picker first (unless a variant was already chosen)
     if (product.has_variants && (product.variants || []).length > 0 && !opts.variant) {
       setVariantProduct(product); return;
+    }
+    // p187: serial-tracked products ask for the IMEI/serial first (one unit per line)
+    if (product.serial_number_tracking && !opts.serialNumber && !cart.returnMode) {
+      setSerialProduct(product); setEntrySerial(''); return;
     }
     if (product.sold_by_weight && opts.overrideQty == null) {
       setWeightProduct(product); setWeightValue(''); return;
@@ -610,6 +615,7 @@ export default function POSPage() {
           total: item.total,
           note: item.note || '',
           variant: item.variant || null,  // p184
+          serial_number: item.serial_number || null,  // p187
         })),
         subtotal: cart.subtotal,
         discount: cart.discount + redeemAmount,  // p181: خصم النقاط مدمج
@@ -995,6 +1001,32 @@ export default function POSPage() {
               onKeyDown={(e) => { if (e.key === 'Enter') confirmWeight(); }}
               data-testid="weight-input" />
             <Button onClick={confirmWeight} className="w-full" data-testid="weight-confirm-btn">{language === 'ar' ? 'إضافة للسلة' : 'Ajouter'}</Button>
+          </DialogContent>
+        </Dialog>
+
+        {/* p187: serial/IMEI entry */}
+        <Dialog open={!!serialProduct} onOpenChange={(o) => { if (!o) setSerialProduct(null); }}>
+          <DialogContent className="max-w-xs" data-testid="serial-dialog">
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? 'الرقم التسلسلي / IMEI' : 'N° de serie / IMEI'}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm font-semibold">{serialProduct?.name || serialProduct?.name_ar}</p>
+            <Input value={entrySerial} onChange={(e) => setEntrySerial(e.target.value)}
+              placeholder={language === 'ar' ? 'امسح أو أدخل الرقم التسلسلي' : 'Scanner ou saisir le n° de serie'}
+              autoFocus dir="ltr" className="text-center font-mono"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && entrySerial.trim()) {
+                  addProductSmart(serialProduct, { serialNumber: entrySerial.trim() });
+                  setSerialProduct(null);
+                }
+              }}
+              data-testid="serial-input" />
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setSerialProduct(null)}>{language === 'ar' ? 'إلغاء' : 'Annuler'}</Button>
+              <Button className="flex-1" disabled={!entrySerial.trim()}
+                onClick={() => { addProductSmart(serialProduct, { serialNumber: entrySerial.trim() }); setSerialProduct(null); }}
+                data-testid="serial-confirm-btn">{language === 'ar' ? 'إضافة للسلة' : 'Ajouter'}</Button>
+            </div>
           </DialogContent>
         </Dialog>
 
