@@ -2564,3 +2564,27 @@ POS crashed with "Cannot access lexical declaration before initialization" — a
 
 ### النسخ الاحتياطية
 /opt/ntcommerce/backups/p170/ (9 ملفات backend + CustomersPage.js)
+
+## p171 — 2026-08-19 (release 20260819_015936)
+
+### توحيد المصدر — المرحلة الأولى: سعر البيع الموحد (retail_price هو المرجع الوحيد)
+الجرد: 7415 منتجاً، صفر يحمل selling_price — الازدواجية كودية فقط، لا بيانات للترحيل.
+sell_price في النطاقات الأخرى (بطاقات/قطع/منصات رقمية) حقول أصلية لنطاقاتها — ليست ازدواجية.
+
+### التغييرات
+- purchases_routes.py: إيقاف كتابة selling_price نهائياً؛ الحمولات القديمة (selling_price فقط) تُوجَّه إلى retail_price عبر _sync_item_extras + سطر price_history — طبقة التوافق
+- search_routes.py: الإسقاط يقرأ retail_price
+- database_routes.py: الاستيراد القديم يكتب retail_price (مع fallback)
+- repair_routes.py: ترتيب القراءة retail_price ← selling_price ← sell_price
+- ProductsPage.js + GlobalSearchModal.js: قراءة retail_price أولاً
+- المتجر العام (ProductDetail/PublicStore/StoreLanding) كان يقرأ retail_price أولاً أصلاً — لا تغيير
+
+### الاختبارات (curl، بيانات تجريبية حُذفت)
+- شراء بحمولة قديمة selling_price=33 → retail_price أصبح 33، selling_price لم يُخزَّن، price_history سجّل 20→33 بمصدر purchase ✓
+- صحة النظام 200 بعد إعادة التشغيل ✓
+
+### القاعدة المستقبلية
+أي كود جديد يقرأ/يكتب سعر البيع للمنتجات يستعمل retail_price حصرياً. حذف حقول selling_price من المخططات مؤجل لمرحلة استقرار لاحقة.
+
+### النسخ الاحتياطية
+/opt/ntcommerce/backups/p171/ (4 backend + ProductsPage.js + GlobalSearchModal.js)

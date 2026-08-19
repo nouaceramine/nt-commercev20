@@ -136,7 +136,7 @@ export function GlobalSearchModal({ open, onClose, language }) {
                   {type === 'sale' && item.invoice_number}
                 </p>
                 <p className={`text-xs truncate ${isSelected ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                  {type === 'product' && `${item.quantity || 0} ${ar ? 'في المخزون' : 'en stock'} · ${item.selling_price || 0} DA`}
+                  {type === 'product' && `${item.quantity || 0} ${ar ? 'في المخزون' : 'en stock'} · ${item.retail_price || item.selling_price || 0} DA`}
                   {type === 'customer' && (item.phone || (ar ? 'بدون هاتف' : 'Sans téléphone'))}
                   {type === 'sale' && `${item.total?.toFixed(2) || 0} DA · ${item.customer_name || (ar ? 'عابر' : 'Client')}`}
                 </p>

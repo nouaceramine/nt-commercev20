@@ -317,7 +317,7 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
         if available < qty:
             raise HTTPException(status_code=400, detail="الكمية غير كافية")
         # p66: unified products use retail_price/name_en — fall back so price is never lost
-        _unit_price = part.get("selling_price") or part.get("retail_price") or part.get("sell_price") or 0
+        _unit_price = part.get("retail_price") or part.get("selling_price") or part.get("sell_price") or 0  # p171: retail_price first (canonical)
         _part_name = part.get("name_ar") or part.get("name_en") or part.get("name") or ""
         usage = {
             "id": str(uuid.uuid4()),

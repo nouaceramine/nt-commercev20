@@ -24,7 +24,7 @@ def create_search_routes(db, get_current_user) -> dict:
         # Search products
         products = await db.products.find(
             {"$or": [{"name": regex}, {"article_code": regex}, {"barcode": regex}]},
-            {"_id": 0, "id": 1, "name": 1, "article_code": 1, "selling_price": 1}
+            {"_id": 0, "id": 1, "name": 1, "article_code": 1, "retail_price": 1}
         ).limit(limit).to_list(limit)
         for p in products:
             results.append({"type": "product", "id": p["id"], "title": p.get("name", ""), "subtitle": p.get("article_code", "")})

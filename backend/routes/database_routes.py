@@ -247,7 +247,7 @@ async def import_to_tenant(
                         "category": prod.get("category", ""),
                         "description": prod.get("description", ""),
                         "cost_price": prod.get("cost_price", 0),
-                        "selling_price": prod.get("selling_price", 0),
+                        "retail_price": prod.get("selling_price", 0) or prod.get("retail_price", 0),  # p171: canonical
                         "wholesale_price": prod.get("price_a", 0),
                         "min_price": prod.get("price_c", 0),
                         "purchase_price": prod.get("purchase_price", 0),

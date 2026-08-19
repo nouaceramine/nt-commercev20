@@ -791,7 +791,7 @@ export default function ProductsPage() {
                     </div>
                     {/* سعر البيع */}
                     <div className="text-center font-bold">
-                      {(product.selling_price ?? product.retail_price ?? 0).toFixed(2)} <span className="text-xs font-normal">{t.currency}</span>
+                      {(product.retail_price ?? product.selling_price ?? 0).toFixed(2)} <span className="text-xs font-normal">{t.currency}</span>
                     </div>
                     {/* Dernier Achat */}
                     <div className="text-center text-xs text-muted-foreground">

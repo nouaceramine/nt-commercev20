@@ -34,7 +34,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         # p168: sale price entered on the purchase → canonical retail_price + price_history;
         #        expiry date → auto-create a product lot (feeds expiry notifications).
         pid = product.get("id")
-        rp = item.get("retail_price")
+        # p171: canonical price field is retail_price; legacy selling_price payloads map onto it
+        rp = item.get("retail_price") if item.get("retail_price") else item.get("selling_price")
         if rp is not None and float(rp) > 0:
             old_rp = float(product.get("retail_price") or 0)
             new_rp = float(rp)
@@ -78,11 +79,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 continue
             updates = {"$inc": {"quantity": sign * qty}}
             if sign > 0 and sync_prices:
-                set_fields = {"purchase_price": float(item.get("unit_price", 0) or 0), "updated_at": now}
-                sp = item.get("selling_price")
-                if sp is not None and sp > 0:
-                    set_fields["selling_price"] = float(sp)
-                updates["$set"] = set_fields
+                # p171: purchase_price always syncs; sale price goes ONLY to retail_price via _sync_item_extras
+                updates["$set"] = {"purchase_price": float(item.get("unit_price", 0) or 0), "updated_at": now}
             await db.products.update_one({"id": pid}, updates)
             if sign > 0:
                 await _sync_item_extras(product, item, ref, now, admin_name)
@@ -139,9 +137,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             if product and item.product_id and (item.update_product_prices is None or item.update_product_prices):
                 # Always sync purchase_price to the latest unit_price on purchase
                 set_fields["purchase_price"] = float(item.unit_price)
-                # Sync selling_price only when explicitly passed (frontend may compute markup)
-                if item.selling_price is not None and item.selling_price > 0:
-                    set_fields["selling_price"] = float(item.selling_price)
+                # p171: sale price syncs ONLY to retail_price (see _sync_item_extras) — selling_price is dead
                 set_fields["updated_at"] = now
             if set_fields:
                 product_updates["$set"] = set_fields
