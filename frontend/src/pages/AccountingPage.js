@@ -22,6 +22,8 @@ const AccountingPage = () => {
   const [bs, setBs] = useState(null);  // p198
   const [ob, setOb] = useState(null);  // p199: opening-balance preview
   const [obBusy, setObBusy] = useState(false);
+  const [ledgerAcc, setLedgerAcc] = useState(null);  // p200: account selected for the ledger
+  const [ledger, setLedger] = useState(null);  // p200
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,6 +58,26 @@ const AccountingPage = () => {
     }
   }, []);
 
+  // p200: general ledger for the selected account (month-to-date like p197)
+  const fetchLedger = useCallback(async (code, dateStr) => {
+    if (!code) { setLedger(null); return; }
+    try {
+      const monthStart = `${dateStr.slice(0, 8)}01`;
+      const res = await apiClient.get(`/accounting/ledger/${code}?start_date=${monthStart}&end_date=${dateStr}`);
+      setLedger(res.data);
+    } catch (e) {
+      console.error('ledger fetch failed', e);
+      setLedger(null);
+    }
+  }, []);
+
+  // p200: open/close the ledger card when a trial-balance row is clicked
+  const toggleLedger = (code) => {
+    const next = ledgerAcc === code ? null : code;
+    setLedgerAcc(next);
+    if (!next) setLedger(null);
+  };
+
   useEffect(() => {
     setLoading(true);
     fetchAll(asOf);
@@ -64,7 +86,7 @@ const AccountingPage = () => {
   // p196: realtime refresh on any money event
   useEffect(() => {
     startRealtime();
-    const refresh = () => fetchAll(asOf);
+    const refresh = () => { fetchAll(asOf); if (ledgerAcc) fetchLedger(ledgerAcc, asOf); };
     const events = [
       'sale.completed', 'sale.refunded', 'sale.deleted',
       'purchase.recorded', 'expense.created', 'expense.deleted',
@@ -72,7 +94,12 @@ const AccountingPage = () => {
     ];
     const unsubs = events.map((ev) => onEvent(ev, refresh));
     return () => unsubs.forEach((u) => u());
-  }, [asOf, fetchAll]);
+  }, [asOf, fetchAll, ledgerAcc, fetchLedger]);
+
+  // p200: refetch the open ledger when the date or the selection changes
+  useEffect(() => {
+    if (ledgerAcc) fetchLedger(ledgerAcc, asOf);
+  }, [asOf, ledgerAcc, fetchLedger]);
 
   // p199: post the opening-balance entry, then refresh everything
   const applyOpening = async () => {
@@ -166,7 +193,8 @@ const AccountingPage = () => {
                     {(tb?.accounts || []).map((a) => (
                       <tr
                         key={a.account_code}
-                        className={`border-b last:border-0 ${a.balance === 0 ? 'text-muted-foreground' : ''}`}
+                        className={`border-b last:border-0 cursor-pointer hover:bg-muted/50 ${a.balance === 0 ? 'text-muted-foreground' : ''} ${ledgerAcc === a.account_code ? 'bg-muted/50' : ''}`}
+                        onClick={() => toggleLedger(a.account_code)}
                         data-testid={`tb-row-${a.account_code}`}
                       >
                         <td className="p-2 font-mono">{a.account_code}</td>
@@ -193,6 +221,63 @@ const AccountingPage = () => {
             )}
           </CardContent>
         </Card>
+
+        {ledger && (
+          <Card data-testid="ledger-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <BookOpen className="h-5 w-5" />
+                {isAr ? `دفتر الأستاذ — ${ledger.account_name} (${ledger.account_code})` : `Grand livre — ${ledger.account_name} (${ledger.account_code})`}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="ledger-table">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-start p-2 font-semibold">{isAr ? 'التاريخ' : 'Date'}</th>
+                      <th className="text-start p-2 font-semibold">{isAr ? 'القيد' : 'Écriture'}</th>
+                      <th className="text-start p-2 font-semibold">{isAr ? 'الوصف' : 'Description'}</th>
+                      <th className="text-end p-2 font-semibold">{isAr ? 'مدين' : 'Débit'}</th>
+                      <th className="text-end p-2 font-semibold">{isAr ? 'دائن' : 'Crédit'}</th>
+                      <th className="text-end p-2 font-semibold">{isAr ? 'الرصيد الجارٍ' : 'Solde courant'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b bg-muted/30" data-testid="ledger-opening">
+                      <td className="p-2" colSpan={3}>{isAr ? 'رصيد افتتاحي' : "Solde d'ouverture"}</td>
+                      <td className="p-2" colSpan={2} />
+                      <td className="p-2 text-end font-mono" data-testid="ledger-opening-balance">{fmt(ledger.opening_balance)}</td>
+                    </tr>
+                    {ledger.lines.length === 0 && (
+                      <tr data-testid="ledger-empty">
+                        <td className="p-2 text-muted-foreground" colSpan={6}>{isAr ? 'لا حركات في هذه النافذة' : 'Aucun mouvement sur la période'}</td>
+                      </tr>
+                    )}
+                    {ledger.lines.map((l) => (
+                      <tr key={`${l.entry_number}-${l.entry_id}`} className="border-b last:border-0" data-testid={`ledger-row-${l.entry_number}`}>
+                        <td className="p-2 font-mono">{l.date}</td>
+                        <td className="p-2 font-mono">{l.entry_number}</td>
+                        <td className="p-2">{l.description}</td>
+                        <td className="p-2 text-end font-mono">{l.debit ? fmt(l.debit) : '—'}</td>
+                        <td className="p-2 text-end font-mono">{l.credit ? fmt(l.credit) : '—'}</td>
+                        <td className="p-2 text-end font-mono">{fmt(l.running_balance)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 font-bold">
+                      <td className="p-2" colSpan={3}>{isAr ? 'الرصيد الختامي' : 'Solde de clôture'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="ledger-total-debit">{fmt(ledger.total_debit)}</td>
+                      <td className="p-2 text-end font-mono" data-testid="ledger-total-credit">{fmt(ledger.total_credit)}</td>
+                      <td className="p-2 text-end font-mono" data-testid="ledger-closing-balance">{fmt(ledger.closing_balance)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {income && (
           <Card>

@@ -831,6 +831,84 @@ async def opening_balance_apply(body: Optional[dict] = None, user=Depends(get_cu
             "entry": entry, "capital": calc["capital"]}
 
 
+# ============ p200: GENERAL LEDGER ============
+
+@router.get("/ledger/{account_code}")
+async def get_account_ledger(
+    account_code: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user=Depends(get_current_user)
+):
+    """p200: general ledger for one account, from journal-entry LINES only.
+    Opening balance (net of lines before start_date), every line in the
+    window with a running balance, then the closing balance.
+    basis=journal_lines — mirrors never consulted."""
+    acc = await db.accounts.find_one({"code": account_code}, {"_id": 0})
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account not found")
+    today = datetime.now(timezone.utc).date().isoformat()
+    end_date = end_date or today
+    if start_date and start_date > end_date:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+
+    acc_id = acc["id"]
+    opening = 0.0
+    if start_date:
+        async for row in db.journal_entries.aggregate([
+            {"$match": {"date": {"$lt": start_date}}},
+            {"$unwind": "$lines"},
+            {"$match": {"lines.account_id": acc_id}},
+            {"$group": {"_id": None, "net": {"$sum": {"$subtract": [
+                {"$ifNull": ["$lines.debit", 0]},
+                {"$ifNull": ["$lines.credit", 0]}]}}}},
+        ]):
+            opening = round(row["net"], 2)
+
+    date_q = {"date": {"$lte": end_date}}
+    if start_date:
+        date_q["date"]["$gte"] = start_date
+    rows = []
+    async for entry in db.journal_entries.find(
+        date_q, {"_id": 0}
+    ).sort([("date", 1), ("created_at", 1)]):
+        for line in entry.get("lines", []):
+            if line.get("account_id") != acc_id:
+                continue
+            debit = round(float(line.get("debit") or 0), 2)
+            credit = round(float(line.get("credit") or 0), 2)
+            rows.append({
+                "entry_id": entry.get("id"),
+                "entry_number": entry.get("entry_number"),
+                "date": entry.get("date"),
+                "reference": entry.get("reference", ""),
+                "description": entry.get("description", ""),
+                "source": entry.get("source", "manual"),
+                "debit": debit,
+                "credit": credit,
+            })
+
+    running = opening
+    for r in rows:
+        running = round(running + r["debit"] - r["credit"], 2)
+        r["running_balance"] = running
+
+    return {
+        "account_code": acc.get("code"),
+        "account_name": acc.get("name_ar") or acc.get("name"),
+        "account_type": acc.get("account_type"),
+        "start_date": start_date,
+        "end_date": end_date,
+        "opening_balance": opening,
+        "lines": rows,
+        "lines_count": len(rows),
+        "total_debit": round(sum(r["debit"] for r in rows), 2),
+        "total_credit": round(sum(r["credit"] for r in rows), 2),
+        "closing_balance": running,
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 @router.get("/reports/tax-summary")
 async def get_tax_summary(
     period: str,
