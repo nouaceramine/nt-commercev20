@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Scale, RefreshCw, BookOpen } from 'lucide-react';
+import { Scale, RefreshCw, BookOpen, TrendingUp } from 'lucide-react';
 import { startRealtime, onEvent } from '../lib/realtime';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -18,6 +18,7 @@ const AccountingPage = () => {
 
   const [asOf, setAsOf] = useState(todayStr());
   const [tb, setTb] = useState(null);
+  const [income, setIncome] = useState(null);  // p197
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,12 +33,15 @@ const AccountingPage = () => {
 
   const fetchAll = useCallback(async (dateStr) => {
     try {
-      const [tbRes, jeRes] = await Promise.all([
+      const monthStart = `${dateStr.slice(0, 8)}01`;  // p197: month-to-date range
+      const [tbRes, jeRes, isRes] = await Promise.all([
         apiClient.get(`/accounting/reports/trial-balance?as_of_date=${dateStr}`),
         apiClient.get('/accounting/journal-entries?limit=15'),
+        apiClient.get(`/accounting/reports/income-statement?start_date=${monthStart}&end_date=${dateStr}`),
       ]);
       setTb(tbRes.data);
       setEntries(Array.isArray(jeRes.data?.items) ? jeRes.data.items : []);
+      setIncome(isRes.data);
     } catch (e) {
       console.error('accounting fetch failed', e);
     } finally {
@@ -164,6 +168,69 @@ const AccountingPage = () => {
             )}
           </CardContent>
         </Card>
+
+        {income && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <TrendingUp className="h-5 w-5" />
+                {isAr ? `قائمة الدخل — ${income.start_date} ← ${income.end_date}` : `Compte de résultat — ${income.start_date} → ${income.end_date}`}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="income-statement-table">
+                  <tbody>
+                    <tr className="border-b bg-muted/30">
+                      <td className="p-2 font-semibold" colSpan={2}>{isAr ? 'الإيرادات' : 'Produits'}</td>
+                    </tr>
+                    {income.revenue_accounts.map((a) => (
+                      <tr key={a.account_code} className="border-b" data-testid={`is-rev-${a.account_code}`}>
+                        <td className="p-2 ps-6">{a.account_name} <span className="font-mono text-muted-foreground">({a.account_code})</span></td>
+                        <td className="p-2 text-end font-mono">{fmt(a.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-b font-semibold">
+                      <td className="p-2">{isAr ? 'إجمالي الإيرادات' : 'Total produits'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="income-revenue-total">{fmt(income.revenue_total)}</td>
+                    </tr>
+                    {income.cogs_accounts.map((a) => (
+                      <tr key={a.account_code} className="border-b" data-testid={`is-cogs-${a.account_code}`}>
+                        <td className="p-2 ps-6">{a.account_name} <span className="font-mono text-muted-foreground">({a.account_code})</span></td>
+                        <td className="p-2 text-end font-mono">({fmt(a.amount)})</td>
+                      </tr>
+                    ))}
+                    <tr className="border-b font-semibold">
+                      <td className="p-2">{isAr ? 'مجمل الربح' : 'Marge brute'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="income-gross-profit">{fmt(income.gross_profit)}</td>
+                    </tr>
+                    <tr className="border-b bg-muted/30">
+                      <td className="p-2 font-semibold" colSpan={2}>{isAr ? 'مصاريف التشغيل' : 'Charges d’exploitation'}</td>
+                    </tr>
+                    {income.operating_accounts.map((a) => (
+                      <tr key={a.account_code} className="border-b" data-testid={`is-exp-${a.account_code}`}>
+                        <td className="p-2 ps-6">{a.account_name} <span className="font-mono text-muted-foreground">({a.account_code})</span></td>
+                        <td className="p-2 text-end font-mono">({fmt(a.amount)})</td>
+                      </tr>
+                    ))}
+                    <tr className="border-b font-semibold">
+                      <td className="p-2">{isAr ? 'إجمالي مصاريف التشغيل' : 'Total charges'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="income-expenses-total">({fmt(income.operating_total)})</td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 font-bold">
+                      <td className="p-2">{isAr ? 'صافي الربح / (الخسارة)' : 'Résultat net'}</td>
+                      <td className={`p-2 text-end font-mono ${income.net_profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-testid="income-net-profit">
+                        {fmt(income.net_profit)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

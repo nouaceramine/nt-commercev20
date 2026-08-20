@@ -551,6 +551,66 @@ async def get_trial_balance(
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
+@router.get("/reports/income-statement")
+async def get_income_statement(
+    start_date: str,
+    end_date: str,
+    user=Depends(get_current_user)
+):
+    """p197: Income statement computed from journal-entry LINES within
+    [start_date, end_date]. Class 7 = revenue (credit-nature),
+    class 60x = COGS, other class 6 = operating expenses (debit-nature)."""
+    pipeline = [
+        {"$match": {"date": {"$gte": start_date, "$lte": end_date}}},
+        {"$unwind": "$lines"},
+        {"$group": {
+            "_id": "$lines.account_id",
+            "account_code": {"$first": "$lines.account_code"},
+            "account_name": {"$first": "$lines.account_name"},
+            "total_debit": {"$sum": {"$ifNull": ["$lines.debit", 0]}},
+            "total_credit": {"$sum": {"$ifNull": ["$lines.credit", 0]}},
+        }},
+    ]
+    revenue, cogs_accounts, operating = [], [], []
+    async for row in db.journal_entries.aggregate(pipeline):
+        code = str(row.get("account_code") or "")
+        name = row.get("account_name") or ""
+        if code.startswith("7"):
+            amount = round(row["total_credit"] - row["total_debit"], 2)
+            if amount:
+                revenue.append({"account_code": code, "account_name": name, "amount": amount})
+        elif code.startswith("6"):
+            amount = round(row["total_debit"] - row["total_credit"], 2)
+            if not amount:
+                continue
+            item = {"account_code": code, "account_name": name, "amount": amount}
+            (cogs_accounts if code.startswith("60") else operating).append(item)
+    revenue.sort(key=lambda r: r["account_code"])
+    cogs_accounts.sort(key=lambda r: r["account_code"])
+    operating.sort(key=lambda r: r["account_code"])
+    revenue_total = round(sum(r["amount"] for r in revenue), 2)
+    cogs_total = round(sum(r["amount"] for r in cogs_accounts), 2)
+    operating_total = round(sum(r["amount"] for r in operating), 2)
+    gross_profit = round(revenue_total - cogs_total, 2)
+    net_profit = round(gross_profit - operating_total, 2)
+    entries_count = await db.journal_entries.count_documents({"date": {"$gte": start_date, "$lte": end_date}})
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "revenue_accounts": revenue,
+        "revenue_total": revenue_total,
+        "cogs_accounts": cogs_accounts,
+        "cogs_total": cogs_total,
+        "gross_profit": gross_profit,
+        "operating_accounts": operating,
+        "operating_total": operating_total,
+        "net_profit": net_profit,
+        "entries_count": entries_count,
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 @router.get("/reports/tax-summary")
 async def get_tax_summary(
     period: str,
