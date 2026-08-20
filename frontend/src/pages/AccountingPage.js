@@ -94,6 +94,7 @@ const AccountingPage = () => {
       'expense.updated',  // p201
       'rental.payment_received',  // p202
       'supplier.advance_paid',  // p203
+      'installment.paid',  // p204
     ];
     const unsubs = events.map((ev) => onEvent(ev, refresh));
     return () => unsubs.forEach((u) => u());

@@ -89,39 +89,64 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
         payment_method = data.get("payment_method", "cash")
         paid_amount = inst["amount"]
 
-        await db.installment_payments.update_one(
-            {"id": installment_id},
-            {"$set": {"status": "paid", "paid_date": now, "paid_by": user.get("name", "")}}
-        )
+        # p204: atomic — installment + cash box + customer + sale + outbox
+        # event commit or abort together (replica set, pattern p195)
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                await db.installment_payments.update_one(
+                    {"id": installment_id},
+                    {"$set": {"status": "paid", "paid_date": now, "paid_by": user.get("name", "")}},
+                    session=_tx,
+                )
 
-        if payment_method and payment_method not in ["credit", "none"]:
-            await db.cash_boxes.update_one(
-                {"id": payment_method},
-                {"$inc": {"balance": paid_amount}, "$set": {"updated_at": now}}
-            )
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()), "cash_box_id": payment_method,
-                "type": "income", "amount": paid_amount,
-                "description": f"قسط #{inst['installment_number']} - {inst.get('customer_name', '')}",
-                "reference_type": "installment", "reference_id": installment_id,
-                "created_at": now, "created_by": user.get("name", ""),
-            })
+                if payment_method and payment_method not in ["credit", "none"]:
+                    await db.cash_boxes.update_one(
+                        {"id": payment_method},
+                        {"$inc": {"balance": paid_amount}, "$set": {"updated_at": now}},
+                        session=_tx,
+                    )
+                    await db.transactions.insert_one({
+                        "id": str(uuid.uuid4()), "cash_box_id": payment_method,
+                        "type": "income", "amount": paid_amount,
+                        "description": f"قسط #{inst['installment_number']} - {inst.get('customer_name', '')}",
+                        "reference_type": "installment", "reference_id": installment_id,
+                        "created_at": now, "created_by": user.get("name", ""),
+                    }, session=_tx)
+                    # p204: outbox → auto journal entry (Dr box / Cr 411)
+                    await outbox_write(
+                        _main_db, "installment.paid",
+                        {
+                            "payment_id": installment_id,
+                            "installment_number": inst.get("installment_number"),
+                            "sale_id": inst.get("sale_id"),
+                            "customer_name": inst.get("customer_name", ""),
+                            "amount": paid_amount,
+                            "payment_method": payment_method,
+                        },
+                        tenant_id=user.get("tenant_id") or "platform",
+                        source="installments_routes",
+                        session=_tx,
+                    )
 
-        if inst.get("customer_id"):
-            await db.customers.update_one(
-                {"id": inst["customer_id"]},
-                {"$inc": {"balance": -paid_amount}}
-            )
+                if inst.get("customer_id"):
+                    await db.customers.update_one(
+                        {"id": inst["customer_id"]},
+                        {"$inc": {"balance": -paid_amount}},
+                        session=_tx,
+                    )
 
-        await db.sales.update_one(
-            {"id": inst["sale_id"]},
-            {"$inc": {"paid_amount": paid_amount, "remaining": -paid_amount}}
-        )
-        sale = await db.sales.find_one({"id": inst["sale_id"]}, {"_id": 0, "remaining": 1, "paid_amount": 1, "total": 1})
-        if sale:
-            new_remaining = max(0, sale.get("remaining", 0))
-            new_status = "paid" if new_remaining <= 0 else "partial"
-            await db.sales.update_one({"id": inst["sale_id"]}, {"$set": {"remaining": new_remaining, "status": new_status}})
+                await db.sales.update_one(
+                    {"id": inst["sale_id"]},
+                    {"$inc": {"paid_amount": paid_amount, "remaining": -paid_amount}},
+                    session=_tx,
+                )
+                sale = await db.sales.find_one({"id": inst["sale_id"]}, {"_id": 0, "remaining": 1, "paid_amount": 1, "total": 1}, session=_tx)
+                if sale:
+                    new_remaining = max(0, sale.get("remaining", 0))
+                    new_status = "paid" if new_remaining <= 0 else "partial"
+                    await db.sales.update_one({"id": inst["sale_id"]}, {"$set": {"remaining": new_remaining, "status": new_status}}, session=_tx)
 
         return {"ok": True, "message": "تم تسجيل الدفع بنجاح"}
 

@@ -268,6 +268,35 @@ async def post_expense_reversal(tdb, payload: dict):
         lines=lines,
     )
 
+# ── p204: installment payments ──────────────────────────────────────────────
+
+async def post_installment_payment_entry(tdb, payload: dict):
+    """installment.paid → Dr cash-box / Cr accounts receivable (411).
+    The installment sale already posted its receivable via sale.completed, so
+    paying an installment is a receivable collection (same shape as p195).
+    Idempotent per installment_id (an installment is paid once)."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "installment_payment"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    lines = [
+        _line(accounts[box_code], debit=amount),
+        _line(accounts["411"], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("invoice_number", ""),
+        reference_id=payment_id,
+        source_tag="installment_payment",
+        description=f"قيد تلقائي — تحصيل قسط من العميل {payload.get('customer_name', '')}",
+        lines=lines,
+    )
+
+
 # ── p203: supplier advance payments ─────────────────────────────────────────
 
 async def post_supplier_advance_entry(tdb, payload: dict):

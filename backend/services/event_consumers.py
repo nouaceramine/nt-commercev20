@@ -470,6 +470,18 @@ async def handle_supplier_advance_paid(event: Event) -> None:
         log.warning("auto-accounting supplier-advance %s failed: %s", p.get("payment_id"), exc)
 
 
+async def handle_installment_paid(event: Event) -> None:
+    """Tenant installment paid → auto journal entry (Dr box / Cr 411)."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_installment_payment_entry
+        await post_installment_payment_entry(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting installment %s failed: %s", p.get("payment_id"), exc)
+
+
 # ── p195: debt settlement accounting ─────────────────────────────────────────
 async def handle_customer_payment_received(event: Event) -> None:
     """Customer debt payment received → auto journal entry (Dr box / Cr AR 411)."""
@@ -509,6 +521,7 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("expense.updated", handle_expense_updated)  # p201
     bus.register("rental.payment_received", handle_rental_payment_received)  # p202
     bus.register("supplier.advance_paid", handle_supplier_advance_paid)  # p203
+    bus.register("installment.paid", handle_installment_paid)  # p204
     bus.register("customer.payment_received", handle_customer_payment_received)  # p195
     bus.register("supplier.payment_made", handle_supplier_payment_made)  # p195
     bus.register("ecom_order.confirmed", handle_ecom_order_confirmed)
