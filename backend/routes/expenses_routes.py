@@ -190,15 +190,40 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         old_amount = float(old.get("amount", 0))
         new_method = update_data.get("payment_method", old_method)
         new_amount = float(update_data.get("amount", old_amount))
-        if old_method and old.get("currency") != "USD" and (update_data.get("amount") is not None or update_data.get("payment_method") is not None):  # p112: USD لا يُزامَن مع الصناديق
-            now = update_data["updated_at"]
-            if old_method and old_amount:  # p68
-                await db.cash_boxes.update_one({"id": old_method}, {"$inc": {"balance": old_amount}, "$set": {"updated_at": now}})
-                await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": old_method, "type": "income", "amount": old_amount, "description": f"تعديل مصروف (عكس) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
-            if new_method and new_amount:  # p68
-                await db.cash_boxes.update_one({"id": new_method}, {"$inc": {"balance": -new_amount}, "$set": {"updated_at": now}})
-                await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": new_method, "type": "expense", "amount": new_amount, "description": f"مصروف (معدّل) - {update_data.get('title', old.get('title', ''))}", "reference_type": "expense", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
-        await db.expenses.update_one({"id": expense_id}, {"$set": update_data})
+        sync_boxes = bool(old_method) and old.get("currency") != "USD" and (update_data.get("amount") is not None or update_data.get("payment_method") is not None)  # p112: USD لا يُزامَن مع الصناديق
+        # p201: atomic — box reversal + new deduction + expense update + outbox
+        # event commit or abort together (replica set, same pattern as p195)
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                if sync_boxes:
+                    now = update_data["updated_at"]
+                    if old_method and old_amount:  # p68
+                        await db.cash_boxes.update_one({"id": old_method}, {"$inc": {"balance": old_amount}, "$set": {"updated_at": now}}, session=_tx)
+                        await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": old_method, "type": "income", "amount": old_amount, "description": f"تعديل مصروف (عكس) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                    if new_method and new_amount:  # p68
+                        await db.cash_boxes.update_one({"id": new_method}, {"$inc": {"balance": -new_amount}, "$set": {"updated_at": now}}, session=_tx)
+                        await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": new_method, "type": "expense", "amount": new_amount, "description": f"مصروف (معدّل) - {update_data.get('title', old.get('title', ''))}", "reference_type": "expense", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                    # p201: outbox → auto adjustment entry (expense.updated)
+                    await outbox_write(
+                        _main_db, "expense.updated",
+                        {
+                            "adjustment_id": str(uuid.uuid4()),
+                            "expense_id": expense_id,
+                            "code": update_data.get("code", old.get("code", "")),
+                            "title": update_data.get("title", old.get("title", "")),
+                            "currency": old.get("currency", "DZD"),
+                            "old_amount": old_amount,
+                            "old_payment_method": old_method,
+                            "new_amount": new_amount,
+                            "new_payment_method": new_method,
+                        },
+                        tenant_id=user.get("tenant_id") or "platform",
+                        source="expenses_routes",
+                        session=_tx,
+                    )
+                await db.expenses.update_one({"id": expense_id}, {"$set": update_data}, session=_tx)
         return await db.expenses.find_one({"id": expense_id}, {"_id": 0})
 
     @router.delete("/{expense_id}")

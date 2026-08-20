@@ -266,6 +266,48 @@ async def post_expense_reversal(tdb, payload: dict):
         lines=lines,
     )
 
+# ── p201: expense edits ──────────────────────────────────────────────────────
+
+async def post_expense_adjustment(tdb, payload: dict):
+    """expense.updated → one balanced adjustment entry: reversal of the old
+    posted entry (if one exists) + a fresh entry for the new amount/box (if
+    applicable). Idempotent per adjustment_id."""
+    adj_id = payload.get("adjustment_id")
+    expense_id = payload.get("expense_id")
+    if not adj_id or await already_posted(tdb, adj_id, "expense_adjustment"):
+        return None
+    currency = payload.get("currency") or "DZD"
+    old_amount = float(payload.get("old_amount", 0) or 0)
+    new_amount = float(payload.get("new_amount", 0) or 0)
+    old_method = payload.get("old_payment_method")
+    new_method = payload.get("new_payment_method")
+    had_entry = bool(expense_id) and await already_posted(tdb, expense_id, "expense")
+    # USD expenses never touch the journal (cash moved at the dollar purchase)
+    can_post_new = currency == "DZD" and bool(new_method) and new_amount > 0
+    if not had_entry and not can_post_new:
+        return None
+    accounts = await ensure_accounts(tdb)
+    lines = []
+    if had_entry and old_amount > 0 and old_method:
+        old_box = BOX_ACCOUNT.get(old_method, "530")
+        lines.append(_line(accounts[old_box], debit=old_amount))
+        lines.append(_line(accounts["610"], credit=old_amount))
+    if can_post_new:
+        new_box = BOX_ACCOUNT.get(new_method, "530")
+        lines.append(_line(accounts["610"], debit=new_amount))
+        lines.append(_line(accounts[new_box], credit=new_amount))
+    if not lines:
+        return None
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("code", ""),
+        reference_id=adj_id,
+        source_tag="expense_adjustment",
+        description=f"قيد تسوية تلقائي — تعديل مصروف {payload.get('title', '')}",
+        lines=lines,
+    )
+
+
 # ── p195: debt settlements ───────────────────────────────────────────────────
 
 async def post_customer_payment_entry(tdb, payload: dict):
