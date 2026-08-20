@@ -175,6 +175,9 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
             item_dict["purchase_price"] = product.get("purchase_price", 0) if product else 0
         enriched_items.append(item_dict)
 
+    # p190: COGS snapshot for the accounting event payload
+    cogs = round(sum((it.get("purchase_price") or 0) * abs(it.get("quantity") or 0) for it in enriched_items), 2)
+
     installment_info = None
     if s.payment_type == "installment" and s.installment_plan:
         plan = s.installment_plan
@@ -291,6 +294,10 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
             "invoice_number": invoice_number,
             "total": final_total,
             "paid_amount": s.paid_amount,
+            "remaining": max(0, remaining),
+            "cash_box_id": resolved_cash_box,
+            "cogs": cogs,
+            "customer_id": s.customer_id,
             "items": [{"product_id": it.product_id, "quantity": it.quantity, "price": it.unit_price} for it in s.items],
             "channel": "pos",
         },
@@ -386,7 +393,14 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
     from config.database import main_db as _main_db
     await outbox_write(
         _main_db, "sale.deleted",
-        {"sale_id": sale_id, "invoice_number": sale.get("invoice_number", ""), "total": sale.get("total", 0), "reason": reason},
+        {
+            "sale_id": sale_id, "invoice_number": sale.get("invoice_number", ""), "total": sale.get("total", 0),
+            "reason": reason,
+            "paid_amount": sale.get("paid_amount", 0),
+            "cash_box_id": sale.get("cash_box_id") or sale.get("payment_method"),
+            "remaining": sale.get("remaining", 0),
+            "cogs": round(sum((it.get("purchase_price") or 0) * abs(it.get("quantity") or 0) for it in sale.get("items", [])), 2),
+        },
         tenant_id=user.get("tenant_id") or "platform",
         source="sales_service", session=_tx,
     )
@@ -452,7 +466,13 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
     from config.database import main_db as _main_db
     await outbox_write(
         _main_db, "sale.refunded",
-        {"sale_id": sale_id, "invoice_number": sale.get("invoice_number", ""), "total": sale.get("total", 0)},
+        {
+            "sale_id": sale_id, "invoice_number": sale.get("invoice_number", ""), "total": sale.get("total", 0),
+            "paid_amount": sale.get("paid_amount", 0),
+            "cash_box_id": sale.get("cash_box_id") or sale.get("payment_method"),
+            "remaining": sale.get("remaining", 0),
+            "cogs": round(sum((it.get("purchase_price") or 0) * abs(it.get("quantity") or 0) for it in sale.get("items", [])), 2),
+        },
         tenant_id=user.get("tenant_id") or "platform",
         source="sales_service", session=_tx,
     )

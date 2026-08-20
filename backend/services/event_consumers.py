@@ -104,6 +104,14 @@ async def handle_sale_completed(event: Event) -> None:
     })
     log.info("Sale audit-logged: tenant=%s sale=%s", tenant_id, sale_id)
 
+    # p190: auto journal entry from the event (tenant DB, idempotent per sale)
+    if tenant_id and tenant_id != "platform":
+        try:
+            from services.accounting_auto import post_sale_entry
+            await post_sale_entry(get_tenant_db(tenant_id), p)
+        except Exception as exc:
+            log.warning("auto-accounting sale %s failed: %s", sale_id, exc)
+
 
 async def handle_sale_refunded(event: Event) -> None:
     p = event.payload or {}
@@ -117,6 +125,35 @@ async def handle_sale_refunded(event: Event) -> None:
         "created_at": _utc_now_iso(),
         "correlation_id": event.metadata.correlation_id,
     })
+
+    # p190: auto reversal entry
+    if event.tenant_id and event.tenant_id != "platform":
+        try:
+            from services.accounting_auto import post_sale_reversal
+            await post_sale_reversal(get_tenant_db(event.tenant_id), p, "refund", "إرجاع فاتورة")
+        except Exception as exc:
+            log.warning("auto-accounting refund %s failed: %s", p.get("sale_id"), exc)
+
+
+async def handle_sale_deleted(event: Event) -> None:
+    """p190: sale deleted → audit row + auto reversal journal entry."""
+    p = event.payload or {}
+    await main_db.inventory_movements.insert_one({
+        "id": event.event_id,
+        "event_type": "sale.deleted",
+        "sale_id": p.get("sale_id"),
+        "tenant_id": event.tenant_id,
+        "amount": float(p.get("total", 0) or 0),
+        "reason": p.get("reason", ""),
+        "created_at": _utc_now_iso(),
+        "correlation_id": event.metadata.correlation_id,
+    })
+    if event.tenant_id and event.tenant_id != "platform":
+        try:
+            from services.accounting_auto import post_sale_reversal
+            await post_sale_reversal(get_tenant_db(event.tenant_id), p, "delete", "حذف فاتورة")
+        except Exception as exc:
+            log.warning("auto-accounting delete %s failed: %s", p.get("sale_id"), exc)
 
 
 # ── Phase 3: ecom_order.confirmed ───────────────────────────────────────────
@@ -299,6 +336,7 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("purchase.codes_uploaded", handle_purchase_codes_uploaded)
     bus.register("sale.completed", handle_sale_completed)
     bus.register("sale.refunded", handle_sale_refunded)
+    bus.register("sale.deleted", handle_sale_deleted)  # p190
     bus.register("ecom_order.confirmed", handle_ecom_order_confirmed)
     bus.register("ecom_order.cancelled", handle_ecom_order_cancelled)
     bus.register("tenant.subscription.expired", handle_tenant_subscription_expired)

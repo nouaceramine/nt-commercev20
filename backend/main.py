@@ -507,11 +507,18 @@ async def startup_event():
     except Exception as e:
         logger.warning("Barcode index ensure: %s", e)
 
+    # p190: actually START the bus — register handlers, bind Mongo, run consumer.
+    # Previously `event_bus.start()` was called without await/args: a dead
+    # coroutine, so no handler was ever registered and nothing was consumed.
     try:
         from services.event_bus import event_bus
-        event_bus.start()
-    except Exception:
-        pass
+        from services.event_consumers import register_handlers
+        register_handlers(event_bus)
+        await event_bus.start(main_db)
+        asyncio.create_task(event_bus.consume_loop())
+        logger.info("Event bus started with consumers")
+    except Exception as e:
+        logger.warning("Event bus start: %s", e)
 
     # p189: transactional outbox relay — drains main_db.outbox to the Redis bus
     try:
