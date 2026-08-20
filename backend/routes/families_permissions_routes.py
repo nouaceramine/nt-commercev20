@@ -420,6 +420,73 @@ async def get_product_families(user: dict = Depends(require_tenant)):
 
     return [ProductFamilyResponse(**f) for f in families]
 
+# ============ p217: PRODUCT BRANDS (الماركات) ============
+
+class ProductBrandCreate(BaseModel):
+    name_ar: str
+    name_en: Optional[str] = ""
+
+
+@router.get("/product-brands")
+async def get_product_brands(user: dict = Depends(require_tenant)):
+    """p217: list brands with live product counts."""
+    brands = await db.product_brands.find({}, {"_id": 0}).sort("name_ar", 1).to_list(1000)
+    brands = [b for b in brands if b.get("id")]
+    for b in brands:
+        b["product_count"] = await db.products.count_documents({"brand_id": b["id"]})
+    return brands
+
+
+@router.post("/product-brands", status_code=201)
+async def create_product_brand(brand: ProductBrandCreate, admin: dict = Depends(get_tenant_admin)):
+    name = (brand.name_ar or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم الماركة مطلوب")
+    import re as _re
+    existing = await db.product_brands.find_one(
+        {"name_ar": {"$regex": f"^{_re.escape(name)}$", "$options": "i"}})
+    if existing:
+        raise HTTPException(status_code=409, detail="الماركة موجودة مسبقاً")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name_ar": name,
+        "name_en": (brand.name_en or "").strip() or name,
+        "product_count": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.product_brands.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/product-brands/{brand_id}")
+async def update_product_brand(brand_id: str, updates: ProductBrandCreate, admin: dict = Depends(get_tenant_admin)):
+    brand = await db.product_brands.find_one({"id": brand_id})
+    if not brand:
+        raise HTTPException(status_code=404, detail="الماركة غير موجودة")
+    name = (updates.name_ar or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم الماركة مطلوب")
+    name_en = (updates.name_en or "").strip() or name
+    await db.product_brands.update_one({"id": brand_id}, {"$set": {"name_ar": name, "name_en": name_en}})
+    # keep product mirrors consistent
+    await db.products.update_many({"brand_id": brand_id}, {"$set": {"brand_name": name}})
+    doc = await db.product_brands.find_one({"id": brand_id}, {"_id": 0})
+    doc["product_count"] = await db.products.count_documents({"brand_id": brand_id})
+    return doc
+
+
+@router.delete("/product-brands/{brand_id}")
+async def delete_product_brand(brand_id: str, admin: dict = Depends(get_tenant_admin)):
+    count = await db.products.count_documents({"brand_id": brand_id})
+    if count > 0:
+        raise HTTPException(status_code=400, detail=f"لا يمكن حذف ماركة عليها {count} منتجاً")
+    res = await db.product_brands.delete_one({"id": brand_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="الماركة غير موجودة")
+    return {"success": True}
+
+
 @router.get("/product-families/{family_id}", response_model=ProductFamilyResponse)
 async def get_product_family(family_id: str, user: dict = Depends(require_tenant)):
     family = await db.product_families.find_one({"id": family_id}, {"_id": 0})

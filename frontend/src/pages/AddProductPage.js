@@ -43,6 +43,10 @@ export default function AddProductPage() {
   const [showAddFamilyDialog, setShowAddFamilyDialog] = useState(false);
   const [newFamily, setNewFamily] = useState({ name: '' });
   const [addingFamily, setAddingFamily] = useState(false);
+  const [brands, setBrands] = useState([]);  // p217
+  const [showAddBrandDialog, setShowAddBrandDialog] = useState(false);
+  const [newBrand, setNewBrand] = useState({ name: '' });
+  const [addingBrand, setAddingBrand] = useState(false);
   const [useAveragePrice, setUseAveragePrice] = useState(false);
   
   // Get last purchase price from localStorage
@@ -65,6 +69,7 @@ export default function AddProductPage() {
     barcode: '',
     article_code: '',
     family_id: '',
+    brand_id: '',
     compatible_models: '',
     low_stock_threshold: '10',
     unit_of_measure: 'U',
@@ -129,6 +134,8 @@ export default function AddProductPage() {
       const token = localStorage.getItem('token');
       const response = await apiClient.get(`/product-families`);
       setFamilies(response.data);
+      const brandsRes = await apiClient.get(`/product-brands`);  // p217
+      setBrands(brandsRes.data);
       const provRes = await apiClient.get(`/ecom/shipping/providers`).catch(() => ({ data: null }));  // p150
       setShippingProviders((provRes.data?.providers || []).filter(pr => pr.key !== 'mock'));
     } catch (error) {
@@ -201,6 +208,29 @@ export default function AddProductPage() {
     }
   };
 
+  const handleAddBrand = async () => {  // p217
+    if (!newBrand.name) {
+      toast.error(language === 'ar' ? 'يرجى إدخال اسم الماركة' : 'Veuillez entrer le nom de la marque');
+      return;
+    }
+    setAddingBrand(true);
+    try {
+      const response = await apiClient.post(`/product-brands`, {
+        name_ar: newBrand.name,
+        name_en: newBrand.name
+      });
+      setBrands(prev => [...prev, response.data]);
+      setFormData(prev => ({ ...prev, brand_id: response.data.id }));
+      setShowAddBrandDialog(false);
+      setNewBrand({ name: '' });
+      toast.success(language === 'ar' ? 'تمت إضافة الماركة' : 'Marque ajoutée');
+    } catch (error) {
+      toast.error(errText(error) || t.error);
+    } finally {
+      setAddingBrand(false);
+    }
+  };
+
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -255,6 +285,7 @@ export default function AddProductPage() {
       image_url: '',
       barcode: '',
       family_id: '',
+      brand_id: '',
       compatible_models: '',
       low_stock_threshold: '10',
       unit_of_measure: 'U', storage_location: '', qty_per_package: '1',
@@ -333,6 +364,7 @@ export default function AddProductPage() {
         barcode: formData.barcode,
         article_code: formData.article_code,
         family_id: formData.family_id || null,
+        brand_id: formData.brand_id || null,
         compatible_models: formData.compatible_models.split(',').map(m => m.trim()).filter(m => m),
         low_stock_threshold: parseInt(formData.low_stock_threshold) || 10,
         use_average_price: useAveragePrice,
@@ -383,6 +415,7 @@ export default function AddProductPage() {
             barcode: '',
             article_code: codeResponse.data.article_code,
             family_id: '',
+            brand_id: '',
             compatible_models: '',
             low_stock_threshold: '10'
           }));
@@ -454,6 +487,23 @@ export default function AddProductPage() {
                         <SelectContent>
                           <SelectItem value="none">{isAr ? 'بدون عائلة' : 'No Family'}</SelectItem>
                           {families.map(f => <SelectItem key={f.id} value={f.id}>{isAr ? f.name_ar : f.name_en}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">{isAr ? 'الماركة' : 'Marque'}</Label>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setShowAddBrandDialog(true)} className="h-5 px-1 text-xs" data-testid="quick-add-brand-btn">
+                          <Plus className="h-3 w-3" />{isAr ? 'إضافة ماركة' : 'Ajouter marque'}
+                        </Button>
+                      </div>
+                      <Select value={formData.brand_id || "none"} onValueChange={(v) => setFormData(p => ({ ...p, brand_id: v === "none" ? "" : v }))}>
+                        <SelectTrigger className="h-9" data-testid="brand-select">
+                          <SelectValue placeholder={isAr ? 'اختر الماركة' : 'Choisir une marque'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{isAr ? 'بدون ماركة' : 'Sans marque'}</SelectItem>
+                          {brands.map(b => <SelectItem key={b.id} value={b.id} data-testid={`brand-option-${b.id}`}>{isAr ? b.name_ar : (b.name_en || b.name_ar)}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
@@ -760,6 +810,23 @@ export default function AddProductPage() {
             <div className="flex gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => setShowAddFamilyDialog(false)} className="flex-1">{t.cancel}</Button>
               <Button size="sm" onClick={handleAddFamily} disabled={addingFamily} className="flex-1">{addingFamily ? t.loading : t.save}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Brand Dialog (p217) */}
+      <Dialog open={showAddBrandDialog} onOpenChange={setShowAddBrandDialog}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader className="pb-2"><DialogTitle className="text-lg">{isAr ? 'إضافة ماركة جديدة' : 'Nouvelle marque'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">{isAr ? 'اسم الماركة' : 'Nom de la marque'}</Label>
+              <Input className="h-9" data-testid="brand-name-input" value={newBrand.name} onChange={(e) => setNewBrand({ name: e.target.value })} placeholder={isAr ? 'مثال: سامسونغ' : 'Ex: Samsung'} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setShowAddBrandDialog(false)} className="flex-1">{t.cancel}</Button>
+              <Button size="sm" onClick={handleAddBrand} disabled={addingBrand} className="flex-1" data-testid="brand-save-btn">{addingBrand ? t.loading : t.save}</Button>
             </div>
           </div>
         </DialogContent>

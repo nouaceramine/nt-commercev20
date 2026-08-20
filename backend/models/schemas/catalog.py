@@ -23,6 +23,7 @@ class ProductCreate(BaseModel):
     barcode: Optional[str] = ""
     article_code: Optional[str] = ""
     family_id: Optional[str] = None
+    brand_id: Optional[str] = None  # p217: ماركة/علامة تجارية
     use_average_price: Optional[bool] = False
     # Stock
     unit_of_measure: Optional[str] = "U"
@@ -112,6 +113,7 @@ class ProductUpdate(BaseModel):
     barcode: Optional[str] = None
     article_code: Optional[str] = None  # كود المنتج
     family_id: Optional[str] = None
+    brand_id: Optional[str] = None  # p217: ماركة/علامة تجارية
     use_average_price: Optional[bool] = None
     allow_online_payment: Optional[bool] = None  # p149
     shipping_provider: Optional[str] = None  # p150
