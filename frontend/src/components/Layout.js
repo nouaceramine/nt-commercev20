@@ -77,6 +77,8 @@ import {
   Calendar,
   Activity,
   Handshake,
+  ArrowLeft,
+  ArrowRight,
   KeyRound, Factory
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
@@ -838,14 +840,27 @@ export const Layout = ({ children }) => {
       {/* Mobile Header */}
       <header className="md:hidden fixed top-0 inset-x-0 z-50 bg-card/80 backdrop-blur-md border-b">
         <div className="flex items-center justify-between px-4 h-16">
-          <button
+          <div className="flex items-center">
+            {/* p214: back button — hidden on the dashboard */}
+            {location.pathname !== '/' && (
+              <button
+                onClick={() => navigate(-1)}
+                className="p-2 hover:bg-muted rounded-lg"
+                data-testid="nav-back-btn"
+                title={language === 'ar' ? 'رجوع' : 'Retour'}
+              >
+                {isRTL ? <ArrowRight className="h-5 w-5" /> : <ArrowLeft className="h-5 w-5" />}
+              </button>
+            )}
+            <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 hover:bg-muted rounded-lg"
             data-testid="mobile-menu-btn"
           >
             <Menu className="h-6 w-6" />
-          </button>
-          
+            </button>
+          </div>
+
           <div className="flex items-center gap-2 min-w-0">
             {brandLogo ? (
               <img src={brandLogo} alt={brandName} className="h-8 w-8 rounded-lg object-cover border flex-shrink-0" />
@@ -1093,6 +1108,17 @@ export const Layout = ({ children }) => {
       <div className={`transition-all duration-300 ${collapsed ? 'md:ms-16' : 'md:ms-64'}`}>
         {/* Desktop Header */}
         <header className="hidden md:flex items-center justify-between h-16 px-8 bg-card/80 backdrop-blur-md border-b sticky top-0 z-40">
+          {/* p214: back button — hidden on the dashboard */}
+          {location.pathname !== '/' && (
+            <button
+              onClick={() => navigate(-1)}
+              className="p-2 me-2 rounded-lg hover:bg-muted transition-colors"
+              data-testid="nav-back-btn"
+              title={language === 'ar' ? 'رجوع' : 'Retour'}
+            >
+              {isRTL ? <ArrowRight className="h-5 w-5 text-muted-foreground" /> : <ArrowLeft className="h-5 w-5 text-muted-foreground" />}
+            </button>
+          )}
           {/* Search Bar - Using UnifiedSearch */}
           <div className="flex-1 max-w-xl">
             <UnifiedSearch mode="header" />
