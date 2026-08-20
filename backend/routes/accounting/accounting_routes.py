@@ -918,10 +918,80 @@ async def get_tax_summary(
     period: str,
     user=Depends(get_current_user)
 ):
-    """Get tax summary"""
-    from services.ai.agents import TaxAssistantAgent
-    tax_agent = TaxAssistantAgent(db)
-    return await tax_agent.calculate_tax_summary(period)
+    """p207: tax summary from journal-entry LINES (was document-based via
+    TaxAssistantAgent — counted every sales doc of the year and matched a
+    non-existent expense_date field, so expenses always came out 0).
+    period = YYYY or YYYY-MM. Response keeps the legacy keys and adds the
+    journal detail."""
+    if len(period) == 4 and period.isdigit():
+        start, end = f"{period}-01-01", f"{period}-12-31"
+    elif len(period) == 7 and period[4] == "-" and period[:4].isdigit() and period[5:].isdigit():
+        start, end = f"{period}-01", f"{period}-31"  # ISO strings compare lexicographically
+    else:
+        raise HTTPException(status_code=400, detail="period بصيغة YYYY أو YYYY-MM")
+
+    pipeline = [
+        {"$match": {"date": {"$gte": start, "$lte": end}}},
+        {"$unwind": "$lines"},
+        {"$group": {
+            "_id": "$lines.account_code",
+            "account_name": {"$first": "$lines.account_name"},
+            "total_debit": {"$sum": {"$ifNull": ["$lines.debit", 0]}},
+            "total_credit": {"$sum": {"$ifNull": ["$lines.credit", 0]}},
+        }},
+    ]
+    revenue_accounts, expense_accounts = [], []
+    revenue_total = cogs_total = operating_total = 0.0
+    entries_count = await db.journal_entries.count_documents({"date": {"$gte": start, "$lte": end}})
+    async for row in db.journal_entries.aggregate(pipeline):
+        code = str(row.get("_id") or "")
+        if code[:1] == "7":
+            amt = round(row["total_credit"] - row["total_debit"], 2)
+            revenue_total += amt
+            if amt:
+                revenue_accounts.append({"account_code": code, "account_name": row.get("account_name"), "amount": amt})
+        elif code.startswith("600"):
+            amt = round(row["total_debit"] - row["total_credit"], 2)
+            cogs_total += amt
+            if amt:
+                expense_accounts.append({"account_code": code, "account_name": row.get("account_name"), "amount": amt})
+        elif code[:1] == "6":
+            amt = round(row["total_debit"] - row["total_credit"], 2)
+            operating_total += amt
+            if amt:
+                expense_accounts.append({"account_code": code, "account_name": row.get("account_name"), "amount": amt})
+
+    revenue_total = round(revenue_total, 2)
+    cogs_total = round(cogs_total, 2)
+    operating_total = round(operating_total, 2)
+    deductible = round(cogs_total + operating_total, 2)
+    taxable_income = round(max(0.0, revenue_total - deductible), 2)
+    tax_rate = 0.19  # Algeria: TAP/TVA/IBS estimate (unchanged from legacy)
+    return {
+        "period": period,
+        "window": {"start_date": start, "end_date": end},
+        "total_revenue": revenue_total,
+        "total_deductible_expenses": deductible,
+        "cogs_total": cogs_total,
+        "operating_total": operating_total,
+        "taxable_income": taxable_income,
+        "tax_rate": tax_rate,
+        "estimated_tax": round(taxable_income * tax_rate, 2),
+        "tax_breakdown": {
+            "TAP": round(taxable_income * 0.01, 2),
+            "TVA": round(revenue_total * 0.19, 2),
+            "IBS": round(taxable_income * 0.19, 2),
+        },
+        "revenue_accounts": revenue_accounts,
+        "expense_accounts": expense_accounts,
+        "entries_count": entries_count,
+        "basis": "journal_lines",
+        "recommendations": [
+            "تأكد من توثيق جميع المصروفات القابلة للخصم",
+            "احتفظ بجميع الفواتير لمدة 10 سنوات",
+        ],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 # ============ AUDIT LOG ============
 
