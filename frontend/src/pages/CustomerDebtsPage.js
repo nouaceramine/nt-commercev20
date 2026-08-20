@@ -72,6 +72,7 @@ export default function CustomerDebtsPage() {
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentNotes, setPaymentNotes] = useState('');
+  const [cashBoxes, setCashBoxes] = useState([]);  // p216: real boxes for the pay dialog
   const [submitting, setSubmitting] = useState(false);
   
   // Debt details dialog
@@ -168,14 +169,15 @@ export default function CustomerDebtsPage() {
     setSubmitting(true);
     try {
       const token = localStorage.getItem('token');
-      await apiClient.post(`/customers/${selectedCustomer.customer_id}/debt/pay`, {
+      const res = await apiClient.post(`/customers/${selectedCustomer.customer_id}/debt/pay`, {
         customer_id: selectedCustomer.customer_id,
         amount: paymentAmount,
         payment_method: paymentMethod,
         notes: paymentNotes
       });
       
-      toast.success(t.debtPaid);
+      const sessNote = language === 'ar' ? ' — سُجّل في حصتك المفتوحة' : ' — enregistré dans votre session ouverte';
+      toast.success(t.debtPaid + (res?.data?.session_attached ? sessNote : ''));
       setShowPaymentDialog(false);
       setSelectedCustomer(null);
       setPaymentAmount(0);
@@ -189,10 +191,17 @@ export default function CustomerDebtsPage() {
     }
   };
 
-  const openPaymentDialog = (customer) => {
+  const openPaymentDialog = async (customer) => {
     setSelectedCustomer(customer);
     setPaymentAmount(customer.total_debt);
     setShowPaymentDialog(true);
+    // p216: load the real cash boxes so the cashier picks where money lands
+    if (cashBoxes.length === 0) {
+      try {
+        const { data } = await apiClient.get('/cash-boxes');
+        setCashBoxes(Array.isArray(data) ? data : []);
+      } catch { /* selector falls back to the three classic methods */ }
+    }
   };
 
   const exportToExcel = async () => {
@@ -771,20 +780,32 @@ export default function CustomerDebtsPage() {
                 </div>
 
                 <div>
-                  <Label>{t.paymentMethod}</Label>
-                  <div className="flex gap-2 mt-2">
-                    <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="flex-1">
-                      <Banknote className="h-4 w-4 me-1" />
-                      {t.cash}
-                    </Button>
-                    <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="flex-1">
-                      <CreditCard className="h-4 w-4 me-1" />
-                      {t.bank}
-                    </Button>
-                    <Button type="button" variant={paymentMethod === 'wallet' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('wallet')} className="flex-1">
-                      <Wallet className="h-4 w-4 me-1" />
-                    </Button>
-                  </div>
+                  <Label>{language === 'ar' ? 'الصندوق المستلم' : 'Caisse de réception'}</Label>
+                  {cashBoxes.length > 0 ? (
+                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                      <SelectTrigger className="mt-2" data-testid="debt-pay-box-select">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cashBoxes.map((b) => (
+                          <SelectItem key={b.id} value={b.id} data-testid={`debt-pay-box-${b.id}`}>
+                            {b.name} — {(Number(b.balance) || 0).toLocaleString()} {language === 'ar' ? 'دج' : 'DA'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex gap-2 mt-2">
+                      <Button type="button" variant={paymentMethod === 'cash' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('cash')} className="flex-1">
+                        <Banknote className="h-4 w-4 me-1" />
+                        {t.cash}
+                      </Button>
+                      <Button type="button" variant={paymentMethod === 'bank' ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod('bank')} className="flex-1">
+                        <CreditCard className="h-4 w-4 me-1" />
+                        {t.bank}
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2 pt-4">

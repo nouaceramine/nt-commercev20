@@ -102,14 +102,14 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
             st["total_sales"] += session.get("total_sales", 0)
             st["cash_sales"] += session.get("cash_sales", 0)
             st["credit_sales"] += session.get("credit_sales", 0)
-            expected = session.get("opening_cash", 0) + session.get("cash_sales", 0)
+            expected = session.get("opening_cash", 0) + session.get("cash_sales", 0) + session.get("debt_collections", 0) - session.get("debt_payouts", 0)  # p216
             st["total_difference"] += (session.get("closing_cash", 0) - expected)
         overall = {
             "total_sessions": len(sessions),
             "total_sales": sum(s.get("total_sales", 0) for s in sessions),
             "total_cash_sales": sum(s.get("cash_sales", 0) for s in sessions),
             "total_credit_sales": sum(s.get("credit_sales", 0) for s in sessions),
-            "total_difference": sum((s.get("closing_cash", 0) - (s.get("opening_cash", 0) + s.get("cash_sales", 0))) for s in sessions)
+            "total_difference": sum((s.get("closing_cash", 0) - (s.get("opening_cash", 0) + s.get("cash_sales", 0) + s.get("debt_collections", 0) - s.get("debt_payouts", 0))) for s in sessions)  # p216
         }
         return {"period_days": days, "overall": overall, "by_user": list(user_stats.values())}
 
@@ -139,11 +139,20 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
                     if product:
                         total_profit += (item.get("price", 0) - product.get("purchase_price", 0)) * item.get("quantity", 1)
 
+        # p216: debt settlements on the cash drawer within the window count
+        # toward expected cash — customer collections add, supplier payments subtract
+        debt_txs = await db.transactions.find(
+            {"reference_type": "debt_payment", "cash_box_id": "cash",
+             "created_at": {"$gte": opened_at, "$lte": closed_at}}, {"_id": 0}).to_list(1000)
+        debt_collections = sum(t.get("amount", 0) for t in debt_txs if t.get("type") == "income")
+        debt_payouts = sum(t.get("amount", 0) for t in debt_txs if t.get("type") == "expense")
+
         update_data = {
             "closing_cash": closing_data.closing_cash, "closed_at": closing_data.closed_at,
             "notes": closing_data.notes or "", "status": "closed",
             "total_sales": total_sales, "cash_sales": cash_sales,
-            "credit_sales": credit_sales, "sales_count": len(sales), "total_profit": total_profit
+            "credit_sales": credit_sales, "sales_count": len(sales), "total_profit": total_profit,
+            "debt_collections": debt_collections, "debt_payouts": debt_payouts,
         }
         await db.daily_sessions.update_one({"id": session_id}, {"$set": update_data})
         updated = await db.daily_sessions.find_one({"id": session_id}, {"_id": 0})
@@ -152,7 +161,7 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         # Cash difference notification
         sys_settings = await db.system_settings.find_one({"id": "global"}, {"_id": 0})
         threshold = sys_settings.get("cash_difference_threshold", 1000) if sys_settings else 1000
-        expected_cash = session.get("opening_cash", 0) + cash_sales
+        expected_cash = session.get("opening_cash", 0) + cash_sales + debt_collections - debt_payouts  # p216
         difference = closing_data.closing_cash - expected_cash
         if abs(difference) >= threshold:
             emp_name = session.get("user_name", session.get("created_by", "موظف"))

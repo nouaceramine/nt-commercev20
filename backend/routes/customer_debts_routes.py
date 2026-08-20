@@ -45,19 +45,27 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         from services.outbox import outbox_write
         async with await _client.start_session() as _tx:
             async with _tx.start_transaction():
+                # p216: the destination must be a real cash box (owner request:
+                # choose among available boxes — no phantom boxes)
+                box = await db.cash_boxes.find_one({"id": payment.payment_method}, session=_tx)
+                if not box:
+                    raise HTTPException(status_code=400, detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                # p216: attach the payment to the collector's OPEN daily session
+                open_session = await db.daily_sessions.find_one({"user_id": user["id"], "status": "open"}, session=_tx)
+                session_id = open_session["id"] if open_session else None
                 # p64: allocate across open sales via `remaining` (legacy `debt_amount` synced too)
                 actual_payment, sales_updated = await allocate_customer_payment(db, customer_id, payment.amount, method=payment.payment_method, session=_tx)
                 if actual_payment <= 0:
                     raise HTTPException(status_code=400, detail="Customer has no debt")
                 remaining_payment = payment.amount - actual_payment
                 now = datetime.now(timezone.utc).isoformat()
-                payment_record = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "amount": actual_payment, "payment_method": payment.payment_method, "notes": payment.notes, "sales_updated": sales_updated, "created_at": now, "created_by": user.get("name", "")}
+                payment_record = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "amount": actual_payment, "payment_method": payment.payment_method, "notes": payment.notes, "sales_updated": sales_updated, "session_id": session_id, "created_at": now, "created_by": user.get("name", "")}
                 await db.debt_payments.insert_one(payment_record, session=_tx)
                 await adjust_customer_mirror(db, customer_id, total_debt=-actual_payment, balance=-actual_payment, session=_tx)
                 # p64: money received must enter a cash box (personal money stays outside boxes)
                 if True:  # p68: personal box is a real ledger
                     await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": actual_payment}, "$set": {"updated_at": now}}, session=_tx)
-                    await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "income", "amount": actual_payment, "description": f"سداد دين زبون - {customer.get('name', '')}", "reference_type": "debt_payment", "reference_id": payment_record["id"], "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                    await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "income", "amount": actual_payment, "description": f"سداد دين زبون - {customer.get('name', '')}", "reference_type": "debt_payment", "reference_id": payment_record["id"], "session_id": session_id, "created_at": now, "created_by": user.get("name", "")}, session=_tx)
                 # p195: outbox → auto journal entry (Dr box / Cr 411)
                 await outbox_write(
                     _main_db, "customer.payment_received",
@@ -73,7 +81,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
                     source="customer_debts_routes",
                     session=_tx,
                 )
-        return {"success": True, "payment_applied": actual_payment, "remaining_from_payment": remaining_payment, "sales_updated": sales_updated}
+        return {"success": True, "payment_applied": actual_payment, "remaining_from_payment": remaining_payment, "sales_updated": sales_updated, "session_id": session_id, "session_attached": bool(session_id)}  # p216
 
     @router.post("/supplier-debts/pay")
     async def pay_supplier_debt(payment: SupplierDebtPayment, user: dict = Depends(require_tenant)):
