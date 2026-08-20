@@ -264,3 +264,52 @@ async def post_expense_reversal(tdb, payload: dict):
         description=f"قيد عكسي تلقائي — حذف مصروف {payload.get('title', '')}",
         lines=lines,
     )
+
+# ── p195: debt settlements ───────────────────────────────────────────────────
+
+async def post_customer_payment_entry(tdb, payload: dict):
+    """customer.payment_received → Dr cash-box / Cr accounts receivable (411)."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "customer_payment"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    lines = [
+        _line(accounts[box_code], debit=amount),
+        _line(accounts["411"], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("customer_name", ""),
+        reference_id=payment_id,
+        source_tag="customer_payment",
+        description=f"قيد تلقائي — تحصيل دين من العميل {payload.get('customer_name', '')}",
+        lines=lines,
+    )
+
+
+async def post_supplier_payment_entry(tdb, payload: dict):
+    """supplier.payment_made → Dr accounts payable (401) / Cr cash-box."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "supplier_payment"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    lines = [
+        _line(accounts["401"], debit=amount),
+        _line(accounts[box_code], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("supplier_name", ""),
+        reference_id=payment_id,
+        source_tag="supplier_payment",
+        description=f"قيد تلقائي — سداد دين للمورد {payload.get('supplier_name', '')}",
+        lines=lines,
+    )

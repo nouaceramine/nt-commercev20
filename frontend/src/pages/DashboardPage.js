@@ -140,7 +140,9 @@ export default function DashboardPage() {
     const _un4 = onEvent('purchase.recorded', fetchData);
     const _un5 = onEvent('expense.created', fetchData);
     const _un6 = onEvent('expense.deleted', fetchData);
-    return () => { _un1(); _un2(); _un3(); _un4(); _un5(); _un6(); };
+    const _un7 = onEvent('customer.payment_received', fetchData);  // p195
+    const _un8 = onEvent('supplier.payment_made', fetchData);  // p195
+    return () => { _un1(); _un2(); _un3(); _un4(); _un5(); _un6(); _un7(); _un8(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const Arrow = isRTL ? ArrowLeft : ArrowRight;

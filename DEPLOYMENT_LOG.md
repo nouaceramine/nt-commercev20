@@ -2928,3 +2928,17 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - نسخة احتياطية: `/opt/ntcommerce/backups/p194/`
 - إصدار الواجهة: **20260820_111100** — الحزمة `main.e5c5947f.js`
 - تحقق: esbuild OK للصفحتين؛ الحزمة المباشرة تحتوي سلاسل `events/stream` و`purchase.recorded` و`sale.refunded`؛ `/api/events/stream` يرد 200 text/event-stream عبر Cloudflare/nginx؛ `/api/health` = ok.
+
+## p195 — القيود الآلية لتسوية الديون + تغليفة ACID لمساري التسوية — 2026-08-20
+
+**قبل:** تحصيل دين عميل أو سداد مورد كان يحرّك الصندوق والذمم دون أي قيد يومية — الحلقة الأخيرة الناقصة في سير العمل المحاسبي المتكامل. مسارا التسوية غير ذرّيين (كتابات متعددة بلا معاملة).
+
+**بعد:**
+- `services/balances.py`: معامل `session=None` اختياري في `allocate_customer_payment` / `allocate_supplier_payment` / `adjust_customer_mirror` / `adjust_supplier_mirror` (توافق كامل مع كل المستدعين الحاليين).
+- `routes/customer_debts_routes.py`: المساران `POST /customers/{id}/debt/pay` و`POST /supplier-debts/pay` مغلّفان بمعاملة Mongo ذرّية (تخصيص FIFO + سجل الدفعة + حركة الصندوق + حدث outbox يلتزم أو يُجهض معاً)؛ حدثا `customer.payment_received` و`supplier.payment_made`؛ حقل `settlement_id` إضافي على معاملة المورد للتتبع.
+- `services/accounting_auto.py`: `post_customer_payment_entry` (مدين الصندوق / دائن 411) و`post_supplier_payment_entry` (مدين 401 / دائن الصندوق) — منع التكرار عبر (reference_id, source_tag).
+- `services/event_consumers.py`: معالجان جديدان — الإجمالي **15 معالجاً**.
+- `DashboardPage.js`: اشتراك الحدثين الجديدين → تحديث اللوحة لحظياً عند أي تسوية.
+- نسخة احتياطية: `/opt/ntcommerce/backups/p195/` — إصدار الواجهة: **20260820_112849** — الحزمة `main.ca5b855d.js`
+
+**الاختبار الحي (curl):** تجهيزات مباشرة (عميل + بيع آجل 300، مورد + شراء آجل 500) → تحصيل 300 نقداً: قيد متوازن Dr 530 / Cr 411، الصندوق 11300→11600، البيع `paid` → سداد 500 من البنك: قيد متوازن Dr 401 / Cr 514، البنك −500، الشراء `paid` → الاختباران السالبان (دفع بلا دين) 400 مع **صفر كتابات جزئية** (إجهاض ذرّي) → قيدان فقط رغم 4 عمال (منع التكرار يعمل) → تنظيف كامل: قيود=0، أرصدة الحسابات=0، الصندوق=11300، صفر مخلفات.

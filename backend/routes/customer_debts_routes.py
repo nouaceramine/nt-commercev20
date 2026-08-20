@@ -40,37 +40,79 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         customer = await db.customers.find_one({"id": customer_id})
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
-        # p64: allocate across open sales via `remaining` (legacy `debt_amount` synced too)
-        actual_payment, sales_updated = await allocate_customer_payment(db, customer_id, payment.amount, method=payment.payment_method)
-        if actual_payment <= 0:
-            raise HTTPException(status_code=400, detail="Customer has no debt")
-        remaining_payment = payment.amount - actual_payment
-        now = datetime.now(timezone.utc).isoformat()
-        payment_record = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "amount": actual_payment, "payment_method": payment.payment_method, "notes": payment.notes, "sales_updated": sales_updated, "created_at": now, "created_by": user.get("name", "")}
-        await db.debt_payments.insert_one(payment_record)
-        await adjust_customer_mirror(db, customer_id, total_debt=-actual_payment, balance=-actual_payment)
-        # p64: money received must enter a cash box (personal money stays outside boxes)
-        if True:  # p68: personal box is a real ledger
-            await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": actual_payment}, "$set": {"updated_at": now}})
-            await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "income", "amount": actual_payment, "description": f"سداد دين زبون - {customer.get('name', '')}", "reference_type": "debt_payment", "reference_id": payment_record["id"], "created_at": now, "created_by": user.get("name", "")})
+        # p195: atomic settlement — allocation + payment record + box movement + outbox event commit/abort together
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                # p64: allocate across open sales via `remaining` (legacy `debt_amount` synced too)
+                actual_payment, sales_updated = await allocate_customer_payment(db, customer_id, payment.amount, method=payment.payment_method, session=_tx)
+                if actual_payment <= 0:
+                    raise HTTPException(status_code=400, detail="Customer has no debt")
+                remaining_payment = payment.amount - actual_payment
+                now = datetime.now(timezone.utc).isoformat()
+                payment_record = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "amount": actual_payment, "payment_method": payment.payment_method, "notes": payment.notes, "sales_updated": sales_updated, "created_at": now, "created_by": user.get("name", "")}
+                await db.debt_payments.insert_one(payment_record, session=_tx)
+                await adjust_customer_mirror(db, customer_id, total_debt=-actual_payment, balance=-actual_payment, session=_tx)
+                # p64: money received must enter a cash box (personal money stays outside boxes)
+                if True:  # p68: personal box is a real ledger
+                    await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": actual_payment}, "$set": {"updated_at": now}}, session=_tx)
+                    await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "income", "amount": actual_payment, "description": f"سداد دين زبون - {customer.get('name', '')}", "reference_type": "debt_payment", "reference_id": payment_record["id"], "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                # p195: outbox → auto journal entry (Dr box / Cr 411)
+                await outbox_write(
+                    _main_db, "customer.payment_received",
+                    {
+                        "payment_id": payment_record["id"],
+                        "customer_id": customer_id,
+                        "customer_name": customer.get("name", ""),
+                        "amount": actual_payment,
+                        "payment_method": payment.payment_method,
+                        "sales_updated": len(sales_updated),
+                    },
+                    tenant_id=user.get("tenant_id") or "platform",
+                    source="customer_debts_routes",
+                    session=_tx,
+                )
         return {"success": True, "payment_applied": actual_payment, "remaining_from_payment": remaining_payment, "sales_updated": sales_updated}
 
     @router.post("/supplier-debts/pay")
     async def pay_supplier_debt(payment: SupplierDebtPayment, user: dict = Depends(require_tenant)):
-        # p64: shared FIFO allocator (same semantics as before)
-        amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method)
-        if amount_applied <= 0:
-            raise HTTPException(status_code=400, detail="No outstanding debt for this supplier")
-        supplier = await db.suppliers.find_one({"id": payment.supplier_id})
-        if supplier:
-            # p62 fix: paying debt reduces what we OWE (balance) — lifetime purchases must not shrink
-            await adjust_supplier_mirror(db, payment.supplier_id, balance=-payment.amount)
-        now = datetime.now(timezone.utc).isoformat()
-        # p62: personal money lives outside business cash boxes — no box movement
-        if True:  # p68: personal box is a real ledger
-            # p64: standard transaction shape (cash_box_id) so /cash ledger shows it
-            await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "expense", "amount": payment.amount, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "reference_type": "debt_payment", "reference_id": payment.supplier_id, "created_at": now, "created_by": user.get("name", "")})
-            await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}, "$set": {"updated_at": now}})
+        # p195: atomic settlement — allocation + mirror + box movement + outbox event commit/abort together
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        settlement_id = str(uuid.uuid4())
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                # p64: shared FIFO allocator (same semantics as before)
+                amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method, session=_tx)
+                if amount_applied <= 0:
+                    raise HTTPException(status_code=400, detail="No outstanding debt for this supplier")
+                supplier = await db.suppliers.find_one({"id": payment.supplier_id}, session=_tx)
+                if supplier:
+                    # p62 fix: paying debt reduces what we OWE (balance) — lifetime purchases must not shrink
+                    await adjust_supplier_mirror(db, payment.supplier_id, balance=-payment.amount, session=_tx)
+                now = datetime.now(timezone.utc).isoformat()
+                # p62: personal money lives outside business cash boxes — no box movement
+                if True:  # p68: personal box is a real ledger
+                    # p64: standard transaction shape (cash_box_id) so /cash ledger shows it
+                    await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "expense", "amount": payment.amount, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "reference_type": "debt_payment", "reference_id": payment.supplier_id, "settlement_id": settlement_id, "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                    await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}, "$set": {"updated_at": now}}, session=_tx)
+                # p195: outbox → auto journal entry (Dr 401 / Cr box)
+                await outbox_write(
+                    _main_db, "supplier.payment_made",
+                    {
+                        "payment_id": settlement_id,
+                        "supplier_id": payment.supplier_id,
+                        "supplier_name": supplier.get("name", "") if supplier else "",
+                        "amount": payment.amount,
+                        "amount_applied": amount_applied,
+                        "payment_method": payment.payment_method,
+                        "purchases_updated": len(updated_purchases),
+                    },
+                    tenant_id=user.get("tenant_id") or "platform",
+                    source="customer_debts_routes",
+                    session=_tx,
+                )
         return {"message": "Payment recorded successfully", "amount_paid": payment.amount, "updated_purchases": updated_purchases}
 
     @router.get("/debts/summary")

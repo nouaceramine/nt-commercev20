@@ -25,7 +25,8 @@ async def customer_debt_aggregates(db, limit: int = 1000):
 async def adjust_customer_mirror(db, customer_id: str, *,
                                  balance: Optional[float] = None,
                                  total_debt: Optional[float] = None,
-                                 total_purchases: Optional[float] = None):
+                                 total_purchases: Optional[float] = None,
+                                 session=None):
     """$inc the stored customer mirror fields. None = leave field untouched."""
     inc = {}
     if balance is not None:
@@ -35,12 +36,13 @@ async def adjust_customer_mirror(db, customer_id: str, *,
     if total_purchases is not None:
         inc["total_purchases"] = total_purchases
     if inc:
-        await db.customers.update_one({"id": customer_id}, {"$inc": inc})
+        await db.customers.update_one({"id": customer_id}, {"$inc": inc}, session=session)
 
 
 async def adjust_supplier_mirror(db, supplier_id: str, *,
                                  balance: Optional[float] = None,
-                                 total_purchases: Optional[float] = None):
+                                 total_purchases: Optional[float] = None,
+                                 session=None):
     """$inc the stored supplier mirror fields. None = leave field untouched."""
     inc = {}
     if balance is not None:
@@ -48,10 +50,10 @@ async def adjust_supplier_mirror(db, supplier_id: str, *,
     if total_purchases is not None:
         inc["total_purchases"] = total_purchases
     if inc:
-        await db.suppliers.update_one({"id": supplier_id}, {"$inc": inc})
+        await db.suppliers.update_one({"id": supplier_id}, {"$inc": inc}, session=session)
 
 
-async def allocate_customer_payment(db, customer_id: str, amount: float, method: str = None):
+async def allocate_customer_payment(db, customer_id: str, amount: float, method: str = None, session=None):
     """p64: FIFO-allocate a customer debt payment across open sales.
 
     Sales may store open debt in `remaining` (current) or `debt_amount` (legacy);
@@ -59,7 +61,8 @@ async def allocate_customer_payment(db, customer_id: str, amount: float, method:
     Returns (applied_amount, sales_updated).
     """
     sales = await db.sales.find(
-        {"customer_id": customer_id, "$or": [{"remaining": {"$gt": 0}}, {"debt_amount": {"$gt": 0}}]}
+        {"customer_id": customer_id, "$or": [{"remaining": {"$gt": 0}}, {"debt_amount": {"$gt": 0}}]},
+        session=session,
     ).sort("created_at", 1).to_list(100)
     remaining_payment = float(amount)
     sales_updated = []
@@ -79,18 +82,18 @@ async def allocate_customer_payment(db, customer_id: str, amount: float, method:
         if method:  # p67: track which box this payment used
             from datetime import datetime as _dt, timezone as _tz
             _upd["$push"] = {"payments": {"amount": applied, "method": method, "at": _dt.now(_tz.utc).isoformat()}}
-        await db.sales.update_one({"id": sale["id"]}, _upd)
+        await db.sales.update_one({"id": sale["id"]}, _upd, session=session)
         remaining_payment -= applied
         sales_updated.append({"sale_id": sale["id"], "payment_applied": applied, "remaining_debt": new_debt})
     return round(float(amount) - remaining_payment, 2), sales_updated
 
 
-async def allocate_supplier_payment(db, supplier_id: str, amount: float, method: str = None):
+async def allocate_supplier_payment(db, supplier_id: str, amount: float, method: str = None, session=None):
     """p64: FIFO-allocate a supplier debt payment across open purchases (`remaining`).
 
     Oldest purchase first. Returns (applied_amount, purchases_updated).
     """
-    purchases = await db.purchases.find({"supplier_id": supplier_id, "remaining": {"$gt": 0}}).sort("created_at", 1).to_list(100)
+    purchases = await db.purchases.find({"supplier_id": supplier_id, "remaining": {"$gt": 0}}, session=session).sort("created_at", 1).to_list(100)
     remaining_payment = float(amount)
     purchases_updated = []
     for purchase in purchases:
@@ -110,7 +113,7 @@ async def allocate_supplier_payment(db, supplier_id: str, amount: float, method:
         }}
         if method:  # p67: track which box this payment used
             _upd["$push"] = {"payments": {"amount": applied, "method": method, "at": datetime.now(timezone.utc).isoformat()}}
-        await db.purchases.update_one({"id": purchase["id"]}, _upd)
+        await db.purchases.update_one({"id": purchase["id"]}, _upd, session=session)
         remaining_payment -= applied
         purchases_updated.append({"purchase_id": purchase["id"], "paid": applied, "payment_applied": applied, "remaining_debt": new_debt})
     return round(float(amount) - remaining_payment, 2), purchases_updated
