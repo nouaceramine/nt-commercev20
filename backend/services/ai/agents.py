@@ -205,7 +205,13 @@ class FraudDetectorAgent:
 
 
 class SmartReporterAgent:
-    """Agent 5: Generates financial reports automatically"""
+    """Agent 5: Generates financial reports automatically.
+
+    p212 LEGACY: the REST reports (/accounting/reports/profit-loss,
+    balance-sheet, cash-flow) no longer call this — they compute from
+    journal-entry lines. This class remains only for the AI-agent registry
+    surface; its document-based math (expense_date field does not exist)
+    must not be used for new reports."""
     
     def __init__(self, db):
         self.db = db

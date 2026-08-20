@@ -449,26 +449,103 @@ async def create_expense(expense: dict, user=Depends(get_current_user)):
 
 # ============ FINANCIAL REPORTS ============
 
+# p212: shared helper — per-account debit-positive nets from journal LINES
+async def _jl_window_nets(tdb, start: str = None, end: str = None) -> dict:
+    date_q = {}
+    if start:
+        date_q["$gte"] = start
+    if end:
+        date_q["$lte"] = end
+    pipeline = ([{"$match": {"date": date_q}}] if date_q else []) + [
+        {"$unwind": "$lines"},
+        {"$group": {"_id": "$lines.account_code",
+                    "d": {"$sum": "$lines.debit"}, "c": {"$sum": "$lines.credit"}}},
+    ]
+    agg = await tdb.journal_entries.aggregate(pipeline).to_list(None)
+    return {r["_id"]: round(r["d"] - r["c"], 2) for r in agg}
+
+
 @router.get("/reports/profit-loss")
 async def get_profit_loss_report(
     start_date: str,
     end_date: str,
     user=Depends(get_current_user)
 ):
-    """Generate Profit & Loss report"""
-    from services.ai.agents import SmartReporterAgent
-    reporter = SmartReporterAgent(db)
-    return await reporter.generate_profit_loss(start_date, end_date)
+    """p212: P&L from journal-entry LINES (was SmartReporterAgent document
+    math: it summed every sales doc in the window and matched expenses on
+    the nonexistent expense_date field). Same response keys as legacy."""
+    nets = await _jl_window_nets(db, start_date, end_date)
+    revenue_accounts = {c: round(-n, 2) for c, n in nets.items() if c.startswith("7")}
+    total_revenue = round(sum(revenue_accounts.values()), 2)
+    total_cogs = round(nets.get("600", 0.0), 2)
+    operating = {c: n for c, n in nets.items() if c.startswith("6") and c != "600"}
+    total_expenses = round(sum(operating.values()), 2)
+    return {
+        "period_start": start_date,
+        "period_end": end_date,
+        "revenue": {"sales": total_revenue, "total": total_revenue, "accounts": revenue_accounts},
+        "cost_of_goods_sold": {"purchases": total_cogs, "total": total_cogs},
+        "gross_profit": round(total_revenue - total_cogs, 2),
+        "operating_expenses": operating,
+        "total_operating_expenses": total_expenses,
+        "operating_income": round(total_revenue - total_cogs - total_expenses, 2),
+        "net_income": round(total_revenue - total_cogs - total_expenses, 2),
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 
 @router.get("/reports/balance-sheet")
 async def get_balance_sheet(
     as_of_date: str,
     user=Depends(get_current_user)
 ):
-    """Generate Balance Sheet"""
-    from services.ai.agents import SmartReporterAgent
-    reporter = SmartReporterAgent(db)
-    return await reporter.generate_balance_sheet(as_of_date)
+    """p212: balance sheet from journal-entry LINES as of the date (was
+    SmartReporterAgent mirror/document snapshot that ignored as_of_date).
+    Same response keys as legacy."""
+    nets = await _jl_window_nets(db, None, as_of_date)
+    cash = round(sum(n for c, n in nets.items() if c.startswith("5")), 2)
+    receivables = round(nets.get("411", 0.0), 2)
+    inventory = round(nets.get("380", 0.0), 2)
+    prepaid = round(nets.get("402", 0.0), 2)
+    total_assets = round(cash + receivables + inventory + prepaid, 2)
+    payables = round(-nets.get("401", 0.0), 2)
+    deposits = round(-sum(n for c, n in nets.items() if c.startswith("2")), 2)
+    total_liabilities = round(payables + deposits, 2)
+    capital = round(-sum(n for c, n in nets.items() if c.startswith("1")), 2)
+    result = round(-sum(n for c, n in nets.items() if c[:1] in ("6", "7")), 2)
+    total_equity = round(capital + result, 2)
+    return {
+        "as_of_date": as_of_date,
+        "assets": {
+            "current_assets": {
+                "cash": cash,
+                "accounts_receivable": receivables,
+                "inventory": inventory,
+                "prepaid_expenses": prepaid
+            },
+            "total_current_assets": total_assets,
+            "total_assets": total_assets
+        },
+        "liabilities": {
+            "current_liabilities": {
+                "accounts_payable": payables,
+                "customer_deposits": deposits
+            },
+            "total_current_liabilities": total_liabilities,
+            "total_liabilities": total_liabilities
+        },
+        "equity": {
+            "capital": capital,
+            "retained_earnings": result,
+            "total_equity": total_equity
+        },
+        "total_liabilities_and_equity": round(total_liabilities + total_equity, 2),
+        "balanced": abs(total_assets - total_liabilities - total_equity) <= 0.01,
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 
 @router.get("/reports/cash-flow")
 async def get_cash_flow_report(
@@ -476,10 +553,64 @@ async def get_cash_flow_report(
     end_date: str,
     user=Depends(get_current_user)
 ):
-    """Generate Cash Flow statement"""
-    from services.ai.agents import SmartReporterAgent
-    reporter = SmartReporterAgent(db)
-    return await reporter.generate_cash_flow(start_date, end_date)
+    """p212: cash flow from journal-entry LINES — every movement on the 5xx
+    box accounts, classified by the counter accounts of its entry:
+    financing = capital 1xx, investing = fixed/inventory 3xx, else operating.
+    (Was SmartReporterAgent doc math with the nonexistent expense_date field.)
+    Same response keys as legacy."""
+    cursor = db.journal_entries.find(
+        {"date": {"$gte": start_date, "$lte": end_date}},
+        {"_id": 0, "entry_number": 1, "lines": 1})
+    op_detail = {"sales": 0.0, "receivables_collected": 0.0, "expenses": 0.0,
+                 "purchases": 0.0, "deposits": 0.0, "other": 0.0}
+    inv_net = fin_net = 0.0
+    async for entry in cursor:
+        lines = entry.get("lines", [])
+        box = round(sum(l.get("debit", 0) - l.get("credit", 0)
+                        for l in lines if str(l.get("account_code", "")).startswith("5")), 2)
+        if not box:
+            continue
+        counters = [l for l in lines if not str(l.get("account_code", "")).startswith("5")]
+        classes = {str(c.get("account_code", ""))[:1] for c in counters}
+        if "1" in classes:
+            fin_net += box
+            continue
+        if "3" in classes:
+            inv_net += box
+            continue
+        for c in counters:
+            flow = round(c.get("credit", 0) - c.get("debit", 0), 2)  # cash mirror of this line
+            code = str(c.get("account_code", ""))
+            if code.startswith("7"):
+                op_detail["sales"] += flow
+            elif code.startswith("411"):
+                op_detail["receivables_collected"] += flow
+            elif code.startswith("6"):
+                op_detail["expenses"] += flow
+            elif code.startswith("40"):
+                op_detail["purchases"] += flow
+            elif code.startswith("203"):
+                op_detail["deposits"] += flow
+            else:
+                op_detail["other"] += flow
+    op_net = round(sum(op_detail.values()), 2)
+    return {
+        "period_start": start_date,
+        "period_end": end_date,
+        "operating_activities": {
+            "cash_from_sales": round(op_detail["sales"] + op_detail["receivables_collected"], 2),
+            "cash_paid_for_expenses": round(op_detail["expenses"], 2),
+            "cash_paid_for_purchases": round(op_detail["purchases"], 2),
+            "customer_deposits": round(op_detail["deposits"], 2),
+            "other_operating": round(op_detail["other"], 2),
+            "net_cash_from_operating": op_net
+        },
+        "investing_activities": {"net_cash_from_investing": round(inv_net, 2)},
+        "financing_activities": {"net_cash_from_financing": round(fin_net, 2)},
+        "net_cash_flow": round(op_net + inv_net + fin_net, 2),
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
 
 @router.get("/reports/trial-balance")
 async def get_trial_balance(
