@@ -1,5 +1,6 @@
 import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
+import EntityActivityTimeline from '../components/EntityActivityTimeline';  // p218
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import PrintButton from '../components/print/PrintButton';
@@ -1056,6 +1057,7 @@ export default function CustomersPage() {
                     </a>
                   )}
                 </div>
+                <EntityActivityTimeline endpoint={overviewCustomer ? `/activity/customer/${overviewCustomer.id}` : null} testid="customer-activity" />
               </div>
             ) : null}
           </DialogContent>

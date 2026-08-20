@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
+import EntityActivityTimeline from '../components/EntityActivityTimeline';  // p218
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +35,7 @@ import {
 import { toast } from 'sonner';
 import { 
   Truck, Plus, Search, Edit, Trash2, Phone, Mail, MapPin, Users, DollarSign,
-  Grid3X3, List, ArrowUpDown, SortAsc, SortDesc
+  Grid3X3, List, ArrowUpDown, SortAsc, SortDesc, History
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import { LoadingState } from '../components/LoadingState';
@@ -59,6 +60,7 @@ export default function SuppliersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [activitySupplier, setActivitySupplier] = useState(null);  // p218
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [formData, setFormData] = useState({
     name: '', phone: '', email: '', address: '', notes: '', family_id: '', code: ''
@@ -427,6 +429,9 @@ export default function SuppliersPage() {
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEditDialog(supplier)}>
                             <Edit className="h-4 w-4" />
                           </Button>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setActivitySupplier(supplier)} title={language === 'ar' ? 'سجل النشاط' : "Journal d'activité"} data-testid={`supplier-activity-${supplier.id}`}>
+                            <History className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -503,15 +508,18 @@ export default function SuppliersPage() {
                       </div>
                     )}
                   </div>
-                  <div className="mt-3 pt-3 border-t">
+                  <div className="mt-3 pt-3 border-t flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="w-full gap-2 text-green-600 border-green-300 hover:bg-green-50"
+                      className="flex-1 gap-2 text-green-600 border-green-300 hover:bg-green-50"
                       onClick={() => openAdvancePaymentDialog(supplier)}
                     >
                       <DollarSign className="h-4 w-4" />
                       {language === 'ar' ? 'دفع متقدم' : 'Paiement avancé'}
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-1" onClick={() => setActivitySupplier(supplier)} data-testid={`supplier-activity-card-${supplier.id}`}>
+                      <History className="h-4 w-4" />
                     </Button>
                   </div>
                 </CardContent>
@@ -662,6 +670,19 @@ export default function SuppliersPage() {
                 </Button>
               </div>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p218: supplier activity dialog */}
+        <Dialog open={!!activitySupplier} onOpenChange={(open) => !open && setActivitySupplier(null)}>
+          <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <History className="h-5 w-5" />
+                {activitySupplier?.name}
+              </DialogTitle>
+            </DialogHeader>
+            <EntityActivityTimeline endpoint={activitySupplier ? `/activity/supplier/${activitySupplier.id}` : null} testid="supplier-activity" />
           </DialogContent>
         </Dialog>
       </div>

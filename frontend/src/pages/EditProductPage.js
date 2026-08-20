@@ -17,6 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
+import EntityActivityTimeline from '../components/EntityActivityTimeline';  // p218
 import { Switch } from '../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
@@ -806,6 +807,7 @@ export default function EditProductPage() {
                         <div><span className="text-muted-foreground">{isAr ? 'آخر شراء:' : 'Dernier achat:'}</span> <span className="font-medium">{formatDate(productHistory.last_purchase_at)}</span></div>
                         <div><span className="text-muted-foreground">{isAr ? 'آخر بيع:' : 'Dernière vente:'}</span> <span className="font-medium">{formatDate(productHistory.last_sale_at)}</span></div>
                       </div>
+                      <EntityActivityTimeline endpoint={`/activity/product/${id}`} testid="product-activity" />
                     </div>
                   )}
                 </TabsContent>
