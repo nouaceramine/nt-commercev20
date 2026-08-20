@@ -10,6 +10,10 @@ import uuid
 
 from config.database import db
 from utils.auth import get_current_user
+from services.accounting_auto import (
+    ensure_accounts, already_posted, _insert_entry, _line, BOX_ACCOUNT,
+)
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -631,7 +635,7 @@ async def get_balance_sheet_journal(
             "total_credit": {"$sum": {"$ifNull": ["$lines.credit", 0]}},
         }},
     ]
-    assets, liabilities = [], []
+    assets, liabilities, equity_accounts = [], [], []
     result = 0.0
     async for row in db.journal_entries.aggregate(pipeline):
         code = str(row.get("account_code") or "")
@@ -644,27 +648,188 @@ async def get_balance_sheet_journal(
         elif code.startswith("401"):
             if net:
                 liabilities.append({"account_code": code, "account_name": name, "amount": round(-net, 2)})
+        elif code[:1] == "1":
+            # p199: capital & other class-1 equity accounts (credit-nature)
+            if net:
+                equity_accounts.append({"account_code": code, "account_name": name, "amount": round(-net, 2)})
         elif code[:1] in ("3", "4", "5"):
             if net:
                 assets.append({"account_code": code, "account_name": name, "amount": net})
     assets.sort(key=lambda r: r["account_code"])
     liabilities.sort(key=lambda r: r["account_code"])
+    equity_accounts.sort(key=lambda r: r["account_code"])
     assets_total = round(sum(a["amount"] for a in assets), 2)
     liabilities_total = round(sum(a["amount"] for a in liabilities), 2)
     result = round(result, 2)
-    equity_total = result
+    equity_capital = round(sum(e["amount"] for e in equity_accounts), 2)
+    equity_total = round(equity_capital + result, 2)
     return {
         "as_of_date": as_of_date,
         "assets": assets,
         "assets_total": assets_total,
         "liabilities": liabilities,
         "liabilities_total": liabilities_total,
+        "equity_accounts": equity_accounts,
+        "equity_capital": equity_capital,
         "equity_result": result,
         "equity_total": equity_total,
         "is_balanced": abs(assets_total - (liabilities_total + equity_total)) < 0.01,
         "basis": "journal_lines",
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
+
+# ============ p199: OPENING BALANCES ============
+
+OPENING_SOURCE_TAG = "opening"
+
+
+async def _compute_opening(tdb):
+    """Actual pre-auto-entry balances vs current journal nets → delta lines.
+
+    Targets (what the journal SHOULD mirror today):
+      380 inventory     = Σ qty × purchase_price (stockable products)
+      5xx cash boxes    = live cash_boxes balances
+      411 receivables   = Σ remaining > 0 on sales
+      401 payables      = Σ remaining > 0 on purchases (credit-nature)
+      101 capital       = balancing figure
+    Each delta = target − current journal net (debit-positive), so the entry
+    never double-counts movements the journal already recorded.
+    """
+    inv = {"val": 0.0, "n": 0}
+    async for r in tdb.products.aggregate([
+        {"$match": {"is_non_stockable": {"$ne": True}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "val": {"$sum": {
+            "$multiply": [{"$ifNull": ["$quantity", 0]}, {"$ifNull": ["$purchase_price", 0]}]}}}},
+    ]):
+        inv = {"val": round(r["val"], 2), "n": r["n"]}
+
+    boxes = []
+    async for b in tdb.cash_boxes.find({}, {"_id": 0}).sort("id", 1):
+        code = BOX_ACCOUNT.get(b.get("id"))
+        if code:
+            boxes.append({"box_id": b.get("id"), "account_code": code,
+                          "name": b.get("name"), "balance": round(float(b.get("balance") or 0), 2)})
+
+    recv = {"val": 0.0, "n": 0}
+    async for r in tdb.sales.aggregate([
+        {"$match": {"remaining": {"$gt": 0}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "val": {"$sum": "$remaining"}}},
+    ]):
+        recv = {"val": round(r["val"], 2), "n": r["n"]}
+
+    payb = {"val": 0.0, "n": 0}
+    async for r in tdb.purchases.aggregate([
+        {"$match": {"remaining": {"$gt": 0}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "val": {"$sum": "$remaining"}}},
+    ]):
+        payb = {"val": round(r["val"], 2), "n": r["n"]}
+
+    nets = {}
+    async for r in tdb.journal_entries.aggregate([
+        {"$unwind": "$lines"},
+        {"$group": {"_id": "$lines.account_code", "net": {"$sum": {
+            "$subtract": [{"$ifNull": ["$lines.debit", 0]}, {"$ifNull": ["$lines.credit", 0]}]}}}},
+    ]):
+        nets[r["_id"]] = round(r["net"], 2)
+
+    deltas = {"380": round(inv["val"] - nets.get("380", 0.0), 2),
+              "411": round(recv["val"] - nets.get("411", 0.0), 2),
+              "401": round(-payb["val"] - nets.get("401", 0.0), 2)}
+    for b in boxes:
+        deltas[b["account_code"]] = round(b["balance"] - nets.get(b["account_code"], 0.0), 2)
+
+    deltas = {k: v for k, v in deltas.items() if abs(v) >= 0.005}
+    # The new entry must balance itself: capital offsets this entry's deltas.
+    # Existing books are already balanced, so 101's current net is NOT part
+    # of the delta (a prior opening entry already carries it).
+    capital = round(-sum(deltas.values()), 2)
+    if abs(capital) >= 0.005:
+        deltas["101"] = capital
+
+    return {
+        "inventory_value": inv["val"], "inventory_products": inv["n"],
+        "boxes": boxes,
+        "boxes_total": round(sum(b["balance"] for b in boxes), 2),
+        "receivables": recv["val"], "receivables_count": recv["n"],
+        "payables": payb["val"], "payables_count": payb["n"],
+        "journal_nets": nets,
+        "deltas": deltas,
+        "capital": capital,
+    }
+
+
+@router.get("/opening-balance/preview")
+async def opening_balance_preview(user=Depends(get_current_user)):
+    """p199: preview of the opening-balance entry (no writes)."""
+    tdb = db
+    accounts = await ensure_accounts(tdb)
+    calc = await _compute_opening(tdb)
+
+    lines = []
+    for code, delta in sorted(calc["deltas"].items()):
+        acc = accounts.get(code) or await tdb.accounts.find_one({"code": code})
+        if not acc:
+            continue
+        lines.append({
+            "account_code": code,
+            "account_name": acc.get("name_ar") or acc.get("name"),
+            "debit": delta if delta > 0 else 0.0,
+            "credit": round(-delta, 2) if delta < 0 else 0.0,
+        })
+    openings = await tdb.journal_entries.count_documents({"source_tag": OPENING_SOURCE_TAG})
+    return {
+        **{k: v for k, v in calc.items() if k != "deltas"},
+        "lines": lines,
+        "total_debit": round(sum(l["debit"] for l in lines), 2),
+        "total_credit": round(sum(l["credit"] for l in lines), 2),
+        "in_sync": not lines,
+        "already_applied": openings > 0,
+        "opening_entries": openings,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/opening-balance/apply")
+async def opening_balance_apply(body: Optional[dict] = None, user=Depends(get_current_user)):
+    """p199: post the opening-balance entry. Idempotent via the unique
+    (reference_id, source_tag) index; force=true posts a delta adjustment
+    under a fresh OPENING-n reference."""
+    tdb = db
+    force = bool((body or {}).get("force"))
+    openings = await tdb.journal_entries.count_documents({"source_tag": OPENING_SOURCE_TAG})
+    if openings and not force:
+        raise HTTPException(409, "القيد الافتتاحي مُرحَّل مسبقاً — استخدم force=true لقيد تسوية بالفرق")
+
+    accounts = await ensure_accounts(tdb)
+    calc = await _compute_opening(tdb)
+    if not calc["deltas"]:
+        raise HTTPException(400, "الأرصدة متطابقة أصلاً — لا حاجة لقيد")
+
+    lines = []
+    for code, delta in sorted(calc["deltas"].items()):
+        acc = accounts.get(code)
+        if not acc:
+            raise HTTPException(500, f"حساب مفقود: {code}")
+        lines.append(_line(acc, debit=delta if delta > 0 else 0.0,
+                           credit=-delta if delta < 0 else 0.0))
+
+    reference_id = f"OPENING-{openings + 1}"
+    try:
+        entry = await _insert_entry(
+            tdb,
+            reference=reference_id,
+            reference_id=reference_id,
+            source_tag=OPENING_SOURCE_TAG,
+            description=("قيد تسوية افتتاحية — " if openings else "قيد افتتاحي — ")
+                        + "ترحيل أرصدة ما قبل القيود الآلية (مخزون/صناديق/ذمم/رأس مال)",
+            lines=lines,
+        )
+    except DuplicateKeyError:
+        # 4 uvicorn workers: a concurrent apply won the race
+        raise HTTPException(409, "القيد الافتتاحي مُرحَّل مسبقاً (تعارض متزامن)")
+    return {"applied": True, "force": force, "reference_id": reference_id,
+            "entry": entry, "capital": calc["capital"]}
+
 
 @router.get("/reports/tax-summary")
 async def get_tax_summary(

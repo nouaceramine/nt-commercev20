@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark } from 'lucide-react';
+import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark, Wallet } from 'lucide-react';
 import { startRealtime, onEvent } from '../lib/realtime';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -20,6 +20,8 @@ const AccountingPage = () => {
   const [tb, setTb] = useState(null);
   const [income, setIncome] = useState(null);  // p197
   const [bs, setBs] = useState(null);  // p198
+  const [ob, setOb] = useState(null);  // p199: opening-balance preview
+  const [obBusy, setObBusy] = useState(false);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -35,16 +37,18 @@ const AccountingPage = () => {
   const fetchAll = useCallback(async (dateStr) => {
     try {
       const monthStart = `${dateStr.slice(0, 8)}01`;  // p197: month-to-date range
-      const [tbRes, jeRes, isRes, bsRes] = await Promise.all([
+      const [tbRes, jeRes, isRes, bsRes, obRes] = await Promise.all([
         apiClient.get(`/accounting/reports/trial-balance?as_of_date=${dateStr}`),
         apiClient.get('/accounting/journal-entries?limit=15'),
         apiClient.get(`/accounting/reports/income-statement?start_date=${monthStart}&end_date=${dateStr}`),
         apiClient.get(`/accounting/reports/balance-sheet-journal?as_of_date=${dateStr}`),
+        apiClient.get('/accounting/opening-balance/preview'),  // p199
       ]);
       setTb(tbRes.data);
       setEntries(Array.isArray(jeRes.data?.items) ? jeRes.data.items : []);
       setIncome(isRes.data);
       setBs(bsRes.data);
+      setOb(obRes.data);
     } catch (e) {
       console.error('accounting fetch failed', e);
     } finally {
@@ -69,6 +73,24 @@ const AccountingPage = () => {
     const unsubs = events.map((ev) => onEvent(ev, refresh));
     return () => unsubs.forEach((u) => u());
   }, [asOf, fetchAll]);
+
+  // p199: post the opening-balance entry, then refresh everything
+  const applyOpening = async () => {
+    if (obBusy) return;
+    const msg = isAr
+      ? 'ترحيل القيد الافتتاحي بالقيم المعروضة؟ يُنفَّذ مرة واحدة فقط.'
+      : 'Comptabiliser l\'écriture d\'ouverture avec ces montants ? Une seule fois.';
+    if (!window.confirm(msg)) return;
+    setObBusy(true);
+    try {
+      await apiClient.post('/accounting/opening-balance/apply', {});
+      await fetchAll(asOf);
+    } catch (e) {
+      console.error('opening-balance apply failed', e);
+    } finally {
+      setObBusy(false);
+    }
+  };
 
   return (
     <Layout>
@@ -292,6 +314,90 @@ const AccountingPage = () => {
                   </tfoot>
                 </table>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {ob && (
+          <Card data-testid="opening-balance-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Wallet className="h-5 w-5" />
+                {isAr ? 'الأرصدة الافتتاحية' : 'Soldes d’ouverture'}
+                {ob.already_applied ? (
+                  <Badge className="bg-emerald-600 hover:bg-emerald-600" data-testid="opening-balance-status">
+                    {isAr ? 'مُرحَّلة ✓' : 'Comptabilisés ✓'}
+                  </Badge>
+                ) : (
+                  <Badge className="bg-amber-600 hover:bg-amber-600" data-testid="opening-balance-status">
+                    {isAr ? 'غير مُرحَّلة' : 'Non comptabilisés'}
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <Badge variant="outline" data-testid="ob-inventory">
+                  {isAr ? `قيمة المخزون: ${fmt(ob.inventory_value)}` : `Stock: ${fmt(ob.inventory_value)}`}
+                </Badge>
+                <Badge variant="outline" data-testid="ob-boxes">
+                  {isAr ? `الصناديق: ${fmt(ob.boxes_total)}` : `Caisses: ${fmt(ob.boxes_total)}`}
+                </Badge>
+                <Badge variant="outline" data-testid="ob-receivables">
+                  {isAr ? `ذمم العملاء: ${fmt(ob.receivables)}` : `Créances: ${fmt(ob.receivables)}`}
+                </Badge>
+                <Badge variant="outline" data-testid="ob-payables">
+                  {isAr ? `ذمم الموردين: ${fmt(ob.payables)}` : `Dettes: ${fmt(ob.payables)}`}
+                </Badge>
+              </div>
+              {ob.in_sync ? (
+                <p className="text-sm text-muted-foreground" data-testid="opening-balance-in-sync">
+                  {isAr
+                    ? 'اليومية متطابقة مع الأرصدة الفعلية — لا حاجة لأي قيد.'
+                    : 'Le journal est aligné sur les soldes réels — aucune écriture requise.'}
+                </p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm" data-testid="opening-balance-table">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-start p-2 font-semibold">{isAr ? 'الحساب' : 'Compte'}</th>
+                          <th className="text-end p-2 font-semibold">{isAr ? 'مدين' : 'Débit'}</th>
+                          <th className="text-end p-2 font-semibold">{isAr ? 'دائن' : 'Crédit'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ob.lines.map((l) => (
+                          <tr key={l.account_code} className="border-b" data-testid={`ob-row-${l.account_code}`}>
+                            <td className="p-2 ps-6">
+                              {l.account_name} <span className="font-mono text-muted-foreground">({l.account_code})</span>
+                            </td>
+                            <td className="p-2 text-end font-mono">{l.debit ? fmt(l.debit) : '—'}</td>
+                            <td className="p-2 text-end font-mono">{l.credit ? fmt(l.credit) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 font-bold">
+                          <td className="p-2">{isAr ? 'الإجمالي' : 'Total'}</td>
+                          <td className="p-2 text-end font-mono" data-testid="ob-total-debit">{fmt(ob.total_debit)}</td>
+                          <td className="p-2 text-end font-mono" data-testid="ob-total-credit">{fmt(ob.total_credit)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  {!ob.already_applied && (
+                    <div className="mt-3">
+                      <Button onClick={applyOpening} disabled={obBusy} data-testid="opening-balance-apply">
+                        {obBusy
+                          ? (isAr ? 'جارٍ الترحيل…' : 'Comptabilisation…')
+                          : (isAr ? 'ترحيل القيد الافتتاحي' : 'Comptabiliser l’ouverture')}
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
         )}

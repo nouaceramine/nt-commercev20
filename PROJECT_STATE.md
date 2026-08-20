@@ -1,7 +1,7 @@
 # PROJECT_STATE.md — حالة مشروع NT Commerce ونقطة الاستئناف
 
-> **للمحادثة الجديدة: اقرأ هذا الملف كاملاً أولاً، ثم آخر 5 إدخالات في DEPLOYMENT_LOG.md، ثم قل «اكمل» لمواصلة p199.**
-> آخر تحديث: 2026-08-20 — p198 مكتملة + خريطة العمل المتبقي الكاملة مدرجة (القسم 7).
+> **للمحادثة الجديدة: اقرأ هذا الملف كاملاً أولاً، ثم آخر 5 إدخالات في DEPLOYMENT_LOG.md، ثم قل «اكمل» لمواصلة p200.**
+> آخر تحديث: 2026-08-20 بعد إتمام p199 — القيد الافتتاحي JE000002 مرحّل فعلياً (رأس المال 101 = 11,825,632.51 دج، المخزون موجب، الميزانية متوازنة).
 
 ---
 
@@ -43,7 +43,7 @@
 - **الفعّاليات الاختيارية**: OPT_IN_FEATURES في main.py + AuthContext.js: ("ecommerce_hub","rental","restaurant","production") — المفتاح الغائب = مفعّل افتراضياً عدا هذه
 - **ناقل الأحداث**: `services/event_bus.py` Redis Streams (nt:events، مجموعة مستهلكين، idempotency عبر processed_events، MAX_RETRIES=3، DLQ)؛ **4 عمال uvicorn — السباقات حقيقية**
 - **Outbox (p189)**: `services/outbox.py` — `outbox_write(main_db, type, payload, tenant_id, source, session=None)`؛ مرحّل كل 2ث مع ادعاء ذرّي (in_progress + استرداد 60ث)؛ النشر يرافقه fan-out لقناة pub/sub `nt:events_feed`
-- **المحاسبة الآلية (p190/p193/p195/p196)**: `services/accounting_auto.py` — مخطط 12 حساباً (530 نقدية، 514 بنك، 531 محفظة، 532 خزنة، 533 خاص، 534 متجر، 401 موردون، 411 زبائن، 380 مخزون، 700 إيرادات، 600 تكلفة، 610 مصاريف)؛ BOX_ACCOUNT؛ قيود approved/auto؛ فهرس فريد sparse `auto_entry_unique` على (reference_id, source_tag)؛ `already_posted` لمنع التكرار؛ `ensure_accounts` آمن ضد السباق
+- **المحاسبة الآلية (p190/p193/p195/p196/p199)**: `services/accounting_auto.py` — مخطط 13 حساباً (101 رأس مال، 530 نقدية، 514 بنك، 531 محفظة، 532 خزنة، 533 خاص، 534 متجر، 401 موردون، 411 زبائن، 380 مخزون، 700 إيرادات، 600 تكلفة، 610 مصاريف)؛ BOX_ACCOUNT؛ قيود approved/auto؛ فهرس فريد sparse `auto_entry_unique` على (reference_id, source_tag)؛ `already_posted` لمنع التكرار؛ `ensure_accounts` آمن ضد السباق
 - **المستهلكون**: `services/event_consumers.py` — **15 معالجاً**: sale.completed/refunded/deleted، purchase.created/codes_uploaded/recorded، expense.created/deleted، customer.payment_received، supplier.payment_made، ecom_order.confirmed/cancelled (saga)، tenant.subscription.*، test.ping
 - **Sagas (p192)**: `services/saga.py` — SagaStep(name, action, compensate)، حالة لكل خطوة في مجموعة sagas؛ **الخطوة الفاشلة تُعوَّض أيضاً**؛ الاسترجاع يتفرع على `"_deducted" in ctx`
 - **ACID**: create/delete/return sale + مسارا تسوية الديون في customer_debts_routes + مسارا debts_routes كلها مغلّفة بمعاملات Mongo (عبر القواعد مسموح — replica set) مع outbox داخل المعاملة
@@ -60,22 +60,19 @@
 - p196: ميزان مراجعة من سطور اليومية + وحدة الديون ذرّية + صفحة /accounting (عُثر عليها منفّذة غير موثقة — رُوجعت واختُبرت وثُبّتت)
 - p197: قائمة دخل من سطور اليومية + بطاقة عرض
 - p198: ميزانية عمومية من سطور اليومية + مزامنة مرايا accounts.balance مع اليومية
+- p199: قيود الأرصدة الافتتاحية — preview/apply بعلامة opening + حساب 101 + فئة 1xx في الميزانية + بطاقة في /accounting؛ JE000002 مرحّل فعلياً
 
-## 6) الخطوة التالية — p199: قيود الأرصدة الافتتاحية
+## 6) الخطوة التالية — p200: دفتر الأستاذ (حسب خريطة القسم 7)
 
-**الدافع**: الميزانية العمومية تظهر مخزوناً محاسبياً سالباً (−142,000) لأن مخزون المستأجر وأرصدة صناديقه وذممه أُدخلت قبل p190 بلا قيود افتتاحية.
+الضغط على حساب في ميزان المراجعة يعرض سطور قيوده مع رصيد جارٍ (running balance). مسار خلفية مثل `GET /api/accounting/ledger/{account_code}?start_date&end_date` من سطور اليومية + واجهة تفصيل في AccountingPage بنفس المكوّنات.
 
-**الخطة**:
-1. `GET /api/accounting/opening-balance/preview` — يحسب: قيمة المخزون الفعلي (Σ quantity × purchase_price)، أرصدة الصناديق الفعلية، ذمم العملاء القائمة (Σ remaining على المبيعات)، ذمم الموردين (Σ remaining على المشتريات)، ورأس المال = الفرق الموازِن
-2. `POST /api/accounting/opening-balance/apply` — قيد افتتاح واحد approved/auto بعلامة source_tag="opening" (مرجع ثابت "OPENING-1" → already_posted يمنع التكرار): مدين 380/5xx/411 بالقيم الفعلية، دائن 401 + حساب رأس مال جديد (مثلاً 101 «رأس المال» — إضافته لـ DEFAULT_ACCOUNTS مع ensure_accounts)
-3. حماية: رفض إن وُجد قيد opening سابق (إلا بـ force=true يولّد قيد تسوية بالفرق)
-4. بطاقة في AccountingPage تعرض المعاينة وزر التطبيق (نفس مكوّنات التصميم القائمة)
-5. اختبار curl: معاينة → تطبيق → ميزانية متوازنة ومخزون موجب → تطبيق ثانٍ مرفوض → توثيق والتزام
+## 6-أ) ما اكتمل في p199 (مرجع سريع)
+
+قيد افتتاحي واحد لكل مستأجر عبر `GET/POST /api/accounting/opening-balance/*`؛ كل سطر = الواقع الفعلي − صافي اليومية الحالي (لا عدّ مزدوج لقيود p190+)؛ رأس المال 101 يوازن القيد نفسه فقط (وليس صافي 101 التراكمي)؛ force=true ← قيد تسوية بالفرق تحت مرجع OPENING-n جديد؛ الصناديق السالبة (533 = −30,600) تُرحَّل بسطور دائنة كما هي بلا تجميل.
 
 ## 7) خريطة العمل المتبقي الكاملة (بعد p199 — بالترتيب)
 
 ### المسار 1: إكمال الدورة المحاسبية
-- **p200**: دفتر الأستاذ — الضغط على حساب في ميزان المراجعة يعرض سطور قيوده مع رصيد جارٍ
 - **ثغرات التغطية المحاسبية** (كل حركة مال بلا قيد بعد — لكل منها: حدث + قيد آلي بنمط p195):
   تعديل المصروف PUT (يترك قيداً قديماً) | دفعات عقود التأجير /rentals/contracts/{id}/payment | الدفعات المسبقة للموردين /suppliers/{id}/advance-payment | سداد ائتمان المحفظة /wallet/settle-credit والأقساط | سجلات الدفع اليدوية /payments/records
 - **p201**: التقارير الضريبية من سطور اليومية (استبدال حساب tax-summary القديم)
@@ -100,4 +97,4 @@
 - MONGO_URL متاح داخل الحاوية (وليس localhost:27017)
 - ecom_orders لها فهرس فريد على order_code (الإدخالات التجريبية تحتاجه)
 - سكربتات التعديل: `assert s.count(old) == 1` قبل الاستبدال؛ تحقق `ast.parse` للبايثون و`npx -y esbuild FILE --loader:.js=jsx --outfile=/dev/null` للجافاسكربت
-- النسخ الاحتياطية: /opt/ntcommerce/backups/p182..p198
+- النسخ الاحتياطية: /opt/ntcommerce/backups/p182..p199

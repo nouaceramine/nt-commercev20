@@ -10,6 +10,7 @@ log = logging.getLogger("accounting_auto")
 
 # code → (name_ar, account_type, cash_box_id or None)
 DEFAULT_ACCOUNTS = [
+    ("101", "رأس المال", "equity", None),
     ("530", "الصندوق", "asset", "cash"),
     ("514", "البنك", "asset", "bank"),
     ("531", "المحفظة", "asset", "wallet"),
