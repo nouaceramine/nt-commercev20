@@ -7,7 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark, Wallet } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark, Wallet, Plus, Trash2, Check } from 'lucide-react';
 import { startRealtime, onEvent } from '../lib/realtime';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -24,6 +26,10 @@ const AccountingPage = () => {
   const [obBusy, setObBusy] = useState(false);
   const [ledgerAcc, setLedgerAcc] = useState(null);  // p200: account selected for the ledger
   const [ledger, setLedger] = useState(null);  // p200
+  const [accounts, setAccounts] = useState([]);  // p208: chart for the manual-entry form
+  const [jeOpen, setJeOpen] = useState(false);  // p208
+  const [jeBusy, setJeBusy] = useState(false);
+  const [jeForm, setJeForm] = useState(null);  // {date, description, reference, lines:[{account_id,debit,credit}]}
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -39,18 +45,20 @@ const AccountingPage = () => {
   const fetchAll = useCallback(async (dateStr) => {
     try {
       const monthStart = `${dateStr.slice(0, 8)}01`;  // p197: month-to-date range
-      const [tbRes, jeRes, isRes, bsRes, obRes] = await Promise.all([
+      const [tbRes, jeRes, isRes, bsRes, obRes, accountsRes] = await Promise.all([
         apiClient.get(`/accounting/reports/trial-balance?as_of_date=${dateStr}`),
         apiClient.get('/accounting/journal-entries?limit=15'),
         apiClient.get(`/accounting/reports/income-statement?start_date=${monthStart}&end_date=${dateStr}`),
         apiClient.get(`/accounting/reports/balance-sheet-journal?as_of_date=${dateStr}`),
         apiClient.get('/accounting/opening-balance/preview'),  // p199
+        apiClient.get('/accounting/accounts'),  // p208
       ]);
       setTb(tbRes.data);
       setEntries(Array.isArray(jeRes.data?.items) ? jeRes.data.items : []);
       setIncome(isRes.data);
       setBs(bsRes.data);
       setOb(obRes.data);
+      setAccounts(Array.isArray(accountsRes.data) ? accountsRes.data : []);  // p208
     } catch (e) {
       console.error('accounting fetch failed', e);
     } finally {
@@ -121,6 +129,71 @@ const AccountingPage = () => {
       console.error('opening-balance apply failed', e);
     } finally {
       setObBusy(false);
+    }
+  };
+
+  // p208: manual journal entry form
+  const newJeLine = () => ({ account_id: '', debit: '', credit: '' });
+
+  const openJe = () => {
+    setJeForm({ date: asOf, description: '', reference: '', lines: [newJeLine(), newJeLine()] });
+    setJeOpen(true);
+  };
+
+  const setJeLine = (i, patch) => {
+    setJeForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)) }));
+  };
+
+  const addJeLine = () => setJeForm((f) => ({ ...f, lines: [...f.lines, newJeLine()] }));
+
+  const removeJeLine = (i) => setJeForm((f) => (f.lines.length <= 2 ? f : { ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+
+  const jeTotals = (f) => ({
+    debit: (f ? f.lines : []).reduce((sum, l) => sum + (Number(l.debit) || 0), 0),
+    credit: (f ? f.lines : []).reduce((sum, l) => sum + (Number(l.credit) || 0), 0),
+  });
+
+  const submitJe = async () => {
+    if (!jeForm || jeBusy) return;
+    const t = jeTotals(jeForm);
+    const balanced = t.debit > 0 && Math.abs(t.debit - t.credit) <= 0.01;
+    if (!jeForm.description.trim() || !balanced) return;
+    setJeBusy(true);
+    try {
+      const lines = jeForm.lines
+        .filter((l) => l.account_id && ((Number(l.debit) || 0) > 0 || (Number(l.credit) || 0) > 0))
+        .map((l) => {
+          const acc = accounts.find((a) => a.id === l.account_id) || {};
+          return {
+            account_id: l.account_id,
+            account_code: acc.code || '',
+            account_name: acc.name || '',
+            debit: Number(l.debit) || 0,
+            credit: Number(l.credit) || 0,
+          };
+        });
+      await apiClient.post('/accounting/journal-entries', {
+        date: jeForm.date,
+        description: jeForm.description.trim(),
+        reference: jeForm.reference.trim(),
+        lines,
+      });
+      setJeOpen(false);
+      setJeForm(null);
+      await fetchAll(asOf);
+    } catch (e) {
+      console.error('manual journal entry failed', e);
+    } finally {
+      setJeBusy(false);
+    }
+  };
+
+  const approveEntry = async (entryId) => {
+    try {
+      await apiClient.put('/accounting/journal-entries/' + entryId + '/approve');
+      await fetchAll(asOf);
+    } catch (e) {
+      console.error('approve failed', e);
     }
   };
 
@@ -494,10 +567,16 @@ const AccountingPage = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <BookOpen className="h-5 w-5" />
-              {isAr ? 'أحدث قيود اليومية' : 'Dernières écritures'}
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <BookOpen className="h-5 w-5" />
+                {isAr ? 'أحدث قيود اليومية' : 'Dernières écritures'}
+              </CardTitle>
+              <Button size="sm" onClick={openJe} data-testid="je-new-button">
+                <Plus className="h-4 w-4 me-1" />
+                {isAr ? 'قيد يدوي جديد' : 'Nouvelle écriture'}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {entries.length === 0 ? (
@@ -515,6 +594,7 @@ const AccountingPage = () => {
                       <th className="text-start p-2 font-semibold">{isAr ? 'المصدر' : 'Source'}</th>
                       <th className="text-start p-2 font-semibold">{isAr ? 'الحالة' : 'Statut'}</th>
                       <th className="text-end p-2 font-semibold">{isAr ? 'الإجمالي' : 'Total'}</th>
+                      <th className="text-end p-2 font-semibold">{isAr ? 'إجراء' : 'Action'}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -534,6 +614,14 @@ const AccountingPage = () => {
                           </Badge>
                         </td>
                         <td className="p-2 text-end font-mono">{fmt(e.total_debit)}</td>
+                        <td className="p-2 text-end">
+                          {e.status !== 'approved' && (
+                            <Button size="sm" variant="outline" onClick={() => approveEntry(e.id)} data-testid={'je-approve-' + e.entry_number}>
+                              <Check className="h-4 w-4 me-1" />
+                              {isAr ? 'اعتماد' : 'Approuver'}
+                            </Button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -542,6 +630,68 @@ const AccountingPage = () => {
             )}
           </CardContent>
         </Card>
+
+        <Dialog open={jeOpen} onOpenChange={(o) => { setJeOpen(o); if (!o) setJeForm(null); }}>
+          <DialogContent className="max-w-2xl" data-testid="je-dialog">
+            <DialogHeader>
+              <DialogTitle>{isAr ? 'قيد يومية يدوي' : 'Écriture manuelle'}</DialogTitle>
+            </DialogHeader>
+            {jeForm && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Input type="date" value={jeForm.date} onChange={(e) => setJeForm({ ...jeForm, date: e.target.value })} data-testid="je-date" />
+                  <Input className="sm:col-span-2" placeholder={isAr ? 'المرجع (اختياري)' : 'Référence (optionnel)'} value={jeForm.reference} onChange={(e) => setJeForm({ ...jeForm, reference: e.target.value })} data-testid="je-reference" />
+                </div>
+                <Input placeholder={isAr ? 'الوصف' : 'Description'} value={jeForm.description} onChange={(e) => setJeForm({ ...jeForm, description: e.target.value })} data-testid="je-description" />
+                <div className="space-y-2">
+                  {jeForm.lines.map((l, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-6">
+                        <Select value={l.account_id} onValueChange={(v) => setJeLine(i, { account_id: v })}>
+                          <SelectTrigger data-testid={'je-line-account-' + i}>
+                            <SelectValue placeholder={isAr ? 'الحساب' : 'Compte'} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {accounts.map((a) => (
+                              <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Input className="col-span-2" type="number" min="0" step="0.01" placeholder={isAr ? 'مدين' : 'Débit'} value={l.debit} onChange={(e) => setJeLine(i, { debit: e.target.value })} data-testid={'je-line-debit-' + i} />
+                      <Input className="col-span-2" type="number" min="0" step="0.01" placeholder={isAr ? 'دائن' : 'Crédit'} value={l.credit} onChange={(e) => setJeLine(i, { credit: e.target.value })} data-testid={'je-line-credit-' + i} />
+                      <Button className="col-span-2" variant="ghost" size="sm" onClick={() => removeJeLine(i)} disabled={jeForm.lines.length <= 2} data-testid={'je-remove-line-' + i}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button variant="outline" size="sm" onClick={addJeLine} data-testid="je-add-line">
+                    <Plus className="h-4 w-4 me-1" />
+                    {isAr ? 'إضافة سطر' : 'Ajouter une ligne'}
+                  </Button>
+                </div>
+                {(() => {
+                  const t = jeTotals(jeForm);
+                  const balanced = t.debit > 0 && Math.abs(t.debit - t.credit) <= 0.01;
+                  return (
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-sm">
+                      <div className="flex gap-4 font-mono">
+                        <span data-testid="je-total-debit">{isAr ? 'مدين: ' : 'Débit : '}{fmt(t.debit)}</span>
+                        <span data-testid="je-total-credit">{isAr ? 'دائن: ' : 'Crédit : '}{fmt(t.credit)}</span>
+                      </div>
+                      <Badge variant={balanced ? 'default' : 'destructive'} data-testid="je-balance-status">
+                        {balanced ? (isAr ? 'متوازن' : 'Équilibrée') : (isAr ? 'غير متوازن' : 'Déséquilibrée')}
+                      </Badge>
+                    </div>
+                  );
+                })()}
+                <Button className="w-full" onClick={submitJe} disabled={jeBusy} data-testid="je-submit">
+                  {jeBusy ? (isAr ? 'جارٍ الحفظ…' : 'Enregistrement…') : (isAr ? 'حفظ القيد (معلّق)' : 'Enregistrer (en attente)')}
+                </Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </Layout>
   );
