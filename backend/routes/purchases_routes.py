@@ -172,6 +172,24 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 "created_at": now, "created_by": admin["name"]
             })
 
+        # p193: transactional outbox → auto journal entry (purchase.recorded)
+        from services.outbox import outbox_write
+        from config.database import main_db as _main_db
+        await outbox_write(
+            _main_db, "purchase.recorded",
+            {
+                "purchase_id": purchase_id,
+                "invoice_number": invoice_number,
+                "total": p.total,
+                "paid_amount": p.paid_amount,
+                "remaining": max(0, remaining),
+                "payment_method": p.payment_method,
+                "supplier_id": p.supplier_id,
+            },
+            tenant_id=admin.get("tenant_id") or "platform",
+            source="purchases_routes",
+        )
+
         purchase_doc.pop("_id", None)
         return purchase_doc
 

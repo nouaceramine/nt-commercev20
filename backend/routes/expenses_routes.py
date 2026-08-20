@@ -158,6 +158,23 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
             now = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.update_one({"id": data["payment_method"]}, {"$inc": {"balance": -data["amount"]}, "$set": {"updated_at": now}})
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": data["payment_method"], "type": "expense", "amount": data["amount"], "description": f"مصروف - {data['title']}", "reference_type": "expense", "reference_id": data["id"], "created_at": now, "created_by": user.get("name", "")})
+        # p193: outbox → auto journal entry (expense.created)
+        from services.outbox import outbox_write
+        from config.database import main_db as _main_db
+        await outbox_write(
+            _main_db, "expense.created",
+            {
+                "expense_id": data["id"],
+                "code": data.get("code", ""),
+                "title": data.get("title", ""),
+                "amount": data["amount"],
+                "currency": data.get("currency", "DZD"),
+                "payment_method": data.get("payment_method"),
+                "category": data.get("category"),
+            },
+            tenant_id=user.get("tenant_id") or "platform",
+            source="expenses_routes",
+        )
         data.pop("_id", None)
         return data
 
@@ -196,6 +213,22 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
             now = datetime.now(timezone.utc).isoformat()
             await db.cash_boxes.update_one({"id": method}, {"$inc": {"balance": float(old["amount"])}, "$set": {"updated_at": now}})
             await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": method, "type": "income", "amount": float(old["amount"]), "description": f"حذف مصروف (استرجاع) - {old.get('title', '')}", "reference_type": "expense_reversal", "reference_id": expense_id, "created_at": now, "created_by": user.get("name", "")})
+        # p193: outbox → auto reversal entry
+        from services.outbox import outbox_write
+        from config.database import main_db as _main_db
+        await outbox_write(
+            _main_db, "expense.deleted",
+            {
+                "expense_id": expense_id,
+                "code": old.get("code", ""),
+                "title": old.get("title", ""),
+                "amount": float(old.get("amount", 0) or 0),
+                "currency": old.get("currency", "DZD"),
+                "payment_method": method,
+            },
+            tenant_id=user.get("tenant_id") or "platform",
+            source="expenses_routes",
+        )
         return {"message": "تم حذف التكلفة بنجاح"}
 
     @router.post("/{expense_id}/mark-paid")

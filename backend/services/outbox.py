@@ -8,7 +8,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 log = logging.getLogger("outbox")
 
@@ -35,11 +35,26 @@ async def outbox_write(main_db, event_type: str, payload: dict, tenant_id: str,
 
 
 async def relay_pending(main_db) -> int:
-    """Publish a batch of pending outbox events to the bus. Returns count."""
+    """Publish a batch of pending outbox events to the bus. Returns count.
+    Multi-worker safe: each row is claimed atomically (find_one_and_update)
+    before publishing; rows stuck 'in_progress' > 60s (crashed worker) are
+    reclaimed."""
     from services.event_bus import event_bus
     n = 0
-    cursor = main_db.outbox.find({"published": False}).sort("created_at", 1).limit(_RELAY_BATCH)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+    cursor = main_db.outbox.find({
+        "$or": [
+            {"published": False},
+            {"published": "in_progress", "claimed_at": {"$lt": cutoff}},
+        ]
+    }).sort("created_at", 1).limit(_RELAY_BATCH)
     async for doc in cursor:
+        claimed = await main_db.outbox.find_one_and_update(
+            {"id": doc["id"], "published": doc["published"]},
+            {"$set": {"published": "in_progress", "claimed_at": datetime.now(timezone.utc)}},
+        )
+        if not claimed:
+            continue  # another worker took it
         try:
             eid = await event_bus.publish(
                 doc["event_type"], doc["payload"],

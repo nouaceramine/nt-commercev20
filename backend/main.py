@@ -503,6 +503,13 @@ async def startup_event():
                 unique=True, name="barcode_unique_partial",
                 partialFilterExpression={"barcode": {"$gt": ""}},
             )
+        for _d in _dbs:
+            # p193: one auto journal entry per (reference_id, source_tag) —
+            # blocks duplicate entries under multi-worker consumption
+            await _d.journal_entries.create_index(
+                [("reference_id", 1), ("source_tag", 1)],
+                unique=True, sparse=True, name="auto_entry_unique",
+            )
         logger.info("Barcode unique partial indexes ensured on %d databases", len(_dbs))
     except Exception as e:
         logger.warning("Barcode index ensure: %s", e)

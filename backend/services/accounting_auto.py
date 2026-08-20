@@ -16,7 +16,9 @@ DEFAULT_ACCOUNTS = [
     ("532", "الخزنة", "asset", "safe"),
     ("533", "المال الخاص", "asset", "personal"),
     ("534", "المتجر الإلكتروني", "asset", "ecom_store"),
+    ("401", "الموردون", "liability", None),
     ("411", "الزبائن", "asset", None),
+    ("610", "مصاريف التشغيل", "expense", None),
     ("380", "المخزون", "asset", None),
     ("700", "إيرادات المبيعات", "revenue", None),
     ("600", "تكلفة البضاعة المباعة", "expense", None),
@@ -44,7 +46,12 @@ async def ensure_accounts(tdb) -> dict:
                 "created_by": "system",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            await tdb.accounts.insert_one(acc)
+            try:
+                await tdb.accounts.insert_one(acc)
+            except Exception:
+                # p193: concurrent events may seed the chart simultaneously —
+                # the unique code index rejects the loser; re-fetch the winner
+                acc = await tdb.accounts.find_one({"code": code})
         out[code] = acc
     return out
 
@@ -167,5 +174,93 @@ async def post_sale_reversal(tdb, payload: dict, source_tag: str, label: str):
         reference_id=sale_id,
         source_tag=tag,
         description=f"قيد عكسي تلقائي — {label} {payload.get('invoice_number', '')}",
+        lines=lines,
+    )
+
+
+# ── p193: purchases & expenses ───────────────────────────────────────────────
+
+async def post_purchase_entry(tdb, payload: dict):
+    """purchase.recorded → Dr inventory(total) / Cr cash-box(paid) + Cr AP(remaining)."""
+    purchase_id = payload.get("purchase_id")
+    if not purchase_id or await already_posted(tdb, purchase_id, "purchase"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    total = float(payload.get("total", 0) or 0)
+    paid = float(payload.get("paid_amount", 0) or 0)
+    remaining = float(payload.get("remaining", max(0.0, total - paid)) or 0)
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+
+    lines = []
+    if total > 0:
+        lines.append(_line(accounts["380"], debit=total))
+    if paid > 0:
+        lines.append(_line(accounts[box_code], credit=paid))
+    if remaining > 0:
+        lines.append(_line(accounts["401"], credit=remaining))
+    if not lines:
+        return None
+
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("invoice_number", ""),
+        reference_id=purchase_id,
+        source_tag="purchase",
+        description=f"قيد تلقائي — فاتورة شراء {payload.get('invoice_number', '')}",
+        lines=lines,
+    )
+
+
+async def post_expense_entry(tdb, payload: dict):
+    """expense.created → Dr operating expenses / Cr cash-box."""
+    expense_id = payload.get("expense_id")
+    if not expense_id or await already_posted(tdb, expense_id, "expense"):
+        return None
+    # USD expenses: cash moved at the dollar-purchase moment — no double count
+    if (payload.get("currency") or "DZD") != "DZD":
+        return None
+    if not payload.get("payment_method"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method"), "530")
+    lines = [
+        _line(accounts["610"], debit=amount),
+        _line(accounts[box_code], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("code", ""),
+        reference_id=expense_id,
+        source_tag="expense",
+        description=f"قيد تلقائي — مصروف {payload.get('title', '')}",
+        lines=lines,
+    )
+
+
+async def post_expense_reversal(tdb, payload: dict):
+    """expense.deleted → mirror of the expense entry (if one was posted)."""
+    expense_id = payload.get("expense_id")
+    if not expense_id or await already_posted(tdb, expense_id, "expense_reversal"):
+        return None
+    if not await already_posted(tdb, expense_id, "expense"):
+        return None  # no entry was ever posted (USD / no payment method)
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method"), "530")
+    lines = [
+        _line(accounts[box_code], debit=amount),
+        _line(accounts["610"], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("code", ""),
+        reference_id=expense_id,
+        source_tag="expense_reversal",
+        description=f"قيد عكسي تلقائي — حذف مصروف {payload.get('title', '')}",
         lines=lines,
     )

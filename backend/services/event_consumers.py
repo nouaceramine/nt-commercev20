@@ -396,12 +396,53 @@ async def handle_test_ping(event: Event) -> None:
 
 
 # ── Registry wiring ─────────────────────────────────────────────────────────
+# ── p193: tenant purchase & expense accounting ──────────────────────────────
+async def handle_purchase_recorded(event: Event) -> None:
+    """Tenant purchase recorded → auto journal entry (Dr inventory / Cr cash+AP)."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_purchase_entry
+        await post_purchase_entry(get_tenant_db(event.tenant_id), p)
+        log.info("purchase auto-entry: tenant=%s purchase=%s", event.tenant_id, p.get("purchase_id"))
+    except Exception as exc:
+        log.warning("auto-accounting purchase %s failed: %s", p.get("purchase_id"), exc)
+
+
+async def handle_expense_created(event: Event) -> None:
+    """Tenant expense created → auto journal entry (Dr expenses / Cr cash-box)."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_expense_entry
+        await post_expense_entry(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting expense %s failed: %s", p.get("expense_id"), exc)
+
+
+async def handle_expense_deleted(event: Event) -> None:
+    """Tenant expense deleted → auto reversal entry."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_expense_reversal
+        await post_expense_reversal(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting expense-delete %s failed: %s", p.get("expense_id"), exc)
+
+
 def register_handlers(bus: RedisEventBus) -> None:
     bus.register("purchase.created", handle_purchase_created)
     bus.register("purchase.codes_uploaded", handle_purchase_codes_uploaded)
     bus.register("sale.completed", handle_sale_completed)
     bus.register("sale.refunded", handle_sale_refunded)
     bus.register("sale.deleted", handle_sale_deleted)  # p190
+    bus.register("purchase.recorded", handle_purchase_recorded)  # p193
+    bus.register("expense.created", handle_expense_created)  # p193
+    bus.register("expense.deleted", handle_expense_deleted)  # p193
     bus.register("ecom_order.confirmed", handle_ecom_order_confirmed)
     bus.register("ecom_order.cancelled", handle_ecom_order_cancelled)
     bus.register("tenant.subscription.expired", handle_tenant_subscription_expired)
