@@ -46,6 +46,7 @@ import POSDialogs from './pos/POSDialogs';
 import POSSessionBar from './pos/POSSessionBar';
 import POSSidebar from './pos/POSSidebar';
 import { useAuth } from '../contexts/AuthContext';
+import { startRealtime, onEvent } from '../lib/realtime';  // p191
 import POSShortcuts from './pos/POSShortcuts';
 import POSCart from './pos/POSCart';
 import PrintDocumentDialog from '../components/print/PrintDocumentDialog';
@@ -508,6 +509,15 @@ export default function POSPage() {
   }, [restaurantOn]);
 
   useEffect(() => { if (restaurantOn) fetchTables(); }, [restaurantOn, fetchTables]);
+
+  // p191: realtime — another till's sale/return/delete refreshes stock instantly
+  useEffect(() => {
+    startRealtime();
+    const un1 = onEvent('sale.completed', () => fetchProducts());
+    const un2 = onEvent('sale.refunded', () => fetchProducts());
+    const un3 = onEvent('sale.deleted', () => fetchProducts());
+    return () => { un1(); un2(); un3(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createTable = async () => {
     if (!newTableName.trim()) return;

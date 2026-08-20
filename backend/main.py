@@ -1145,6 +1145,7 @@ _AUTO_REG_MODULES = [
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
     'routes.serials_routes',  # p187: IMEI/serial tracking
     'routes.production_routes',  # p188: BOM / production recipes
+    'routes.events_routes',  # p191: SSE realtime channel
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

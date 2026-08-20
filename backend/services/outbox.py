@@ -52,6 +52,18 @@ async def relay_pending(main_db) -> int:
                     {"$set": {"published": True, "published_at": datetime.now(timezone.utc), "bus_event_id": eid}},
                 )
                 n += 1
+                # p191: fan out to the SSE feed (fire-and-forget)
+                try:
+                    import json as _json
+                    c = await event_bus._get_client()
+                    if c is not None:
+                        await c.publish("nt:events_feed", _json.dumps({
+                            "type": doc["event_type"],
+                            "tenant_id": doc.get("tenant_id", "platform"),
+                            "payload": doc["payload"],
+                        }, default=str))
+                except Exception:
+                    pass
         except Exception as exc:
             log.warning("relay %s failed: %s", doc.get("id"), exc)
     return n
