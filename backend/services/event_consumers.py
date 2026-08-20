@@ -157,6 +157,73 @@ async def handle_sale_deleted(event: Event) -> None:
 
 
 # ── Phase 3: ecom_order.confirmed ───────────────────────────────────────────
+def _fulfillment_steps():
+    """p192: ecom fulfillment saga steps (action, compensation)."""
+    from services.saga import SagaStep
+
+    async def deduct(tdb, ctx):
+        deducted = []
+        for it in ctx.get("items") or []:
+            pid = it.get("product_id")
+            qty = int(it.get("quantity", 0) or 0)
+            if not pid or qty <= 0:
+                continue
+            # guarded atomic claim on the REAL stock field (`quantity` — the
+            # legacy EDA handler mistakenly decremented a stray `stock` field)
+            res = await tdb.products.find_one_and_update(
+                {"id": pid, "quantity": {"$gte": qty}},
+                {"$inc": {"quantity": -qty}},
+            )
+            if res is None:
+                ctx["_deducted"] = deducted
+                raise ValueError(f"insufficient stock for product {pid} (need {qty})")
+            deducted.append((pid, qty))
+        ctx["_deducted"] = deducted
+
+    async def restore(tdb, ctx):
+        # two paths: (a) in-memory partial failure — _deducted tracks exactly
+        # what was claimed; (b) later compensation of a COMPLETED saga loaded
+        # from the DB — context has no _deducted, so restore all items.
+        if "_deducted" in ctx:
+            to_restore = ctx["_deducted"]
+        else:
+            to_restore = [(it.get("product_id"), int(it.get("quantity", 0) or 0))
+                          for it in ctx.get("items") or []]
+        for pid, qty in to_restore:
+            if pid and qty > 0:
+                await tdb.products.update_one({"id": pid}, {"$inc": {"quantity": qty}})
+
+    async def mark(tdb, ctx):
+        await tdb.ecom_orders.update_one(
+            {"id": ctx["order_id"]},
+            {"$set": {"fulfillment_status": "stock_reserved", "_eda_stock_deducted": True, "_eda_deducted_at": _utc_now_iso()}},
+        )
+
+    async def unmark(tdb, ctx):
+        await tdb.ecom_orders.update_one(
+            {"id": ctx["order_id"]},
+            {"$set": {"fulfillment_status": None, "_eda_stock_deducted": False}},
+        )
+
+    async def notify(tdb, ctx):
+        await tdb.notifications.insert_one({
+            "id": f"ntf_{ctx['order_id'][:8]}_fulfill",
+            "type": "ecom_fulfillment",
+            "message_ar": f"طلب إلكتروني {ctx['order_id'][:8]} — حُجز المخزون وجاهز للتحضير",
+            "message_en": f"E-com order {ctx['order_id'][:8]} — stock reserved",
+            "reference_id": ctx["order_id"],
+            "read": False,
+            "created_at": _utc_now_iso(),
+        })
+
+    async def unnotify(tdb, ctx):
+        await tdb.notifications.delete_many({"reference_id": ctx["order_id"], "type": "ecom_fulfillment"})
+
+    return [
+        SagaStep("deduct_stock", deduct, restore),
+        SagaStep("mark_order", mark, unmark),
+        SagaStep("notify", notify, unnotify),
+    ]
 async def handle_ecom_order_confirmed(event: Event) -> None:
     """When an e-com order is confirmed → deduct POS stock + log movement.
     Because dual-write means the sync path may already have deducted, this
@@ -173,28 +240,18 @@ async def handle_ecom_order_confirmed(event: Event) -> None:
         return
 
     tdb = get_tenant_db(tenant_id)
-    # Per-order idempotency flag — prevents double deduction on bus retries
-    flag = await tdb.ecom_orders.find_one(
-        {"id": order_id},
-        {"_id": 0, "_eda_stock_deducted": 1, "items": 1},
-    )
-    if flag and flag.get("_eda_stock_deducted"):
-        log.debug("ecom_order %s already deducted by EDA — skipping", order_id)
+    # p192: fulfillment saga (idempotent — one running/completed saga per order)
+    from services.saga import run_saga
+    existing = await tdb.sagas.find_one({
+        "name": "ecom_fulfillment", "context.order_id": order_id,
+        "status": {"$in": ["running", "completed"]},
+    })
+    if existing:
+        log.debug("fulfillment saga already ran for order %s — skipping", order_id)
     else:
-        # Deduct stock per item — products live in tenant db
-        for it in items:
-            pid = it.get("product_id")
-            qty = int(it.get("quantity", 0) or 0)
-            if not pid or qty <= 0:
-                continue
-            await tdb.products.update_one(
-                {"id": pid},
-                {"$inc": {"stock": -qty}},
-            )
-        await tdb.ecom_orders.update_one(
-            {"id": order_id},
-            {"$set": {"_eda_stock_deducted": True, "_eda_deducted_at": _utc_now_iso()}},
-        )
+        saga_doc = await run_saga(tdb, "ecom_fulfillment", _fulfillment_steps(),
+                                  {"order_id": order_id, "items": items})
+        log.info("fulfillment saga %s for order %s", saga_doc["status"], order_id)
 
     # Always write the audit row (idempotent via event_id PK)
     try:
@@ -220,18 +277,26 @@ async def handle_ecom_order_cancelled(event: Event) -> None:
     if not order_id or tenant_id == "platform":
         return
     tdb = get_tenant_db(tenant_id)
-    order = await tdb.ecom_orders.find_one({"id": order_id}, {"_id": 0, "items": 1, "_eda_stock_deducted": 1})
-    if order and order.get("_eda_stock_deducted"):
-        for it in order.get("items") or []:
-            pid = it.get("product_id")
-            qty = int(it.get("quantity", 0) or 0)
-            if not pid or qty <= 0:
-                continue
-            await tdb.products.update_one({"id": pid}, {"$inc": {"stock": qty}})
-        await tdb.ecom_orders.update_one(
-            {"id": order_id},
-            {"$set": {"_eda_stock_deducted": False, "_eda_restored_at": _utc_now_iso()}},
-        )
+    # p192: compensate the fulfillment saga if it completed
+    from services.saga import compensate_saga
+    saga = await tdb.sagas.find_one({"name": "ecom_fulfillment", "context.order_id": order_id})
+    if saga and saga.get("status") == "completed":
+        await compensate_saga(tdb, saga["id"], _fulfillment_steps())
+        await tdb.ecom_orders.update_one({"id": order_id}, {"$set": {"fulfillment_status": "cancelled"}})
+        log.info("fulfillment saga compensated for cancelled order %s", order_id)
+    else:
+        order = await tdb.ecom_orders.find_one({"id": order_id}, {"_id": 0, "items": 1, "_eda_stock_deducted": 1})
+        if order and order.get("_eda_stock_deducted"):
+            # legacy path: EDA had decremented a stray `stock` field (never the
+            # real `quantity`) — clean the stray field, nothing else to restore
+            for it in order.get("items") or []:
+                pid = it.get("product_id")
+                if pid:
+                    await tdb.products.update_one({"id": pid}, {"$unset": {"stock": ""}})
+            await tdb.ecom_orders.update_one(
+                {"id": order_id},
+                {"$set": {"_eda_stock_deducted": False, "_eda_restored_at": _utc_now_iso()}},
+            )
     try:
         await main_db.inventory_movements.insert_one({
             "id": event.event_id,

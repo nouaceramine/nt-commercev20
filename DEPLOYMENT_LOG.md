@@ -2894,3 +2894,12 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - POSPage: يشترك في sale.completed/refunded/deleted → تحديث المخزون لحظياً عند بيع أي كاشير آخر (تعدد نقاط البيع).
 - اختبار حي: اتصال → بيع تجريبي وصل كـSSE خلال أقل من 10 ثوانٍ عبر localhost وعبر nt-commerce.net؛ الصندوق 11300؛ أرصدة الحسابات صُفّرت بعد التنظيف.
 - release 20260820_004454 — bundle main.94dccdb8.js
+
+## p192 — المرحلة 3.4: منسّق Sagas + saga تجهيز الطلبات الإلكترونية (2026-08-20) — نهاية المرحلة 3
+**قبل:** لا تنسيق للتدفقات متعددة الخطوات؛ ومعالج ecom_order.confirmed كان يخصم حقل stock وهمياً (خلل حقيقي — المخزون الفعلي quantity لا يُخصم أبداً عبر EDA).
+**بعد:**
+- services/saga.py (جديد): SagaStep(action, compensate) + run_saga بحالة مُديمة في مجموعة sagas لكل مستأجر (running/completed/compensating/compensated/compensation_failed + حالة كل خطوة ووقتها وخطأها) + compensate_saga لتعويض saga مكتملة لاحقاً (إلغاء). الخطوة الفاشلة نفسها تُعوَّض أيضاً (آثار جزئية) — أُصلح بعد اختبار حي كشف تسريب خصم.
+- saga ecom_fulfillment: deduct_stock (خصم ذرّي محروس $gte على quantity — إصلاح خلل stock) → mark_order (stock_reserved) → notify (إشعار)؛ التعويضات: إرجاع المخزون / إلغاء التعليم / حذف الإشعار. idempotent: saga واحدة running/completed لكل طلب.
+- الإلغاء: compensate_saga تستعيد كل العناصر (المسار المُديم بلا _deducted) — أُصلح بعد اختبار كشف أن التقدم كان في الذاكرة فقط.
+- اختبارات حية: نجاح كامل (3 خطوات done + حجز + إشعار)؛ فشل جزئي (نقص مكوّن ثانٍ → compensated وصفر تسريب)؛ إلغاء بعد الاكتمال (استعادة كاملة 5/5 + cancelled + حذف الإشعار).
+- لا تغيير واجهة. تنظيف كامل لبيانات الاختبار.
