@@ -74,6 +74,7 @@
 - p210: تنبيه DLQ — platform_alerts عند الإسقاط + alerts/ack endpoints + بطاقة في لوحة event-bus + replay يحلّ التنبيه تلقائياً
 - p211: أرشفة outbox — المنشور >30ي ينتقل إلى outbox_archive بحلقة ساعوية آمنة متعددة العمال
 - p212: توحيد التقارير — profit-loss/balance-sheet/cash-flow من سطور اليومية (نفس مفاتيح الاستجابة) + SmartReporterAgent موسوم LEGACY
+- p213: إصلاح /auto-reports — كانت بلا Layout (القائمة تختفي) وبلا i18n (عربية دائماً) — الآن مغلّفة وثنائية اللغة
 
 ## 6) الخطوة التالية — المسار 3: تحصينات تقنية (بالترتيب)
 
