@@ -30,6 +30,9 @@ const AccountingPage = () => {
   const [jeOpen, setJeOpen] = useState(false);  // p208
   const [jeBusy, setJeBusy] = useState(false);
   const [jeForm, setJeForm] = useState(null);  // {date, description, reference, lines:[{account_id,debit,credit}]}
+  const [fcYear, setFcYear] = useState(String(new Date().getFullYear()));  // p209
+  const [fc, setFc] = useState(null);  // p209: fiscal-close preview
+  const [fcBusy, setFcBusy] = useState(false);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -79,6 +82,23 @@ const AccountingPage = () => {
     }
   }, []);
 
+  // p209: fiscal-close preview for the typed year — separate fetch so a
+  // partial year (still typing) never breaks the main Promise.all
+  const fetchFc = useCallback(async (year) => {
+    if (!/^\d{4}$/.test(year)) { setFc(null); return; }
+    try {
+      const res = await apiClient.get(`/accounting/fiscal-close/preview?year=${year}`);
+      setFc(res.data);
+    } catch (e) {
+      console.error('fiscal-close preview failed', e);
+      setFc(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchFc(fcYear);
+  }, [fcYear, fetchFc]);
+
   // p200: open/close the ledger card when a trial-balance row is clicked
   const toggleLedger = (code) => {
     const next = ledgerAcc === code ? null : code;
@@ -94,7 +114,7 @@ const AccountingPage = () => {
   // p196: realtime refresh on any money event
   useEffect(() => {
     startRealtime();
-    const refresh = () => { fetchAll(asOf); if (ledgerAcc) fetchLedger(ledgerAcc, asOf); };
+    const refresh = () => { fetchAll(asOf); if (ledgerAcc) fetchLedger(ledgerAcc, asOf); fetchFc(fcYear); };
     const events = [
       'sale.completed', 'sale.refunded', 'sale.deleted',
       'purchase.recorded', 'expense.created', 'expense.deleted',
@@ -107,7 +127,7 @@ const AccountingPage = () => {
     ];
     const unsubs = events.map((ev) => onEvent(ev, refresh));
     return () => unsubs.forEach((u) => u());
-  }, [asOf, fetchAll, ledgerAcc, fetchLedger]);
+  }, [asOf, fetchAll, ledgerAcc, fetchLedger, fcYear, fetchFc]);
 
   // p200: refetch the open ledger when the date or the selection changes
   useEffect(() => {
@@ -194,6 +214,25 @@ const AccountingPage = () => {
       await fetchAll(asOf);
     } catch (e) {
       console.error('approve failed', e);
+    }
+  };
+
+  // p209: close the fiscal year — carry the result to capital, zero 6xx/7xx
+  const applyFiscalClose = async () => {
+    if (fcBusy || !fc || fc.closed) return;
+    const msg = isAr
+      ? `إقفال السنة المالية ${fcYear}؟ يُرحَّل صافي النتيجة (${fmt(fc.result)}) إلى رأس المال وتُصفَّر حسابات 6xx/7xx — يُنفَّذ مرة واحدة ويمنع أي قيود جديدة داخل ${fcYear}.`
+      : `Clôturer l'exercice ${fcYear} ? Le résultat (${fmt(fc.result)}) passe en capital et les comptes 6xx/7xx sont soldés — irréversible.`;
+    if (!window.confirm(msg)) return;
+    setFcBusy(true);
+    try {
+      await apiClient.post('/accounting/fiscal-close', { year: fcYear });
+      await fetchAll(asOf);
+      await fetchFc(fcYear);
+    } catch (e) {
+      console.error('fiscal close failed', e);
+    } finally {
+      setFcBusy(false);
     }
   };
 
@@ -560,6 +599,53 @@ const AccountingPage = () => {
                     </div>
                   )}
                 </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {fc && (
+          <Card data-testid="fiscal-close-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Landmark className="h-5 w-5" />
+                {isAr ? 'إقفال السنة المالية' : 'Clôture de l’exercice'}
+                {fc.closed ? (
+                  <Badge className="bg-emerald-600 hover:bg-emerald-600" data-testid="fc-status">
+                    {isAr ? `${fc.year} مقفلة ✓` : `${fc.year} clôturé ✓`}
+                  </Badge>
+                ) : (
+                  <Badge className="bg-amber-600 hover:bg-amber-600" data-testid="fc-status">
+                    {isAr ? `${fc.year} مفتوحة` : `${fc.year} ouvert`}
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <Input className="w-28" type="number" min="2000" max="2100" value={fcYear} onChange={(e) => setFcYear(e.target.value)} data-testid="fc-year" />
+                <Badge variant="outline" data-testid="fc-revenue">
+                  {isAr ? `الإيرادات: ${fmt(fc.revenue_total)}` : `Produits: ${fmt(fc.revenue_total)}`}
+                </Badge>
+                <Badge variant="outline" data-testid="fc-expense">
+                  {isAr ? `المصاريف: ${fmt(fc.expense_total)}` : `Charges: ${fmt(fc.expense_total)}`}
+                </Badge>
+                <Badge variant="outline" data-testid="fc-result">
+                  {isAr ? `النتيجة: ${fmt(fc.result)}` : `Résultat: ${fmt(fc.result)}`}
+                </Badge>
+              </div>
+              {fc.closed ? (
+                <p className="text-sm text-muted-foreground" data-testid="fc-closed-note">
+                  {isAr ? 'السنة مقفلة — لا يمكن إضافة أو اعتماد قيود بتاريخ داخلها.' : 'Exercice clôturé — aucune écriture ne peut y être ajoutée ou approuvée.'}
+                </p>
+              ) : fc.accounts.length === 0 ? (
+                <p className="text-sm text-muted-foreground" data-testid="fc-empty-note">
+                  {isAr ? 'لا حركات على حسابات النتائج في هذه السنة — لا شيء للترحيل.' : 'Aucun mouvement sur les comptes de résultat — rien à clôturer.'}
+                </p>
+              ) : (
+                <Button size="sm" onClick={applyFiscalClose} disabled={fcBusy} data-testid="fc-apply">
+                  {fcBusy ? (isAr ? 'جارٍ الإقفال…' : 'Clôture…') : (isAr ? `ترحيل نتيجة ${fc.year} إلى رأس المال` : `Clôturer ${fc.year}`)}
+                </Button>
               )}
             </CardContent>
           </Card>

@@ -100,7 +100,12 @@ async def create_journal_entry(entry: dict, user=Depends(get_current_user)):
     
     if abs(total_debit - total_credit) > 0.01:
         raise HTTPException(status_code=400, detail="Journal entry must be balanced")
-    
+
+    # p209: entries dated in a closed fiscal year are forbidden
+    _yr = str(entry.get("date", ""))[:4]
+    if _yr in await _closed_fiscal_years(db):
+        raise HTTPException(status_code=403, detail=f"السنة المالية {_yr} مقفلة — لا يمكن إضافة قيود إليها")
+
     # Generate entry number
     count = await db.journal_entries.count_documents({})
     entry_number = f"JE{str(count + 1).zfill(6)}"
@@ -139,6 +144,11 @@ async def create_journal_entry(entry: dict, user=Depends(get_current_user)):
 @router.put("/journal-entries/{entry_id}/approve")
 async def approve_journal_entry(entry_id: str, user=Depends(get_current_user)):
     """Approve a journal entry"""
+    # p209: approving an entry dated in a closed fiscal year is forbidden
+    _doc = await db.journal_entries.find_one({"id": entry_id, "status": "pending"}, {"date": 1})
+    _yr = str((_doc or {}).get("date", ""))[:4]
+    if _doc and _yr in await _closed_fiscal_years(db):
+        raise HTTPException(status_code=403, detail=f"السنة المالية {_yr} مقفلة — لا يمكن الاعتماد")
     result = await db.journal_entries.update_one(
         {"id": entry_id, "status": "pending"},
         {
@@ -1024,3 +1034,115 @@ async def get_audit_log(
     total = await db.audit_logs.count_documents(query)
     
     return {"items": logs, "total": total, "page": page, "limit": limit}
+
+# ============ p209: FISCAL YEAR CLOSE ============
+
+FISCAL_CLOSE_TAG = "fiscal_close"
+
+
+async def _closed_fiscal_years(tdb) -> set:
+    """Years with a posted closing entry (the closing entry IS the lock)."""
+    years = await tdb.journal_entries.distinct("fiscal_year", {"source_tag": FISCAL_CLOSE_TAG})
+    return {y for y in (years or []) if y}
+
+
+async def _fiscal_year_nets(tdb, year: str) -> dict:
+    """Debit-positive nets of 6xx/7xx lines within the year, EXCLUDING
+    closing entries — so the preview stays stable after closing."""
+    agg = await tdb.journal_entries.aggregate([
+        {"$match": {"date": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"},
+                    "source_tag": {"$ne": FISCAL_CLOSE_TAG}}},
+        {"$unwind": "$lines"},
+        {"$match": {"lines.account_code": {"$regex": "^(6|7)"}}},
+        {"$group": {"_id": "$lines.account_code",
+                    "d": {"$sum": "$lines.debit"}, "c": {"$sum": "$lines.credit"}}},
+    ]).to_list(None)
+    return {r["_id"]: round(r["d"] - r["c"], 2) for r in agg if round(r["d"] - r["c"], 2)}
+
+
+def _fiscal_close_payload(nets: dict) -> dict:
+    """Split nets into closing lines + the result carried to capital 101."""
+    revenue_total = round(sum(-n for n in nets.values() if n < 0), 2)
+    expense_total = round(sum(n for n in nets.values() if n > 0), 2)
+    result = round(revenue_total - expense_total, 2)
+    return {"revenue_total": revenue_total, "expense_total": expense_total, "result": result}
+
+
+@router.get("/fiscal-close")
+async def list_fiscal_closes(user=Depends(get_current_user)):
+    """p209: list of closed fiscal years."""
+    return {"closed_years": sorted(await _closed_fiscal_years(db))}
+
+
+@router.get("/fiscal-close/preview")
+async def fiscal_close_preview(year: str, user=Depends(get_current_user)):
+    """p209: result of the year (7xx − 6xx) + the closing lines. No writes."""
+    if not (len(year) == 4 and year.isdigit()):
+        raise HTTPException(status_code=400, detail="year بصيغة YYYY")
+    accounts = await ensure_accounts(db)
+    nets = await _fiscal_year_nets(db, year)
+    closed = year in await _closed_fiscal_years(db)
+    detail = []
+    for code, net in sorted(nets.items()):
+        acc = accounts.get(code) or await db.accounts.find_one({"code": code})
+        detail.append({
+            "account_code": code,
+            "account_name": (acc or {}).get("name_ar") or (acc or {}).get("name") or code,
+            "net": net,
+            "close_debit": round(-net, 2) if net < 0 else 0.0,
+            "close_credit": net if net > 0 else 0.0,
+        })
+    return {
+        "year": year,
+        "closed": closed,
+        **_fiscal_close_payload(nets),
+        "accounts": detail,
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/fiscal-close")
+async def fiscal_close_apply(body: dict, user=Depends(get_current_user)):
+    """p209: close a fiscal year — carry the result to capital 101 and zero
+    7xx/6xx via one approved entry dated YYYY-12-31. Idempotent per year."""
+    year = str((body or {}).get("year", ""))
+    if not (len(year) == 4 and year.isdigit()):
+        raise HTTPException(status_code=400, detail="year بصيغة YYYY")
+    if year in await _closed_fiscal_years(db):
+        raise HTTPException(status_code=409, detail=f"السنة المالية {year} مقفلة مسبقاً")
+    accounts = await ensure_accounts(db)
+    nets = await _fiscal_year_nets(db, year)
+    if not nets:
+        raise HTTPException(status_code=400, detail=f"لا حركات على حسابات 6xx/7xx في {year} — لا نتيجة للترحيل")
+    payload = _fiscal_close_payload(nets)
+
+    lines = []
+    for code, net in sorted(nets.items()):
+        acc = accounts.get(code)
+        if not acc:
+            raise HTTPException(status_code=500, detail=f"حساب مفقود: {code}")
+        lines.append(_line(acc, debit=round(-net, 2) if net < 0 else 0.0,
+                           credit=net if net > 0 else 0.0))
+    capital = accounts.get("101")
+    if not capital:
+        raise HTTPException(status_code=500, detail="حساب رأس المال 101 مفقود")
+    result = payload["result"]
+    lines.append(_line(capital, debit=round(-result, 2) if result < 0 else 0.0,
+                       credit=result if result > 0 else 0.0))
+
+    reference_id = f"CLOSE-{year}"
+    try:
+        entry = await _insert_entry(
+            db,
+            reference=reference_id,
+            reference_id=reference_id,
+            source_tag=FISCAL_CLOSE_TAG,
+            description=f"قيد إقفال السنة المالية {year} — ترحيل النتيجة ({result}) إلى رأس المال وتصفير حسابات النتائج",
+            lines=lines,
+            date=f"{year}-12-31",
+            extra={"fiscal_year": year},
+        )
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail=f"السنة المالية {year} مقفلة مسبقاً (تعارض متزامن)")
+    return {"applied": True, "year": year, **payload, "entry": entry}

@@ -61,8 +61,11 @@ async def ensure_accounts(tdb) -> dict:
     return out
 
 
-async def _insert_entry(tdb, *, reference, reference_id, source_tag, description, lines):
-    """Insert a balanced, approved auto journal entry + update balances."""
+async def _insert_entry(tdb, *, reference, reference_id, source_tag, description, lines,
+                        date: str = None, extra: dict = None):
+    """Insert a balanced, approved auto journal entry + update balances.
+    p209: optional date override (e.g. fiscal close dated YYYY-12-31) and
+    extra doc fields (e.g. fiscal_year)."""
     total_debit = round(sum(l["debit"] for l in lines), 2)
     total_credit = round(sum(l["credit"] for l in lines), 2)
     if abs(total_debit - total_credit) > 0.01:
@@ -71,7 +74,7 @@ async def _insert_entry(tdb, *, reference, reference_id, source_tag, description
     doc = {
         "id": str(uuid.uuid4()),
         # entry_number is assigned in the retry loop below (p206 race guard)
-        "date": now[:10],
+        "date": date or now[:10],
         "reference": reference,
         "description": description,
         "lines": lines,
@@ -87,6 +90,8 @@ async def _insert_entry(tdb, *, reference, reference_id, source_tag, description
         "created_at": now,
         "updated_at": now,
     }
+    if extra:
+        doc.update(extra)
     # p206: 4-worker race guard — two DIFFERENT entries can compute the same
     # count+1 entry_number concurrently; the unique index rejects the loser.
     # Retry with a fresh count (the auto_entry_unique dup still propagates).
