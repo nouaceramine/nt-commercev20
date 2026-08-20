@@ -229,6 +229,14 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
                     )
                 except Exception:
                     logger.exception("Bridge: failed to compensate wallet for recharge %s", recharge_id)
+                try:
+                    from services.commission_engine import reverse_platform_commission
+                    await reverse_platform_commission(
+                        main_db, reference_type="recharge", reference_id=recharge_id,
+                        reason="recharge_failed",
+                    )
+                except Exception:
+                    logger.exception("Bridge: failed to reverse commission for recharge %s", recharge_id)
 
         return {"ok": True, "task_id": task_id, "status": body.status}
 

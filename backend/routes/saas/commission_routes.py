@@ -408,3 +408,49 @@ async def admin_promote_pending(admin: dict = Depends(get_super_admin)):
 async def agent_wallet_withdraw_request_alias(data: dict, agent: dict = Depends(get_current_agent)):
     """Alias of /saas/agent/commissions/withdraw-request for spec compatibility."""
     return await agent_withdraw_request(data, agent)
+# ── p205: platform commission ledger (owner's margin on mediated services) ──
+
+@router.get("/saas/platform-commissions/summary")
+async def platform_commission_summary(days: int = 30, admin: dict = Depends(get_super_admin)):
+    """Owner's earnings from mediated services (recharge spread, ...).
+    Only status='earned' rows count; reversed ops are excluded automatically."""
+    from datetime import timedelta as _td
+    since = (datetime.now(timezone.utc) - _td(days=days)).isoformat()
+    match = {"status": "earned", "created_at": {"$gte": since}}
+    by_service = {}
+    total = 0.0
+    count = 0
+    async for row in db.platform_commissions.aggregate([
+        {"$match": match},
+        {"$group": {"_id": "$service_type",
+                    "margin": {"$sum": "$platform_margin"},
+                    "gross": {"$sum": "$gross_amount"},
+                    "n": {"$sum": 1}}},
+    ]):
+        by_service[row["_id"]] = {"margin": round(row["margin"], 2),
+                                  "gross": round(row["gross"], 2),
+                                  "count": row["n"]}
+        total += row["margin"]
+        count += row["n"]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_doc = await db.platform_commissions.aggregate([
+        {"$match": {"status": "earned", "created_at": {"$gte": today}}},
+        {"$group": {"_id": None, "margin": {"$sum": "$platform_margin"}, "n": {"$sum": 1}}},
+    ]).to_list(1)
+    return {
+        "period_days": days,
+        "total_margin": round(total, 2),
+        "operations": count,
+        "by_service": by_service,
+        "today": {"margin": round(today_doc[0]["margin"], 2), "count": today_doc[0]["n"]} if today_doc else {"margin": 0.0, "count": 0},
+    }
+
+
+@router.get("/saas/platform-commissions/history")
+async def platform_commission_history(
+    limit: int = 50, service_type: str = "", admin: dict = Depends(get_super_admin),
+):
+    """Recent platform commission rows (newest first)."""
+    q = {"service_type": service_type} if service_type else {}
+    rows = await db.platform_commissions.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return {"items": rows, "count": len(rows)}

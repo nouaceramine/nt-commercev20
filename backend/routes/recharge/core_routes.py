@@ -24,6 +24,8 @@ def build_core_router(db, main_db, require_tenant, get_tenant_admin, RECHARGE_CO
                 merged = dict(defaults)
                 if "commission" in override:
                     merged["commission"] = override["commission"]
+                if "platform_commission" in override:
+                    merged["platform_commission"] = override["platform_commission"]
                 if "amounts" in override and override["amounts"]:
                     merged["amounts"] = override["amounts"]
                 effective[key] = merged

@@ -585,6 +585,11 @@ async def startup_event():
             await main_db.wallets.create_index(
                 [("entity_type", 1), ("entity_id", 1)], unique=True, sparse=True
             )
+            # p205: platform commission ledger — one row per mediated transaction
+            await main_db.platform_commissions.create_index(
+                [("reference_type", 1), ("reference_id", 1)],
+                unique=True, sparse=True, name="platform_commission_unique",
+            )
         except Exception as wal_exc:
             logger.warning("wallets unique index: %s", wal_exc)
 

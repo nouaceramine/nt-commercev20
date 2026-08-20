@@ -79,6 +79,21 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
         user.get("name", ""),
     )
 
+    # p205: platform commission ledger — platform margin = (platform% − tenant%) × amount.
+    # platform_commission defaults to the tenant rate (margin 0) until the owner
+    # configures their real upstream deal via /saas/recharge-config.
+    from services.commission_engine import record_platform_commission, reverse_platform_commission
+    await record_platform_commission(
+        main_db,
+        service_type="recharge", tenant_id=entity_id,
+        reference_type="recharge", reference_id=recharge_id,
+        gross_amount=recharge.amount,
+        tenant_commission_pct=operator_config.get("commission", 0),
+        platform_commission_pct=operator_config.get("platform_commission", operator_config.get("commission", 0)),
+        operator=recharge.operator,
+        meta={"phone_number": recharge.phone_number, "code": recharge_code},
+    )
+
     bridge_task_id = str(uuid.uuid4())
     txn_record_id = str(uuid.uuid4())
     recharge_doc = {
@@ -280,6 +295,13 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
             )
         except Exception:
             logger.exception("Rollback: failed to compensate wallet for recharge %s", recharge_id)
+        try:
+            await reverse_platform_commission(
+                main_db, reference_type="recharge", reference_id=recharge_id,
+                reason="recharge_saga_rollback",
+            )
+        except Exception:
+            logger.exception("Rollback: failed to reverse commission for recharge %s", recharge_id)
         if isinstance(e, HTTPException):
             raise
         raise HTTPException(status_code=500, detail="فشل تسجيل عملية الشحن") from e

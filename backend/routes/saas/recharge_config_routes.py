@@ -8,10 +8,10 @@ from .helpers import get_super_admin
 router = APIRouter(tags=["Recharge Config"])
 
 DEFAULT_OPERATORS = {
-    "mobilis": {"name": "موبيليس", "name_en": "Mobilis", "commission": 3, "amounts": [100, 200, 500, 1000, 2000, 5000]},
-    "djezzy":  {"name": "جازي",    "name_en": "Djezzy",  "commission": 3, "amounts": [100, 200, 500, 1000, 2000, 5000]},
-    "ooredoo": {"name": "أوريدو",  "name_en": "Ooredoo", "commission": 3, "amounts": [100, 200, 500, 1000, 2000, 5000]},
-    "idoom":   {"name": "إيدوم",   "name_en": "Idoom",   "commission": 2, "amounts": [1000, 1500, 2000, 2500, 3000, 4000, 5000]},
+    "mobilis": {"name": "موبيليس", "name_en": "Mobilis", "commission": 3, "platform_commission": 3, "amounts": [100, 200, 500, 1000, 2000, 5000]},
+    "djezzy":  {"name": "جازي",    "name_en": "Djezzy",  "commission": 3, "platform_commission": 3, "amounts": [100, 200, 500, 1000, 2000, 5000]},
+    "ooredoo": {"name": "أوريدو",  "name_en": "Ooredoo", "commission": 3, "platform_commission": 3, "amounts": [100, 200, 500, 1000, 2000, 5000]},
+    "idoom":   {"name": "إيدوم",   "name_en": "Idoom",   "commission": 2, "platform_commission": 2, "amounts": [1000, 1500, 2000, 2500, 3000, 4000, 5000]},
 }
 
 
@@ -47,6 +47,8 @@ async def update_operator_config(operator_key: str, body: dict, admin: dict = De
     update = {"updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": admin.get("email", "")}
     if "commission" in body:
         update["commission"] = float(body["commission"])
+    if "platform_commission" in body:
+        update["platform_commission"] = float(body["platform_commission"])
     if "amounts" in body and isinstance(body["amounts"], list):
         update["amounts"] = [int(a) for a in body["amounts"] if str(a).isdigit()]
 
