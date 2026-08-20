@@ -18,6 +18,7 @@ DEFAULT_ACCOUNTS = [
     ("533", "المال الخاص", "asset", "personal"),
     ("534", "المتجر الإلكتروني", "asset", "ecom_store"),
     ("401", "الموردون", "liability", None),
+    ("402", "سلف الموردين", "asset", None),
     ("411", "الزبائن", "asset", None),
     ("610", "مصاريف التشغيل", "expense", None),
     ("380", "المخزون", "asset", None),
@@ -266,6 +267,35 @@ async def post_expense_reversal(tdb, payload: dict):
         description=f"قيد عكسي تلقائي — حذف مصروف {payload.get('title', '')}",
         lines=lines,
     )
+
+# ── p203: supplier advance payments ─────────────────────────────────────────
+
+async def post_supplier_advance_entry(tdb, payload: dict):
+    """supplier.advance_paid → Dr supplier advances (402) / Cr cash-box.
+    An advance is a prepaid ASSET (tracked per supplier, never netted against
+    purchases), not a debt settlement — debts use supplier.payment_made.
+    Idempotent per payment_id."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "supplier_advance"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    lines = [
+        _line(accounts["402"], debit=amount),
+        _line(accounts[box_code], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("supplier_name", ""),
+        reference_id=payment_id,
+        source_tag="supplier_advance",
+        description=f"قيد تلقائي — دفعة مسبقة للمورد {payload.get('supplier_name', '')}",
+        lines=lines,
+    )
+
 
 # ── p202: rental payments ────────────────────────────────────────────────────
 
