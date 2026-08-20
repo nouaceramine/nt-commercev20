@@ -95,6 +95,7 @@ const AccountingPage = () => {
       'rental.payment_received',  // p202
       'supplier.advance_paid',  // p203
       'installment.paid',  // p204
+      'rental.deposit_held', 'rental.deposit_refunded', 'rental.deposit_kept', 'rental.close_billed',  // p206
     ];
     const unsubs = events.map((ev) => onEvent(ev, refresh));
     return () => unsubs.forEach((u) => u());

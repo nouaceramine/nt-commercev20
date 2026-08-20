@@ -482,6 +482,34 @@ async def handle_installment_paid(event: Event) -> None:
         log.warning("auto-accounting installment %s failed: %s", p.get("payment_id"), exc)
 
 
+# p206: rental deposit & close-out accounting
+async def _rental_post(event, fn_name, warn_key):
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services import accounting_auto
+        await getattr(accounting_auto, fn_name)(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting %s %s failed: %s", fn_name, p.get(warn_key), exc)
+
+
+async def handle_rental_deposit_held(event: Event) -> None:
+    await _rental_post(event, "post_rental_deposit_held", "payment_id")
+
+
+async def handle_rental_deposit_refunded(event: Event) -> None:
+    await _rental_post(event, "post_rental_deposit_refund", "payment_id")
+
+
+async def handle_rental_deposit_kept(event: Event) -> None:
+    await _rental_post(event, "post_rental_deposit_kept", "payment_id")
+
+
+async def handle_rental_close_billed(event: Event) -> None:
+    await _rental_post(event, "post_rental_close_billed", "payment_id")
+
+
 # ── p195: debt settlement accounting ─────────────────────────────────────────
 async def handle_customer_payment_received(event: Event) -> None:
     """Customer debt payment received → auto journal entry (Dr box / Cr AR 411)."""
@@ -522,6 +550,10 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("rental.payment_received", handle_rental_payment_received)  # p202
     bus.register("supplier.advance_paid", handle_supplier_advance_paid)  # p203
     bus.register("installment.paid", handle_installment_paid)  # p204
+    bus.register("rental.deposit_held", handle_rental_deposit_held)  # p206
+    bus.register("rental.deposit_refunded", handle_rental_deposit_refunded)  # p206
+    bus.register("rental.deposit_kept", handle_rental_deposit_kept)  # p206
+    bus.register("rental.close_billed", handle_rental_close_billed)  # p206
     bus.register("customer.payment_received", handle_customer_payment_received)  # p195
     bus.register("supplier.payment_made", handle_supplier_payment_made)  # p195
     bus.register("ecom_order.confirmed", handle_ecom_order_confirmed)

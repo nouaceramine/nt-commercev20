@@ -5,6 +5,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
 
 log = logging.getLogger("accounting_auto")
 
@@ -17,6 +18,7 @@ DEFAULT_ACCOUNTS = [
     ("532", "الخزنة", "asset", "safe"),
     ("533", "المال الخاص", "asset", "personal"),
     ("534", "المتجر الإلكتروني", "asset", "ecom_store"),
+    ("203", "ودائع أمانات العملاء", "liability", None),
     ("401", "الموردون", "liability", None),
     ("402", "سلف الموردين", "asset", None),
     ("411", "الزبائن", "asset", None),
@@ -65,11 +67,10 @@ async def _insert_entry(tdb, *, reference, reference_id, source_tag, description
     total_credit = round(sum(l["credit"] for l in lines), 2)
     if abs(total_debit - total_credit) > 0.01:
         raise ValueError(f"unbalanced auto entry: {total_debit} != {total_credit}")
-    count = await tdb.journal_entries.count_documents({})
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()),
-        "entry_number": f"JE{str(count + 1).zfill(6)}",
+        # entry_number is assigned in the retry loop below (p206 race guard)
         "date": now[:10],
         "reference": reference,
         "description": description,
@@ -86,7 +87,19 @@ async def _insert_entry(tdb, *, reference, reference_id, source_tag, description
         "created_at": now,
         "updated_at": now,
     }
-    await tdb.journal_entries.insert_one(doc)
+    # p206: 4-worker race guard — two DIFFERENT entries can compute the same
+    # count+1 entry_number concurrently; the unique index rejects the loser.
+    # Retry with a fresh count (the auto_entry_unique dup still propagates).
+    for _attempt in range(4):
+        count = await tdb.journal_entries.count_documents({})
+        doc["entry_number"] = f"JE{str(count + 1).zfill(6)}"
+        try:
+            await tdb.journal_entries.insert_one(doc)
+            break
+        except DuplicateKeyError as exc:
+            if "entry_number" in str(exc) and _attempt < 3:
+                continue
+            raise
     for line in lines:
         change = line["debit"] - line["credit"]
         if change:
@@ -294,6 +307,85 @@ async def post_installment_payment_entry(tdb, payload: dict):
         source_tag="installment_payment",
         description=f"قيد تلقائي — تحصيل قسط من العميل {payload.get('customer_name', '')}",
         lines=lines,
+    )
+
+
+# ── p206: rental deposits & close-out ───────────────────────────────────────
+
+async def post_rental_deposit_held(tdb, payload: dict):
+    """rental.deposit_held → Dr cash-box / Cr customer deposits (203).
+    A held deposit is a LIABILITY (أمانة), not revenue."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "rental_deposit"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    return await _insert_entry(
+        tdb, reference=payload.get("contract_code", ""), reference_id=payment_id,
+        source_tag="rental_deposit",
+        description=f"قيد تلقائي — وديعة أمانة عقد كراء {payload.get('contract_code', '')}",
+        lines=[_line(accounts[box_code], debit=amount),
+               _line(accounts["203"], credit=amount)],
+    )
+
+
+async def post_rental_deposit_refund(tdb, payload: dict):
+    """rental.deposit_refunded → Dr 203 / Cr cash-box (أمانة مسترجعة)."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "rental_deposit_refund"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    return await _insert_entry(
+        tdb, reference=payload.get("contract_code", ""), reference_id=payment_id,
+        source_tag="rental_deposit_refund",
+        description=f"قيد تلقائي — استرجاع وديعة عقد كراء {payload.get('contract_code', '')}",
+        lines=[_line(accounts["203"], debit=amount),
+               _line(accounts[box_code], credit=amount)],
+    )
+
+
+async def post_rental_deposit_kept(tdb, payload: dict):
+    """rental.deposit_kept → Dr 203 / Cr rental revenue (701) — وديعة مصادَرة."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "rental_deposit_kept"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    return await _insert_entry(
+        tdb, reference=payload.get("contract_code", ""), reference_id=payment_id,
+        source_tag="rental_deposit_kept",
+        description=f"قيد تلقائي — مصادرة وديعة عقد كراء {payload.get('contract_code', '')}",
+        lines=[_line(accounts["203"], debit=amount),
+               _line(accounts["701"], credit=amount)],
+    )
+
+
+async def post_rental_close_billed(tdb, payload: dict):
+    """rental.close_billed → Dr receivables (411) / Cr rental revenue (701).
+    Collected parts already hit 701 on payment (p202/p206); at close only the
+    UNPAID remainder (incl. late fees) is recognised against the customer."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "rental_close"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    return await _insert_entry(
+        tdb, reference=payload.get("contract_code", ""), reference_id=payment_id,
+        source_tag="rental_close",
+        description=f"قيد تلقائي — متبقّي عقد كراء {payload.get('contract_code', '')} (دين على العميل)",
+        lines=[_line(accounts["411"], debit=amount),
+               _line(accounts["701"], credit=amount)],
     )
 
 

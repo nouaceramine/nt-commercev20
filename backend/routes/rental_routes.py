@@ -255,16 +255,41 @@ def create_rental_routes(db, get_current_user, get_tenant_admin, require_tenant)
             contract["payments"].append(pay)
             contract["paid_amount"] = initial
 
-        await db.rental_contracts.insert_one(dict(contract))
-        await db.rental_assets.update_one(
-            {"id": asset["id"]}, {"$set": {"status": "rented", "updated_at": now}}
-        )
-        if initial > 0:
-            await _add_cash(body.cash_box_id or "cash", initial, "rental_payment",
-                            contract["id"], f"دفعة أولى عقد كراء {contract['code']}", user.get("name", ""))
-        if contract["deposit_amount"] > 0:
-            await _add_cash(body.cash_box_id or "cash", contract["deposit_amount"], "rental_deposit",
-                            contract["id"], f"وديعة عقد كراء {contract['code']}", user.get("name", ""))
+        # p206: atomic — contract + asset + initial payment + deposit + outbox
+        # events commit or abort together (replica set, pattern p195/p202)
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        _tid = user.get("tenant_id") or "platform"
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                await db.rental_contracts.insert_one(dict(contract), session=_tx)
+                await db.rental_assets.update_one(
+                    {"id": asset["id"]}, {"$set": {"status": "rented", "updated_at": now}},
+                    session=_tx,
+                )
+                if initial > 0:
+                    pay0 = contract["payments"][0]
+                    await _add_cash(body.cash_box_id or "cash", initial, "rental_payment",
+                                    contract["id"], f"دفعة أولى عقد كراء {contract['code']}", user.get("name", ""), session=_tx)
+                    await outbox_write(
+                        _main_db, "rental.payment_received",
+                        {"payment_id": pay0["id"], "contract_id": contract["id"],
+                         "contract_code": contract["code"],
+                         "customer_name": contract.get("customer_name", ""),
+                         "amount": initial, "cash_box_id": body.cash_box_id or "cash"},
+                        tenant_id=_tid, source="rental_routes", session=_tx,
+                    )
+                if contract["deposit_amount"] > 0:
+                    await _add_cash(body.cash_box_id or "cash", contract["deposit_amount"], "rental_deposit",
+                                    contract["id"], f"وديعة عقد كراء {contract['code']}", user.get("name", ""), session=_tx)
+                    # p206: held deposit is a liability (203), not revenue
+                    await outbox_write(
+                        _main_db, "rental.deposit_held",
+                        {"payment_id": contract["id"] + "-deposit", "contract_id": contract["id"],
+                         "contract_code": contract["code"], "amount": contract["deposit_amount"],
+                         "cash_box_id": body.cash_box_id or "cash"},
+                        tenant_id=_tid, source="rental_routes", session=_tx,
+                    )
         contract.pop("_id", None)
         return contract
 
@@ -353,37 +378,69 @@ def create_rental_routes(db, get_current_user, get_tenant_admin, require_tenant)
             raise HTTPException(status_code=400, detail="قرار الوديعة: returned أو kept")
 
         now = _now()
-        # deposit refund from the chosen box (allowed to drive it negative — أمانة مسترجعة)
+        # p206: atomic close — deposit resolution + remainder debt + contract +
+        # asset + outbox events commit or abort together (pattern p195)
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        _tid = user.get("tenant_id") or "platform"
         deposit = float(c.get("deposit_amount") or 0)
-        if body.deposit_action == "returned" and deposit > 0 and c.get("deposit_status") == "held":
-            await _add_cash(body.refund_cash_box_id or "cash", -deposit, "rental_deposit_refund",
-                            contract_id, f"استرجاع وديعة عقد كراء {c['code']}", user.get("name", ""))
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                # deposit refund from the chosen box (allowed to drive it negative — أمانة مسترجعة)
+                if body.deposit_action == "returned" and deposit > 0 and c.get("deposit_status") == "held":
+                    await _add_cash(body.refund_cash_box_id or "cash", -deposit, "rental_deposit_refund",
+                                    contract_id, f"استرجاع وديعة عقد كراء {c['code']}", user.get("name", ""), session=_tx)
+                    await outbox_write(
+                        _main_db, "rental.deposit_refunded",
+                        {"payment_id": contract_id + "-deposit-refund", "contract_id": contract_id,
+                         "contract_code": c["code"], "amount": deposit,
+                         "cash_box_id": body.refund_cash_box_id or "cash"},
+                        tenant_id=_tid, source="rental_routes", session=_tx,
+                    )
+                # p206: kept deposit → forfeited, becomes rental revenue (203→701)
+                if body.deposit_action == "kept" and deposit > 0 and c.get("deposit_status") == "held":
+                    await outbox_write(
+                        _main_db, "rental.deposit_kept",
+                        {"payment_id": contract_id + "-deposit-kept", "contract_id": contract_id,
+                         "contract_code": c["code"], "amount": deposit},
+                        tenant_id=_tid, source="rental_routes", session=_tx,
+                    )
 
-        # unpaid remainder becomes a customer debt (mirror)
-        if remaining > 0 and c.get("customer_id"):
-            await db.customers.update_one(
-                {"id": c["customer_id"]},
-                {"$inc": {"balance": remaining, "total_debt": remaining}},
-            )
+                # unpaid remainder becomes a customer debt (mirror + journal 411/701)
+                if remaining > 0 and c.get("customer_id"):
+                    await db.customers.update_one(
+                        {"id": c["customer_id"]},
+                        {"$inc": {"balance": remaining, "total_debt": remaining}},
+                        session=_tx,
+                    )
+                    await outbox_write(
+                        _main_db, "rental.close_billed",
+                        {"payment_id": contract_id + "-close", "contract_id": contract_id,
+                         "contract_code": c["code"],
+                         "customer_name": c.get("customer_name", ""), "amount": remaining},
+                        tenant_id=_tid, source="rental_routes", session=_tx,
+                    )
 
-        await db.rental_contracts.update_one(
-            {"id": contract_id},
-            {"$set": {
-                "status": "closed",
-                "closed_at": now,
-                "actual_return_date": ret.isoformat(),
-                "late_days": late_days,
-                "late_fee": late_fee,
-                "total_due": total_due,
-                "remaining_at_close": remaining,
-                "deposit_status": ("none" if deposit <= 0 else body.deposit_action),
-                "close_notes": body.notes or "",
-                "updated_at": now,
-            }},
-        )
-        await db.rental_assets.update_one(
-            {"id": c["asset_id"]}, {"$set": {"status": "available", "updated_at": now}}
-        )
+                await db.rental_contracts.update_one(
+                    {"id": contract_id},
+                    {"$set": {
+                        "status": "closed",
+                        "closed_at": now,
+                        "actual_return_date": ret.isoformat(),
+                        "late_days": late_days,
+                        "late_fee": late_fee,
+                        "total_due": total_due,
+                        "remaining_at_close": remaining,
+                        "deposit_status": ("none" if deposit <= 0 else body.deposit_action),
+                        "close_notes": body.notes or "",
+                        "updated_at": now,
+                    }},
+                    session=_tx,
+                )
+                await db.rental_assets.update_one(
+                    {"id": c["asset_id"]}, {"$set": {"status": "available", "updated_at": now}},
+                    session=_tx,
+                )
         return {
             "success": True,
             "late_days": late_days,

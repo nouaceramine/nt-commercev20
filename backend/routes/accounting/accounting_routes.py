@@ -648,6 +648,10 @@ async def get_balance_sheet_journal(
         elif code.startswith("401"):
             if net:
                 liabilities.append({"account_code": code, "account_name": name, "amount": round(-net, 2)})
+        elif code[:1] == "2":
+            # p206: class-2 liabilities (203 customer deposits, credit-nature)
+            if net:
+                liabilities.append({"account_code": code, "account_name": name, "amount": round(-net, 2)})
         elif code[:1] == "1":
             # p199: capital & other class-1 equity accounts (credit-nature)
             if net:
