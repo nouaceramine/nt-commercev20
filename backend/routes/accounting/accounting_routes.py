@@ -611,6 +611,61 @@ async def get_income_statement(
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
+@router.get("/reports/balance-sheet-journal")
+async def get_balance_sheet_journal(
+    as_of_date: str,
+    user=Depends(get_current_user)
+):
+    """p198: Balance sheet (financial position) from journal-entry LINES as of
+    a date. Assets = 3xx/4xx(debit-nature)/5xx boxes; liabilities = 401;
+    equity = period result (7xx net − 6xx net). Double-entry guarantees
+    assets == liabilities + equity; is_balanced reports the live check."""
+    pipeline = [
+        {"$match": {"date": {"$lte": as_of_date}}},
+        {"$unwind": "$lines"},
+        {"$group": {
+            "_id": "$lines.account_id",
+            "account_code": {"$first": "$lines.account_code"},
+            "account_name": {"$first": "$lines.account_name"},
+            "total_debit": {"$sum": {"$ifNull": ["$lines.debit", 0]}},
+            "total_credit": {"$sum": {"$ifNull": ["$lines.credit", 0]}},
+        }},
+    ]
+    assets, liabilities = [], []
+    result = 0.0
+    async for row in db.journal_entries.aggregate(pipeline):
+        code = str(row.get("account_code") or "")
+        name = row.get("account_name") or ""
+        net = round(row["total_debit"] - row["total_credit"], 2)
+        if code.startswith("7"):
+            result -= net  # credit-nature: negative net = revenue
+        elif code.startswith("6"):
+            result -= net  # debit-nature: positive net = expense
+        elif code.startswith("401"):
+            if net:
+                liabilities.append({"account_code": code, "account_name": name, "amount": round(-net, 2)})
+        elif code[:1] in ("3", "4", "5"):
+            if net:
+                assets.append({"account_code": code, "account_name": name, "amount": net})
+    assets.sort(key=lambda r: r["account_code"])
+    liabilities.sort(key=lambda r: r["account_code"])
+    assets_total = round(sum(a["amount"] for a in assets), 2)
+    liabilities_total = round(sum(a["amount"] for a in liabilities), 2)
+    result = round(result, 2)
+    equity_total = result
+    return {
+        "as_of_date": as_of_date,
+        "assets": assets,
+        "assets_total": assets_total,
+        "liabilities": liabilities,
+        "liabilities_total": liabilities_total,
+        "equity_result": result,
+        "equity_total": equity_total,
+        "is_balanced": abs(assets_total - (liabilities_total + equity_total)) < 0.01,
+        "basis": "journal_lines",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 @router.get("/reports/tax-summary")
 async def get_tax_summary(
     period: str,

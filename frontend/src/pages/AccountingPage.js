@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Scale, RefreshCw, BookOpen, TrendingUp } from 'lucide-react';
+import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark } from 'lucide-react';
 import { startRealtime, onEvent } from '../lib/realtime';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -19,6 +19,7 @@ const AccountingPage = () => {
   const [asOf, setAsOf] = useState(todayStr());
   const [tb, setTb] = useState(null);
   const [income, setIncome] = useState(null);  // p197
+  const [bs, setBs] = useState(null);  // p198
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -34,14 +35,16 @@ const AccountingPage = () => {
   const fetchAll = useCallback(async (dateStr) => {
     try {
       const monthStart = `${dateStr.slice(0, 8)}01`;  // p197: month-to-date range
-      const [tbRes, jeRes, isRes] = await Promise.all([
+      const [tbRes, jeRes, isRes, bsRes] = await Promise.all([
         apiClient.get(`/accounting/reports/trial-balance?as_of_date=${dateStr}`),
         apiClient.get('/accounting/journal-entries?limit=15'),
         apiClient.get(`/accounting/reports/income-statement?start_date=${monthStart}&end_date=${dateStr}`),
+        apiClient.get(`/accounting/reports/balance-sheet-journal?as_of_date=${dateStr}`),
       ]);
       setTb(tbRes.data);
       setEntries(Array.isArray(jeRes.data?.items) ? jeRes.data.items : []);
       setIncome(isRes.data);
+      setBs(bsRes.data);
     } catch (e) {
       console.error('accounting fetch failed', e);
     } finally {
@@ -224,6 +227,67 @@ const AccountingPage = () => {
                       <td className={`p-2 text-end font-mono ${income.net_profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-testid="income-net-profit">
                         {fmt(income.net_profit)}
                       </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {bs && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Landmark className="h-5 w-5" />
+                {isAr ? `الميزانية العمومية — ${bs.as_of_date}` : `Bilan — ${bs.as_of_date}`}
+                <Badge
+                  className={bs.is_balanced ? 'bg-emerald-600 hover:bg-emerald-600' : 'bg-red-600 hover:bg-red-600'}
+                  data-testid="balance-sheet-status"
+                >
+                  {bs.is_balanced ? (isAr ? 'متوازنة ✓' : 'Équilibré ✓') : (isAr ? 'غير متوازنة ✗' : 'Déséquilibré ✗')}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="balance-sheet-table">
+                  <tbody>
+                    <tr className="border-b bg-muted/30">
+                      <td className="p-2 font-semibold" colSpan={2}>{isAr ? 'الأصول' : 'Actif'}</td>
+                    </tr>
+                    {bs.assets.map((a) => (
+                      <tr key={a.account_code} className="border-b" data-testid={`bs-asset-${a.account_code}`}>
+                        <td className="p-2 ps-6">{a.account_name} <span className="font-mono text-muted-foreground">({a.account_code})</span></td>
+                        <td className="p-2 text-end font-mono">{fmt(a.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-b font-semibold">
+                      <td className="p-2">{isAr ? 'إجمالي الأصول' : 'Total actif'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="bs-assets-total">{fmt(bs.assets_total)}</td>
+                    </tr>
+                    <tr className="border-b bg-muted/30">
+                      <td className="p-2 font-semibold" colSpan={2}>{isAr ? 'الالتزامات' : 'Passif'}</td>
+                    </tr>
+                    {bs.liabilities.map((a) => (
+                      <tr key={a.account_code} className="border-b" data-testid={`bs-liab-${a.account_code}`}>
+                        <td className="p-2 ps-6">{a.account_name} <span className="font-mono text-muted-foreground">({a.account_code})</span></td>
+                        <td className="p-2 text-end font-mono">{fmt(a.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-b font-semibold">
+                      <td className="p-2">{isAr ? 'إجمالي الالتزامات' : 'Total passif'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="bs-liabilities-total">{fmt(bs.liabilities_total)}</td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="p-2 ps-6">{isAr ? 'نتيجة الفترة (حقوق الملكية)' : 'Résultat de la période (capitaux propres)'}</td>
+                      <td className={`p-2 text-end font-mono ${bs.equity_result >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-testid="bs-equity-result">{fmt(bs.equity_result)}</td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 font-bold">
+                      <td className="p-2">{isAr ? 'الالتزامات + حقوق الملكية' : 'Passif + capitaux propres'}</td>
+                      <td className="p-2 text-end font-mono" data-testid="bs-liab-equity-total">{fmt(bs.liabilities_total + bs.equity_total)}</td>
                     </tr>
                   </tfoot>
                 </table>
