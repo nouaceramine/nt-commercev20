@@ -3,22 +3,51 @@
  * Extracted from POSPage.js (Refactoring: Extract Hook)
  * Addresses: Large Class, Data Clumps, Feature Envy
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { getTierPrice } from '../lib/priceTiers';
 
 const CART_STORAGE_KEY = 'posParkedCarts';
 
+// p215: the ACTIVE cart survives navigation between pages (and reloads).
+// Scoped per user so two logins on the same browser never share a cart.
+const ACTIVE_CART_KEY = (() => {
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || 'null');
+    return 'posActiveCart:' + ((u && u.id) || 'anon');
+  } catch { return 'posActiveCart:anon'; }
+})();
+
+const loadActiveCart = () => {
+  try { return JSON.parse(localStorage.getItem(ACTIVE_CART_KEY) || 'null') || {}; } catch { return {}; }
+};
+
 export function usePOSCart({ language, toast }) {
-  const [cart, setCart] = useState([]);
-  const [discount, setDiscount] = useState(0);
-  const [discountMode, setDiscountMode] = useState('amount');
-  const [paidAmount, setPaidAmount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [paymentType, setPaymentType] = useState('cash');
-  const [mixedCash, setMixedCash] = useState(0);
-  const [mixedBank, setMixedBank] = useState(0);
-  const [returnMode, setReturnMode] = useState(false);
-  const [saleNote, setSaleNote] = useState('');
+  const [snapshot] = useState(loadActiveCart);  // p215: read once at mount
+  const [cart, setCart] = useState(snapshot.cart || []);
+  const [discount, setDiscount] = useState(snapshot.discount || 0);
+  const [discountMode, setDiscountMode] = useState(snapshot.discountMode || 'amount');
+  const [paidAmount, setPaidAmount] = useState(snapshot.paidAmount || 0);
+  const [paymentMethod, setPaymentMethod] = useState(snapshot.paymentMethod || 'cash');
+  const [paymentType, setPaymentType] = useState(snapshot.paymentType || 'cash');
+  const [mixedCash, setMixedCash] = useState(snapshot.mixedCash || 0);
+  const [mixedBank, setMixedBank] = useState(snapshot.mixedBank || 0);
+  const [returnMode, setReturnMode] = useState(snapshot.returnMode || false);
+  const [saleNote, setSaleNote] = useState(snapshot.saleNote || '');
+
+  // p215: write-through persistence — every cart change is saved instantly
+  useEffect(() => {
+    try {
+      if (cart.length === 0) {
+        localStorage.removeItem(ACTIVE_CART_KEY);
+        return;
+      }
+      localStorage.setItem(ACTIVE_CART_KEY, JSON.stringify({
+        cart, discount, discountMode, paidAmount, paymentMethod, paymentType,
+        mixedCash, mixedBank, returnMode, saleNote,
+      }));
+    } catch { /* storage blocked/full — cart just won't persist */ }
+  }, [cart, discount, discountMode, paidAmount, paymentMethod, paymentType,
+      mixedCash, mixedBank, returnMode, saleNote]);
 
   // Parked carts for later retrieval
   const [parkedCarts, setParkedCarts] = useState(() => {
@@ -124,6 +153,7 @@ export function usePOSCart({ language, toast }) {
   }, []);
 
   const clear = useCallback(() => {
+    try { localStorage.removeItem(ACTIVE_CART_KEY); } catch { /* p215 */ }
     setCart([]);
     setDiscount(0);
     setPaidAmount(0);
