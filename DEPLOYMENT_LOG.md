@@ -2916,3 +2916,15 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - اختبار حي نهائي: شراء 500 نقدي → قيد واحد فقط (380:500/530:500)؛ مصروف 50 → قيد واحد (610:50/530:50)؛ المجموع 2 بالضبط. حذف المصروف → قيد عكسي مطابق.
 - الصندوق 11300 سليم، القيود والأرصدة نظيفة، الدليل (12 حساباً) محفوظ.
 - لا تغيير واجهة.
+
+## p194 — توسيع التزامن الفوري (SSE): صفحة المنتجات + لوحة التحكم — 2026-08-20
+
+**قبل:** الاشتراك في أحداث SSE كان محصوراً في صفحة نقطة البيع (p191)؛ صفحة المنتجات ولوحة التحكم تتطلبان تحديثاً يدوياً لرؤية تغيّر المخزون/الإحصاءات بعد أي عملية.
+
+**بعد:**
+- `ProductsPage.js`: اشتراك في `sale.completed` / `sale.refunded` / `sale.deleted` / `purchase.recorded` → إعادة جلب المنتجات فورياً؛ استخدام `useRef` لأحدث نسخة من `fetchProducts` لتفادي الـ stale closure مع الفلاتر/الترقيم.
+- `DashboardPage.js`: اشتراك في `sale.completed` / `sale.refunded` / `sale.deleted` / `purchase.recorded` / `expense.created` / `expense.deleted` → إعادة جلب بيانات اللوحة صامتاً (دون spinner).
+- لا تغيير في الخلفية؛ نقطة `/api/events/stream` (p191) هي المصدر.
+- نسخة احتياطية: `/opt/ntcommerce/backups/p194/`
+- إصدار الواجهة: **20260820_111100** — الحزمة `main.e5c5947f.js`
+- تحقق: esbuild OK للصفحتين؛ الحزمة المباشرة تحتوي سلاسل `events/stream` و`purchase.recorded` و`sale.refunded`؛ `/api/events/stream` يرد 200 text/event-stream عبر Cloudflare/nginx؛ `/api/health` = ok.

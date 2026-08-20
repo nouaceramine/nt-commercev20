@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import apiClient from '../lib/apiClient';
+import { startRealtime, onEvent } from '../lib/realtime';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useDateFormat } from '../contexts/DateFormatContext';
@@ -130,6 +131,16 @@ export default function DashboardPage() {
     };
 
     fetchData();
+
+    // p194: تحديث فوري للوحة التحكم عند أحداث البيع/الشراء/المصاريف (SSE)
+    startRealtime();
+    const _un1 = onEvent('sale.completed', fetchData);
+    const _un2 = onEvent('sale.refunded', fetchData);
+    const _un3 = onEvent('sale.deleted', fetchData);
+    const _un4 = onEvent('purchase.recorded', fetchData);
+    const _un5 = onEvent('expense.created', fetchData);
+    const _un6 = onEvent('expense.deleted', fetchData);
+    return () => { _un1(); _un2(); _un3(); _un4(); _un5(); _un6(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const Arrow = isRTL ? ArrowLeft : ArrowRight;

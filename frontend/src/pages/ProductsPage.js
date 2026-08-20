@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
+import { startRealtime, onEvent } from '../lib/realtime';
 import PrintButton from '../components/print/PrintButton';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -323,6 +324,19 @@ export default function ProductsPage() {
         setFamilies(list.filter(f => f && f.id));
       } catch { /* العائلات غير متاحة — يبقى الفلتر فارغاً */ }
     })();
+  }, []);
+
+  // p194: تحديث فوري للمخزون عند أحداث البيع/الشراء (SSE)
+  const fetchProductsRef = useRef(fetchProducts);
+  fetchProductsRef.current = fetchProducts;
+  useEffect(() => {
+    startRealtime();
+    const refresh = () => fetchProductsRef.current();
+    const un1 = onEvent('sale.completed', refresh);
+    const un2 = onEvent('sale.refunded', refresh);
+    const un3 = onEvent('sale.deleted', refresh);
+    const un4 = onEvent('purchase.recorded', refresh);
+    return () => { un1(); un2(); un3(); un4(); };
   }, []);
 
   const handleSearch = (e) => {
