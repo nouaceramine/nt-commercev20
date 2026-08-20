@@ -22,6 +22,7 @@ DEFAULT_ACCOUNTS = [
     ("610", "مصاريف التشغيل", "expense", None),
     ("380", "المخزون", "asset", None),
     ("700", "إيرادات المبيعات", "revenue", None),
+    ("701", "إيرادات التأجير", "revenue", None),
     ("600", "تكلفة البضاعة المباعة", "expense", None),
 ]
 
@@ -265,6 +266,34 @@ async def post_expense_reversal(tdb, payload: dict):
         description=f"قيد عكسي تلقائي — حذف مصروف {payload.get('title', '')}",
         lines=lines,
     )
+
+# ── p202: rental payments ────────────────────────────────────────────────────
+
+async def post_rental_payment_entry(tdb, payload: dict):
+    """rental.payment_received → Dr cash-box / Cr rental revenue (701).
+    Contracts never post receivables, so rent is recognised on collection.
+    Idempotent per payment_id."""
+    payment_id = payload.get("payment_id")
+    if not payment_id or await already_posted(tdb, payment_id, "rental_payment"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    amount = float(payload.get("amount", 0) or 0)
+    if amount <= 0:
+        return None
+    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    lines = [
+        _line(accounts[box_code], debit=amount),
+        _line(accounts["701"], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("contract_code", ""),
+        reference_id=payment_id,
+        source_tag="rental_payment",
+        description=f"قيد تلقائي — دفعة عقد كراء {payload.get('contract_code', '')}",
+        lines=lines,
+    )
+
 
 # ── p201: expense edits ──────────────────────────────────────────────────────
 

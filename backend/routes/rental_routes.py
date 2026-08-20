@@ -159,13 +159,14 @@ def create_rental_routes(db, get_current_user, get_tenant_admin, require_tenant)
         notes: Optional[str] = ""
 
     async def _add_cash(cash_box_id: str, amount: float, category: str, reference_id: str,
-                        description: str, user_name: str):
+                        description: str, user_name: str, session=None):
         box = await db.cash_boxes.find_one({"id": cash_box_id})
         if not box:
             raise HTTPException(status_code=404, detail="الصندوق غير موجود")
         await db.cash_boxes.update_one(
             {"id": cash_box_id},
             {"$inc": {"balance": amount}, "$set": {"updated_at": _now()}},
+            session=session,
         )
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()),
@@ -177,7 +178,7 @@ def create_rental_routes(db, get_current_user, get_tenant_admin, require_tenant)
             "description": description,
             "created_at": _now(),
             "created_by": user_name,
-        })
+        }, session=session)
 
     @router.get("/contracts")
     async def list_contracts(status: Optional[str] = None, asset_id: Optional[str] = None,
@@ -304,12 +305,34 @@ def create_rental_routes(db, get_current_user, get_tenant_admin, require_tenant)
             "cash_box_id": body.cash_box_id or "cash",
             "notes": body.notes or "", "created_at": _now(), "created_by": user.get("name", ""),
         }
-        await db.rental_contracts.update_one(
-            {"id": contract_id},
-            {"$push": {"payments": pay}, "$inc": {"paid_amount": amount}, "$set": {"updated_at": _now()}},
-        )
-        await _add_cash(body.cash_box_id or "cash", amount, "rental_payment",
-                        contract_id, f"دفعة عقد كراء {c['code']}", user.get("name", ""))
+        # p202: atomic — contract payment + cash + outbox event commit or abort
+        # together (replica set, same pattern as p195/p201)
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                await db.rental_contracts.update_one(
+                    {"id": contract_id},
+                    {"$push": {"payments": pay}, "$inc": {"paid_amount": amount}, "$set": {"updated_at": _now()}},
+                    session=_tx,
+                )
+                await _add_cash(body.cash_box_id or "cash", amount, "rental_payment",
+                                contract_id, f"دفعة عقد كراء {c['code']}", user.get("name", ""), session=_tx)
+                # p202: outbox → auto journal entry (Dr box / Cr 701)
+                await outbox_write(
+                    _main_db, "rental.payment_received",
+                    {
+                        "payment_id": pay["id"],
+                        "contract_id": contract_id,
+                        "contract_code": c["code"],
+                        "customer_name": c.get("customer_name", ""),
+                        "amount": amount,
+                        "cash_box_id": body.cash_box_id or "cash",
+                    },
+                    tenant_id=user.get("tenant_id") or "platform",
+                    source="rental_routes",
+                    session=_tx,
+                )
         return {"success": True, "paid_amount": round(float(c["paid_amount"]) + amount, 2)}
 
     @router.post("/contracts/{contract_id}/close")
