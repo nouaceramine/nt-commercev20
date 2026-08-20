@@ -81,6 +81,12 @@ async def replay_event(event_id: str, _admin: dict = Depends(get_super_admin)):
     if not doc:
         raise HTTPException(status_code=404, detail="event not found")
     await main_db[PROCESSED_COLLECTION].delete_one({"event_id": event_id})
+    # p210: replaying auto-resolves any open DLQ alert for this event
+    await main_db.platform_alerts.update_many(
+        {"type": "event_dlq", "event_id": event_id, "acknowledged": False},
+        {"$set": {"acknowledged": True, "resolved_by": "replay",
+                  "acknowledged_at": datetime.now(timezone.utc).isoformat()}},
+    )
     new_id = await event_bus.publish(
         doc["event_type"],
         doc.get("payload_snapshot") or {},
@@ -113,6 +119,37 @@ async def list_inventory_movements(
         q["event_type"] = event_type
     cursor = main_db.inventory_movements.find(q, {"_id": 0}).sort("created_at", -1).limit(limit)
     return await cursor.to_list(limit)
+
+
+@router.get("/alerts")
+async def list_dlq_alerts(
+    acknowledged: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    _admin: dict = Depends(get_super_admin),
+):
+    """p210: DLQ alert feed (proactive notification for failed events)."""
+    q: dict = {"type": "event_dlq"}
+    if acknowledged is not None:
+        q["acknowledged"] = acknowledged
+    cursor = main_db.platform_alerts.find(q, {"_id": 0}).sort("created_at", -1).limit(limit)
+    items = await cursor.to_list(limit)
+    unacked = await main_db.platform_alerts.count_documents(
+        {"type": "event_dlq", "acknowledged": False})
+    return {"items": items, "unacknowledged": unacked}
+
+
+@router.post("/alerts/{alert_id}/ack")
+async def ack_dlq_alert(alert_id: str, _admin: dict = Depends(get_super_admin)):
+    """p210: acknowledge (dismiss) a DLQ alert."""
+    from fastapi import HTTPException
+    res = await main_db.platform_alerts.update_one(
+        {"id": alert_id, "type": "event_dlq"},
+        {"$set": {"acknowledged": True,
+                  "acknowledged_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="alert not found")
+    return {"ok": True}
 
 
 __all__ = ["router"]

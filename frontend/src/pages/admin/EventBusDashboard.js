@@ -52,6 +52,7 @@ export default function EventBusDashboard() {
   const [processed, setProcessed] = useState([]);
   const [dlq, setDlq] = useState([]);
   const [movements, setMovements] = useState([]);
+  const [alerts, setAlerts] = useState([]);  // p210: unacknowledged DLQ alerts
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -59,18 +60,20 @@ export default function EventBusDashboard() {
 
   const loadAll = async () => {
     try {
-      const [s, p, d, m] = await Promise.all([
+      const [s, p, d, m, a] = await Promise.all([
         apiClient.get("/admin/event-bus/stats"),
         apiClient.get("/admin/event-bus/processed", {
           params: { limit: 100, ...(statusFilter ? { status: statusFilter } : {}), ...(typeFilter ? { event_type: typeFilter } : {}) },
         }),
         apiClient.get("/admin/event-bus/dlq", { params: { limit: 50 } }),
         apiClient.get("/admin/event-bus/movements", { params: { limit: 50 } }),
+        apiClient.get("/admin/event-bus/alerts", { params: { acknowledged: false, limit: 20 } }),  // p210
       ]);
       setStats(s.data);
       setProcessed(p.data || []);
       setDlq(d.data || []);
       setMovements(m.data || []);
+      setAlerts(a.data?.items || []);  // p210
     } catch (e) {
       toast.error("فشل تحميل البيانات");
     } finally {
@@ -100,6 +103,17 @@ export default function EventBusDashboard() {
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || "فشل إعادة الإرسال";
       toast.error(msg);
+    }
+  };
+
+  // p210: acknowledge (dismiss) a DLQ alert
+  const ackAlert = async (alertId) => {
+    try {
+      await apiClient.post(`/admin/event-bus/alerts/${alertId}/ack`);
+      toast.success("تم تأكيد التنبيه");
+      loadAll();
+    } catch (e) {
+      toast.error("فشل تأكيد التنبيه");
     }
   };
 
@@ -146,6 +160,45 @@ export default function EventBusDashboard() {
           <StatBlock icon={AlertTriangle} label="فشل" value={counts.failed || 0} tone="rose" />
           <StatBlock icon={Activity} label="حالة Redis" value={stats?.available ? "متّصل" : "—"} tone={stats?.available ? "emerald" : "rose"} />
         </div>
+
+        {/* ── p210: DLQ Alerts ────────────────────────────────────────── */}
+        {alerts.length > 0 && (
+          <Card className="border-rose-300 bg-rose-50/60" data-testid="event-bus-alerts">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-rose-700">
+                <AlertTriangle className="w-5 h-5" />
+                تنبيهات طابور المهملة — {alerts.length} حدث يحتاج مراجعة
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {alerts.map((al) => (
+                  <div
+                    key={al.id}
+                    className="flex items-center justify-between gap-3 rounded-md bg-white p-3 border border-rose-200"
+                    data-testid={`alert-row-${al.id}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-mono text-sm font-semibold">{al.event_type}</div>
+                      <div className="text-xs text-slate-500 truncate">{al.error || "—"}</div>
+                      <div className="text-xs text-slate-400">
+                        {(al.created_at || "").slice(0, 19).replace("T", " ")} — {al.tenant_id}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button size="sm" variant="outline" data-testid={`alert-replay-${al.event_id}`} onClick={() => replay(al.event_id)}>
+                        <RotateCw className="w-4 h-4 ml-1" /> إعادة
+                      </Button>
+                      <Button size="sm" variant="ghost" data-testid={`alert-ack-${al.id}`} onClick={() => ackAlert(al.id)}>
+                        <CheckCircle2 className="w-4 h-4 ml-1" /> تأكيد
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Top Event Types ────────────────────────────────────────── */}
         {topTypes.length > 0 && (

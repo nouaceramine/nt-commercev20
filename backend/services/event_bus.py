@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import socket
+import uuid
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
@@ -247,6 +248,7 @@ class RedisEventBus:
                 except Exception:
                     pass
                 await self._mark_finished(event, status="dlq", consumer="dlq", error=str(exc))
+                await self._raise_dlq_alert(event, str(exc))
                 await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
             else:
                 # Re-publish for retry. We delete the 'processing' doc so the
@@ -295,6 +297,31 @@ class RedisEventBus:
             )
         except Exception as exc:
             log.warning("mark_finished failed: %s", exc)
+
+    async def _raise_dlq_alert(self, event: Event, error: str) -> None:
+        """p210: platform alert when an event lands in the DLQ — the
+        proactive-notification half of DLQ monitoring. Deduped: one
+        unacknowledged alert per event_id."""
+        if self._db is None:
+            return
+        try:
+            alerts = self._db["platform_alerts"]
+            existing = await alerts.find_one(
+                {"type": "event_dlq", "event_id": event.event_id, "acknowledged": False})
+            if existing:
+                return
+            await alerts.insert_one({
+                "id": str(uuid.uuid4()),
+                "type": "event_dlq",
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "tenant_id": event.tenant_id,
+                "error": (error or "")[:500],
+                "acknowledged": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as exc:
+            log.warning("dlq alert write failed: %s", exc)
 
     # ── Inspection helpers ──────────────────────────────────────────────
     async def stream_info(self) -> dict:
