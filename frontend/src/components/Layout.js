@@ -534,6 +534,7 @@ export const Layout = ({ children }) => {
       items: [
         { path: '/cash', icon: Wallet, label: t.cashManagement },
         { path: '/partners', icon: Handshake, label: language === 'ar' ? 'الشركاء والأرباح' : 'Associés & bénéfices' },
+        { path: '/accounting', icon: BookOpen, label: language === 'ar' ? 'ميزان المراجعة' : 'Balance de vérification' },
         { path: '/debts', icon: Receipt, label: t.debts },
         { path: '/tax-reports', icon: FileText, label: language === 'ar' ? 'الضرائب' : 'Taxes' },
         { path: '/currencies', icon: Coins, label: language === 'ar' ? 'العملات' : 'Devises' },

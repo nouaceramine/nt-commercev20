@@ -129,6 +129,7 @@ async def create_journal_entry(entry: dict, user=Depends(get_current_user)):
                 {"$inc": {"balance": balance_change}}
             )
     
+    entry_doc.pop("_id", None)  # p196: insert_one mutates the doc — ObjectId breaks JSON serialization (500)
     return entry_doc
 
 @router.put("/journal-entries/{entry_id}/approve")
@@ -471,34 +472,82 @@ async def get_trial_balance(
     as_of_date: str,
     user=Depends(get_current_user)
 ):
-    """Generate Trial Balance"""
+    """Generate Trial Balance.
+
+    p196: computed from journal-entry LINES with date <= as_of_date (the
+    as-of date is honoured; previously the live account mirror was returned
+    regardless of the requested date). Response shape is a superset of the
+    original: same keys plus gross totals, per-account line counts and
+    auto/manual entry breakdown.
+    """
     accounts = await db.accounts.find({"is_active": True}, {"_id": 0}).to_list(500)
-    
+
+    # gross debit/credit per account from journal lines within the window
+    pipeline = [
+        {"$match": {"date": {"$lte": as_of_date}}},
+        {"$unwind": "$lines"},
+        {"$group": {
+            "_id": "$lines.account_id",
+            "account_code": {"$first": "$lines.account_code"},
+            "total_debit": {"$sum": {"$ifNull": ["$lines.debit", 0]}},
+            "total_credit": {"$sum": {"$ifNull": ["$lines.credit", 0]}},
+            "lines_count": {"$sum": 1},
+        }},
+    ]
+    movement = {}
+    async for row in db.journal_entries.aggregate(pipeline):
+        movement[row["_id"]] = row
+
+    date_q = {"date": {"$lte": as_of_date}}
+    entries_count = await db.journal_entries.count_documents(date_q)
+    auto_entries = await db.journal_entries.count_documents({**date_q, "source": "auto"})
+
+    def _row(code, name, atype, mov):
+        td = round(mov["total_debit"], 2) if mov else 0.0
+        tc = round(mov["total_credit"], 2) if mov else 0.0
+        balance = round(td - tc, 2)
+        return {
+            "account_code": code,
+            "account_name": name,
+            "account_type": atype,
+            "total_debit": td,
+            "total_credit": tc,
+            "balance": balance,
+            "debit": balance if balance > 0 else 0,
+            "credit": -balance if balance < 0 else 0,
+            "entries_count": mov["lines_count"] if mov else 0,
+        }
+
     trial_balance = []
-    total_debit = 0
-    total_credit = 0
-    
+    seen = set()
     for account in accounts:
-        balance = account.get("balance", 0)
-        debit = balance if balance >= 0 else 0
-        credit = -balance if balance < 0 else 0
-        
-        trial_balance.append({
-            "account_code": account.get("code"),
-            "account_name": account.get("name_ar") or account.get("name"),
-            "debit": debit,
-            "credit": credit
-        })
-        
-        total_debit += debit
-        total_credit += credit
-    
+        seen.add(account.get("id"))
+        trial_balance.append(_row(
+            account.get("code"),
+            account.get("name_ar") or account.get("name"),
+            account.get("account_type"),
+            movement.get(account.get("id")),
+        ))
+    # lines pointing at deactivated/deleted accounts still surface honestly
+    for acc_id, mov in movement.items():
+        if acc_id in seen:
+            continue
+        trial_balance.append(_row(mov.get("account_code") or "?", "(حساب غير نشط)", None, mov))
+
+    trial_balance.sort(key=lambda r: str(r["account_code"] or ""))
+    total_debit = round(sum(r["debit"] for r in trial_balance), 2)
+    total_credit = round(sum(r["credit"] for r in trial_balance), 2)
+
     return {
         "as_of_date": as_of_date,
         "accounts": trial_balance,
         "total_debit": total_debit,
         "total_credit": total_credit,
         "is_balanced": abs(total_debit - total_credit) < 0.01,
+        "entries_count": entries_count,
+        "auto_entries": auto_entries,
+        "manual_entries": entries_count - auto_entries,
+        "basis": "journal_lines",
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 

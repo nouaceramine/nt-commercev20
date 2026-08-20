@@ -85,6 +85,7 @@ import ExpensesPage from "./pages/ExpensesPage";
 import PartnersPage from "./pages/PartnersPage";
 import RentalsPage from "./pages/RentalsPage";
 import ProductionPage from "./pages/ProductionPage";  // p188
+import AccountingPage from "./pages/AccountingPage";  // p196
 import NotificationsPage from "./pages/NotificationsPage";
 import AdvancedSalesReportPage from "./pages/AdvancedSalesReportPage";
 import SalesPermissionsPage from "./pages/SalesPermissionsPage";
@@ -1105,6 +1106,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="production">
             <ProductionPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/accounting"
+        element={
+          <ProtectedRoute>
+            <AccountingPage />
           </ProtectedRoute>
         }
       />
