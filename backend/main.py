@@ -1159,6 +1159,7 @@ _AUTO_REG_MODULES = [
     'routes.production_routes',  # p188: BOM / production recipes
     'routes.events_routes',  # p191: SSE realtime channel
     'routes.pin_auth_routes',  # p219: PIN quick-login
+    'routes.commissions_routes',  # p221: commission engine
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

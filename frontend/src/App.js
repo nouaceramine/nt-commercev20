@@ -128,6 +128,7 @@ import CurrenciesPage from "./pages/CurrenciesPage";
 import BankingPage from "./pages/BankingPage";
 import RobotsPage from "./pages/RobotsPage";
 import AutoReportsPage from "./pages/AutoReportsPage";
+import CommissionsPage from "./pages/CommissionsPage";  // p221
 
 // Legendary Build Pages
 import DefectiveGoodsPage from "./pages/DefectiveGoodsPage";
@@ -482,6 +483,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AutoReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/commissions"
+        element={
+          <ProtectedRoute>
+            <CommissionsPage />
           </ProtectedRoute>
         }
       />

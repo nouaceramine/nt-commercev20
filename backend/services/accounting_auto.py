@@ -27,6 +27,8 @@ DEFAULT_ACCOUNTS = [
     ("700", "إيرادات المبيعات", "revenue", None),
     ("701", "إيرادات التأجير", "revenue", None),
     ("600", "تكلفة البضاعة المباعة", "expense", None),
+    ("658", "مصاريف العمولات", "expense", None),  # p221
+    ("421", "عمولات مستحقة الدفع", "liability", None),  # p221
 ]
 
 BOX_ACCOUNT = {box: code for code, _, _, box in DEFAULT_ACCOUNTS if box}
@@ -539,5 +541,65 @@ async def post_supplier_payment_entry(tdb, payload: dict):
         reference_id=payment_id,
         source_tag="supplier_payment",
         description=f"قيد تلقائي — سداد دين للمورد {payload.get('supplier_name', '')}",
+        lines=lines,
+    )
+
+
+# ── p221: commission engine journal entries ──
+
+async def post_commission_entry(tdb, *, commission_id: str, amount: float, beneficiary: str, invoice_number: str = ""):
+    """Commission accrued → Dr 658 (commissions expense) / Cr 421 (commissions payable)."""
+    if not commission_id or amount <= 0 or await already_posted(tdb, commission_id, "commission"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    lines = [
+        _line(accounts["658"], debit=amount),
+        _line(accounts["421"], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=f"COM-{invoice_number or commission_id[:8]}",
+        reference_id=commission_id,
+        source_tag="commission",
+        description=f"قيد تلقائي — عمولة مستحقة لـ {beneficiary} (فاتورة {invoice_number})",
+        lines=lines,
+    )
+
+
+async def reverse_commission_entry(tdb, *, commission_id: str, amount: float, beneficiary: str):
+    """Commission cancelled (sale refunded/deleted) → Dr 421 / Cr 658."""
+    if not commission_id or amount <= 0 or await already_posted(tdb, commission_id, "commission_reversal"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    lines = [
+        _line(accounts["421"], debit=amount),
+        _line(accounts["658"], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=f"COMC-{commission_id[:8]}",
+        reference_id=commission_id,
+        source_tag="commission_reversal",
+        description=f"قيد تلقائي — إلغاء عمولة {beneficiary} (مرتجع/حذف بيع)",
+        lines=lines,
+    )
+
+
+async def post_commission_payout(tdb, *, commission_id: str, amount: float, beneficiary: str, payment_method: str):
+    """Commission paid → Dr 421 / Cr cash-box."""
+    if not commission_id or amount <= 0 or await already_posted(tdb, commission_id, "commission_payout"):
+        return None
+    accounts = await ensure_accounts(tdb)
+    box_code = BOX_ACCOUNT.get(payment_method or "cash", "530")
+    lines = [
+        _line(accounts["421"], debit=amount),
+        _line(accounts[box_code], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference=f"COMP-{commission_id[:8]}",
+        reference_id=commission_id,
+        source_tag="commission_payout",
+        description=f"قيد تلقائي — دفع عمولة لـ {beneficiary}",
         lines=lines,
     )

@@ -112,6 +112,14 @@ async def handle_sale_completed(event: Event) -> None:
         except Exception as exc:
             log.warning("auto-accounting sale %s failed: %s", sale_id, exc)
 
+    # p221: commission engine (tenant rules)
+    if tenant_id and tenant_id != "platform":
+        try:
+            from services.commissions import apply_commission_rules
+            await apply_commission_rules(get_tenant_db(tenant_id), p)
+        except Exception as exc:
+            log.warning("commissions sale %s failed: %s", sale_id, exc)
+
 
 async def handle_sale_refunded(event: Event) -> None:
     p = event.payload or {}
@@ -134,6 +142,14 @@ async def handle_sale_refunded(event: Event) -> None:
         except Exception as exc:
             log.warning("auto-accounting refund %s failed: %s", p.get("sale_id"), exc)
 
+    # p221: cancel pending commissions of this sale
+    if event.tenant_id and event.tenant_id != "platform":
+        try:
+            from services.commissions import cancel_commissions_for_sale
+            await cancel_commissions_for_sale(get_tenant_db(event.tenant_id), p.get("sale_id"), "refund")
+        except Exception as exc:
+            log.warning("commissions cancel (refund) %s failed: %s", p.get("sale_id"), exc)
+
 
 async def handle_sale_deleted(event: Event) -> None:
     """p190: sale deleted → audit row + auto reversal journal entry."""
@@ -154,6 +170,14 @@ async def handle_sale_deleted(event: Event) -> None:
             await post_sale_reversal(get_tenant_db(event.tenant_id), p, "delete", "حذف فاتورة")
         except Exception as exc:
             log.warning("auto-accounting delete %s failed: %s", p.get("sale_id"), exc)
+
+    # p221: cancel pending commissions of this sale
+    if event.tenant_id and event.tenant_id != "platform":
+        try:
+            from services.commissions import cancel_commissions_for_sale
+            await cancel_commissions_for_sale(get_tenant_db(event.tenant_id), p.get("sale_id"), "delete")
+        except Exception as exc:
+            log.warning("commissions cancel (delete) %s failed: %s", p.get("sale_id"), exc)
 
 
 # ── Phase 3: ecom_order.confirmed ───────────────────────────────────────────

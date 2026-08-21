@@ -79,7 +79,7 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory
+  KeyRound, Factory, Percent
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -499,6 +499,7 @@ export const Layout = ({ children }) => {
         { path: '/analytics', icon: BarChart3, label: language === 'ar' ? 'إحصائيات متقدمة' : 'Analyses', subFeature: 'financial_reports', featureKey: 'reports' },
         { path: '/smart-reports', icon: Sparkles, label: language === 'ar' ? 'تقارير ذكية' : 'Rapports IA', subFeature: 'smart_reports', featureKey: 'reports' },
         { path: '/auto-reports', icon: Calendar, label: language === 'ar' ? 'التقارير التلقائية' : 'Rapports auto', featureKey: 'reports' },
+        { path: '/commissions', icon: Percent, label: language === 'ar' ? 'العمولات' : 'Commissions', featureKey: 'reports' },  // p221
       ]
     },
     {
