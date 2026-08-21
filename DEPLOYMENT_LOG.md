@@ -3328,3 +3328,20 @@ Release: 20260821_134533 — Bundle: main.cdb5772a.js
 - لم تُعدّل أي بيانات مالية؛ الفحصان الجديدان قراءة فقط.
 
 Release: 20260821_140243 — Bundle: main.f47f1ccc.js
+
+## p226 — تشفير على مستوى الحقل (AES-256-GCM) — 2026-08-21
+
+**الهدف (تقرير استشاري §7):** تشفير الحقول الحساسة فقط — «شفّر الهوية والأسرار، اترك الأرقام التشغيلية مفهرسة». لا ترحيل لأي بيانات تشغيلية حية، ولا تشفير لحقول مفهرسة.
+
+### Backend
+- `services/crypto_fields.py` (جديد): AES-256-GCM — المفتاح من FIELD_ENCRYPTION_KEY (موجود مسبقاً في .env: hex64/base64-32B/عبارة→SHA-256). الصيغة: v1. + b64(nonce‖ct‖tag). decrypt_field يمرّر القيم غير المشفرة (توافق رجعي). key_fingerprint للتحقق التشغيلي دون كشف المفتاح.
+- الحقول المُدارة (أسرار at-rest فقط): `bridge_secret` في settings المستأجر و `self_bridge_api_key` في saas_tenants — تشفير عند الكتابة وفكّ شفاف عند القراءة في كل المواضع: verify_bridge (مصادقة الجسر)، GET/PUT bridge/secret، تحديث المستأجر، test-bridge، تسليم مهام الجسر في recharge saga، ومصدق pydantic على TenantResponse.
+- `routes/saas/security_routes.py` (جديد): GET /saas/security/encryption-status (توفر المفتاح + بصمته + تغطية الأسرار مشفرة/نصية) و POST /saas/security/encrypt-secrets-now (ترحيل لمرة واحدة للأسرار النصية القائمة — idempotent، نطاق أسرار فقط).
+- `main.py`: تسجيل راوتر الأمان.
+
+### الاختبار (TEST-P226 — موسوم ومنظَّف)
+- وحدة: round-trip عربي/لاتيني، passthrough للنصوص القديمة، بصمة مفتاح 57d1339f16cb.
+- E2E على المستأجر الحقيقي: وضع bridge secret تجريبي → المخزَّن v1. مشفراً (87 حرفاً) → GET يعيد النص الأصلي → مصادقة الجسر بالنص الصريح تعمل (200) → secret خاطئ 403 → حذف وثيقة الاختبار (لم تكن موجودة قبل) — لا بقايا.
+- regression: قائمة المستأجرين تُسلسل سليمة مع المصدق الجديد؛ migration endpoint no-op (0/0).
+
+Release: backend only (لا واجهة — بنية تحتية)

@@ -678,7 +678,11 @@ async def set_recharge_mode(
     if "self_bridge_url" in body:
         update["self_bridge_url"] = body["self_bridge_url"] or ""
     if "self_bridge_api_key" in body:
-        update["self_bridge_api_key"] = body["self_bridge_api_key"] or ""
+        _bk = body["self_bridge_api_key"] or ""
+        if _bk:  # p226: encrypt at rest
+            from services.crypto_fields import encrypt_field
+            _bk = encrypt_field(_bk)
+        update["self_bridge_api_key"] = _bk
 
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": update})
     return {"ok": True, "recharge_mode": mode}
@@ -699,6 +703,9 @@ async def test_tenant_bridge(
 
     bridge_url = body.get("self_bridge_url") or tenant.get("self_bridge_url", "")
     bridge_api_key = body.get("self_bridge_api_key") or tenant.get("self_bridge_api_key", "")
+    if bridge_api_key and not body.get("self_bridge_api_key"):  # p226: stored value is encrypted
+        from services.crypto_fields import decrypt_field
+        bridge_api_key = decrypt_field(bridge_api_key)
 
     if not bridge_url:
         raise HTTPException(status_code=400, detail="لم يُعدَّ رابط الجسر بعد")

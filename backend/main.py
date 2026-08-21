@@ -911,6 +911,13 @@ except Exception as _e:
     print(f"[INIT] SaaS AI billing routes: {_e}")
 
 try:
+    from routes.saas.security_routes import router as saas_security_router
+    app.include_router(saas_security_router, prefix="/api", tags=["SaaS Security"])
+    print("[INIT] SaaS security routes registered")
+except Exception as _e:
+    print(f"[INIT] SaaS security routes: {_e}")
+
+try:
     from routes.system_logs_routes import router as system_logs_router
     app.include_router(system_logs_router, prefix="/api", tags=["System Logs"])
     print("[INIT] System logs routes registered")

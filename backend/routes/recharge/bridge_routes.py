@@ -30,6 +30,9 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
         tenant_db = get_tenant_db(x_tenant_id)
         secret_doc = await tenant_db.settings.find_one({"key": "bridge_secret"}, {"_id": 0})
         expected = (secret_doc.get("value", "") if secret_doc else "")
+        if expected:  # p226: transparent decryption (plaintext passes through)
+            from services.crypto_fields import decrypt_field
+            expected = decrypt_field(expected)
         if not expected or x_bridge_secret != expected:
             raise HTTPException(status_code=403, detail="Bridge secret invalide")
         return tenant_db
@@ -244,7 +247,11 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
     @router.get("/recharge/bridge/secret")
     async def get_bridge_secret_value(admin: dict = Depends(get_tenant_admin)):
         doc = await db.settings.find_one({"key": "bridge_secret"}, {"_id": 0})
-        return {"secret": doc.get("value", "") if doc else ""}
+        val = doc.get("value", "") if doc else ""
+        if val:  # p226
+            from services.crypto_fields import decrypt_field
+            val = decrypt_field(val)
+        return {"secret": val}
 
     class BridgeSecretUpdate(BaseModel):
         secret: str
@@ -253,9 +260,10 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
     async def set_bridge_secret(body: BridgeSecretUpdate, admin: dict = Depends(get_tenant_admin)):
         if not body.secret or len(body.secret) < 16:
             raise HTTPException(status_code=400, detail="يجب أن لا يقل الـ secret عن 16 حرفاً")
+        from services.crypto_fields import encrypt_field  # p226: encrypt at rest
         await db.settings.update_one(
             {"key": "bridge_secret"},
-            {"$set": {"key": "bridge_secret", "value": body.secret}},
+            {"$set": {"key": "bridge_secret", "value": encrypt_field(body.secret)}},
             upsert=True,
         )
         return {"ok": True}

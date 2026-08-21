@@ -40,6 +40,9 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     if recharge_mode == "self_bridge":
         self_bridge_url = (tenant_doc.get("self_bridge_url", "") if tenant_doc else "")
         self_bridge_api_key = (tenant_doc.get("self_bridge_api_key", "") if tenant_doc else "")
+        if self_bridge_api_key:  # p226: transparent decryption
+            from services.crypto_fields import decrypt_field
+            self_bridge_api_key = decrypt_field(self_bridge_api_key)
         if not self_bridge_url:
             raise HTTPException(
                 status_code=400,

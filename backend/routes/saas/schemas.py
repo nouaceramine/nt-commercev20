@@ -166,6 +166,18 @@ class TenantResponse(BaseModel):
     self_bridge_url: str = ""
     self_bridge_api_key: str = ""
 
+    @field_validator("self_bridge_api_key", mode="before")
+    @classmethod
+    def _decrypt_bridge_key(cls, v):
+        # p226: stored value may be AES-GCM encrypted — transparent decrypt.
+        if isinstance(v, str) and v.startswith("v1."):
+            try:
+                from services.crypto_fields import decrypt_field
+                return decrypt_field(v)
+            except Exception:  # noqa: BLE001
+                return ""
+        return v
+
     class Config:
         from_attributes = True
 
