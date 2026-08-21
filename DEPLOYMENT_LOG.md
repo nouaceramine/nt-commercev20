@@ -3427,3 +3427,24 @@ Release: 20260821_142922 — Bundle: main.9059a4cb.js
 فحص حي: 400 «أدخل اسم المنتج» و /ai/status تعمل.
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p233/
+
+
+---
+
+## p234 — تنبيهات DLQ وأرشفة الـ outbox: تحقق + معالجة أول حدث DLQ (المسار 3)
+
+**التاريخ:** 2026-08-21
+
+**التحقق — البندان منفذان فعلاً منذ p210/p211:**
+- تنبيه DLQ: `_raise_dlq_alert` (p210) يكتب platform_alerts بلا تكرار، ويُعرض عبر
+  /api/admin/event-bus/alerts مع acknowledge، وفي /api/saas/health-alerts — **مُتحقق حياً**.
+- أرشفة outbox: `_archive_loop` (p211) يعمل (سجل الإقلاع: «Outbox archival started (>30d, every 3600s)»)؛
+  الأرشيف فارغ لأن أقدم حدث منشور عمره يومان فقط (< 30 يوماً) — سلوك صحيح بالتصميم.
+
+**المعالجة الفعلية:** وُجد حدث واحد في DLQ — `product.published_to_marketplace` الذي سقط أثناء p227
+بخلل «name 'uuid' is not defined» (أُصلح حينها بإضافة الاستيراد). تمت معالجته عبر مسار الاسترداد
+الرسمي: POST /api/admin/event-bus/replay/{event_id} → نجح، DLQ = 0، والتنبيه حُلّ تلقائياً
+(resolved_by=replay). السجل الجانبي الوحيد (سطر كتالوج TEST-P227 أعاده الـreplay) حُذف بدقة —
+كتالوج المستأجر عاد إلى 0 سطر كما كان.
+
+**لا تغيير برمجي** — توثيق تحقق + أول عملية replay ناجحة من DLQ في تاريخ المنصة.
