@@ -390,6 +390,18 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         elif risk["action"] == "confirm_first":
             doc["status"] = "awaiting_confirmation"
 
+    # p245: optional referral code attachment (snapshot reward terms)
+    ref_code = (body.get("referral_code") or "").strip().upper()
+    if ref_code:
+        from routes.ecom.referral_routes import resolve_referral
+        ref = await resolve_referral(ref_code)
+        if not ref:
+            raise HTTPException(status_code=400, detail="رمز الإحالة غير صالح")
+        doc["referral_id"] = ref["id"]
+        doc["referral_code"] = ref["code"]
+        doc["referral_reward_type"] = ref.get("reward_type", "fixed")
+        doc["referral_reward_value"] = float(ref.get("reward_value") or 0)
+
     # p100: cross-tenant reputation — attach trust, escalate serial returners to confirmation
     try:
         from services.application.ecom_order_service import get_network_trust

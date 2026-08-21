@@ -718,6 +718,12 @@ async def startup_event():
         await db.ecom_import_batches.create_index("id", unique=True)
         await db.ecom_import_batches.create_index("created_at")
         await db.ecom_orders.create_index("import_batch_id")
+        await db.ecom_referrals.create_index("id", unique=True)
+        await db.ecom_referrals.create_index("code", unique=True)
+        await db.ecom_referral_rewards.create_index("id", unique=True)
+        await db.ecom_referral_rewards.create_index("order_id", unique=True)
+        await db.ecom_referral_rewards.create_index([("referral_id", 1), ("status", 1)])
+        await db.ecom_referral_payouts.create_index("id", unique=True)
         await db.ecom_orders.create_index("assigned_to")
         await db.ecom_leads.create_index("assigned_to")
         await db.ecom_sms_logs.create_index("id", unique=True)
@@ -1203,6 +1209,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.assignment_routes',  # p242: call-center assignment
     'routes.ecom.bulk_import_routes',  # p243: Excel/CSV bulk order upload
     'routes.ecom.public_track_routes',  # p244: public global order tracking
+    'routes.ecom.referral_routes',  # p245: referral program
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

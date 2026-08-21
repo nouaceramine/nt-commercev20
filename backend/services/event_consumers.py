@@ -713,6 +713,51 @@ async def handle_marketplace_settlement(event: Event) -> None:
     log.info("marketplace settlement: order %s fee=%s (%s%%)", order_id, fee, fee_pct)
 
 
+async def handle_referral_outcome(event: Event) -> None:
+    """p245: referral rewards. On delivered, book the referrer's reward from
+    the terms snapshotted on the order (idempotent per order — reward rows
+    carry a unique order_id index). On cancelled/refunded, unpaid rewards
+    for that order are cancelled; paid ones stay (merchant settles apart)."""
+    p = event.payload or {}
+    tenant_id = event.tenant_id
+    order_id = p.get("order_id")
+    if not order_id or tenant_id == "platform":
+        return
+    tdb = get_tenant_db(tenant_id)
+    now = datetime.now(timezone.utc).isoformat()
+
+    if event.event_type == "ecom_order.cancelled":
+        await tdb.ecom_referral_rewards.update_many(
+            {"order_id": order_id, "status": "due"},
+            {"$set": {"status": "cancelled", "cancelled_at": now}})
+        return
+
+    # delivered
+    order = await tdb.ecom_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order or not order.get("referral_id"):
+        return
+    if await tdb.ecom_referral_rewards.find_one({"order_id": order_id}, {"_id": 1}):
+        return  # already booked (replay-safe)
+    rtype = order.get("referral_reward_type") or "fixed"
+    rval = float(order.get("referral_reward_value") or 0)
+    total = float(order.get("total") or 0)
+    amount = round(rval if rtype == "fixed" else total * rval / 100, 2)
+    if amount <= 0:
+        return
+    await tdb.ecom_referral_rewards.insert_one({
+        "id": str(uuid.uuid4()),
+        "referral_id": order["referral_id"],
+        "order_id": order_id,
+        "order_code": order.get("order_code"),
+        "reward_type": rtype,
+        "reward_value": rval,
+        "order_total": total,
+        "amount": amount,
+        "status": "due",
+        "created_at": now,
+    })
+
+
 def register_handlers(bus: RedisEventBus) -> None:
     bus.register("purchase.created", handle_purchase_created)
     bus.register("purchase.codes_uploaded", handle_purchase_codes_uploaded)
@@ -742,6 +787,8 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("marketplace.order_placed", handle_marketplace_order_placed)  # p237
     bus.register("ecom_order.delivered", handle_marketplace_settlement)  # p238
     bus.register("ecom_order.cancelled", handle_marketplace_settlement)  # p238
+    bus.register("ecom_order.delivered", handle_referral_outcome)  # p245
+    bus.register("ecom_order.cancelled", handle_referral_outcome)  # p245
     log.info("Event consumers registered: %d handlers", len(bus._handlers))
 
 

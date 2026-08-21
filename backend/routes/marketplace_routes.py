@@ -143,6 +143,7 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
         address: str = ""
         city: str = ""
         notes: str = ""
+        referral_code: str = ""  # p245
 
     @public.post("/order")
     async def place_marketplace_order(data: OrderIn):
@@ -171,6 +172,15 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
         prod = await tdb.products.find_one({"id": data.product_id}, {"_id": 0})
         if not prod:
             raise HTTPException(status_code=404, detail="المنتج لم يعد متوفراً")
+
+        # p245: validate referral code BEFORE touching stock
+        ref = None
+        ref_code = (data.referral_code or "").strip().upper()
+        if ref_code:
+            ref = await tdb.ecom_referrals.find_one(
+                {"code": ref_code, "active": {"$ne": False}}, {"_id": 0})
+            if not ref:
+                raise HTTPException(status_code=400, detail="رمز الإحالة غير صالح")
 
         now = _now()
         stock_deducted = False
@@ -216,6 +226,13 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
             # p240: duplicate detection (non-blocking, internal flag only)
             from services.ecom.duplicate_detector import annotate_order as _annot_dup
             await _annot_dup(tdb, order_doc)
+
+            # p245: referral attachment (terms snapshotted at order time)
+            if ref:
+                order_doc["referral_id"] = ref["id"]
+                order_doc["referral_code"] = ref["code"]
+                order_doc["referral_reward_type"] = ref.get("reward_type", "fixed")
+                order_doc["referral_reward_value"] = float(ref.get("reward_value") or 0)
 
             await tdb.ecom_orders.insert_one(order_doc)
 
