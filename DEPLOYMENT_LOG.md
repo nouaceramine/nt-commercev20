@@ -320,6 +320,32 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 
 ---
 
+## p242 — إسناد مركز الاتصال (Call-Center Assignment)
+
+**التاريخ:** 2026-08-21
+**الدافع:** فجوة EcoManager: توزيع طلبات التأكيد والعملاء المحتملين على موظفي
+النداء بدل العمل الجماعي الفوضوي على نفس القائمة.
+
+### ما أُضيف
+- `routes/ecom/assignment_routes.py`:
+  - `GET /api/ecom/agents` — حسابات الموظفين القابلة للإسناد (أدمن).
+  - `POST /api/ecom/assign` — إسناد جماعي (حتى 200) طلبات/عملاء لموظف؛ فقط الحالات المفتوحة
+    (طلبات: new/awaiting_confirmation/needs_review/confirmed/packed — عملاء: new/contacted/qualified).
+  - `POST /api/ecom/unassign` — سحب الإسناد.
+  - `GET /api/ecom/my-queue` — قائمة عمل الموظف الحالي (طلبات + عملاء مفتوحة مسندة إليه).
+  - `GET /api/ecom/assignments/summary` — عبء العمل لكل موظف (توزيع متوازن).
+- الحقول: `assigned_to` / `assigned_to_name` / `assigned_at` / `assigned_by` — ميتاداتا فقط،
+  لا تغيّر الحالة ولا ترسل إشعارات.
+- فلتر `assigned_to=<id|none>` في `GET /api/ecom/orders` و `GET /api/ecom/leads`.
+- فهارس `assigned_to` على ecom_orders و ecom_leads.
+- الصلاحيات: الإسناد/السحب/الملخص للأدمن فقط (موظف agent يُختبر 403)، my-queue لأي مستخدم.
+
+### الاختبار
+- 15/15 E2E (TEST-P242): قائمة الوكلاء، إسناد طلبين وعميل، قائمة الموظف، الملخص (3)،
+  الفلاتر (assigned_to/none)، 404 لموظف غير موجود، 403 لغير الأدمن، سحب الإسناد.
+- تنظيف دقيق: حذف المستخدم التجريبي وكل الآثار الجانبية؛ الثوابت سليمة
+  (journal=2، cash=11300.88، ecom_store=2650، لا إسنادات يتيمة).
+
 ## p241 — SMS تلقائي للزبون مع كل حالة توصيل + رصيد SMS (SuiviSMS parity)
 
 **التاريخ:** 2026-08-21

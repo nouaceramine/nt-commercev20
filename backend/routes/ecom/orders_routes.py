@@ -130,6 +130,7 @@ async def list_orders(
     search: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
+    assigned_to: Optional[str] = None,  # p242: agent id, or "none" for unassigned
     limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0),
     user: dict = Depends(require_tenant),
@@ -137,6 +138,10 @@ async def list_orders(
     """List orders with filters. Supports channel/status/search/date range + pagination."""
     await require_ecom_feature(user)
     query: dict = {}
+    if assigned_to == "none":
+        query["$or"] = [{"assigned_to": {"$exists": False}}, {"assigned_to": None}]
+    elif assigned_to:
+        query["assigned_to"] = assigned_to
     if channel:
         if channel not in CHANNEL_KEYS:
             raise HTTPException(status_code=400, detail="قناة غير صالحة")
