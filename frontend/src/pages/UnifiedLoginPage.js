@@ -148,7 +148,14 @@ export default function UnifiedLoginPage() {
   });
   const [loginSuccess, setLoginSuccess] = useState(null);
   // p53: login package — 2FA step, forgot/reset password, inline lockout error
-  const [view, setView] = useState('login'); // login | twofa | forgot | reset
+  const [view, setView] = useState('login'); // login | twofa | forgot | reset | pin
+  // p219: PIN quick-login (POS-style staff picker)
+  const [pinStep, setPinStep] = useState('code'); // code | users | pin
+  const [shopCode, setShopCode] = useState(function() { return localStorage.getItem('posShopCode') || ''; });
+  const [shopName, setShopName] = useState('');
+  const [pinUsers, setPinUsers] = useState([]);
+  const [pinUser, setPinUser] = useState(null);
+  const [pinValue, setPinValue] = useState('');
   const [pendingToken, setPendingToken] = useState('');
   const [twoFaMsg, setTwoFaMsg] = useState('');  // p154: server-side 2FA method message
   const [twoFaCode, setTwoFaCode] = useState('');
@@ -360,7 +367,8 @@ export default function UnifiedLoginPage() {
     login: { title: T.hLogin, desc: T.hLoginDesc, icon: LogIn },
     twofa: { title: T.hTwofa, desc: T.hTwofaDesc, icon: KeyRound },
     forgot: { title: T.hForgot, desc: T.hForgotDesc, icon: Mail },
-    reset: { title: T.hReset, desc: T.hResetDesc, icon: KeyRound }
+    reset: { title: T.hReset, desc: T.hResetDesc, icon: KeyRound },
+    pin: { title: language === 'ar' ? 'دخول سريع' : 'Connexion rapide', desc: language === 'ar' ? 'اختر حسابك وأدخل رمز PIN' : 'Choisissez votre compte et entrez le PIN', icon: KeyRound }
   };
   const header = headerFor[view] || headerFor.login;
   const HeaderIcon = header.icon;
@@ -371,6 +379,60 @@ export default function UnifiedLoginPage() {
       <span>{inlineError}</span>
     </div>
   ) : null;
+
+
+  // ── p219: PIN quick-login handlers ──
+  var PIN_ROLES = { admin: ['مدير', 'Gérant'], manager: ['مدير', 'Gérant'], seller: ['بائع', 'Vendeur'], cashier: ['أمين صندوق', 'Caissier'] };
+  const pinRoleLabel = function(role) {
+    var r = PIN_ROLES[role] || ['موظف', 'Employé'];
+    return language === 'ar' ? r[0] : r[1];
+  };
+
+  const handlePinFetchUsers = async function() {
+    if (!shopCode.trim()) return;
+    setLoading(true); setInlineError('');
+    try {
+      const res = await fetch('/api/auth/pin/users/' + encodeURIComponent(shopCode.trim()));
+      const body = await res.json();
+      if (!res.ok) { setInlineError(errText(body) || T.badCreds); setLoading(false); return; }
+      localStorage.setItem('posShopCode', shopCode.trim().toUpperCase());
+      setShopName(body.shop || '');
+      setPinUsers(body.users || []);
+      setPinStep('users');
+    } catch (e) {
+      setInlineError(T.connErr + e.message);
+    }
+    setLoading(false);
+  };
+
+  const handlePinLogin = async function() {
+    if (!pinUser || pinValue.length < 4) {
+      setInlineError(language === 'ar' ? 'أدخل رمز PIN (4-6 أرقام)' : 'Entrez le code PIN (4-6 chiffres)');
+      return;
+    }
+    setLoading(true); setInlineError('');
+    try {
+      const res = await fetch('/api/auth/pin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shop_code: shopCode.trim(), user_id: pinUser.id, pin: pinValue })
+      });
+      const body = await res.json();
+      if (body && body.access_token) { completeLogin(body); return; }
+      setInlineError(errText(body) || T.badCreds);
+      setPinValue('');
+      if (res.status === 429) { setPinStep('users'); }
+    } catch (e) {
+      setInlineError(T.connErr + e.message);
+    }
+    setLoading(false);
+  };
+
+  const pinPadPress = function(k) {
+    setInlineError('');
+    if (k === 'back') { setPinValue(function(v) { return v.slice(0, -1); }); return; }
+    setPinValue(function(v) { return v.length >= 6 ? v : v + k; });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-4">
@@ -423,6 +485,105 @@ export default function UnifiedLoginPage() {
                 <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   {T.redirecting}
+                </div>
+              </div>
+            ) : view === 'pin' ? (
+              <div className="space-y-4" data-testid="pin-login-view">
+                {inlineErrorBox}
+                {pinStep === 'code' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>{language === 'ar' ? 'رمز المتجر' : 'Code magasin'}</Label>
+                      <Input
+                        value={shopCode}
+                        onChange={function(e) { setShopCode(e.target.value.toUpperCase()); }}
+                        onKeyDown={function(e) { if (e.key === 'Enter') handlePinFetchUsers(); }}
+                        placeholder="NT-0000"
+                        className="h-11 text-center font-mono text-lg tracking-widest text-black bg-white"
+                        data-testid="pin-shop-code"
+                        dir="ltr"
+                      />
+                    </div>
+                    <Button type="button" onClick={handlePinFetchUsers} className="w-full h-11 gap-2" disabled={loading || !shopCode.trim()} data-testid="pin-fetch-users-btn">
+                      {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Store className="h-5 w-5" />}
+                      {language === 'ar' ? 'فتح المتجر' : 'Ouvrir le magasin'}
+                    </Button>
+                  </>
+                )}
+                {pinStep === 'users' && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium flex items-center gap-1"><Store className="h-4 w-4 text-primary" />{shopName}</p>
+                      <button type="button" className="text-xs text-primary hover:underline" onClick={function() { setPinStep('code'); }} data-testid="pin-change-shop">
+                        {language === 'ar' ? 'تغيير المتجر' : 'Changer'}
+                      </button>
+                    </div>
+                    {pinUsers.length === 0 ? (
+                      <p className="text-center text-sm text-muted-foreground py-6" data-testid="pin-no-users">
+                        {language === 'ar' ? 'لا يوجد موظفون برمز PIN مفعّل — فعّله من صفحة المستخدمين' : 'Aucun employé avec PIN activé'}
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        {pinUsers.map(function(u) {
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={function() { setPinUser(u); setPinValue(''); setPinStep('pin'); setInlineError(''); }}
+                              className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-3 hover:border-primary hover:shadow-sm transition-all"
+                              data-testid={'pin-user-' + u.id}
+                            >
+                              <span className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center text-lg font-bold">
+                                {(u.name || '?').trim().charAt(0)}
+                              </span>
+                              <span className="text-sm font-medium leading-tight">{u.name}</span>
+                              <span className="text-[11px] text-muted-foreground">{pinRoleLabel(u.role)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+                {pinStep === 'pin' && pinUser && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{pinUser.name} <span className="text-xs text-muted-foreground">({pinRoleLabel(pinUser.role)})</span></p>
+                      <button type="button" className="text-xs text-primary hover:underline" onClick={function() { setPinStep('users'); setPinValue(''); }} data-testid="pin-change-user">
+                        {language === 'ar' ? 'تغيير' : 'Changer'}
+                      </button>
+                    </div>
+                    <div className="flex justify-center gap-2 py-1" dir="ltr" data-testid="pin-dots">
+                      {[0, 1, 2, 3, 4, 5].map(function(i) {
+                        return <span key={i} className={'h-3 w-3 rounded-full border ' + (i < pinValue.length ? 'bg-primary border-primary' : 'border-slate-300')} />;
+                      })}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 max-w-[240px] mx-auto" dir="ltr">
+                      {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'back'].map(function(k, idx) {
+                        if (k === '') return <span key={idx} />;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={function() { pinPadPress(k); }}
+                            className="h-12 rounded-lg border border-slate-200 bg-white text-lg font-semibold hover:bg-slate-50 active:bg-slate-100"
+                            data-testid={k === 'back' ? 'pin-pad-back' : 'pin-pad-' + k}
+                          >
+                            {k === 'back' ? '⌫' : k}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <Button type="button" onClick={handlePinLogin} className="w-full h-11 gap-2" disabled={loading || pinValue.length < 4} data-testid="pin-login-btn">
+                      {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
+                      {language === 'ar' ? 'دخول' : 'Connexion'}
+                    </Button>
+                  </>
+                )}
+                <div className="text-center">
+                  <button type="button" onClick={function() { setView('login'); setInlineError(''); }} className="text-xs text-primary hover:underline" data-testid="pin-back-to-login">
+                    {language === 'ar' ? 'العودة لتسجيل الدخول الكامل' : 'Retour à la connexion complète'}
+                  </button>
                 </div>
               </div>
             ) : view === 'twofa' ? (
@@ -664,6 +825,18 @@ export default function UnifiedLoginPage() {
                     </>
                   )}
                 </Button>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={function() { setPinStep('code'); setPinValue(''); setPinUser(null); setInlineError(''); setView('pin'); }}
+                    className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                    data-testid="pin-mode-link"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    {language === 'ar' ? 'دخول سريع برمز PIN (للموظفين)' : 'Connexion rapide PIN (employés)'}
+                  </button>
+                </div>
               </div>
             )}
 

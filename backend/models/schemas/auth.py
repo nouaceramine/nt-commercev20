@@ -33,6 +33,7 @@ class UserResponse(BaseModel):
     user_type: Optional[str] = None
     company_name: Optional[str] = None
     features: Optional[dict] = None
+    pin_enabled: Optional[bool] = False  # p219
     limits: Optional[dict] = None
     created_at: Optional[str] = None
 

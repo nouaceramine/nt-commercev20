@@ -34,7 +34,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { Users, Trash2, Shield, User, Plus, Eye, EyeOff, UserPlus } from 'lucide-react';
+import { Users, Trash2, Shield, User, Plus, Eye, EyeOff, UserPlus, KeyRound } from 'lucide-react';
 
 export default function UsersPage() {
   const { t, language } = useLanguage();
@@ -44,6 +44,10 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
+  // p219: PIN management
+  const [pinDialogUser, setPinDialogUser] = useState(null);
+  const [pinValue, setPinValue] = useState('');
+  const [pinSaving, setPinSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   // Add User Dialog
@@ -68,6 +72,41 @@ export default function UsersPage() {
     { value: 'technician', label: language === 'ar' ? 'فني صيانة' : 'Technician', icon: User },
     { value: 'user', label: language === 'ar' ? 'مستخدم' : 'User', icon: User },
   ];
+
+
+  // p219: admin sets/clears a staff PIN (POS quick-login)
+  const handlePinSave = async () => {
+    if (!/^\d{4,6}$/.test(pinValue)) {
+      toast.error(language === 'ar' ? 'رمز PIN يجب أن يكون 4-6 أرقام' : 'Le PIN doit contenir 4 à 6 chiffres');
+      return;
+    }
+    setPinSaving(true);
+    try {
+      await apiClient.post('/auth/pin/admin-set', { user_id: pinDialogUser.id, pin: pinValue });
+      toast.success(language === 'ar' ? 'تم تفعيل رمز PIN' : 'PIN activé');
+      setPinDialogUser(null);
+      setPinValue('');
+      fetchUsers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Erreur'));
+    } finally {
+      setPinSaving(false);
+    }
+  };
+
+  const handlePinDisable = async () => {
+    setPinSaving(true);
+    try {
+      await apiClient.post('/auth/pin/admin-set', { user_id: pinDialogUser.id, pin: '' });
+      toast.success(language === 'ar' ? 'تم تعطيل رمز PIN' : 'PIN désactivé');
+      setPinDialogUser(null);
+      fetchUsers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || (language === 'ar' ? 'حدث خطأ' : 'Erreur'));
+    } finally {
+      setPinSaving(false);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -257,7 +296,16 @@ export default function UsersPage() {
                         <td className="text-muted-foreground">
                           {formatDate(user.created_at)}
                         </td>
-                        <td>
+                        <td className="whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title={language === 'ar' ? 'رمز PIN للدخول السريع' : 'Code PIN connexion rapide'}
+                            onClick={() => { setPinDialogUser(user); setPinValue(''); }}
+                            data-testid={`pin-btn-${user.id}`}
+                          >
+                            <KeyRound className={`h-4 w-4 ${user.pin_enabled ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -393,6 +441,47 @@ export default function UsersPage() {
               </Button>
               <Button onClick={handleAddUser} disabled={saving} data-testid="save-new-user-btn">
                 {saving ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ' : 'Save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* p219: PIN management dialog */}
+        <Dialog open={!!pinDialogUser} onOpenChange={(open) => !open && setPinDialogUser(null)}>
+          <DialogContent className="max-w-xs">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5" />
+                {language === 'ar' ? 'رمز PIN للدخول السريع' : 'PIN connexion rapide'}
+              </DialogTitle>
+              <DialogDescription>
+                {pinDialogUser?.name} — {language === 'ar' ? '4-6 أرقام، يظهر في شاشة الدخول السريع' : '4-6 chiffres, visible sur l\'écran de connexion rapide'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={pinValue}
+                onChange={(e) => setPinValue(e.target.value.replace(/\D/g, ''))}
+                placeholder="••••"
+                className="h-11 text-center text-lg tracking-[0.5em] font-mono"
+                dir="ltr"
+                data-testid="pin-value-input"
+              />
+              {pinDialogUser?.pin_enabled && (
+                <p className="text-xs text-emerald-600 text-center">{language === 'ar' ? 'رمز PIN مفعّل حالياً' : 'PIN actuellement actif'}</p>
+              )}
+            </div>
+            <DialogFooter className="gap-2">
+              {pinDialogUser?.pin_enabled && (
+                <Button variant="outline" onClick={handlePinDisable} disabled={pinSaving} data-testid="pin-disable-btn">
+                  {language === 'ar' ? 'تعطيل' : 'Désactiver'}
+                </Button>
+              )}
+              <Button onClick={handlePinSave} disabled={pinSaving || pinValue.length < 4} data-testid="pin-save-btn">
+                {pinSaving ? (language === 'ar' ? 'جاري الحفظ...' : 'Enregistrement...') : (language === 'ar' ? 'حفظ' : 'Enregistrer')}
               </Button>
             </DialogFooter>
           </DialogContent>

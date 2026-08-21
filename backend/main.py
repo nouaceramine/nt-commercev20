@@ -1158,6 +1158,7 @@ _AUTO_REG_MODULES = [
     'routes.serials_routes',  # p187: IMEI/serial tracking
     'routes.production_routes',  # p188: BOM / production recipes
     'routes.events_routes',  # p191: SSE realtime channel
+    'routes.pin_auth_routes',  # p219: PIN quick-login
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
