@@ -715,6 +715,9 @@ async def startup_event():
         # p240: partial — empty external_id (manual leads) must not collide
         await db.ecom_leads.create_index([("channel", 1), ("external_id", 1)], unique=True,
                                          partialFilterExpression={"external_id": {"$gt": ""}})
+        await db.ecom_import_batches.create_index("id", unique=True)
+        await db.ecom_import_batches.create_index("created_at")
+        await db.ecom_orders.create_index("import_batch_id")
         await db.ecom_orders.create_index("assigned_to")
         await db.ecom_leads.create_index("assigned_to")
         await db.ecom_sms_logs.create_index("id", unique=True)
@@ -1198,6 +1201,7 @@ _AUTO_REG_MODULES = [
     'routes.marketplace_routes',  # p227: unified marketplace catalog
     'routes.ecom.status_sms_routes',  # p241: per-status customer SMS + SMS credits
     'routes.ecom.assignment_routes',  # p242: call-center assignment
+    'routes.ecom.bulk_import_routes',  # p243: Excel/CSV bulk order upload
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
