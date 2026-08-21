@@ -912,6 +912,13 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             except Exception as _we:  # noqa: BLE001
                 logger.warning(f"p101 wa confirm hook failed: {_we}")
 
+            # p240: duplicate detection (non-blocking, internal flag only)
+            try:
+                from services.ecom.duplicate_detector import annotate_order as _annot_dup
+                await _annot_dup(tenant_db_inst, ecom_doc)
+            except Exception as _de:  # noqa: BLE001
+                logger.warning(f"p240 webstore duplicate check failed: {_de}")
+
             # p100: cross-tenant reputation — attach trust badge (no auto-escalation for webstore)
             try:
                 from services.application.ecom_order_service import get_network_trust, reputation_on_create

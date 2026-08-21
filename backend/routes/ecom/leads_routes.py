@@ -84,6 +84,10 @@ async def create_lead(body: dict, user: dict = Depends(require_tenant)):
         "updated_at": now,
         "created_by": user.get("id"),
     }
+    # p240: duplicate detection (non-blocking — flag only)
+    from services.ecom.duplicate_detector import annotate_lead
+    await annotate_lead(db, doc)
+
     await db.ecom_leads.insert_one(doc)
     doc.pop("_id", None)
     return doc

@@ -213,6 +213,10 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
                 "notes": (data.notes or "").strip(),
                 "created_at": now, "updated_at": now, "created_by": "marketplace",
             }
+            # p240: duplicate detection (non-blocking, internal flag only)
+            from services.ecom.duplicate_detector import annotate_order as _annot_dup
+            await _annot_dup(tdb, order_doc)
+
             await tdb.ecom_orders.insert_one(order_doc)
 
             await main_db.marketplace_orders.insert_one({

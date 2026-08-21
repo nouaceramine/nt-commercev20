@@ -712,7 +712,9 @@ async def startup_event():
         await db.ecom_leads.create_index("created_at")
         await db.ecom_leads.create_index([("channel", 1), ("status", 1)])
         await db.ecom_leads.create_index("ai_category")
-        await db.ecom_leads.create_index([("channel", 1), ("external_id", 1)], unique=True, sparse=True)
+        # p240: partial — empty external_id (manual leads) must not collide
+        await db.ecom_leads.create_index([("channel", 1), ("external_id", 1)], unique=True,
+                                         partialFilterExpression={"external_id": {"$gt": ""}})
         await db.ecom_shipping_labels.create_index("id", unique=True)
         await db.ecom_shipping_labels.create_index("order_id")
         await db.ecom_shipping_labels.create_index("tracking_number", unique=True, sparse=True)

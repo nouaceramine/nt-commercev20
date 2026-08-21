@@ -400,6 +400,10 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
     except Exception as exc:  # noqa: BLE001
         logger.warning("p100 network trust lookup failed: %s", exc)
 
+    # p240: duplicate detection (non-blocking — flag only)
+    from services.ecom.duplicate_detector import annotate_order
+    await annotate_order(db, doc)
+
     await db.ecom_orders.insert_one(doc)
 
     # p170: tag/create customer category (زبون التجارة الإلكترونية)
@@ -711,3 +715,24 @@ async def call_queue(user: dict = Depends(require_tenant)):
         })
     rows.sort(key=lambda r: -r["score"])
     return {"queue": rows[:50], "count": len(rows)}
+
+
+@router.get("/ecom/duplicates")
+async def list_duplicates(
+    days: int = Query(7, ge=1, le=90),
+    user: dict = Depends(require_tenant),
+):
+    """p240: recent orders/leads flagged as duplicates (same phone within 48h)."""
+    await require_ecom_feature(user)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    orders = await db.ecom_orders.find(
+        {"duplicate_warning": True, "created_at": {"$gte": cutoff}},
+        {"_id": 0, "id": 1, "order_code": 1, "channel": 1, "status": 1,
+         "customer": 1, "total": 1, "duplicate_of": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(200)
+    leads = await db.ecom_leads.find(
+        {"duplicate_warning": True, "created_at": {"$gte": cutoff}},
+        {"_id": 0, "id": 1, "channel": 1, "status": 1, "name": 1, "phone": 1,
+         "duplicate_of": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(200)
+    return {"orders": orders, "leads": leads, "count": len(orders) + len(leads)}

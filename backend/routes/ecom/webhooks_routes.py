@@ -348,6 +348,10 @@ async def tiktok_webhook(tenant_id: str, integration_id: str, request: Request):
         "status_history": [{"status": "new", "at": now, "by": "tiktok-webhook"}],
         "created_at": now, "updated_at": now, "created_by": "tiktok-webhook",
     }
+    # p240: duplicate detection (non-blocking — flag only)
+    from services.ecom.duplicate_detector import annotate_order as _annot_dup
+    await _annot_dup(db, doc)
+
     await db.ecom_orders.insert_one(doc)
     # p170: tag/create customer category (زبون التجارة الإلكترونية)
     try:
@@ -386,6 +390,10 @@ async def _upsert_lead(db, channel: str, integration_id: str, parsed: dict) -> N
         "converted_order_id": None,
         "created_at": now, "updated_at": now, "created_by": f"{channel}-webhook",
     }
+    # p240: duplicate detection (non-blocking — flag only)
+    from services.ecom.duplicate_detector import annotate_lead as _annot_dup_lead
+    await _annot_dup_lead(db, doc)
+
     await db.ecom_leads.insert_one(doc)
     await db.ecom_integrations.update_one(
         {"id": integration_id},
