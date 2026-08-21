@@ -114,6 +114,46 @@ def create_autoheal_routes(get_super_admin):
             raise HTTPException(status_code=404, detail="النتيجة غير موجودة أو معالَجة مسبقاً")
         return {"message": "تم التجاهل", "status": "dismissed"}
 
+    @router.get("/error-classes")
+    async def autoheal_error_classes(limit: int = 50, admin: dict = Depends(get_super_admin)):
+        """p225: classified error signatures with recurrence counts."""
+        limit = max(1, min(limit, 200))
+        items = await _db().autoheal_error_signatures.find(
+            {}, {"_id": 0}).sort("count", -1).limit(limit).to_list(limit)
+        by_cat = {}
+        for i in items:
+            by_cat[i.get("category", "application")] = by_cat.get(i.get("category", "application"), 0) + i.get("count", 0)
+        unclassified = await _db().system_errors.count_documents({"classification": {"$exists": False}})
+        return {"items": items, "by_category": by_cat, "unclassified": unclassified}
+
+    @router.post("/classify")
+    async def autoheal_classify_now(admin: dict = Depends(get_super_admin)):
+        """p225: run the error classifier now (also runs automatically every scan)."""
+        from services.autoheal_level1 import classify_system_errors
+        return await classify_system_errors(_db())
+
+    @router.get("/runbooks")
+    async def autoheal_runbooks(admin: dict = Depends(get_super_admin)):
+        """p225: the known-error runbook catalog."""
+        from services.autoheal_level1 import RUNBOOKS
+        return {"runbooks": [{"category": k, **v} for k, v in RUNBOOKS.items()]}
+
+    @router.get("/morning-report")
+    async def autoheal_morning_report(date: Optional[str] = None, admin: dict = Depends(get_super_admin)):
+        """p225: latest morning report (or a specific date YYYY-MM-DD)."""
+        q = {"date": date} if date else {}
+        doc = await _db().autoheal_morning_reports.find_one(
+            q, {"_id": 0}, sort=[("generated_at", -1)])
+        if not doc:
+            raise HTTPException(status_code=404, detail="لا يوجد تقرير صباحي بعد")
+        return doc
+
+    @router.post("/morning-report/generate")
+    async def autoheal_morning_report_generate(admin: dict = Depends(get_super_admin)):
+        """p225: force-generate today's morning report."""
+        from services.autoheal_level1 import generate_morning_report
+        return await generate_morning_report(_db())
+
     @router.get("/known-issues")
     async def autoheal_known_issues(admin: dict = Depends(get_super_admin)):
         items = await _db().autoheal_known_issues.find(

@@ -3305,3 +3305,26 @@ Release: 20260821_052844 — Bundle: main.fc2818a5.js
 - التنظيف الدقيق: حذف صفوف usage/الفواتير/محفظة ومعاملات TEST (2/1/2/1)، لا بقايا، محفظة المستأجر الحقيقي سليمة (0.0 / عتبة 1000).
 
 Release: 20260821_134533 — Bundle: main.cdb5772a.js
+
+## p225 — شفاء ذاتي المستوى 1 (Rule-based self-healing) — 2026-08-21
+
+**الهدف (تقرير استشاري §4.1):** تصنيف الأخطاء + runbooks + تقرير صباحي فوق محرك AutoHeal (p54). القاعدة الذهبية مطبَّقة: الإصلاح الآلي يُقترح ولا يُفرض على البيانات المالية.
+
+### Backend
+- `services/autoheal_level1.py` (جديد):
+  - مصنّف الأخطاء: 6 فئات (database/cache/network/auth/validation/integration + application) بكلمات مفتاحية على type+message؛ `normalize_signature` يوحّد الرسائل (إخفاء UUID/أرقام)؛ `classify_system_errors` يوسم system_errors.classification ويحدّث autoheal_error_signatures (تكرار/أول وآخر ظهور/عينة).
+  - RUNBOOKS: دليل معالجة عربي لكل فئة (مثال cache: إعادة تشغيل Redis + ping + إعادة backend — لا docker.sock داخل الحاوية لذا الخطوات إرشادية للمالك).
+  - `generate_morning_report`: ملخص 24 ساعة (مسحات + أدنى/متوسط النقاط، نتائج جديدة/محلولة/مُصلحة آلياً، أخطاء حسب الفئة، أكثر التواقيع تكراراً، قائمة «يحتاج تدخلك») في autoheal_morning_reports — idempotent لكل تاريخ.
+- `services/autoheal_service.py`: فحصان جديدان في run_scan — `_check_error_classification` (تصنيف مستمر + نتيجة High/Medium عند ≥10/≥5 أخطاء بنفس الفئة خلال ساعة مع خطوات الـ runbook) و `_check_tenant_data_advisories` (بوابة ساعية عبر autoheal_state: مخزون سالب + قيود يومية غير متوازنة لكل مستأجر نشط — نتائج إرشادية بلا remediation_key أبداً). التقرير الصباحي يُولَّد في حلقة المجدول مرة يومياً من 06:00 بتوقيت الجزائر.
+- `routes/saas/autoheal_routes.py`: GET /error-classes، POST /classify، GET /runbooks، GET /morning-report، POST /morning-report/generate.
+
+### Frontend
+- `pages/admin/saas/AutoHealPage.js`: بطاقة «التقرير الصباحي» (عدادات مسحات/جديدة/مُصلحة/تحتاجك + قائمة المنتظرة + زر توليد) وبطاقة «تصنيف الأخطاء» (شرائح الفئات + أكثر التواقيع). testids: autoheal-morning-report, morning-report-generate, mr-scans/new/fixed/needs, mr-needs-list, autoheal-error-classes, errcat-*.
+
+### الاختبار (قراءة فقط على البيانات الحقيقية — بلا TEST data)
+- POST /classify: صنّف خطأً قائماً (DuplicateKeyError → database بعد تصحيح كلمة مفتاحية)، remaining=0.
+- error-classes/runbooks (7 أدلة)/morning-report: توليد وجلب MR-2026-08-21 (146 مسحاً/24س، متوسط 35، needs_owner=1 — الحرج القائم يُعرض صحيحاً).
+- المسح التفاعلي يشغّل الفحصين الجديدين دون أخطاء؛ لا مخزون سالب ولا قيود غير متوازنة لدى المستأجر الحقيقي (لا نتائج جديدة — البيانات سليمة).
+- لم تُعدّل أي بيانات مالية؛ الفحصان الجديدان قراءة فقط.
+
+Release: 20260821_140243 — Bundle: main.f47f1ccc.js

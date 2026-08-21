@@ -14,7 +14,7 @@ import {
 import { toast } from 'sonner';
 import {
   Activity, RefreshCw, Play, CheckCircle, XCircle, Clock,
-  AlertTriangle, ShieldCheck, Bug, Zap
+  AlertTriangle, ShieldCheck, Bug, Zap, FileText, Wrench
 } from 'lucide-react';
 
 const SEV = {
@@ -51,19 +51,26 @@ export default function AutoHealPage() {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [morningReport, setMorningReport] = useState(null);  // p225
+  const [errorClasses, setErrorClasses] = useState(null);    // p225
+  const [generatingReport, setGeneratingReport] = useState(false);  // p225
 
   const fetchAll = useCallback(async () => {
     try {
-      const [h, f, s, k] = await Promise.all([
+      const [h, f, s, k, mr, ec] = await Promise.all([
         apiClient.get('/saas/autoheal/health'),
         apiClient.get('/saas/autoheal/findings', { params: { limit: 100 } }),
         apiClient.get('/saas/autoheal/scans', { params: { limit: 10 } }),
         apiClient.get('/saas/autoheal/known-issues'),
+        apiClient.get('/saas/autoheal/morning-report').catch(() => ({ data: null })),  // p225
+        apiClient.get('/saas/autoheal/error-classes').catch(() => ({ data: null })),   // p225
       ]);
       setHealth(h.data);
       setFindings(f.data.items || []);
       setScans(s.data.items || []);
       setKnownIssues(k.data.items || []);
+      setMorningReport(mr.data);       // p225
+      setErrorClasses(ec.data);        // p225
     } catch (err) {
       console.error('autoheal fetch failed:', err);
       toast.error('تعذر تحميل بيانات الإصلاح الذاتي');
@@ -114,6 +121,19 @@ export default function AutoHealPage() {
       toast.error('فشل التجاهل');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const generateMorningReport = async () => {  // p225
+    setGeneratingReport(true);
+    try {
+      const res = await apiClient.post('/saas/autoheal/morning-report/generate');
+      setMorningReport(res.data);
+      toast.success('تم توليد التقرير الصباحي');
+    } catch (err) {
+      toast.error('فشل توليد التقرير');
+    } finally {
+      setGeneratingReport(false);
     }
   };
 
@@ -336,6 +356,101 @@ export default function AutoHealPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* p225: Morning report */}
+        <Card data-testid="autoheal-morning-report">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4" />
+                التقرير الصباحي — ماذا حدث خلال 24 ساعة
+              </CardTitle>
+              <Button size="sm" variant="outline" onClick={generateMorningReport}
+                      disabled={generatingReport} className="gap-2" data-testid="morning-report-generate">
+                {generatingReport ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                توليد الآن
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {!morningReport ? (
+              <p className="text-sm text-muted-foreground py-4 text-center" data-testid="morning-report-empty">
+                لا تقرير بعد — يُولَّد تلقائياً كل صباح بعد السادسة
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xs text-muted-foreground">المسحات</p>
+                    <p className="text-xl font-bold" data-testid="mr-scans">{morningReport.scans?.count ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">أدنى نقاط: {morningReport.scans?.min_score ?? '—'}</p>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xs text-muted-foreground">نتائج جديدة</p>
+                    <p className="text-xl font-bold" data-testid="mr-new">{morningReport.findings?.new ?? 0}</p>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xs text-muted-foreground">أُصلحت تلقائياً</p>
+                    <p className="text-xl font-bold text-emerald-600" data-testid="mr-fixed">{morningReport.findings?.auto_fixed ?? 0}</p>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xs text-muted-foreground">تحتاج تدخلك</p>
+                    <p className="text-xl font-bold text-amber-600" data-testid="mr-needs">{morningReport.needs_owner?.length ?? 0}</p>
+                  </div>
+                </div>
+                {morningReport.needs_owner?.length > 0 && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3" data-testid="mr-needs-list">
+                    <p className="text-sm font-medium mb-2">بانتظار موافقتك:</p>
+                    {morningReport.needs_owner.map((n) => (
+                      <p key={n.id} className="text-sm">• {n.title} <span className="text-xs text-muted-foreground">({n.occurrences}×)</span></p>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">تاريخ التقرير: {morningReport.date} — وُلّد {(morningReport.generated_at || '').slice(11, 16)} UTC</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* p225: Error classification */}
+        <Card data-testid="autoheal-error-classes">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Wrench className="h-4 w-4" />
+              تصنيف الأخطاء (المستوى 1)
+            </CardTitle>
+            <CardDescription>كل خطأ في سجل النظام يُصنَّف تلقائياً ويُربط بدليل معالجة (runbook)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!errorClasses ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">لا بيانات</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2" data-testid="error-classes-chips">
+                  {Object.entries(errorClasses.by_category || {}).map(([cat, n]) => (
+                    <Badge key={cat} variant="secondary" className="gap-1" data-testid={`errcat-${cat}`}>
+                      {cat}: {n}
+                    </Badge>
+                  ))}
+                  {(errorClasses.unclassified ?? 0) > 0 && (
+                    <Badge variant="outline">{errorClasses.unclassified} غير مصنّف</Badge>
+                  )}
+                </div>
+                {errorClasses.items?.length > 0 && (
+                  <div className="space-y-1">
+                    {errorClasses.items.slice(0, 5).map((i) => (
+                      <div key={i.signature} className="flex items-center gap-2 text-sm border-b pb-1">
+                        <Badge variant="outline">{i.category}</Badge>
+                        <span className="flex-1 truncate text-xs">{i.sample}</span>
+                        <span className="text-xs text-muted-foreground">{i.count}×</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </Layout>
   );

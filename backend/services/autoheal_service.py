@@ -64,6 +64,19 @@ def start_autoheal_scheduler(interval_seconds: int = SCAN_INTERVAL_SECONDS, firs
                 if leader:
                     logger.info("AutoHeal leader pid=%s running scan", os.getpid())
                     await eng.run_scan("scheduled")
+                    # p225: morning report — once daily from 06:00 Africa/Algiers
+                    try:
+                        from services.autoheal_level1 import generate_morning_report, LOCAL_TZ
+                        from datetime import datetime as _dt
+                        _nl = _dt.now(LOCAL_TZ)
+                        _st = await eng._main_db.autoheal_state.find_one({"_id": "morning_report_last"})
+                        if _nl.hour >= 6 and (not _st or _st.get("value") != _nl.strftime("%Y-%m-%d")):
+                            await generate_morning_report(eng._main_db)
+                            await eng._main_db.autoheal_state.update_one(
+                                {"_id": "morning_report_last"},
+                                {"$set": {"value": _nl.strftime("%Y-%m-%d")}}, upsert=True)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("AutoHeal morning report failed")
             except Exception:  # noqa: BLE001
                 logger.exception("AutoHeal scheduled scan failed")
             await asyncio.sleep(interval_seconds)
@@ -131,6 +144,9 @@ class AutoHealEngine:
             self._check_error_log_patterns,
             self._check_client_logs,
             self._check_component_metrics,
+            # p225: level-1 rule-based self-healing
+            self._check_error_classification,
+            self._check_tenant_data_advisories,
         ]
         for check in checks:
             try:
@@ -554,6 +570,102 @@ class AutoHealEngine:
         return findings or None
 
     # ── safe inline remediation (degree 2) ─────────────────────────────────
+    # ── p225 L1: error classification — tag system_errors + spike findings ──
+    async def _check_error_classification(self):
+        from services.autoheal_level1 import classify_system_errors, RUNBOOKS
+        stats = await classify_system_errors(self._main_db)
+        # spike detection: errors of one category in the last hour
+        cutoff = _iso(_now() - timedelta(hours=1))
+        recent = await self._main_db.system_errors.find(
+            {"timestamp": {"$gte": cutoff}, "classification": {"$exists": True}},
+            {"_id": 0, "classification.category": 1, "classification.signature": 1,
+             "message": 1, "tenant_name": 1},
+        ).to_list(2000)
+        by_cat = {}
+        for e in recent:
+            c = (e.get("classification") or {}).get("category", "application")
+            g = by_cat.setdefault(c, {"count": 0, "sample": e.get("message", ""),
+                                      "tenants": set()})
+            g["count"] += 1
+            if e.get("tenant_name"):
+                g["tenants"].add(e["tenant_name"])
+        findings = []
+        for cat, g in by_cat.items():
+            rb = RUNBOOKS.get(cat) or RUNBOOKS["application"]
+            if g["count"] >= 10:
+                sev = rb["severity"]
+            elif g["count"] >= 5:
+                sev = "Medium"
+            else:
+                continue
+            steps = "\n".join(f"• {st}" for st in rb["steps_ar"])
+            findings.append(self._finding(
+                sev, "System-wide", "error-classifier", f"errclass:{cat}",
+                f"{rb['title_ar']}: {g['count']} خطأ خلال الساعة الأخيرة",
+                f"العينة: {g['sample'][:180]}"
+                + (f" — المستأجرون: {', '.join(list(g['tenants'])[:3])}" if g["tenants"] else ""),
+                f"runbook:\n{steps}",
+                "within-1h" if sev == "High" else "within-24h", "availability",
+                prevention=rb["title_ar"],
+            ))
+        return findings or None
+
+    # ── p225 L1: tenant financial-data advisories (suggest, never impose) ──
+    async def _check_tenant_data_advisories(self):
+        """Hourly-gated sweep of tenant DBs for negative stock and unbalanced
+        journal entries. Golden rule: advisory only — no auto-remediation on
+        financial data (remediation_key stays None)."""
+        state = await self._main_db.autoheal_state.find_one({"_id": "tenant_advisories_last"})
+        now = _now()
+        if state and (_now() - datetime.fromisoformat(state["value"])).total_seconds() < 3600:
+            return None
+        await self._main_db.autoheal_state.update_one(
+            {"_id": "tenant_advisories_last"}, {"$set": {"value": _iso(now)}}, upsert=True)
+
+        from config.database import get_tenant_db
+        findings = []
+        tenants = await self._main_db.saas_tenants.find(
+            {"is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "short_id": 1}
+        ).to_list(500)
+        for t in tenants:
+            tdb = get_tenant_db(t["id"])
+            tname = t.get("name") or t.get("short_id") or t["id"][:8]
+            try:
+                neg = await tdb.products.find(
+                    {"quantity": {"$lt": 0}}, {"_id": 0, "name_en": 1, "name_ar": 1, "quantity": 1}
+                ).limit(20).to_list(20)
+            except Exception:  # noqa: BLE001
+                neg = []
+            if neg:
+                sample = ", ".join(f"{p.get('name_ar') or p.get('name_en')} ({p.get('quantity')})" for p in neg[:5])
+                findings.append(self._finding(
+                    "Medium", "Subscriber", "inventory", f"negstock:{t['id']}",
+                    f"مخزون سالب لدى {tname} ({len(neg)} صنف)",
+                    f"الأصناف: {sample}",
+                    "راجع حركات هذه الأصناف (بيع بدون مخزون/جرد ناقص) وصحّحها يدوياً — "
+                    "الإصلاح الآلي ممنوع على البيانات المالية",
+                    "within-24h", "data-integrity",
+                ))
+            try:
+                entries = await tdb.journal_entries.find(
+                    {}, {"_id": 0, "entry_number": 1, "total_debit": 1, "total_credit": 1}
+                ).to_list(5000)
+            except Exception:  # noqa: BLE001
+                entries = []
+            bad = [e for e in entries
+                   if abs((e.get("total_debit") or 0) - (e.get("total_credit") or 0)) > 0.01]
+            if bad:
+                nums = ", ".join(str(e.get("entry_number", "?")) for e in bad[:5])
+                findings.append(self._finding(
+                    "High", "Subscriber", "accounting", f"unbalanced:{t['id']}",
+                    f"قيود يومية غير متوازنة لدى {tname} ({len(bad)} قيد)",
+                    f"الأرقام: {nums}",
+                    "علّق القيود المخالفة وراجع مصدرها يدوياً — "
+                    "الإصلاح الآلي ممنوع على البيانات المالية (موافقتك مطلوبة دائماً)",
+                    "within-1h", "data-integrity",
+                ))
+        return findings or None
+
     async def _cleanup_expired_auth_artifacts(self):
         now_iso = _iso(_now())
         deleted = 0
