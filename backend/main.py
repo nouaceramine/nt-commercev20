@@ -598,6 +598,11 @@ async def startup_event():
                 [("tenant_id", 1), ("month", 1)],
                 unique=True, sparse=True, name="ai_invoice_unique",
             )
+            # p246: support tickets
+            await main_db.support_tickets.create_index("id", unique=True)
+            await main_db.support_tickets.create_index("code", unique=True)
+            await main_db.support_tickets.create_index([("tenant_id", 1), ("status", 1)])
+            await main_db.support_tickets.create_index("platform_unread")
             # p227: one catalog row per (tenant, product)
             await main_db.marketplace_catalog.create_index(
                 [("tenant_id", 1), ("product_id", 1)],
@@ -1210,6 +1215,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.bulk_import_routes',  # p243: Excel/CSV bulk order upload
     'routes.ecom.public_track_routes',  # p244: public global order tracking
     'routes.ecom.referral_routes',  # p245: referral program
+    'routes.support_routes',  # p246: tenant support tickets
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
