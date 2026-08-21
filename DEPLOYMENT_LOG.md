@@ -3363,3 +3363,15 @@ Release: backend only (لا واجهة — بنية تحتية)
 - التنظيف الدقيق: حذف المنتج/الإدراج/صف الكتالوج/3 أحداث outbox؛ journal_entries=2 (الحقيقيان فقط) وcash=11300.88 — لا مساس بالبيانات الحقيقية.
 
 Release: 20260821_142922 — Bundle: main.9059a4cb.js
+
+## p228 — تدقيق شامل للنظام + إصلاح جذري لخطإ المصاريف — 2026-08-21
+
+**فحص كامل:** حاويات (8/8)، API، الموقع 200، git، DLQ=0، outbox=0 معلق، نسخ يومية 03:00، push GitHub حتى p228، قرص 35%.
+
+**errors.log — 4 أنماط أخطاء:**
+1. expenses DuplicateKeyError (expense_number=null) — **أُصلح جذرياً**: create_expense يضبط expense_number=code (المؤشر الفريد كان قد أُسقط، لكن التناسق يمنع عودته).
+2. shipping settings E11000/company_id — مُصلح سابقاً (p141) — تحقق حي 200 (وحُذف مستند الاختبار فوراً).
+3. sim/transfer NameError — مُصلح سابقاً — تحقق حي: 400 سليمة.
+4. journal-entries ObjectId — مُصلح سابقاً (p196) — GET 200 و400 للقيد غير المتوازن.
+
+**تنظيف AutoHeal:** اعتماد إصلاح الأخطاء الحرجة (resolve_critical_system_errors أغلق سجل system_errors) + تجاهل 5 نتائج راكدة بعد التحقق من إصلاح جذورها → مسح جديد: **health_score=100**.
