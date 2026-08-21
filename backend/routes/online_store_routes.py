@@ -622,13 +622,30 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not settings or not settings.get("enabled"):
             raise HTTPException(status_code=404, detail="Store not available")
 
-        store_products = await tenant_db_inst.store_products.find({"is_active": True}, {"_id": 0}).to_list(100000)  # p175: unlimited
+        # p250: multi-store — a slug may point to a specific sub-store
+        _store_id = slug_mapping.get("store_id")
+        if _store_id:
+            _store = await tenant_db_inst.stores.find_one(
+                {"id": _store_id, "enabled": True}, {"_id": 0})
+            if not _store:
+                raise HTTPException(status_code=404, detail="Store not available")
+            settings = {**settings,
+                        "store_name": _store.get("name") or settings.get("store_name"),
+                        "store_slug": store_slug,
+                        "description": _store.get("description") or settings.get("description", "")}
+
+        if _store_id:
+            _sp_query = {"is_active": True, "store_id": _store_id}
+        else:
+            # default store: legacy entries carry no store_id
+            _sp_query = {"is_active": True, "store_id": {"$in": [None, ""]}}
+        store_products = await tenant_db_inst.store_products.find(_sp_query, {"_id": 0}).to_list(100000)  # p175: unlimited
         product_ids = [sp["product_id"] for sp in store_products]
 
         # p149: family-level visibility — selected families auto-include ALL their products
         _vis_fams = [f for f in (settings.get("visible_family_ids") or []) if f]
         _query = {"id": {"$in": product_ids}}
-        if _vis_fams:
+        if _vis_fams and not _store_id:  # p250: sub-store catalog = its attached products only
             _query = {"$or": [{"id": {"$in": product_ids}}, {"family_id": {"$in": _vis_fams}}]}
 
         products = await tenant_db_inst.products.find(
