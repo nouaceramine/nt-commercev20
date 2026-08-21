@@ -1202,6 +1202,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.status_sms_routes',  # p241: per-status customer SMS + SMS credits
     'routes.ecom.assignment_routes',  # p242: call-center assignment
     'routes.ecom.bulk_import_routes',  # p243: Excel/CSV bulk order upload
+    'routes.ecom.public_track_routes',  # p244: public global order tracking
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

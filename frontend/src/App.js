@@ -33,6 +33,7 @@ import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/store/ProductDetailPage";
 import StoreLandingPage from "./pages/store/StoreLandingPage";
 import OrderTrackingPage from "./pages/store/OrderTrackingPage";
+import GlobalTrackingPage from "./pages/store/GlobalTrackingPage";
 import AddProductPage from "./pages/AddProductPage";
 import EditProductPage from "./pages/EditProductPage";
 import UsersPage from "./pages/UsersPage";
@@ -357,6 +358,7 @@ function AppRoutes() {
       <Route path="/shop/:slug/product/:productId" element={<ProductDetailPage />} />
       <Route path="/shop/:slug/lp/:productId" element={<StoreLandingPage />} />
       <Route path="/shop/:slug/track/:orderId" element={<OrderTrackingPage />} />
+      <Route path="/track" element={<GlobalTrackingPage />} />
       
       {/* Unified Login - Single Entry Point for ALL users */}
       <Route path="/portal" element={<UnifiedLoginPage />} />
