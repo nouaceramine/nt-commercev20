@@ -729,6 +729,9 @@ async def startup_event():
         await db.ecom_referral_rewards.create_index("order_id", unique=True)
         await db.ecom_referral_rewards.create_index([("referral_id", 1), ("status", 1)])
         await db.ecom_referral_payouts.create_index("id", unique=True)
+        await db.ecom_drivers.create_index("id", unique=True)
+        await db.ecom_drivers.create_index("token", unique=True)
+        await db.ecom_orders.create_index("driver_id")
         await db.ecom_orders.create_index("assigned_to")
         await db.ecom_leads.create_index("assigned_to")
         await db.ecom_sms_logs.create_index("id", unique=True)
@@ -1216,6 +1219,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.public_track_routes',  # p244: public global order tracking
     'routes.ecom.referral_routes',  # p245: referral program
     'routes.support_routes',  # p246: tenant support tickets
+    'routes.ecom.driver_routes',  # p247: driver mobile web interface
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
