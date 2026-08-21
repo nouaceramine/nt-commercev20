@@ -17,6 +17,7 @@ main.py at startup.
 from __future__ import annotations
 
 import logging
+import uuid  # p227
 from datetime import datetime, timezone
 
 from config.database import main_db, get_tenant_db
@@ -561,6 +562,53 @@ async def handle_supplier_payment_made(event: Event) -> None:
         log.warning("auto-accounting supplier-payment %s failed: %s", p.get("payment_id"), exc)
 
 
+# ── p227: unified marketplace catalog ────────────────────────────────────────
+async def handle_product_published(event: Event) -> None:
+    """Upsert the central catalog row for a tenant-published product."""
+    p = event.payload or {}
+    tenant_id = p.get("tenant_id") or event.tenant_id
+    pid = p.get("product_id")
+    if not pid or not tenant_id:
+        return
+    from config.database import main_db
+    now = datetime.now(timezone.utc).isoformat()
+    await main_db.marketplace_catalog.update_one(
+        {"tenant_id": tenant_id, "product_id": pid},
+        {"$set": {
+            "tenant_id": tenant_id,
+            "product_id": pid,
+            "tenant_name": p.get("tenant_name", ""),
+            "short_id": p.get("short_id", ""),
+            "name_ar": p.get("name_ar", ""),
+            "name_en": p.get("name_en", ""),
+            "description": p.get("description", ""),
+            "image_url": p.get("image_url", ""),
+            "category": p.get("category", ""),
+            "retail_price": p.get("retail_price", 0),
+            "margin_pct": p.get("margin_pct", 0),
+            "price": p.get("price", 0),
+            "active": True,
+            "published_at": now,
+        }, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now}},
+        upsert=True,
+    )
+    log.info("marketplace catalog upsert: %s/%s", tenant_id, pid)
+
+
+async def handle_product_unpublished(event: Event) -> None:
+    p = event.payload or {}
+    tenant_id = p.get("tenant_id") or event.tenant_id
+    pid = p.get("product_id")
+    if not pid or not tenant_id:
+        return
+    from config.database import main_db
+    await main_db.marketplace_catalog.update_one(
+        {"tenant_id": tenant_id, "product_id": pid},
+        {"$set": {"active": False, "unpublished_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    log.info("marketplace catalog unpublish: %s/%s", tenant_id, pid)
+
+
 def register_handlers(bus: RedisEventBus) -> None:
     bus.register("purchase.created", handle_purchase_created)
     bus.register("purchase.codes_uploaded", handle_purchase_codes_uploaded)
@@ -585,6 +633,8 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("tenant.subscription.expired", handle_tenant_subscription_expired)
     bus.register("tenant.subscription.renewed", handle_tenant_subscription_renewed)
     bus.register("test.ping", handle_test_ping)
+    bus.register("product.published_to_marketplace", handle_product_published)  # p227
+    bus.register("product.unpublished_from_marketplace", handle_product_unpublished)  # p227
     log.info("Event consumers registered: %d handlers", len(bus._handlers))
 
 

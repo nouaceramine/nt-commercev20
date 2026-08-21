@@ -598,6 +598,11 @@ async def startup_event():
                 [("tenant_id", 1), ("month", 1)],
                 unique=True, sparse=True, name="ai_invoice_unique",
             )
+            # p227: one catalog row per (tenant, product)
+            await main_db.marketplace_catalog.create_index(
+                [("tenant_id", 1), ("product_id", 1)],
+                unique=True, name="marketplace_catalog_unique",
+            )
         except Exception as wal_exc:
             logger.warning("wallets unique index: %s", wal_exc)
 
@@ -1183,6 +1188,7 @@ _AUTO_REG_MODULES = [
     'routes.pin_auth_routes',  # p219: PIN quick-login
     'routes.commissions_routes',  # p221: commission engine
     'routes.margin_rules_routes',  # p223: per-subscriber price margins
+    'routes.marketplace_routes',  # p227: unified marketplace catalog
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

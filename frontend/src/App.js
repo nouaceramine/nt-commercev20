@@ -130,6 +130,7 @@ import RobotsPage from "./pages/RobotsPage";
 import AutoReportsPage from "./pages/AutoReportsPage";
 import CommissionsPage from "./pages/CommissionsPage";  // p221
 import MarginRulesPage from "./pages/MarginRulesPage";  // p223
+import MarketplacePage from "./pages/MarketplacePage";  // p227
 
 // Legendary Build Pages
 import DefectiveGoodsPage from "./pages/DefectiveGoodsPage";
@@ -500,6 +501,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute adminOnly featureKey="recharge">
             <MarginRulesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/marketplace"
+        element={
+          <ProtectedRoute>
+            <MarketplacePage />
           </ProtectedRoute>
         }
       />

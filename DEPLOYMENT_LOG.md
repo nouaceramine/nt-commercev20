@@ -3345,3 +3345,21 @@ Release: 20260821_140243 — Bundle: main.f47f1ccc.js
 - regression: قائمة المستأجرين تُسلسل سليمة مع المصدق الجديد؛ migration endpoint no-op (0/0).
 
 Release: backend only (لا واجهة — بنية تحتية)
+
+## p227 — الكتالوج المركزي للسوق الموحد (Unified marketplace catalog) — 2026-08-21
+
+**الهدف (تقرير استشاري §8):** كتالوج مركزي في main_db يغذّيه حدث product.published_to_marketplace عبر الناقل الموجود — المشترك يختار منتجاته وهامشه. (توجيه الطلبات والدفع عند الاستلام مرحلة لاحقة §3.5).
+
+### Backend
+- `routes/marketplace_routes.py` (جديد): جانب المستأجر — POST /marketplace/publish {product_id, margin_pct} (السعر في السوق = سعر التجزئة × (1+الهامش)، تحقق 0–200% ورفض منتج بلا سعر تجزئة) يخزّن marketplace_listings في قاعدة المستأجر ويكتب الحدث في outbox؛ POST /unpublish؛ GET /my (المنشورات + بيانات المنتج). جانب عام بلا مصادقة — GET /marketplace/catalog (بحث q، فلتر فئة، صفحات ≤60، لا يكشف tenant_id).
+- `services/event_consumers.py`: handle_product_published (upsert في main_db.marketplace_catalog بمفتاح tenant+product) و handle_product_unpublished (active=False) — مسجّلان في الناقل. إصلاح: استيراد uuid كان مفقوداً.
+- `main.py`: تسجيل routes.marketplace_routes + فهرس فريد marketplace_catalog(tenant_id, product_id).
+
+### Frontend
+- `pages/MarketplacePage.js` (جديد): قائمة منشوراتي (سعر أساسي ← سعر السوق، شارة نفاد المخزون)، حوار نشر (اختيار منتج من غير المنشورة + هامش %)، سحب من السوق. مسار /marketplace + عنصر «السوق الموحد» في قائمة المبيعات. testids: marketplace-page, publish-product-btn/select/margin/confirm-btn, listing-{pid}, unpublish-{pid}.
+
+### الاختبار (TEST-P227 — موسوم ومنظَّف)
+- E2E عبر الناقل الحقيقي: إنشاء منتج اختبار (تجزئة 500) → نشر بهامش 20% → الكتالوج العام يعرضه بسعر 600 خلال ثوانٍ → سحب → يختفي من العام. تحقق: 400 هامش 300%، 404 منتج وهمي، 404 سحب مكرر، الكتالوج العام 200 بلا توكن.
+- التنظيف الدقيق: حذف المنتج/الإدراج/صف الكتالوج/3 أحداث outbox؛ journal_entries=2 (الحقيقيان فقط) وcash=11300.88 — لا مساس بالبيانات الحقيقية.
+
+Release: 20260821_142922 — Bundle: main.9059a4cb.js

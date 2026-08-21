@@ -500,6 +500,7 @@ export const Layout = ({ children }) => {
         { path: '/smart-reports', icon: Sparkles, label: language === 'ar' ? 'تقارير ذكية' : 'Rapports IA', subFeature: 'smart_reports', featureKey: 'reports' },
         { path: '/auto-reports', icon: Calendar, label: language === 'ar' ? 'التقارير التلقائية' : 'Rapports auto', featureKey: 'reports' },
         { path: '/commissions', icon: Percent, label: language === 'ar' ? 'العمولات' : 'Commissions', featureKey: 'reports' },  // p221
+        { path: '/marketplace', icon: Globe, label: language === 'ar' ? 'السوق الموحد' : 'Marché' },  // p227
       ]
     },
     {
