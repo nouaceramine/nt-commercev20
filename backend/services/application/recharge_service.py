@@ -143,6 +143,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     cashbox_updated = False
     txn_inserted = False
     sale_cash_inserted = False
+    sale_credit_inserted = False  # p232
     bridge_task_inserted = False
     is_credit_sale = recharge.payment_method == "credit"
     try:
@@ -171,6 +172,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 "user_id": user.get("id"), "user_name": user.get("name", ""),
                 "created_at": now,
             })
+            sale_credit_inserted = True  # p232
             # Update user's open daily session
             try:
                 await db.daily_sessions.update_one(
@@ -286,6 +288,19 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 await db.mobile_recharge_tasks.delete_one({"id": bridge_task_id})
             except Exception:
                 logger.exception("Rollback: failed to delete bridge task %s", bridge_task_id)
+        if sale_credit_inserted:
+            # p232: credit sale row was missing from rollback — orphaned FLEXY- sale if bridge dispatch failed
+            try:
+                await db.sales.delete_one({"invoice_number": f"FLEXY-{recharge_id[:6].upper()}", "type": "recharge_credit"})
+            except Exception:
+                logger.exception("Rollback: failed to delete credit sale row for recharge %s", recharge_id)
+            try:
+                await db.daily_sessions.update_one(
+                    {"user_id": user.get("id"), "status": "open"},
+                    {"$inc": {"total_sales": -sale_price, "credit_sales": -sale_price, "sales_count": -1}},
+                )
+            except Exception:
+                logger.exception("Rollback: failed to reverse daily session credit totals for %s", recharge_id)
         if txn_inserted:
             try:
                 await db.transactions.delete_one({"id": txn_record_id})
@@ -296,6 +311,14 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 await db.sales.delete_one({"invoice_number": f"FLEXY-{recharge_id[:6].upper()}", "type": "recharge_cash"})
             except Exception:
                 logger.exception("Rollback: failed to delete cash sale row for recharge %s", recharge_id)
+            try:
+                # p232: reverse daily session cash totals too
+                await db.daily_sessions.update_one(
+                    {"user_id": user.get("id"), "status": "open"},
+                    {"$inc": {"total_sales": -sale_price, "cash_sales": -sale_price, "sales_count": -1}},
+                )
+            except Exception:
+                logger.exception("Rollback: failed to reverse daily session cash totals for %s", recharge_id)
         if cashbox_updated:
             try:
                 await db.cash_boxes.update_one(
