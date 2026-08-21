@@ -22,6 +22,10 @@ CHANNELS = {
     "manual":    {"label_ar": "إدخال يدوي",         "label_en": "Manual",    "icon": "✍️", "color": "#6b7280"},
     "excel":     {"label_ar": "استيراد Excel",       "label_en": "Excel",     "icon": "📊", "color": "#217346"},
     "marketplace": {"label_ar": "السوق الموحد",       "label_en": "Marketplace", "icon": "🛒", "color": "#8b5cf6"},
+    "youcan":    {"label_ar": "YouCan",              "label_en": "YouCan",    "icon": "🟧", "color": "#f97316"},
+    "lightfunnels": {"label_ar": "LightFunnels",     "label_en": "LightFunnels", "icon": "🔶", "color": "#fb923c"},
+    "sheets":    {"label_ar": "Google Sheets",        "label_en": "Sheets",    "icon": "📑", "color": "#16a34a"},
+    "custom-intake": {"label_ar": "استقبال مخصص",     "label_en": "Custom Intake", "icon": "🔗", "color": "#64748b"},
     "webstore":  {"label_ar": "متجر الويب",          "label_en": "Web Store", "icon": "🌐", "color": "#0ea5e9"},
     # ── Shipping carriers — stored as integrations to keep credentials in one collection ──
     "yalidine":  {"label_ar": "يالدين (شحن)",        "label_en": "Yalidine",  "icon": "🚚", "color": "#f97316", "kind": "shipping"},

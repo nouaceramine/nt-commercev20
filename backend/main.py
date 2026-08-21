@@ -732,6 +732,8 @@ async def startup_event():
         await db.ecom_drivers.create_index("id", unique=True)
         await db.ecom_drivers.create_index("token", unique=True)
         await db.ecom_orders.create_index("driver_id")
+        await db.ecom_intake_sources.create_index("id", unique=True)
+        await db.ecom_intake_sources.create_index("token", unique=True)
         await db.ecom_orders.create_index("assigned_to")
         await db.ecom_leads.create_index("assigned_to")
         await db.ecom_sms_logs.create_index("id", unique=True)
@@ -1220,6 +1222,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.referral_routes',  # p245: referral program
     'routes.support_routes',  # p246: tenant support tickets
     'routes.ecom.driver_routes',  # p247: driver mobile web interface
+    'routes.ecom.intake_routes',  # p251: YouCan/LightFunnels/Sheets order intake
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
