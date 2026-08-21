@@ -152,6 +152,10 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         data["created_by"] = user["id"]
         if not data.get("code"):
             data["code"] = await generate_code(db, "expenses", "CH", 5, with_year=True)
+        # p228: keep expense_number in sync with the unique code — the accounting
+        # module writes the same collection with EXP-numbers, and any legacy/unique
+        # expense_number index must never see a null from this path.
+        data["expense_number"] = data["code"]
         await db.expenses.insert_one(data)
         # p66: an expense is money OUT of a cash box (personal money stays outside)
         if data.get("payment_method") and data.get("currency") != "USD":  # p68 + p112: مصروف USD خُصم من الصندوق لحظة شراء الدولار — لا خصم مزدوج
