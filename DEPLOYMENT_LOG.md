@@ -3855,3 +3855,42 @@ deliver-btn-* / fail-btn-*.
 التنظيف: 4 طلبات + مراياها + المصادر + السمعة؛ الثوابت سليمة (القيود=2، الصناديق على اللقطة).
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p251/
+
+
+---
+
+## p248 — إطار مزامنة الحالات العام للناقلين (ZR/Maystro/Noest/Ecotrack/Guepex)
+
+**التاريخ:** 2026-08-21
+
+**الهدف (فجوة منافسين — EcoManager يزامن عدة ناقلين):** المزامنة الآلية كانت حكراً على
+يالدين (p74). الآن إطار عام بمحوّلات: أي ناقل جديد يُوصَّل ببيانات اعتماد فقط بلا كود.
+
+**الإضافة — `services/ecom/courier_sync.py`:**
+- سجل `COURIER_ADAPTERS`: yalidine (محوّل حقيقي يلف خدمة p74 القائمة كما هي) +
+  generic_http لكل من ZR Express وMaystro وNoest وEcotrack وGuepex.
+- المحوّل العام تصريحي بالكامل من credentials التكامل (المشفّرة p226): base_url،
+  api_token، tracking_style (path/param)، auth_header/prefix، status_path (dot-path) —
+  و`status_map` اختياري على التكامل يعلو على الاستدلال بالكلمات المفتاحية الافتراضي
+  (livrée/delivered/تم التسليم → delivered؛ retour/échec/refus/مرتجع → refunded؛
+  حالات «قيد التوصيل» لا تُسلَّم خطأً).
+- وضع mock (`credentials.mock_status`) للاختبار والعرض بلا HTTP.
+- `sync_courier_orders` يكرر حلقة p74: طلبات shipped برقم تتبع ← جلب الحالة ← ترجمة ←
+  `change_order_status` الحقيقية (delivered يحصّل COD دفترياً في محفظة الناقل ويحقق
+  الربح، refunded يرحّل الإرجاع)، وخطأ طرد واحد لا يوقف الدفعة.
+
+**المسارات:** `GET /api/ecom/shipping/courier-adapters` (جاهزية كل ناقل) و
+`POST /api/ecom/shipping/sync/{courier}` (400 برسالة عربية عند ناقل مجهول أو غير مُعَدّ).
+
+**الاختبار E2E (TEST-P248، 8/8 PASS):** تكاملا guepex/noest بوضع mock + طلبان shipped
+بتتبع ✓ قائمة المحوّلات (guepex جاهز / zr غير مُعَدّ) ✓ مزامنة guepex ← delivered عبر
+آلة الحالات الحقيقية (تحصيل 700 دج في محفظة الناقل ecom_store_guepex بسطر دفتري) ✓
+noest «En cours» ← بلا تغيير ✓ ناقل مجهول/غير مُعَدّ 400 ✓ إعادة المزامنة checked=0 ✓.
+**ملاحظة توثيقية:** تحصيل COD يذهب لمحفظة الناقل `_courier_box` (ecom_store_{courier})
+وليس محفظة المتجر العامة — سلوك قائم منذ p74.
+التنظيف الدقيق: الطلبان + مرآة البيع + سطرا الحركات + التكاملان + السمعة + محفظة
+الناقل الاختبارية حُذفت؛ ecom_store أُعيد إلى 2650 بالضبط، القيود=2، WEB000001 سليم.
+
+**اعتماديات الناقلين الحقيقية تبقى من بنود المالك** (مفاتيح API لكل ناقل في صفحة التكاملات).
+
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p248/

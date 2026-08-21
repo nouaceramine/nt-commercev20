@@ -309,6 +309,38 @@ async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
 COURIER_DISPLAY_NAMES = {"yalidine": "يالدين", "zr": "ZR Express", "maystro": "مايسترو"}
 
 
+@router.get("/ecom/shipping/courier-adapters")
+async def courier_adapters(user: dict = Depends(require_tenant)):
+    """p248: registered couriers + whether each is sync-ready (credentials or mock)."""
+    await require_ecom_feature(user)
+    from services.ecom.courier_sync import COURIER_ADAPTERS
+    out = []
+    for code, meta in COURIER_ADAPTERS.items():
+        integ = await db.ecom_integrations.find_one(
+            {"channel": code, "is_active": True}, {"_id": 0, "credentials": 1, "status_map": 1})
+        creds = (integ or {}).get("credentials") or {}
+        ready = bool(creds.get("mock_status") or creds.get("api_id")
+                     or (creds.get("base_url") and (creds.get("api_token") or creds.get("api_key"))))
+        out.append({"courier": code, "label_ar": meta["label_ar"],
+                    "adapter": meta["adapter"], "configured": bool(integ),
+                    "sync_ready": ready, "has_status_map": bool((integ or {}).get("status_map"))})
+    return {"items": out}
+
+
+@router.post("/ecom/shipping/sync/{courier}")
+async def sync_courier(courier: str, user: dict = Depends(require_tenant)):
+    """p248: generic auto status sync for any registered courier (mock or
+    credentials-configured). Advances shipped orders through the real state
+    machine — delivered collects COD, refunded books the return."""
+    await require_ecom_feature(user)
+    from services.ecom.courier_sync import sync_courier_orders, CourierNotConfigured
+    courier = (courier or "").strip().lower()
+    try:
+        return await sync_courier_orders(db, courier, user)
+    except CourierNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/ecom/shipping/cheapest")
 async def cheapest_courier(wilaya: str = "", desk: bool = False, user: dict = Depends(require_tenant)):
     """p99: for each ACTIVE courier integration, the price for a given wilaya + the cheapest pick.
