@@ -356,7 +356,11 @@ ECOM_BOX_ID = "ecom_store"
 async def _cash_tx(db, box_id, tx_type, amount, description, ref_type, ref_id, now, user,
                    box_name="محفظة المتجر الإلكتروني"):
     """Move money in/out of a cash box and journal it (upserts the box —
-    self-heals when init_cash_boxes hasn't run for this tenant yet)."""
+    self-heals when init_cash_boxes hasn't run for this tenant yet).
+
+    p239: the docstring always promised journaling but the movement was a
+    silent $inc — now every movement also writes a transactions ledger row
+    (same shape as the recharge path) so cashbox history reconciles."""
     await db.cash_boxes.update_one(
         {"id": box_id},
         {"$inc": {"balance": amount if tx_type == "income" else -amount},
@@ -364,6 +368,17 @@ async def _cash_tx(db, box_id, tx_type, amount, description, ref_type, ref_id, n
          "$setOnInsert": {"name": box_name, "name_fr": box_name, "type": "ecom"}},
         upsert=True,
     )
+    await db.transactions.insert_one({  # p239
+        "id": str(uuid.uuid4()),
+        "cash_box_id": box_id,
+        "type": tx_type,
+        "amount": amount,
+        "description": description,
+        "reference_type": ref_type,
+        "reference_id": ref_id,
+        "created_at": now,
+        "created_by": (user or {}).get("name", "ecom") if isinstance(user, dict) else "ecom",
+    })
 
 
 async def _courier_box(db, order: dict):
