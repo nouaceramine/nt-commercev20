@@ -3403,3 +3403,27 @@ Release: 20260821_142922 — Bundle: main.9059a4cb.js
 - سجلات الدفع اليدوية (/payments/records): سجلات إيراد اشتراكات على جانب المنصة في payment_transactions — ليست قيود مستأجر.
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p232/
+
+
+---
+
+## p233 — قياس استهلاك توليد صور المنتجات بالذكاء الاصطناعي (Image AI Metering)
+
+**التاريخ:** 2026-08-21
+
+**الخلفية:** جرد p228 وجد أن `/ai/generate-product-image` يستهلك Gemini/OpenAI Images دون أي قياس —
+كل مسارات LLM الأخرى رُبطت بـ usage_meter في p224 إلا الصور (لا ترجع tokens).
+
+**التغييرات:**
+- `services/ai/usage_meter.py`: جدول `DEFAULT_IMAGE_PRICING` (gpt-image-1 = 0.04$/صورة، نماذج Gemini
+  المجانية = 0) + دالة `record_ai_image_usage` (سعر ثابت للصورة، قابل للتجاوز عبر
+  ai_billing_config.model_prices.{model}.per_image) — fail-open مثل بقية الخطافات.
+- `routes/ai_routes.py`: `check_ai_cap` قبل التوليد (429 عند تجاوز السقف الشهري) و
+  `record_ai_image_usage` بعد النجاح مع تتبع النموذج الفعلي المستخدم (used_model) —
+  السجلات تدخل نفس usage_records فتظهر في /saas/ai-usage/summary وتدخل فواتير AIB الشهرية.
+
+**الاختبار:** سكربت داخل الحاوية — تسجيل صورة gpt-image-1 (cost_usd=0.04 بالضبط)، نموذج مجهول
+(fallback 0.05 × 2 = 0.10)، سقف غير مُعدّ → مسموح. السجلات TEST-P233 حُذفت بدقة (leftover=0).
+فحص حي: 400 «أدخل اسم المنتج» و /ai/status تعمل.
+
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p233/

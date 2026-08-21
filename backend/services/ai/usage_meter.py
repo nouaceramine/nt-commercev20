@@ -33,6 +33,15 @@ DEFAULT_MODEL_PRICING = {
 }
 _FALLBACK_PRICE = (1.0, 4.0)  # unknown model → conservative estimate
 
+# p233: flat per-image prices in USD (image APIs return no token usage).
+# Overridable via ai_billing_config {model_prices: {model: {"per_image": x}}}.
+DEFAULT_IMAGE_PRICING = {
+    "gpt-image-1": 0.04,
+    "gemini-3.1-flash-lite-image": 0.0,
+    "gemini-2.5-flash-image": 0.0,
+}
+_FALLBACK_IMAGE_PRICE = 0.05  # unknown image model → conservative estimate
+
 DEFAULT_BILLING_CONFIG = {
     "margin_pct": 30.0,       # owner's markup when billing tenants
     "usd_dzd_rate": 135.0,    # conversion for wallet deduction
@@ -123,3 +132,30 @@ async def record_ai_usage(main_db, *, model: str, tokens_in: int, tokens_out: in
         })
     except Exception:
         logger.exception("ai usage record failed (%s)", feature)
+
+
+async def record_ai_image_usage(main_db, *, model: str, count: int = 1, feature: str = "") -> None:
+    # p233: meter an image-generation call (flat per-image price, no tokens).
+    # Never raises — metering must not break AI calls.
+    try:
+        tenant_id = current_tenant_id()
+        cfg = await get_billing_config(main_db)
+        price = DEFAULT_IMAGE_PRICING.get(model or "", _FALLBACK_IMAGE_PRICE)
+        over = ((cfg.get("model_prices") or {}).get(model) or {}) if isinstance(cfg.get("model_prices"), dict) else {}
+        price = float(over.get("per_image", price))
+        cost = round(price * max(int(count or 1), 1), 6)
+        now = datetime.now(timezone.utc)
+        await main_db.usage_records.insert_one({
+            "id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,
+            "month": month_key(now),
+            "model": model or "",
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "images": max(int(count or 1), 1),
+            "cost_usd": cost,
+            "feature": feature,
+            "created_at": now.isoformat(),
+        })
+    except Exception:
+        logger.exception("ai image usage record failed (%s)", feature)

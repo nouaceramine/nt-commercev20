@@ -140,6 +140,11 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
     )
     errors = []
     content = None
+    used_model = ""  # p233
+    # p233: cap check before generation + metering after (same hooks as LLM calls)
+    from config.database import main_db as _main_db
+    from services.ai.usage_meter import check_ai_cap, record_ai_image_usage
+    await check_ai_cap(_main_db)
 
     # 1) Gemini image models
     if os.environ.get("GEMINI_API_KEY"):
@@ -151,6 +156,7 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
                     idata = getattr(part, "inline_data", None)
                     if idata and idata.data:
                         content = idata.data
+                        used_model = mn  # p233
                         break
                 if content:
                     break
@@ -170,10 +176,12 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
             item = resp.data[0]
             if getattr(item, "b64_json", None):
                 content = _b64.b64decode(item.b64_json)
+                used_model = 'gpt-image-1'  # p233
             elif getattr(item, "url", None):
                 req = _urlreq.Request(item.url, headers={"User-Agent": "NTCommerce/1.0"})
                 with _urlreq.urlopen(req, timeout=60) as rr:
                     content = rr.read()
+                used_model = 'gpt-image-1'  # p233
         except Exception as e:
             errors.append(f"OpenAI: {str(e)[:60]}")
 
@@ -182,6 +190,9 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
             status_code=503,
             detail="حصة توليد الصور مستنفدة حالياً — فعّل الفوترة على مفتاح Gemini أو أضف مفتاح OpenAI مدفوعاً",
         )
+
+    if used_model:  # p233: meter the successful generation
+        await record_ai_image_usage(_main_db, model=used_model, count=1, feature="product_image")
 
     upload_dir = _Path(__file__).resolve().parent.parent / "static" / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
