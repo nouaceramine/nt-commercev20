@@ -214,6 +214,14 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
                 tenant_id=tenant_id,
                 source="ecom.orders_routes",
             )
+        elif new_status == "delivered":  # p238: marketplace settlement trigger
+            await event_bus.publish(
+                "ecom_order.delivered",
+                {"order_id": order_id, "order_code": order.get("order_code"),
+                 "channel": order.get("channel"), "total": order.get("total")},
+                tenant_id=tenant_id,
+                source="ecom.orders_routes",
+            )
     except Exception:
         pass
 

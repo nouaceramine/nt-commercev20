@@ -630,6 +630,89 @@ async def handle_marketplace_order_placed(event: Event) -> None:
     })
 
 
+async def handle_marketplace_settlement(event: Event) -> None:
+    """p238: settle a marketplace order on delivery — platform fee (default 5%)
+    goes to the tenant's credit_debt (they collect COD themselves), a PF-coded
+    wallet_transactions row is written, and the platform_commissions ledger gets
+    its row (idempotent per order). On cancel/refund before settlement the
+    marketplace_orders row is marked cancelled."""
+    p = event.payload or {}
+    if p.get("channel") != "marketplace" and event.event_type == "ecom_order.delivered":
+        return
+    order_id = p.get("order_id")
+    if not order_id:
+        return
+    from config.database import main_db
+    mo = await main_db.marketplace_orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not mo:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+
+    if event.event_type == "ecom_order.cancelled":
+        if not mo.get("settled_at"):
+            await main_db.marketplace_orders.update_one(
+                {"order_id": order_id},
+                {"$set": {"status": p.get("new_status", "cancelled"), "cancelled_at": now}})
+        return
+
+    # delivered
+    if mo.get("settled_at"):
+        return
+    total = round(float(mo.get("total") or 0), 2)
+    cfg = await main_db.platform_config.find_one({"id": "global"}, {"_id": 0}) or {}
+    fee_pct = float(cfg.get("marketplace_fee_pct", 5.0))
+    fee = round(total * fee_pct / 100, 2)
+    tenant_id = mo["tenant_id"]
+
+    if fee > 0:
+        # tenant collected COD → owes the platform its fee (credit_debt track)
+        w = await main_db.wallets.find_one({"entity_id": tenant_id}, {"_id": 0})
+        if w:
+            old_debt = float(w.get("credit_debt") or 0)
+            new_debt = round(old_debt + fee, 2)
+            await main_db.wallets.update_one(
+                {"entity_id": tenant_id}, {"$set": {"credit_debt": new_debt}})
+            from services.code_generator import generate_code
+            code = await generate_code(main_db, "wallet_transactions", "PF", 5, with_year=True)
+            await main_db.wallet_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "code": code,
+                "wallet_id": w["id"],
+                "entity_id": tenant_id,
+                "transaction_type": "marketplace_fee",
+                "amount": fee,
+                "balance_before": old_debt,
+                "balance_after": new_debt,
+                "reference_type": "marketplace_order",
+                "reference_id": order_id,
+                "description": f"عمولة المنصة على طلب السوق {mo.get('order_code', '')} ({fee_pct}%)",
+                "status": "completed",
+                "created_by": "marketplace_settlement",
+                "created_at": now,
+            })
+            try:
+                from routes.saas.tenant_debts_routes import invalidate_tenant_debts_cache
+                await invalidate_tenant_debts_cache()
+            except Exception:
+                pass
+        from services.commission_engine import record_platform_commission
+        await record_platform_commission(
+            main_db,
+            service_type="marketplace", tenant_id=tenant_id,
+            reference_type="marketplace_order", reference_id=order_id,
+            gross_amount=total,
+            tenant_commission_pct=0.0,
+            platform_commission_pct=fee_pct,
+            operator="marketplace",
+            meta={"order_code": mo.get("order_code", "")},
+        )
+    await main_db.marketplace_orders.update_one(
+        {"order_id": order_id},
+        {"$set": {"status": "delivered", "platform_fee": fee, "fee_pct": fee_pct,
+                  "settled_at": now}})
+    log.info("marketplace settlement: order %s fee=%s (%s%%)", order_id, fee, fee_pct)
+
+
 def register_handlers(bus: RedisEventBus) -> None:
     bus.register("purchase.created", handle_purchase_created)
     bus.register("purchase.codes_uploaded", handle_purchase_codes_uploaded)
@@ -657,6 +740,8 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("product.published_to_marketplace", handle_product_published)  # p227
     bus.register("product.unpublished_from_marketplace", handle_product_unpublished)  # p227
     bus.register("marketplace.order_placed", handle_marketplace_order_placed)  # p237
+    bus.register("ecom_order.delivered", handle_marketplace_settlement)  # p238
+    bus.register("ecom_order.cancelled", handle_marketplace_settlement)  # p238
     log.info("Event consumers registered: %d handlers", len(bus._handlers))
 
 

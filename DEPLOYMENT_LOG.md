@@ -3523,3 +3523,34 @@ Release: 20260821_142922 — Bundle: main.9059a4cb.js
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p237/
 **المرحلة 3 المتبقية:** التسويات بين المنصة والمستأجرين على طلبات السوق (عمولة الطلب).
+
+
+---
+
+## p238 — السوق الموحد، المرحلة 3: التسويات (Marketplace Settlements)
+
+**التاريخ:** 2026-08-21
+
+**النموذج:** الزبون يدفع COD للمستأجر البائع مباشرة؛ عند انتقال الطلب إلى «تم التسليم»
+تستحق عمولة المنصة وتُرحَّل إلى دين المستأجر (credit_debt) — يُسدَّد لاحقاً عبر settle-credit الموجود.
+
+**التغييرات:**
+- `ecom_order_service.py`: إصدار حدث `ecom_order.delivered` جديد (مع channel وtotal).
+- `event_consumers.py`: معالج `handle_marketplace_settlement` على ecom_order.delivered/cancelled:
+  عمولة = total × marketplace_fee_pct (من main_db.platform_config، افتراضي 5%) →
+  credit_debt المستأجر + سجل wallet_transactions برمز PF (transaction_type="marketplace_fee") +
+  قيد platform_commissions (idempotent لكل طلب) + تحديث marketplace_orders (settled_at).
+  الإلغاء قبل التسوية يعلّم الطلب cancelled دون أي عمولة.
+
+**الاختبار E2E كامل عبر المسارات الحقيقية (تجهيزات TEST-P238):**
+- طلب سوق MP00001 (1200 دج) ← انتقالات الحالة الحقيقية new→confirmed→packed→shipped→delivered ✓
+- التسوية: platform_fee=60 دج (5%) • credit_debt 0→60 • سجل PF00001/26 • قيد PCOM-00001 •
+  marketplace_orders status=delivered+settled_at ✓
+- **PASS** ثم تنظيف دقيق: ecom_store أُعيد إلى 2650، credit_debt إلى 0، كل السجلات التجريبية
+  حُذفت (بما فيها سمعة الزبون التجريبي)، القيود=2، wallet_transactions/platform_commissions/
+  marketplace_orders عادت فارغة، الطلب الحقيقي WEB000001 سليم.
+- ملاحظة موثقة: قيد تحصيل ecom عند التسليم `$inc` مباشر على الصندوق بلا سجل حركة — سلوك قديم
+  قائم (ليس من هذه المرحلة)، مرشح لتحسين مستقبلي.
+
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p238/
+**بهذا اكتملت مراحل السوق الموحد الثلاث** (النشر p227 ← الطلبات p237 ← التسويات p238).
