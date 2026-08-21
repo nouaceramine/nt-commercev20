@@ -590,6 +590,14 @@ async def startup_event():
                 [("reference_type", 1), ("reference_id", 1)],
                 unique=True, sparse=True, name="platform_commission_unique",
             )
+            # p224: AI usage metering + one invoice per tenant per month
+            await main_db.usage_records.create_index(
+                [("tenant_id", 1), ("month", 1)], name="usage_tenant_month",
+            )
+            await main_db.ai_invoices.create_index(
+                [("tenant_id", 1), ("month", 1)],
+                unique=True, sparse=True, name="ai_invoice_unique",
+            )
         except Exception as wal_exc:
             logger.warning("wallets unique index: %s", wal_exc)
 
@@ -894,6 +902,13 @@ try:
     print("[INIT] SaaS commission routes registered")
 except Exception as _e:
     print(f"[INIT] SaaS commission routes: {_e}")
+
+try:
+    from routes.saas.ai_billing_routes import router as saas_ai_billing_router
+    app.include_router(saas_ai_billing_router, prefix="/api", tags=["SaaS AI Billing"])
+    print("[INIT] SaaS AI billing routes registered")
+except Exception as _e:
+    print(f"[INIT] SaaS AI billing routes: {_e}")
 
 try:
     from routes.system_logs_routes import router as system_logs_router

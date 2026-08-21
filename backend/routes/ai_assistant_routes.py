@@ -50,12 +50,22 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
         if not client:
             return ""
         model = os.environ.get("AI_INTEGRATIONS_OPENAI_MODEL", "gpt-4o-mini")
+        from config.database import main_db as _mdb  # p224
+        from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
+        await check_ai_cap(_mdb)  # p224
         resp = await client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt},
             ],
+        )
+        _u = getattr(resp, "usage", None)  # p224
+        await record_ai_usage(
+            _mdb, model=model,
+            tokens_in=getattr(_u, "prompt_tokens", 0) or 0,
+            tokens_out=getattr(_u, "completion_tokens", 0) or 0,
+            feature="ai_assistant",
         )
         return resp.choices[0].message.content or ""
 

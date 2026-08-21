@@ -38,6 +38,9 @@ async def llm_chat(system_message: str, user_prompt: str, max_tokens: int = 2000
     """Return assistant text, or None when LLM is not configured."""
     if not llm_configured():
         return None
+    from config.database import main_db as _mdb  # p224
+    from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
+    await check_ai_cap(_mdb)  # p224
     resp = await _client().chat.completions.create(
         model=_model(),
         messages=[
@@ -46,6 +49,13 @@ async def llm_chat(system_message: str, user_prompt: str, max_tokens: int = 2000
         ],
         max_tokens=max_tokens,
     )
+    _u = getattr(resp, "usage", None)  # p224
+    await record_ai_usage(
+        _mdb, model=_model(),
+        tokens_in=getattr(_u, "prompt_tokens", 0) or 0,
+        tokens_out=getattr(_u, "completion_tokens", 0) or 0,
+        feature="llm_chat",
+    )
     return (resp.choices[0].message.content or "").strip()
 
 
@@ -53,6 +63,9 @@ async def llm_vision(system_message: str, user_prompt: str, image_base64: str, m
     """Vision call with a base64 image. Returns None when not configured."""
     if not llm_configured():
         return None
+    from config.database import main_db as _mdb  # p224
+    from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
+    await check_ai_cap(_mdb)  # p224
     resp = await _client().chat.completions.create(
         model=_model(),
         messages=[
@@ -63,5 +76,12 @@ async def llm_vision(system_message: str, user_prompt: str, image_base64: str, m
             ]},
         ],
         max_tokens=max_tokens,
+    )
+    _u = getattr(resp, "usage", None)  # p224
+    await record_ai_usage(
+        _mdb, model=_model(),
+        tokens_in=getattr(_u, "prompt_tokens", 0) or 0,
+        tokens_out=getattr(_u, "completion_tokens", 0) or 0,
+        feature="llm_vision",
     )
     return (resp.choices[0].message.content or "").strip()

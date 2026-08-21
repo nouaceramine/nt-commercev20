@@ -3285,3 +3285,23 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - لم تُنشأ أي قاعدة بفئة «recharge» للمستأجر الحقيقي — سلوك الشحن الإنتاجي لم يتغير. margin_rules فارغة بعد التنظيف.
 
 Release: 20260821_052844 — Bundle: main.fc2818a5.js
+
+## p224 — محاسبة تكلفة توكنات الذكاء الاصطناعي (AI usage billing) — 2026-08-21
+
+**الهدف (تقرير استشاري §3.4):** استغلال usage_records — تقرير شهري لكل مشترك (تكلفة + هامش المالك) ← فاتورة تُخصم من محفظته، مع سقف شهري اختياري.
+
+### Backend
+- `services/ai/usage_meter.py` (جديد): `check_ai_cap` (429 عند تجاوز ai_monthly_cap_usd للمستأجر — fail-open عدا خرق السقف)، `record_ai_usage` (صف في main_db.usage_records {tenant_id, month, model, tokens_in/out, cost_usd, feature})، جدول أسعار افتراضي لكل مليون توكن (gpt-5/4o/4o-mini) مع تجاوز من ai_billing_config، حلّ المستأجر عبر tenant_id_ctx (platform لا يُقيَّد ولا يُفوتر).
+- خطافات القياس في كل مواضع استدعاء LLM: `services/ai/llm_service.py` (send_message)، `routes/ai_assistant_routes.py` (_llm_answer)، `services/ai/openai_llm.py` (llm_chat + llm_vision) — فحص السقف قبل النداء وتسجيل الاستهلاك بعده. توليد الصور (images.generate) غير مشمول بفوترة التوكنات.
+- `routes/saas/ai_billing_routes.py` (جديد): `/saas/ai-billing/config` GET/PUT (margin_pct + usd_dzd_rate + model_prices)، `/saas/ai-billing/cap` (سقف شهري لكل مستأجر على saas_tenants.ai_monthly_cap_usd)، `/saas/ai-usage/summary` (تجميع شهري لكل مستأجر مع سعر البيع والحالة)، `/saas/ai-billing/run` {month} (فاتورة AIB-YYYYMM-NNNN لكل مستأجر: billed_usd = cost × (1+margin)، amount_dzd = ×rate، خصم wallet بنوع ai_billing؛ رصيد غير كافٍ → failed قابلة لإعادة المحاولة؛ billed تُتخطى — idempotent لكل (tenant, month) بفهرس فريد)، `/saas/ai-billing/invoices`.
+- `main.py`: تسجيل الراوتر + فهارس usage_records(tenant_id,month) و ai_invoices UNIQUE(tenant_id,month).
+
+### Frontend
+- `pages/admin/PlatformFinanceTab/AiBillingCard.js` (جديد): تبويب فرعي «🤖 فوترة الذكاء» في /saas-admin/finance — إعدادات (هامش/سعر صرف)، جدول استهلاك المشتركين مع حقل سقف لكل مشترك، زر تشغيل الفوترة، جدول الفواتير. testids: ai-billing-tab, ai-cfg-margin/rate/save, ai-month, ai-run-billing, ai-usage-{tid}, ai-cap-{tid}, ai-invoice-{id}.
+
+### الاختبار (TEST-P224 — موسوم ومنظَّف)
+- وحدة الميتر داخل الحاوية: حساب التكلفة (0.45$ لـ gpt-4o-mini 1M+0.5M)، تسجيل صفين بالشهر الصحيح، السقف يحجب بـ 429 ويُلغى بالصفر، platform لا يُحجب.
+- E2E عبر API بمستأجر TEST: بذر استهلاك 0.135$ → summary يعرض billed 0.1755$ / 23.69 دج → run مع محفظة فارغة → فاتورة failed («الرصيد غير كافي») → شحن محفظة TEST → إعادة run → billed مع خصم 23.69 → run ثالثة → skipped. تحقق: 400 سعر صرف سالب، 404 سقف لمستأجر وهمي، 403 لتوكن مستأجر على saas.
+- التنظيف الدقيق: حذف صفوف usage/الفواتير/محفظة ومعاملات TEST (2/1/2/1)، لا بقايا، محفظة المستأجر الحقيقي سليمة (0.0 / عتبة 1000).
+
+Release: 20260821_134533 — Bundle: main.cdb5772a.js

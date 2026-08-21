@@ -65,6 +65,9 @@ class _ChatAdapter:
         # 1. Prefer Replit AI integration if configured (back-compat)
         client = _get_openai_client()
         if client is not None:
+            from config.database import main_db as _mdb  # p224
+            from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
+            await check_ai_cap(_mdb)  # p224: monthly cap enforcement
             response = await client.chat.completions.create(
                 model=AI_MODEL,
                 messages=[
@@ -72,6 +75,13 @@ class _ChatAdapter:
                     {"role": "user", "content": text},
                 ],
                 max_completion_tokens=8192,
+            )
+            _u = getattr(response, "usage", None)  # p224
+            await record_ai_usage(
+                _mdb, model=AI_MODEL,
+                tokens_in=getattr(_u, "prompt_tokens", 0) or 0,
+                tokens_out=getattr(_u, "completion_tokens", 0) or 0,
+                feature="llm_service",
             )
             return response.choices[0].message.content or ""
         raise RuntimeError("AI integration not configured")
