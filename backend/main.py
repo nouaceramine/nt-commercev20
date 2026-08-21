@@ -1160,6 +1160,7 @@ _AUTO_REG_MODULES = [
     'routes.events_routes',  # p191: SSE realtime channel
     'routes.pin_auth_routes',  # p219: PIN quick-login
     'routes.commissions_routes',  # p221: commission engine
+    'routes.margin_rules_routes',  # p223: per-subscriber price margins
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

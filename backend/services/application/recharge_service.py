@@ -51,6 +51,19 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     profit = recharge.amount * commission_rate
     cost = recharge.amount - profit
 
+    # p223: per-tenant margin rule — customer-facing sale price = cost × (1 + tenant margin)
+    # (or cost + fixed). No rule → sale_price stays the face amount (legacy behaviour).
+    sale_price = round(float(recharge.amount), 2)
+    margin_rule_id = ""
+    margin_extra = 0.0
+    if entity_id_for_mode and main_db is not None:
+        from services.pricing_engine import get_active_margin_rule, apply_margin_rule
+        _margin_rule = await get_active_margin_rule(main_db, entity_id_for_mode, "recharge")
+        if _margin_rule:
+            sale_price, margin_extra = apply_margin_rule(cost, _margin_rule)
+            margin_rule_id = _margin_rule.get("id", "")
+            profit = round(sale_price - cost, 2)
+
     # Get customer name
     customer_name = "عميل نقدي"
     if recharge.customer_id:
@@ -106,6 +119,9 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
         "recharge_type": recharge.recharge_type,
         "cost": cost,
         "profit": profit,
+        "sale_price": sale_price,        # p223: what the customer actually pays
+        "margin_rule_id": margin_rule_id,  # p223
+        "margin_extra": margin_extra,    # p223: markup beyond the face amount
         "customer_id": recharge.customer_id or "",
         "customer_name": customer_name,
         "payment_method": recharge.payment_method,
@@ -140,11 +156,12 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 "invoice_number": f"FLEXY-{recharge_id[:6].upper()}",
                 "items": [{
                     "name": f"شحن {operator_config['name']} - {recharge.phone_number}",
-                    "quantity": 1, "price": recharge.amount, "discount": 0,
+                    "quantity": 1, "price": sale_price, "discount": 0,
                     "is_recharge": True, "recharge_id": recharge_id,
                 }],
-                "subtotal": recharge.amount, "discount_total": 0, "tax_total": 0,
-                "total": recharge.amount, "paid_amount": 0, "debt_amount": recharge.amount,
+                "subtotal": sale_price, "discount_total": 0, "tax_total": 0,
+                "total": sale_price, "paid_amount": 0, "debt_amount": sale_price,
+                "face_amount": recharge.amount,  # p223
                 "payment_method": "credit",
                 "customer_id": recharge.customer_id, "customer_name": customer_name,
                 "type": "recharge_credit", "source": "pos_quick_flexy",
@@ -155,7 +172,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
             try:
                 await db.daily_sessions.update_one(
                     {"user_id": user.get("id"), "status": "open"},
-                    {"$inc": {"total_sales": recharge.amount, "credit_sales": recharge.amount, "sales_count": 1}},
+                    {"$inc": {"total_sales": sale_price, "credit_sales": sale_price, "sales_count": 1}},
                 )
             except Exception as _se:
                 pass
@@ -163,7 +180,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
             # Cash / bank / wallet — update cashbox like before
             await db.cash_boxes.update_one(
                 {"id": recharge.payment_method},
-                {"$inc": {"balance": recharge.amount}, "$set": {"updated_at": now}}
+                {"$inc": {"balance": sale_price}, "$set": {"updated_at": now}}
             )
             cashbox_updated = True
 
@@ -171,7 +188,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 "id": txn_record_id,
                 "cash_box_id": recharge.payment_method,
                 "type": "income",
-                "amount": recharge.amount,
+                "amount": sale_price,
                 "description": f"شحن {operator_config['name']} - {recharge.phone_number}",
                 "reference_type": "recharge",
                 "reference_id": recharge_id,
@@ -190,14 +207,15 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                     "product_id": None,
                     "product_name": f"شحن {operator_config['name']} - {recharge.phone_number}",
                     "name": f"شحن {operator_config['name']} - {recharge.phone_number}",
-                    "quantity": 1, "unit_price": recharge.amount, "price": recharge.amount,
-                    "purchase_price": cost, "discount": 0, "total": recharge.amount,
+                    "quantity": 1, "unit_price": sale_price, "price": sale_price,
+                    "purchase_price": cost, "discount": 0, "total": sale_price,
                     "is_recharge": True, "recharge_id": recharge_id,
                 }],
-                "subtotal": recharge.amount, "discount": 0, "discount_total": 0, "tax_total": 0,
-                "total": recharge.amount, "paid_amount": recharge.amount, "debt_amount": 0,
+                "subtotal": sale_price, "discount": 0, "discount_total": 0, "tax_total": 0,
+                "total": sale_price, "paid_amount": sale_price, "debt_amount": 0,
+                "face_amount": recharge.amount,  # p223
                 "remaining": 0, "payment_method": recharge.payment_method, "payment_type": "cash",
-                "payments": [{"amount": recharge.amount, "method": recharge.payment_method, "at": now}],
+                "payments": [{"amount": sale_price, "method": recharge.payment_method, "at": now}],
                 "customer_id": recharge.customer_id or None, "customer_name": customer_name,
                 "type": "recharge_cash", "source": "pos_quick_flexy",
                 "status": "paid",
@@ -209,7 +227,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
             try:
                 await db.daily_sessions.update_one(
                     {"user_id": user.get("id"), "status": "open"},
-                    {"$inc": {"total_sales": recharge.amount, "cash_sales": recharge.amount, "sales_count": 1}},
+                    {"$inc": {"total_sales": sale_price, "cash_sales": sale_price, "sales_count": 1}},
                 )
             except Exception as _se:
                 pass
@@ -279,7 +297,7 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
             try:
                 await db.cash_boxes.update_one(
                     {"id": recharge.payment_method},
-                    {"$inc": {"balance": -recharge.amount}, "$set": {"updated_at": now}},
+                    {"$inc": {"balance": -sale_price}, "$set": {"updated_at": now}},
                 )
             except Exception:
                 logger.exception("Rollback: failed to reverse cash_box for recharge %s", recharge_id)

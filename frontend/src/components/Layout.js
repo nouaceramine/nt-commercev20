@@ -591,6 +591,7 @@ export const Layout = ({ children }) => {
         { path: '/recharge', icon: Smartphone, label: t.recharge },
         { path: '/wallet-management', icon: Wallet, label: language === 'ar' ? 'المحفظة' : 'Portefeuille', featureKey: 'wallet' },
         ...(isAdmin ? [
+          { path: '/margin-rules', icon: Percent, label: language === 'ar' ? 'هوامش الأسعار' : 'Marges' },  // p223
           { path: '/sim-management', icon: Zap, label: language === 'ar' ? 'إدارة الشرائح' : 'Gestion SIM' },
           { path: '/telecom-stock', icon: Package, label: language === 'ar' ? 'مخزون الشحن' : 'Stock recharge' },
         ] : [])

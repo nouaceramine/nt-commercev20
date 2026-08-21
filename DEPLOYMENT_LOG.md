@@ -3265,3 +3265,23 @@ sell_price في النطاقات الأخرى (بطاقات/قطع/منصات ر
 - نسخة: backups/p221 — إصدار **20260821_045416** — الحزمة `main.9125247d.js`.
 
 **الاختبار الحي (TEST-P221، عبر الناقل الحقيقي):** قاعدة 10% ← حدث sale.completed بـ1000 ← عمولة 100 معلقة + قيد COM (658/421) ← حدث مكرر ← صفر ازدواج (idempotent) ← sale.refunded ← ملغاة + قيد عكسي ← CRUD عبر API (400 لنسبة >100، 404 لإعادة الحذف) ← تنظيف دقيق: القاعدة والعمولات والقيود الاختبارية حُذفت، 530=11300.88 و700=-140580 كما هما، الحسابان الجديدان 0.0، القيدان الحقيقيان فقط باقيان، الصناديق على اللقطة.
+
+## p223 — هوامش أسعار لكل مشترك (Per-subscriber price margins) — 2026-08-21
+
+**الهدف (تقرير استشاري §3.3):** قاعدة تسعير «سعر التكلفة + هامش المشترك» لكل فئة خدمة وسيطة.
+
+### Backend
+- `services/pricing_engine.py` (جديد): محرك التسعير — `get_active_margin_rule` (main_db.margin_rules، أحدث قاعدة مفعّلة)، `apply_margin_rule` (percent/fixed، لا يبيع تحت التكلفة)، `quote_sale_price`، فئات معروفة recharge/digital/iptv/ai + slugs حرة.
+- `routes/margin_rules_routes.py` (جديد): CRUD للمستأجر `/margin-rules` (قاعدة واحدة لكل فئة — 409 عند التكرار، تحقق percent≤100)، `/margin-rules/quote` تجربة جافة، `/margin-rules/all` للسوبر أدمن مع أسماء المستأجرين.
+- `services/application/recharge_service.py`: بعد حساب cost/profit يُطبَّق هامش المستأجر — `sale_price = cost × (1+margin)`؛ عند عدم وجود قاعدة يبقى sale_price = القيمة الاسمية (سلوك قديم حرفياً). سعر البيع يدخل: cashbox income، سند transactions، سجل المبيعات (نقدي/آجل + face_amount)، daily_sessions، والتراجع (rollback) — بينما USSD/bridge/خصم المحفظة/عمولة المنصة (p205) تبقى على القيمة الاسمية. حقول جديدة على سند الشحن: sale_price, margin_rule_id, margin_extra.
+- `main.py`: تسجيل routes.margin_rules_routes في _AUTO_REG_MODULES.
+
+### Frontend
+- `pages/MarginRulesPage.js` (جديد): قائمة القواعد (تفعيل/تعطيل/تعديل/حذف)، حوار إضافة (فئة+نوع+قيمة)، حاسبة سعر تفاعلية. ثنائية اللغة. testids: margin-rules-page, add-margin-rule-btn, margin-category/type/value, margin-save-btn, quote-cost, quote-run-btn, quote-result.
+- `App.js`: مسار /margin-rules (adminOnly + featureKey=recharge). `Layout.js`: عنصر «هوامش الأسعار» في قسم خدمات الشحن (admin).
+
+### الاختبار (TEST-P223 — موسوم ومنظَّف)
+- 15 اختبار curl ناجحاً: CRUD كامل، quote percent 10% على 97→106.7، fixed 25 على 97→122، تعطيل→سعر التكلفة، 409 تكرار، 400 نسبة>100، 403 بدون صلاحية، 404 حذف مكرر، super-admin يرى القاعدة مع اسم المستأجر.
+- لم تُنشأ أي قاعدة بفئة «recharge» للمستأجر الحقيقي — سلوك الشحن الإنتاجي لم يتغير. margin_rules فارغة بعد التنظيف.
+
+Release: 20260821_052844 — Bundle: main.fc2818a5.js
