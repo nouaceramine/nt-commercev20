@@ -609,6 +609,27 @@ async def handle_product_unpublished(event: Event) -> None:
     log.info("marketplace catalog unpublish: %s/%s", tenant_id, pid)
 
 
+async def handle_marketplace_order_placed(event: Event) -> None:
+    """p237: drop a notification into the OWNING tenant's DB when a
+    marketplace order lands in their ecom inbox."""
+    p = event.payload or {}
+    tenant_id = p.get("tenant_id") or event.tenant_id
+    if not tenant_id:
+        return
+    from config.database import get_tenant_db
+    tdb = get_tenant_db(tenant_id)
+    await tdb.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "marketplace_order",
+        "message_ar": f"طلب جديد من السوق الموحد: {p.get('product_name', '')} "
+                      f"×{p.get('qty', 1)} — {p.get('order_code', '')} ({p.get('total', 0):.0f} دج)",
+        "message_en": f"New marketplace order {p.get('order_code', '')}",
+        "reference_id": p.get("order_id", ""),
+        "read": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 def register_handlers(bus: RedisEventBus) -> None:
     bus.register("purchase.created", handle_purchase_created)
     bus.register("purchase.codes_uploaded", handle_purchase_codes_uploaded)
@@ -635,6 +656,7 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("test.ping", handle_test_ping)
     bus.register("product.published_to_marketplace", handle_product_published)  # p227
     bus.register("product.unpublished_from_marketplace", handle_product_unpublished)  # p227
+    bus.register("marketplace.order_placed", handle_marketplace_order_placed)  # p237
     log.info("Event consumers registered: %d handlers", len(bus._handlers))
 
 

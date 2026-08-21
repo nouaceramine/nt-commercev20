@@ -134,4 +134,121 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
         return {"total": total, "page": page, "pages": (total + limit - 1) // limit,
                 "categories": [c for c in categories if c], "items": items}
 
+    # ── p237: cross-tenant order placement (public, COD) ─────────────────
+    class OrderIn(BaseModel):
+        product_id: str
+        quantity: int = 1
+        customer_name: str
+        phone: str
+        address: str = ""
+        city: str = ""
+        notes: str = ""
+
+    @public.post("/order")
+    async def place_marketplace_order(data: OrderIn):
+        """Place a COD order on a catalog product. The order lands in the OWNING
+        tenant's ecom inbox (channel='marketplace') with an atomic stock guard,
+        and a platform-side marketplace_orders row is kept for settlements."""
+        qty = int(data.quantity or 1)
+        if qty < 1 or qty > 50:
+            raise HTTPException(status_code=400, detail="الكمية بين 1 و 50")
+        name = (data.customer_name or "").strip()
+        phone = (data.phone or "").strip()
+        if not name or not phone:
+            raise HTTPException(status_code=400, detail="الاسم ورقم الهاتف مطلوبان")
+
+        row = await main_db.marketplace_catalog.find_one(
+            {"product_id": data.product_id, "active": True}, {"_id": 0})
+        if not row:
+            raise HTTPException(status_code=404, detail="المنتج غير متوفر في السوق")
+        tenant_id = row["tenant_id"]
+        unit_price = float(row.get("price") or 0)
+        if unit_price <= 0:
+            raise HTTPException(status_code=400, detail="سعر المنتج غير صالح")
+
+        from config.database import get_tenant_db
+        tdb = get_tenant_db(tenant_id)
+        prod = await tdb.products.find_one({"id": data.product_id}, {"_id": 0})
+        if not prod:
+            raise HTTPException(status_code=404, detail="المنتج لم يعد متوفراً")
+
+        now = _now()
+        stock_deducted = False
+        if not prod.get("is_non_stockable"):
+            guarded = await tdb.products.find_one_and_update(
+                {"id": data.product_id, "quantity": {"$gte": qty}},
+                {"$inc": {"quantity": -qty}, "$set": {"updated_at": now}},
+            )
+            if not guarded:
+                raise HTTPException(status_code=409, detail="نفد المخزون حالياً")
+            stock_deducted = True
+
+        order_id = str(uuid.uuid4())
+        try:
+            # MP-prefixed order code (ecom_orders has a unique order_code index)
+            order_code = ""
+            for _attempt in range(3):
+                n = await tdb.ecom_orders.count_documents({"order_code": {"$regex": "^MP"}})
+                order_code = f"MP{n + 1:05d}"
+                if not await tdb.ecom_orders.find_one({"order_code": order_code}, {"_id": 1}):
+                    break
+            total = round(unit_price * qty, 2)
+            order_doc = {
+                "id": order_id,
+                "order_code": order_code,
+                "channel": "marketplace",
+                "customer": {"name": name, "phone": phone,
+                             "address": (data.address or "").strip(),
+                             "city": (data.city or "").strip()},
+                "items": [{
+                    "name": row.get("name_ar") or row.get("name_en") or "",
+                    "sku": "", "product_id": data.product_id, "variant_index": None,
+                    "qty": qty, "price": unit_price, "total": total,
+                }],
+                "subtotal": total, "shipping_fee": 0, "total": total,
+                "status": "new", "payment_status": "unpaid",
+                "tags": ["marketplace"],
+                "status_history": [{"status": "new", "at": now, "by": "marketplace",
+                                    "note": "طلب من السوق الموحد"}],
+                "notes": (data.notes or "").strip(),
+                "created_at": now, "updated_at": now, "created_by": "marketplace",
+            }
+            await tdb.ecom_orders.insert_one(order_doc)
+
+            await main_db.marketplace_orders.insert_one({
+                "id": str(uuid.uuid4()),
+                "order_id": order_id,
+                "order_code": order_code,
+                "tenant_id": tenant_id,
+                "tenant_name": row.get("tenant_name", ""),
+                "short_id": row.get("short_id", ""),
+                "product_id": data.product_id,
+                "qty": qty,
+                "unit_price": unit_price,
+                "total": total,
+                "customer": {"name": name, "phone": phone},
+                "status": "new",
+                "created_at": now,
+            })
+
+            from services.outbox import outbox_write
+            await outbox_write(main_db, "marketplace.order_placed", {
+                "order_id": order_id, "order_code": order_code,
+                "tenant_id": tenant_id, "product_id": data.product_id,
+                "product_name": row.get("name_ar") or row.get("name_en") or "",
+                "qty": qty, "total": total, "customer_name": name,
+            }, tenant_id=tenant_id, source="marketplace_order")
+        except Exception:
+            if stock_deducted:
+                try:
+                    await tdb.products.update_one(
+                        {"id": data.product_id},
+                        {"$inc": {"quantity": qty}, "$set": {"updated_at": _now()}})
+                except Exception:
+                    pass
+            raise
+
+        return {"ok": True, "order_code": order_code, "total": total,
+                "message": "تم استلام طلبك — سيتواصل معك البائع للتأكيد"}
+
     return {"marketplace": router, "marketplace_public": public}
