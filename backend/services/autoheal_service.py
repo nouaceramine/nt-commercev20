@@ -147,6 +147,8 @@ class AutoHealEngine:
             # p225: level-1 rule-based self-healing
             self._check_error_classification,
             self._check_tenant_data_advisories,
+            # p235: level-2 statistical anomaly detection
+            self._check_business_anomalies,
         ]
         for check in checks:
             try:
@@ -664,6 +666,109 @@ class AutoHealEngine:
                     "الإصلاح الآلي ممنوع على البيانات المالية (موافقتك مطلوبة دائماً)",
                     "within-1h", "data-integrity",
                 ))
+        return findings or None
+
+    async def _check_business_anomalies(self):
+        """p235 — level-2 statistical anomaly detection (advisory only, daily-gated).
+        Compares recent activity against rolling baselines per tenant:
+          1) sales drop    — last 7d vs previous 7d (>60% drop, baseline >= 5 sales)
+          2) return spike  — returned sales last 7d > 25% of sales value (>= 3 returns)
+          3) cash gap      — closed session: |closing_cash - expected| > max(1000, 10%)
+                             expected = opening + cash_sales + cash txns in window
+        Golden rule unchanged: advisory only, no remediation_key, no data writes."""
+        state = await self._main_db.autoheal_state.find_one({"_id": "business_anomalies_last"})
+        now = _now()
+        if state and (now - datetime.fromisoformat(state["value"])).total_seconds() < 86400:
+            return None
+        await self._main_db.autoheal_state.update_one(
+            {"_id": "business_anomalies_last"}, {"$set": {"value": _iso(now)}}, upsert=True)
+
+        from config.database import get_tenant_db
+        findings = []
+        d7 = _iso(now - timedelta(days=7))
+        d14 = _iso(now - timedelta(days=14))
+        tenants = await self._main_db.saas_tenants.find(
+            {"is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "short_id": 1}
+        ).to_list(500)
+        for t in tenants:
+            tdb = get_tenant_db(t["id"])
+            tname = t.get("name") or t.get("short_id") or t["id"][:8]
+            try:
+                cur = await tdb.sales.find(
+                    {"created_at": {"$gte": d7}, "status": {"$ne": "returned"}},
+                    {"_id": 0, "total": 1}).to_list(10000)
+                prev = await tdb.sales.find(
+                    {"created_at": {"$gte": d14, "$lt": d7}, "status": {"$ne": "returned"}},
+                    {"_id": 0, "total": 1}).to_list(10000)
+            except Exception:  # noqa: BLE001
+                continue
+            cur_total = sum(float(x.get("total") or 0) for x in cur)
+            prev_total = sum(float(x.get("total") or 0) for x in prev)
+
+            # 1) sales drop
+            if len(prev) >= 5 and prev_total > 0 and cur_total < prev_total * 0.4:
+                findings.append(self._finding(
+                    "Medium", "Subscriber", "sales", f"salesdrop:{t['id']}",
+                    f"هبوط حاد في مبيعات {tname} (آخر 7 أيام مقابل الأسبوع السابق)",
+                    f"الأسبوع السابق: {len(prev)} بيع / {prev_total:.0f} دج — الحالي: {len(cur)} بيع / {cur_total:.0f} دج",
+                    "تحقق من سبب الهبوط (توقف نشاط، مشكلة مخزون، منافس) — هذا تنبيه إحصائي وليس خطأً مؤكداً",
+                    "within-24h", "business",
+                ))
+
+            # 2) return spike
+            try:
+                rets = await tdb.sales.find(
+                    {"status": "returned", "returned_at": {"$gte": d7}},
+                    {"_id": 0, "total": 1}).to_list(5000)
+            except Exception:  # noqa: BLE001
+                rets = []
+            ret_total = sum(float(x.get("total") or 0) for x in rets)
+            if len(rets) >= 3 and cur_total > 0 and ret_total > cur_total * 0.25:
+                findings.append(self._finding(
+                    "Medium", "Subscriber", "sales", f"retspike:{t['id']}",
+                    f"نسبة مرتجعات مرتفعة لدى {tname} (آخر 7 أيام)",
+                    f"{len(rets)} مرتجعاً بقيمة {ret_total:.0f} دج = {ret_total / cur_total * 100:.0f}% من مبيعات الفترة",
+                    "راجع أسباب الإرجاع (returns-report) — جودة منتج أو خطأ تشغيلي متكرر",
+                    "within-24h", "business",
+                ))
+
+            # 3) cash gap in recently closed sessions
+            try:
+                sessions = await tdb.daily_sessions.find(
+                    {"status": "closed", "closed_at": {"$gte": d7},
+                     "closing_cash": {"$ne": None}},
+                    {"_id": 0, "id": 1, "code": 1, "opened_at": 1, "closed_at": 1,
+                     "opening_cash": 1, "closing_cash": 1, "cash_sales": 1}).to_list(200)
+            except Exception:  # noqa: BLE001
+                sessions = []
+            flagged = 0
+            for sess in sessions:
+                if flagged >= 3:
+                    break
+                try:
+                    win = {"created_at": {"$gte": sess.get("opened_at") or d14,
+                                          "$lte": sess.get("closed_at") or _iso(now)}}
+                    txns = await tdb.transactions.find(
+                        {**win, "cash_box_id": "cash"}, {"_id": 0, "type": 1, "amount": 1}
+                    ).to_list(5000)
+                    tx_net = sum(
+                        float(x.get("amount") or 0) * (1 if x.get("type") == "income" else -1)
+                        for x in txns)
+                    expected = (float(sess.get("opening_cash") or 0)
+                                + float(sess.get("cash_sales") or 0) + tx_net)
+                    gap = float(sess.get("closing_cash") or 0) - expected
+                    if abs(gap) > max(1000.0, abs(expected) * 0.10):
+                        findings.append(self._finding(
+                            "Low", "Subscriber", "cashbox",
+                            f"cashgap:{t['id']}:{sess.get('id')}",
+                            f"فرق صندوق في جلسة {sess.get('code') or sess.get('id')} لدى {tname}",
+                            f"الإغلاق المصرّح {float(sess.get('closing_cash') or 0):.0f} دج مقابل المتوقع {expected:.0f} دج (الفرق {gap:+.0f} دج)",
+                            "راجع قيد الجلسة وحركات الصندوق في تلك النافذة — قد يكون إدخالاً يدوياً مشروعاً",
+                            "within-24h", "data-integrity",
+                        ))
+                        flagged += 1
+                except Exception:  # noqa: BLE001
+                    continue
         return findings or None
 
     async def _cleanup_expired_auth_artifacts(self):
