@@ -16,6 +16,7 @@ CHANNELS = {
     "facebook":  {"label_ar": "Facebook",           "label_en": "Facebook",  "icon": "📘", "color": "#1877f2"},
     "instagram": {"label_ar": "Instagram",          "label_en": "Instagram", "icon": "📸", "color": "#e4405f"},
     "tiktok":    {"label_ar": "TikTok",             "label_en": "TikTok",    "icon": "🎵", "color": "#000000"},
+    "messenger": {"label_ar": "ماسنجر",             "label_en": "Messenger", "icon": "💬", "color": "#a855f7"},
     "whatsapp":  {"label_ar": "واتساب",             "label_en": "WhatsApp",  "icon": "💬", "color": "#25d366"},
     "telegram":  {"label_ar": "تيليجرام",           "label_en": "Telegram",  "icon": "✈️", "color": "#0088cc"},
     "viber":     {"label_ar": "Viber",              "label_en": "Viber",     "icon": "🟣", "color": "#665cac"},
