@@ -149,6 +149,8 @@ class AutoHealEngine:
             self._check_tenant_data_advisories,
             # p235: level-2 statistical anomaly detection
             self._check_business_anomalies,
+            # p236: level-3 predictive advisories
+            self._check_predictive_advisories,
         ]
         for check in checks:
             try:
@@ -769,6 +771,135 @@ class AutoHealEngine:
                         flagged += 1
                 except Exception:  # noqa: BLE001
                     continue
+        return findings or None
+
+    async def _check_predictive_advisories(self):
+        """p236 — level-3 predictive advisories (advisory only, daily-gated).
+        Forward-looking forecasts per tenant:
+          1) stock-out forecast   — days until product hits zero at 14d sales velocity (< 7d)
+          2) wallet depletion     — days until tenant platform wallet empties at 14d burn (< 5d)
+          3) sales trend forecast — linear fit on 28d daily totals; next-7d forecast < 50% of last 7d
+        Golden rule unchanged: advisory only, no remediation_key, no data writes."""
+        state = await self._main_db.autoheal_state.find_one({"_id": "predictive_advisories_last"})
+        now = _now()
+        if state and (now - datetime.fromisoformat(state["value"])).total_seconds() < 86400:
+            return None
+        await self._main_db.autoheal_state.update_one(
+            {"_id": "predictive_advisories_last"}, {"$set": {"value": _iso(now)}}, upsert=True)
+
+        from config.database import get_tenant_db
+        findings = []
+        d14 = _iso(now - timedelta(days=14))
+        d28 = _iso(now - timedelta(days=28))
+        d7 = _iso(now - timedelta(days=7))
+        tenants = await self._main_db.saas_tenants.find(
+            {"is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "short_id": 1}
+        ).to_list(500)
+        for t in tenants:
+            tdb = get_tenant_db(t["id"])
+            tname = t.get("name") or t.get("short_id") or t["id"][:8]
+
+            # ── 1) stock-out forecast ──
+            try:
+                sales14 = await tdb.sales.find(
+                    {"created_at": {"$gte": d14}, "status": {"$ne": "returned"}},
+                    {"_id": 0, "items.product_id": 1, "items.quantity": 1}).to_list(20000)
+                velocity = {}
+                for sdoc in sales14:
+                    for it in (sdoc.get("items") or []):
+                        pid = it.get("product_id")
+                        if pid:
+                            velocity[pid] = velocity.get(pid, 0.0) + float(it.get("quantity") or 0)
+                risky = []
+                if velocity:
+                    prods = await tdb.products.find(
+                        {"id": {"$in": list(velocity.keys())},
+                         "is_non_stockable": {"$ne": True},
+                         "quantity": {"$gt": 0}},
+                        {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "quantity": 1}
+                    ).to_list(5000)
+                    for pr in prods:
+                        sold = velocity.get(pr["id"], 0.0)
+                        if sold <= 0:
+                            continue
+                        days_left = float(pr.get("quantity") or 0) / (sold / 14.0)
+                        if days_left < 7:
+                            risky.append((days_left, pr))
+                    risky.sort(key=lambda x: x[0])
+                if risky:
+                    sample = ", ".join(
+                        f"{(pr.get('name_ar') or pr.get('name') or pr.get('name_en'))}: "
+                        f"{pr.get('quantity')} متبقٍ ≈ {dl:.0f} يوم"
+                        for dl, pr in risky[:5])
+                    findings.append(self._finding(
+                        "Medium", "Subscriber", "inventory", f"stockout:{t['id']}",
+                        f"توقّع نفاد مخزون قريب لدى {tname} ({len(risky)} صنف خلال أسبوع)",
+                        f"بوتيرة مبيعات آخر 14 يوماً: {sample}",
+                        "جهّز إعادة التموين قبل النفاد — هذا توقّع إحصائي قد يتغير مع وتيرة البيع",
+                        "within-24h", "business",
+                    ))
+            except Exception:  # noqa: BLE001
+                pass
+
+            # ── 2) wallet depletion forecast ──
+            try:
+                w = await self._main_db.wallets.find_one(
+                    {"entity_id": t["id"]}, {"_id": 0, "balance": 1})
+                if w and float(w.get("balance") or 0) > 0:
+                    debits = await self._main_db.wallet_transactions.find(
+                        {"entity_id": t["id"], "transaction_type": "debit",
+                         "created_at": {"$gte": d14}},
+                        {"_id": 0, "amount": 1}).to_list(10000)
+                    burn = sum(float(x.get("amount") or 0) for x in debits)
+                    if burn > 0:
+                        days_left = float(w["balance"]) / (burn / 14.0)
+                        if days_left < 5:
+                            findings.append(self._finding(
+                                "Medium", "Subscriber", "wallet", f"walletdepl:{t['id']}",
+                                f"محفظة {tname} ستنفد خلال ≈{days_left:.0f} يوماً بالوتيرة الحالية",
+                                f"الرصيد {float(w['balance']):.0f} دج والاستهلاك {burn:.0f} دج/14 يوماً",
+                                "ذكّر المستأجر بشحن المحفظة مبكراً لتفادي توقف خدمات الشحن",
+                                "within-24h", "business",
+                            ))
+            except Exception:  # noqa: BLE001
+                pass
+
+            # ── 3) sales trend forecast (28d linear fit) ──
+            try:
+                sales28 = await tdb.sales.find(
+                    {"created_at": {"$gte": d28}, "status": {"$ne": "returned"}},
+                    {"_id": 0, "total": 1, "created_at": 1}).to_list(50000)
+                if len(sales28) >= 10:
+                    daily = [0.0] * 28
+                    for x in sales28:
+                        try:
+                            age = (now - datetime.fromisoformat(
+                                str(x.get("created_at")).replace("Z", "+00:00"))).days
+                            if 0 <= age < 28:
+                                daily[27 - age] += float(x.get("total") or 0)
+                        except Exception:  # noqa: BLE001
+                            continue
+                    n = 28
+                    sx = n * (n - 1) / 2.0
+                    sxx = (n - 1) * n * (2 * n - 1) / 6.0
+                    sy = sum(daily)
+                    sxy = sum(i * v for i, v in enumerate(daily))
+                    denom = n * sxx - sx * sx
+                    if denom:
+                        slope = (n * sxy - sx * sy) / denom
+                        intercept = (sy - slope * sx) / n
+                        forecast7 = sum(max(0.0, intercept + slope * (n + k)) for k in range(7))
+                        prev7 = sum(daily[21:])
+                        if prev7 > 0 and forecast7 < prev7 * 0.5:
+                            findings.append(self._finding(
+                                "Low", "Subscriber", "sales", f"salesforecast:{t['id']}",
+                                f"اتجاه تنازلي في مبيعات {tname} — التوقع للأسبوع القادم ≈{forecast7:.0f} دج",
+                                f"آخر 7 أيام: {prev7:.0f} دج؛ الانحدار الخطي على 28 يوماً يتوقع أقل من النصف",
+                                "توقّع إحصائي — راجع الحملات والمخزون والأسعار قبل أن يترسخ الاتجاه",
+                                "within-24h", "business",
+                            ))
+            except Exception:  # noqa: BLE001
+                pass
         return findings or None
 
     async def _cleanup_expired_auth_artifacts(self):
