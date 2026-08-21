@@ -320,6 +320,37 @@ nginx بلا client_max_body_size (افتراضي 1MB) وصور base64 تتجا�
 
 ---
 
+## p241 — SMS تلقائي للزبون مع كل حالة توصيل + رصيد SMS (SuiviSMS parity)
+
+**التاريخ:** 2026-08-21
+**الدافع:** جوهر منتج SuiviSMS: إشعار الزبون برسالة SMS عند التأكيد/الشحن/التسليم
+يخفض نسبة الرفض عند الاستلام (يدّعون رفع التسليم إلى ~75%).
+
+### ما أُضيف
+- `services/ecom/sms_gateway.py`: تجريد مزوّد قابل للتبديل —
+  `mock` (افتراضي: تسجيل فقط، لا حساب مزوّد بعد) أو `http` (أي بوابة SMS بـ REST POST بسيط
+  تُربَط بالإعدادات دون كود: url/token/phone_field/message_field/headers/extra).
+- `services/ecom/status_sms_service.py`: قوالب عربية قابلة للتعديل لكل حالة
+  (confirmed/packed/shipped/delivered/cancelled/returned) بمتغيرات
+  {customer_name} {order_code} {total} {store_name} {tracking_number} {courier}.
+  خصم ذري: رسالة = رصيد 1 من `main_db.wallets.sms_credits`؛ فشل المزوّد ⇒ استرجاع تلقائي؛
+  عدم كفاية الرصيد ⇒ تسجيل `skipped_no_credit` دون إرسال؛ dedup لكل (طلب، حالة).
+- ربط fail-open داخل انتقال حالة الطلب (نفس نمط إشعار واتساب — لا يعيق الانتقال أبداً).
+- `routes/ecom/status_sms_routes.py`:
+  - المستأجر: GET/PUT `/api/ecom/sms/settings`، GET `/api/ecom/sms/status` (الرصيد+السعر)،
+    GET `/api/ecom/sms/logs`، POST `/api/ecom/sms/test`.
+  - المنصة (سوبر أدمن): POST `/api/admin/sms/credits/grant` (مع قيد PF في wallet_transactions)،
+    GET `/api/admin/sms/credits/{tenant_id}`، PUT `/api/admin/sms/price`
+    (سعر الرصيد في platform_config، الافتراضي 8 دج).
+
+### الاختبار
+- 18/18 E2E (TEST-P241): إعدادات افتراضية معطلة، منع الإرسال بدون رصيد (402)، منح 3 أرصدة
+  (PF00001/26)، SMS عند shipped فقط دون الحالات المعطلة، تقدير القالب بالمتغيرات، خصم الرصيد،
+  skipped_no_credit عند نفاد الرصيد، إرجاع الإعدادات.
+- 4/4 unit: استرجاع الرصيد عند فشل المزوّد، الخصم عند النجاح، dedup، تصفير الرصيد.
+- تنظيف دقيق + استعادة المحفظة من لقطة: journal=2، الصناديق كما هي، wallet_transactions=0،
+  credit_debt=0، marketplace/commissions فارغة.
+
 ## p240 — كشف الطلبات والعملاء المحتملين المكررين (Duplicate Detection)
 
 **التاريخ:** 2026-08-21

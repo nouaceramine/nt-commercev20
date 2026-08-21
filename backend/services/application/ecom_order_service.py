@@ -187,6 +187,14 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
     except Exception as exc:  # noqa: BLE001 — never let notification failures block status change
         logger.warning("WhatsApp notify failed for order %s: %s", order_id, exc)
 
+    # p241: automatic per-status customer SMS (fail-open, credit-billed)
+    try:
+        from services.ecom.status_sms_service import maybe_send_status_sms
+        await maybe_send_status_sms(db, order, new_status,
+                                    tenant_id=user.get("tenant_id") or "platform")
+    except Exception as exc:  # noqa: BLE001 — SMS must never block a status change
+        logger.warning("p241 status SMS failed for order %s: %s", order_id, exc)
+
     # EDA: emit ecom_order.confirmed / .cancelled (dual-write)
     try:
         from services.event_bus import event_bus
