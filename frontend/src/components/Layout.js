@@ -79,7 +79,7 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory, Percent
+  KeyRound, Factory, Percent, LifeBuoy
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -381,6 +381,7 @@ export const Layout = ({ children }) => {
         { path: '/saas-admin/payments',            icon: CreditCard,    label: language === 'ar' ? 'المدفوعات' : 'Paiements' },
         { path: '/saas-admin/tenant-debts',        icon: Receipt,       label: language === 'ar' ? 'ديون التجار' : 'Dettes locataires' },
         { path: '/saas-admin/withdrawals',         icon: DollarSign,    label: language === 'ar' ? 'طلبات السحب' : 'Demandes retrait' },
+        { path: '/saas-admin/support',           icon: LifeBuoy,      label: language === 'ar' ? 'تذاكر الدعم' : 'Tickets support' },
       ]
     },
     {
@@ -668,6 +669,7 @@ export const Layout = ({ children }) => {
           { path: '/email-notifications', icon: Mail, label: language === 'ar' ? 'إشعارات البريد' : 'Email', subFeature: 'email_notifications' },
           { path: '/internal-chat', icon: MessageCircle, label: language === 'ar' ? 'الدردشة' : 'Chat' },
           { path: '/whatsapp', icon: MessageSquare, label: 'WhatsApp' },
+          { path: '/support', icon: LifeBuoy, label: language === 'ar' ? 'تذاكر الدعم' : 'Support' },
         ] : [])
       ]
     }

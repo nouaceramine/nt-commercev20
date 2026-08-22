@@ -118,6 +118,8 @@ import EcomShippingTab from "./pages/ecom/EcomShippingTab";
 import EcomDriversPage from "./pages/ecom/EcomDriversPage";
 import EcomReferralsPage from "./pages/ecom/EcomReferralsPage";
 import EcomSocialInboxPage from "./pages/ecom/EcomSocialInboxPage";
+import SupportTicketsPage from "./pages/SupportTicketsPage";
+import SaasSupportPage from "./pages/admin/saas/SaasSupportPage";
 
 // AI & Smart Accounting Pages
 // p160: SmartDashboardPage merged into DashboardPage (route redirects to /)
@@ -396,6 +398,10 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/support"
+        element={<ProtectedRoute><SupportTicketsPage /></ProtectedRoute>}
+      />
       {/* E-Commerce Hub — gated by ecommerce_hub feature flag (super-admin opt-in) */}
       <Route
         path="/ecom-hub"
@@ -545,6 +551,10 @@ function AppRoutes() {
             <SaasAdminPage />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/saas-admin/support"
+        element={<ProtectedRoute superAdminOnly><SaasSupportPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/subscribers"

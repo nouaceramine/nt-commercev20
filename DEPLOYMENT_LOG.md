@@ -4012,3 +4012,22 @@ Latin/data-testid (drivers-page, referral-create-btn, shipping/drivers, store/re
 **اختبار الدخان:** GET /ecom/social/sources → 200 []، GET /ecom/social/conversations → 200.
 **البيانات الحقيقية:** لم تُمَس.
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p253/
+
+---
+
+## p254 — شاشتا تذاكر الدعم (واجهة لِـ p246)
+
+**الواجهة:**
+- `frontend/src/pages/SupportTicketsPage.js` — مسار `/support` للمستأجر: قائمة تذاكره مع
+  شارة «رد جديد»، إنشاء تذكرة (موضوع/تصنيف/أولوية/وصف)، نافذة المحادثة بفقاعات (المستأجر ↔
+  فريق المنصة)، الرد يعيد فتح المحلولة، الإغلاق. دخول من القائمة الجانبية «الرسائل
+  والإشعارات → تذاكر الدعم».
+- `frontend/src/pages/admin/saas/SaasSupportPage.js` — مسار `/saas-admin/support`
+  (superAdminOnly): كل تذاكر المشتركين مع فلتر حالة وشارة «بلا رد»، نافذة التذكرة مع تغيير
+  الحالة/الأولوية والرد (open → in_progress تلقائياً). دخول من «إدارة SaaS → تذاكر الدعم».
+
+**النشر:** main.4dbee887.js — الإصدار 20260822_004120. التحقق عبر testids ✓.
+**اختبار الدخان:** GET /support/tickets (مستأجر) → 200 []، GET /admin/support/tickets
+(منصة) → 200 + عدّاد. منطق الحالات الكامل مُختبَر E2E في p246 (18/18).
+**البيانات الحقيقية:** لم تُمَس.
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p254/ (App.js, Layout.js)
