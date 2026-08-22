@@ -4031,3 +4031,25 @@ Latin/data-testid (drivers-page, referral-create-btn, shipping/drivers, store/re
 (منصة) → 200 + عدّاد. منطق الحالات الكامل مُختبَر E2E في p246 (18/18).
 **البيانات الحقيقية:** لم تُمَس.
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p254/ (App.js, Layout.js)
+
+---
+
+## p255 — شاشتا الاستقبال والمتاجر الفرعية + بطاقة مزامنة الناقلين (واجهة لِـ p251/p250/p248)
+
+**الواجهة:**
+- `frontend/src/pages/ecom/EcomIntakeSourcesPage.js` — مسار `/ecom-hub/channels/intake`
+  (adminOnly)، تبويب «استقبال الطلبات» ضمن القنوات: إنشاء مصدر (YouCan/LightFunnels/Sheets/
+  مخصص مع محرر خريطة JSON)، نسخ رابط الويب هوك، عدادات (وارد/أُنشئ/مكرر/مرفوض)، تفعيل/حذف.
+- `frontend/src/pages/ecom/EcomMultiStorePage.js` — مسار `/ecom-hub/store/multi`
+  (adminOnly)، تبويب «المتاجر الفرعية» ضمن المتجر: إنشاء (اسم/رابط/وصف)، فتح /shop/slug،
+  تفعيل/تعطيل، حذف، نافذة كتالوج كاملة (المرتبطة + بحث وربط جماعي بالعلامات + فصل).
+- `EcomShippingTab.js`: بطاقة «مزامنة حالات الناقلين» (CourierSyncCard) — تعرض الناقلين الستة
+  المسجلين مع جاهزية المزامنة وزر «مزامنة الآن» لكل ناقل وملخص آخر نتيجة
+  (delivered/returned/unchanged/errors).
+
+**النشر:** main.a55e57ec.js — الإصدار 20260822_004718. التحقق عبر testids ✓.
+**اختبار الدخان:** GET /ecom/intake-sources → []، GET /store/multi → []،
+GET /ecom/shipping/courier-adapters → الناقلون الستة (غير مهيأين على المستأجر الحقيقي —
+بانتظار مفاتيح المالك). المنطق مُختبَر E2E في p248/p250/p251.
+**البيانات الحقيقية:** لم تُمَس.
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p255/

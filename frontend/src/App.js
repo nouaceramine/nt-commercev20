@@ -118,6 +118,8 @@ import EcomShippingTab from "./pages/ecom/EcomShippingTab";
 import EcomDriversPage from "./pages/ecom/EcomDriversPage";
 import EcomReferralsPage from "./pages/ecom/EcomReferralsPage";
 import EcomSocialInboxPage from "./pages/ecom/EcomSocialInboxPage";
+import EcomIntakeSourcesPage from "./pages/ecom/EcomIntakeSourcesPage";
+import EcomMultiStorePage from "./pages/ecom/EcomMultiStorePage";
 import SupportTicketsPage from "./pages/SupportTicketsPage";
 import SaasSupportPage from "./pages/admin/saas/SaasSupportPage";
 
@@ -415,6 +417,7 @@ function AppRoutes() {
         <Route path="store" element={<ProtectedRoute adminOnly><StoreManagementPage /></ProtectedRoute>} />
         <Route path="store/loyalty" element={<ProtectedRoute adminOnly featureKey="loyalty_points"><LoyaltyPage /></ProtectedRoute>} />
         <Route path="store/referrals" element={<ProtectedRoute adminOnly><EcomReferralsPage /></ProtectedRoute>} />
+        <Route path="store/multi" element={<ProtectedRoute adminOnly><EcomMultiStorePage /></ProtectedRoute>} />
         <Route path="channels" element={<EcomChannelsPage />} />
         <Route path="channels/woocommerce" element={<ProtectedRoute adminOnly><WooCommercePage /></ProtectedRoute>} />
         <Route path="channels/status" element={<IntegrationStatusPage />} />
@@ -422,6 +425,7 @@ function AppRoutes() {
         <Route path="channels/2fa" element={<TwoFactorPage />} />
         <Route path="channels/guide" element={<EcomGuidePage />} />
         <Route path="channels/social-inbox" element={<EcomSocialInboxPage />} />
+        <Route path="channels/intake" element={<ProtectedRoute adminOnly><EcomIntakeSourcesPage /></ProtectedRoute>} />
         <Route path="ads" element={<EcomAdsTab />} />
         <Route path="shipping" element={<EcomShippingTab />} />
         <Route path="shipping/companies" element={<ProtectedRoute adminOnly><ShippingPage /></ProtectedRoute>} />

@@ -11,6 +11,7 @@ const SUB_TABS = {
     { path: '/ecom-hub/store', ar: 'إدارة المتجر', fr: 'Boutique' },
     { path: '/ecom-hub/store/loyalty', ar: 'الولاء', fr: 'Fidélité' },
     { path: '/ecom-hub/store/referrals', ar: 'الإحالات', fr: 'Parrainage' },
+    { path: '/ecom-hub/store/multi', ar: 'المتاجر الفرعية', fr: 'Sous-boutiques' },
   ],
   channels: [
     { path: '/ecom-hub/channels', ar: 'قنوات البيع', fr: 'Canaux' },
@@ -19,6 +20,7 @@ const SUB_TABS = {
     { path: '/ecom-hub/channels/api-keys', ar: 'مفاتيح API', fr: 'Clés API' },
     { path: '/ecom-hub/channels/2fa', ar: 'التحقق بخطوتين', fr: '2FA' },
     { path: '/ecom-hub/channels/social-inbox', ar: 'الوارد الاجتماعي', fr: 'Boîte sociale' },
+    { path: '/ecom-hub/channels/intake', ar: 'استقبال الطلبات', fr: 'Réception commandes' },
     { path: '/ecom-hub/channels/guide', ar: 'دليل الاستخدام والربط', fr: 'Guide' },
   ],
   shipping: [

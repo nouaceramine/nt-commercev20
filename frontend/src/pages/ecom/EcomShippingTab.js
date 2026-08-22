@@ -14,6 +14,75 @@ import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
 import { toast } from 'sonner';
 
+// p255: generic courier sync (p248 backend) — one card for all registered
+// couriers: config status + one-click status sync through the real pipeline.
+function CourierSyncCard({ ar }) {
+  const [adapters, setAdapters] = useState([]);
+  const [busy, setBusy] = useState('');
+  const [lastResult, setLastResult] = useState(null);
+
+  const loadAdapters = async () => {
+    try {
+      const r = await apiClient.get('/ecom/shipping/courier-adapters');
+      setAdapters(r.data.items || []);
+    } catch { /* card stays empty */ }
+  };
+  useEffect(() => { loadAdapters(); }, []);
+
+  const sync = async (code) => {
+    setBusy(code); setLastResult(null);
+    try {
+      const r = await apiClient.post(`/ecom/shipping/sync/${code}`);
+      setLastResult({ courier: code, ...r.data });
+      toast.success(ar ? 'تمت المزامنة' : 'Synchronisé');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (ar ? 'فشلت المزامنة' : 'Échec'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <Card data-testid="courier-sync-card">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Truck className="h-5 w-5" />
+          {ar ? 'مزامنة حالات الناقلين' : 'Synchronisation des transporteurs'}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          {ar
+            ? 'تسحب المزامنة أحدث حالة لكل طرد مشحون وتُمرّرها عبر خط المعالجة الحقيقي: التسليم يحصّل COD والإرجاع يُقيَّد تلقائياً.'
+            : 'La sync pousse chaque colis dans le pipeline réel : livré encaisse le COD, retourné est comptabilisé.'}
+        </p>
+        <div className="space-y-2">
+          {adapters.map(a => (
+            <div key={a.courier} className="flex items-center justify-between border rounded px-3 py-2" data-testid={`sync-row-${a.courier}`}>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm">{a.label_ar}</span>
+                <Badge variant={a.sync_ready ? 'default' : 'secondary'} className={a.sync_ready ? 'bg-green-100 text-green-700' : ''}>
+                  {a.sync_ready ? (ar ? 'جاهز' : 'Prêt') : (a.configured ? (ar ? 'يحتاج mock أو مفاتيح' : 'clés manquantes') : (ar ? 'غير مهيأ' : 'Non configuré'))}
+                </Badge>
+                {a.has_status_map && <Badge variant="outline">{ar ? 'خريطة حالات مخصصة' : 'status map'}</Badge>}
+              </div>
+              <Button size="sm" variant="outline" onClick={() => sync(a.courier)} disabled={!!busy || !a.sync_ready} data-testid={`sync-btn-${a.courier}`}>
+                {busy === a.courier ? '...' : (ar ? 'مزامنة الآن' : 'Sync')}
+              </Button>
+            </div>
+          ))}
+          {adapters.length === 0 && <p className="text-xs text-muted-foreground">{ar ? 'جارٍ التحميل…' : 'Chargement…'}</p>}
+        </div>
+        {lastResult && (
+          <div className="text-xs bg-muted rounded p-2" dir="ltr" data-testid="sync-last-result">
+            <b>{lastResult.courier}</b>: delivered={lastResult.delivered ?? 0} returned={lastResult.returned ?? 0} unchanged={lastResult.unchanged ?? 0} errors={(lastResult.errors || []).length}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function EcomShippingTab() {
   const { language } = useLanguage();
   const ar = language === 'ar';
@@ -571,6 +640,8 @@ export default function EcomShippingTab() {
             </div>
           </CardContent>
         </Card>
+
+        <CourierSyncCard ar={ar} />
       </div>
 
       {/* p94: courier settings dialog */}
