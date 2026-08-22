@@ -115,6 +115,8 @@ import DigitalServicesPage from "./pages/digital/DigitalServicesPage";
 import DigitalAdminPage from "./pages/digital/DigitalAdminPage";
 import EcomAdsTab from "./pages/ecom/EcomAdsTab";
 import EcomShippingTab from "./pages/ecom/EcomShippingTab";
+import EcomDriversPage from "./pages/ecom/EcomDriversPage";
+import EcomReferralsPage from "./pages/ecom/EcomReferralsPage";
 
 // AI & Smart Accounting Pages
 // p160: SmartDashboardPage merged into DashboardPage (route redirects to /)
@@ -405,6 +407,7 @@ function AppRoutes() {
         <Route index element={<EcomHubPage />} />
         <Route path="store" element={<ProtectedRoute adminOnly><StoreManagementPage /></ProtectedRoute>} />
         <Route path="store/loyalty" element={<ProtectedRoute adminOnly featureKey="loyalty_points"><LoyaltyPage /></ProtectedRoute>} />
+        <Route path="store/referrals" element={<ProtectedRoute adminOnly><EcomReferralsPage /></ProtectedRoute>} />
         <Route path="channels" element={<EcomChannelsPage />} />
         <Route path="channels/woocommerce" element={<ProtectedRoute adminOnly><WooCommercePage /></ProtectedRoute>} />
         <Route path="channels/status" element={<IntegrationStatusPage />} />
@@ -414,6 +417,7 @@ function AppRoutes() {
         <Route path="ads" element={<EcomAdsTab />} />
         <Route path="shipping" element={<EcomShippingTab />} />
         <Route path="shipping/companies" element={<ProtectedRoute adminOnly><ShippingPage /></ProtectedRoute>} />
+        <Route path="shipping/drivers" element={<ProtectedRoute adminOnly><EcomDriversPage /></ProtectedRoute>} />
         <Route path="shipping/yalidine" element={<Navigate to="/ecom-hub/shipping" replace />} />  {/* p93: legacy status page removed — real Yalidine management lives in الشحن الموحَّد */}
         <Route path="analytics" element={<EcomAnalyticsPage />} />
         <Route path="guide" element={<Navigate to="/ecom-hub/channels/guide" replace />} />

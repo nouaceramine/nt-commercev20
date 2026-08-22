@@ -10,6 +10,7 @@ const SUB_TABS = {
   store: [
     { path: '/ecom-hub/store', ar: 'إدارة المتجر', fr: 'Boutique' },
     { path: '/ecom-hub/store/loyalty', ar: 'الولاء', fr: 'Fidélité' },
+    { path: '/ecom-hub/store/referrals', ar: 'الإحالات', fr: 'Parrainage' },
   ],
   channels: [
     { path: '/ecom-hub/channels', ar: 'قنوات البيع', fr: 'Canaux' },
@@ -22,6 +23,7 @@ const SUB_TABS = {
   shipping: [
     { path: '/ecom-hub/shipping', ar: 'الشحن الموحَّد', fr: 'Livraison unifiée' },
     { path: '/ecom-hub/shipping/companies', ar: 'شركات الشحن', fr: 'Transporteurs' },
+    { path: '/ecom-hub/shipping/drivers', ar: 'السائقون', fr: 'Livreurs' },
   ],
 };
 
