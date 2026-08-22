@@ -117,6 +117,7 @@ import EcomAdsTab from "./pages/ecom/EcomAdsTab";
 import EcomShippingTab from "./pages/ecom/EcomShippingTab";
 import EcomDriversPage from "./pages/ecom/EcomDriversPage";
 import EcomReferralsPage from "./pages/ecom/EcomReferralsPage";
+import EcomSocialInboxPage from "./pages/ecom/EcomSocialInboxPage";
 
 // AI & Smart Accounting Pages
 // p160: SmartDashboardPage merged into DashboardPage (route redirects to /)
@@ -414,6 +415,7 @@ function AppRoutes() {
         <Route path="channels/api-keys" element={<ProtectedRoute adminOnly><ApiKeysPage /></ProtectedRoute>} />
         <Route path="channels/2fa" element={<TwoFactorPage />} />
         <Route path="channels/guide" element={<EcomGuidePage />} />
+        <Route path="channels/social-inbox" element={<EcomSocialInboxPage />} />
         <Route path="ads" element={<EcomAdsTab />} />
         <Route path="shipping" element={<EcomShippingTab />} />
         <Route path="shipping/companies" element={<ProtectedRoute adminOnly><ShippingPage /></ProtectedRoute>} />

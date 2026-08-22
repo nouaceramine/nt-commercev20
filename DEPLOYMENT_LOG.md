@@ -3996,3 +3996,19 @@ Latin/data-testid (drivers-page, referral-create-btn, shipping/drivers, store/re
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p252/ (App.js, EcomHubShell.js, EcomHubTabs.js)
 
+
+---
+
+## p253 — شاشة الوارد الاجتماعي (واجهة لِـ p249)
+
+**الواجهة:** `frontend/src/pages/ecom/EcomSocialInboxPage.js` — مسار `/ecom-hub/channels/social-inbox`،
+تبويب فرعي «الوارد الاجتماعي» ضمن القنوات:
+- بطاقة المصادر: إنشاء مصدر (ماسنجر/إنستغرام/واتساب) مع نسخ رابط الويب هوك الكامل، حذف.
+- صندوق الوارد: فلاتر قناة/حالة، شارة عدد غير المقروء، شارات unread لكل محادثة.
+- نافذة المحادثة: فقاعات رسائل (وارد/صادر)، رد (وضع محاكاة — الإرسال الحقيقي بانتظار
+  اعتماديات Meta من المالك)، إغلاق، تحويل لطلب بنموذج كامل (زبون/منتج/كمية/سعر/شحن/ولاية).
+
+**النشر:** main.a0201916.js — الإصدار 20260822_003243. التحقق عبر testids اللاتينية ✓.
+**اختبار الدخان:** GET /ecom/social/sources → 200 []، GET /ecom/social/conversations → 200.
+**البيانات الحقيقية:** لم تُمَس.
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p253/

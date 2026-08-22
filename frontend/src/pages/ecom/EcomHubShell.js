@@ -18,6 +18,7 @@ const SUB_TABS = {
     { path: '/ecom-hub/channels/status', ar: 'حالة التكاملات', fr: 'Intégrations' },
     { path: '/ecom-hub/channels/api-keys', ar: 'مفاتيح API', fr: 'Clés API' },
     { path: '/ecom-hub/channels/2fa', ar: 'التحقق بخطوتين', fr: '2FA' },
+    { path: '/ecom-hub/channels/social-inbox', ar: 'الوارد الاجتماعي', fr: 'Boîte sociale' },
     { path: '/ecom-hub/channels/guide', ar: 'دليل الاستخدام والربط', fr: 'Guide' },
   ],
   shipping: [
