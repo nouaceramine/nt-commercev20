@@ -687,6 +687,9 @@ async def startup_event():
             await main_db.saas_agents.create_index(
                 [("agent_code", 1)], unique=True,
                 partialFilterExpression={"agent_code": {"$gt": ""}}, name="p266_agent_code")
+            # p268: data-browser access log
+            await main_db.saas_data_access_log.create_index(
+                [("tenant_id", 1), ("created_at", -1)], name="p268_access_log")
             await main_db.saas_payments.create_index(
                 [("payment_code", 1)], unique=True,
                 partialFilterExpression={"payment_code": {"$gt": ""}}, name="p266_payment_code")
@@ -1308,6 +1311,7 @@ _AUTO_REG_MODULES = [
     'routes.partners_routes',  # p182: partners & profit distribution
     'routes.saas.business_profiles_routes',  # p183: business activity profiles
     'routes.saas.id_audit_routes',  # p266: ID-system audit for super admin
+    'routes.saas.data_browser_routes',  # p268: cross-tenant data browser (read-only)
     'routes.rental_routes',  # p185: rental module (cars & properties)
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
     'routes.serials_routes',  # p187: IMEI/serial tracking

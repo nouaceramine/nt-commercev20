@@ -419,6 +419,7 @@ export const Layout = ({ children }) => {
         { path: '/saas-admin/feature-flags',       icon: Shield,        label: language === 'ar' ? 'إدارة الميزات' : 'Feature Flags' },
         { path: '/saas-admin/event-bus',           icon: Zap,           label: language === 'ar' ? 'ناقل الأحداث' : 'Event Bus' },
         { path: '/saas-admin/email-settings',      icon: Mail,          label: language === 'ar' ? 'إعدادات البريد' : 'Email & Resend' },
+        { path: '/saas-admin/data-browser',      icon: Database,      label: language === 'ar' ? 'متصفح البيانات' : 'Explorateur' },  // p268
         { path: '/security-dashboard',             icon: Shield,        label: language === 'ar' ? 'لوحة الأمان' : 'Sécurité' },
         { path: '/backup-system',                  icon: Database,      label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes' },
         { path: '/data-import-export',             icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },

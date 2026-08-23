@@ -163,6 +163,7 @@ import SystemLogsPage from "./pages/SystemLogsPage";
 import SupplierAdminPage from "./pages/admin/SupplierAdminPage";
 import EventBusDashboard from "./pages/admin/EventBusDashboard";
 import SaasPaymentsPage from "./pages/admin/saas/PaymentsPage";
+import SaasDataBrowserPage from "./pages/admin/saas/DataBrowserPage";
 import SaasPlansPage from "./pages/admin/saas/PlansPage";
 import SaasTenantDebtsPage from "./pages/admin/saas/TenantDebtsPage";
 import SaasAuditTimelinePage from "./pages/admin/saas/AuditTimelinePage";
@@ -579,6 +580,10 @@ function AppRoutes() {
       <Route
         path="/saas-admin/payments"
         element={<ProtectedRoute superAdminOnly><SaasPaymentsPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/data-browser"
+        element={<ProtectedRoute superAdminOnly><SaasDataBrowserPage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/platform-catalog"

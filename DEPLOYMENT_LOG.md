@@ -4361,3 +4361,16 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 ### الاختبارات
 - GET /saas/platform-commissions/summary?days=30 ✓ (200، بنية كاملة) | history ✓.
 - bundle main.c32848f5.js؛ العلامات finance-tab-pcom / pcom-total / pcom-history-table ✓.
+
+## p268 — متصفح بيانات المشتركين للسوبر أدمن (قراءة فقط + تدقيق) (2026-08-23)
+
+### التغييرات
+- backend/routes/saas/data_browser_routes.py (جديد): 5 endpoints للسوبر أدمن فقط —
+  search شامل داخل مستأجر (منتجات/عملاء/مبيعات/موردون)، products بأسعار الشراء والبيع والجملة والمخزون مع ترقيم (skip/limit≤200)، sales، customers، access-log.
+- **كل عملية اطلاع تُدوَّن** في main_db.saas_data_access_log (admin_email + tenant + action + query + وقت) + فهرس p268_access_log.
+- frontend: صفحة /saas-admin/data-browser — اختيار المشترك، بحث فوري مجمّع، تبويبات منتجات/مبيعات/عملاء/سجل الوصول، ترقيم صفحات، شريط تحذير «قراءة فقط». دخول «متصفح البيانات» في قائمة السوبر أدمن.
+
+### الاختبارات (على المستأجر الحقيقي NT-0004 — قراءة فقط)
+- products: 7,415 منتجاً مع الأسعار ✓ | search «BV»: 10 مبيعات + 3 منتجات ✓
+- access-log سجّل القراءتين ببريد المشرف ✓
+- bundle main.d61d6335.js؛ العلامات db-* ✓ | لا كتابة إطلاقاً (لا يوجد أي POST/PUT في الوحدة).
