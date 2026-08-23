@@ -17,6 +17,21 @@ import {
   AlertTriangle, ShieldCheck, Bug, Zap, FileText, Wrench
 } from 'lucide-react';
 
+const MODULE_AR = {  // p271: exact fault location labels
+  inventory: 'المنتجات / المخزون',
+  accounting: 'المحاسبة / القيود',
+  sales: 'المبيعات',
+  purchases: 'المشتريات',
+  customers: 'العملاء',
+  wallet: 'المحافظ',
+  auth: 'الدخول والأمان',
+  payments: 'المدفوعات',
+  system: 'النظام',
+  backup: 'النسخ الاحتياطي',
+  email: 'البريد الإلكتروني',
+  subscriptions: 'الاشتراكات',
+};
+
 const SEV = {
   Critical: { label: 'حرج', cls: 'bg-red-100 text-red-800' },
   High: { label: 'عالي', cls: 'bg-orange-100 text-orange-800' },
@@ -235,7 +250,28 @@ export default function AutoHealPage() {
                         </TableCell>
                         <TableCell className="max-w-[260px]">
                           <p className="text-sm font-medium">{f.title_ar}</p>
-                          <p className="text-xs text-muted-foreground">{f.module} — {f.level}</p>
+                          <p className="text-xs text-muted-foreground" data-testid="autoheal-location">
+                            {f.location?.module_ar || MODULE_AR[f.module] || f.module} — {f.level}
+                            {f.location?.tenant_name ? ` • ${f.location.tenant_name}` : ''}
+                          </p>
+                          {f.location?.endpoint && (
+                            <p className="text-xs font-mono text-muted-foreground" dir="ltr">{f.location.endpoint}</p>
+                          )}
+                          {f.location?.collection && (
+                            <p className="text-xs font-mono text-muted-foreground" dir="ltr">collection: {f.location.collection}</p>
+                          )}
+                          {f.location?.records?.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {f.location.records.map((r, i) => (
+                                <Badge key={i} variant="outline" className="text-[10px] font-mono" data-testid="autoheal-record">
+                                  {r.code || r.id}{r.value !== undefined ? ` (${r.value})` : ''}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                          {f.location?.error_id && (
+                            <p className="text-[10px] font-mono text-muted-foreground" dir="ltr">error_id: {f.location.error_id}</p>
+                          )}
                         </TableCell>
                         <TableCell className="max-w-[220px] text-xs text-muted-foreground">
                           {f.root_cause_ar}

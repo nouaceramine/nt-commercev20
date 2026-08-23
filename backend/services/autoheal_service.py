@@ -450,6 +450,13 @@ class AutoHealEngine:
             f"{method} {path} → {exc_type}: {str(exc)[:200]}",
             f"راجع logs/{component_key}.log — error_id: {error_id}",
             "immediate" if sensitive else "within-1h", "availability",
+            location={  # p271
+                "module_ar": component_name_ar,
+                "component": component_key,
+                "endpoint": f"{method} {norm_path}",
+                "error_id": error_id,
+                "log_file": f"logs/{component_key}.log",
+            },
         )
         stored = await self._upsert_finding("realtime", f)
         if stored and sev == "Critical":
@@ -636,7 +643,9 @@ class AutoHealEngine:
             tname = t.get("name") or t.get("short_id") or t["id"][:8]
             try:
                 neg = await tdb.products.find(
-                    {"quantity": {"$lt": 0}}, {"_id": 0, "name_en": 1, "name_ar": 1, "quantity": 1}
+                    {"quantity": {"$lt": 0}},
+                    {"_id": 0, "id": 1, "name_en": 1, "name_ar": 1, "quantity": 1,
+                     "article_code": 1, "barcode": 1}
                 ).limit(20).to_list(20)
             except Exception:  # noqa: BLE001
                 neg = []
@@ -649,6 +658,19 @@ class AutoHealEngine:
                     "راجع حركات هذه الأصناف (بيع بدون مخزون/جرد ناقص) وصحّحها يدوياً — "
                     "الإصلاح الآلي ممنوع على البيانات المالية",
                     "within-24h", "data-integrity",
+                    location={  # p271
+                        "module_ar": "المنتجات / المخزون",
+                        "collection": "products",
+                        "tenant_id": t["id"],
+                        "tenant_name": tname,
+                        "records": [
+                            {"id": p.get("id"),
+                             "code": p.get("article_code") or p.get("barcode") or "",
+                             "name": p.get("name_ar") or p.get("name_en"),
+                             "value": p.get("quantity")}
+                            for p in neg[:10]
+                        ],
+                    },
                 ))
             try:
                 entries = await tdb.journal_entries.find(
@@ -667,6 +689,19 @@ class AutoHealEngine:
                     "علّق القيود المخالفة وراجع مصدرها يدوياً — "
                     "الإصلاح الآلي ممنوع على البيانات المالية (موافقتك مطلوبة دائماً)",
                     "within-1h", "data-integrity",
+                    location={  # p271
+                        "module_ar": "المحاسبة / قيود اليومية",
+                        "collection": "journal_entries",
+                        "tenant_id": t["id"],
+                        "tenant_name": tname,
+                        "records": [
+                            {"id": str(e.get("entry_number", "?")),
+                             "code": str(e.get("entry_number", "?")),
+                             "name": "قيد يومية",
+                             "value": f"مدين {e.get('total_debit')} ≠ دائن {e.get('total_credit')}"}
+                            for e in bad[:10]
+                        ],
+                    },
                 ))
         return findings or None
 
@@ -960,7 +995,7 @@ class AutoHealEngine:
     # ── persistence helpers ────────────────────────────────────────────────
     def _finding(self, severity, level, module, key, title, root_cause,
                  manual_details, urgency, impact, remediation_key=None,
-                 remediation_payload=None, prevention=None):
+                 remediation_payload=None, prevention=None, location=None):
         return {
             "signature": _sig(module, key),
             "severity": severity,
@@ -978,6 +1013,8 @@ class AutoHealEngine:
             "estimated_impact": impact,
             "remediation_key": remediation_key,
             "remediation_payload": remediation_payload,
+            # p271: exact fault location — module/collection/tenant/sample records
+            "location": location or {},
         }
 
     async def _upsert_finding(self, scan_id: str, f: dict):
@@ -994,9 +1031,12 @@ class AutoHealEngine:
             if dismissed and f.get("severity") in ("Low", "Medium"):
                 return None
         if existing:
+            _bump = {"last_seen": _iso(_now()), "scan_id": scan_id}
+            if f.get("location") and not existing.get("location"):
+                _bump["location"] = f["location"]  # p271: backfill location on legacy rows
             await self._main_db.autoheal_findings.update_one(
                 {"id": existing["id"]},
-                {"$set": {"last_seen": _iso(_now()), "scan_id": scan_id},
+                {"$set": _bump,
                  "$inc": {"occurrences": 1}},
             )
             return None

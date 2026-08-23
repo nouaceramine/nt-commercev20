@@ -4406,3 +4406,25 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 
 ### الاختبارات
 - esbuild ✓ | bundle main.bb3e0d93.js منشور | علامات المسارات الجديدة موجودة ✓.
+
+## p271 — AutoHeal: موقع العطل الدقيق في كل تنبيه (2026-08-23)
+
+### المشكلة
+تنبيهات AutoHeal كانت تقول «يوجد خطأ في المخزون» دون تحديد أين بالضبط — لا المستأجر، لا المجموعة، لا السجلات المتأثرة.
+
+### التغييرات
+- services/autoheal_service.py:
+  - _finding() يقبل معاملاً جديداً location (اختياري) ويحفظه في وثيقة التنبيه.
+  - كاشف المخزون السالب (negstock): location = {module_ar: «المنتجات / المخزون», collection: products, tenant_id, tenant_name, records:[{id, code, name, value}]}.
+  - كاشف قيود اليومية غير المتوازنة: location = {module_ar: «المحاسبة / قيود اليومية», collection: journal_entries, records مع entry_number + «مدين X ≠ دائن Y»}.
+  - emit_exception: location = {module_ar: اسم المكوّن, component, endpoint: «METHOD /path», error_id, log_file}.
+  - _upsert_finding: عند تكرار توقيع موجود قديم بلا location، يُنسخ location الجديد إليه (backfill للسجلات القديمة).
+- AutoHealPage.js: خريطة MODULE_AR + عرض الموقع تحت سطر الوحدة — module_ar • tenant_name، endpoint (font-mono ltr)، collection، السجلات كشارات Badge (data-testid=autoheal-record)، وerror_id.
+
+### الاختبارات
+- إنشاء تنبيه تجريبي TEST-P271 عبر محرك AutoHeal نفسه داخل الحاوية → حُفظ location كاملاً ✓.
+- GET /api/saas/autoheal/findings يُرجع location بالبنية الكاملة ✓.
+- ملاحظة: كاشف negstock لا يمكن اختباره بإدخال كمية سالبة — خدمة النزاهة الخلفية تصححها إلى 0 خلال ثانيتين (سلوك مرغوب).
+- تنظيف دقيق: حذف تنبيه TEST-P271، بقايا 0 ✓.
+- عطل عابر: docker daemon توقف أثناء الاختبار (Start request repeated too quickly) — استُعيد بـ systemctl reset-failed + start، كل الحاويات عادت تلقائياً، health 200.
+- bundle main.3bde6f31.js منشور؛ العلامات autoheal-location/autoheal-record ✓؛ health 200 ✓.
