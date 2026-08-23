@@ -9,6 +9,7 @@ import { NotificationBell } from './NotificationBell';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { SidebarReorder } from './SidebarReorder';
+import { MobileBottomBar } from './MobileBottomBar';
 import { 
   LayoutDashboard,
   Megaphone, 
@@ -1208,7 +1209,7 @@ export const Layout = ({ children }) => {
         </header>
 
         {/* Page Content */}
-        <main className="p-6 md:p-8 pt-20 md:pt-8">
+        <main className="p-6 md:p-8 pt-20 md:pt-8 pb-24 md:pb-8">
           {isImpersonating && (
             <div data-testid="impersonation-banner" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm dark:border-amber-700/50 dark:bg-amber-900/20">
               <div className="text-amber-800 dark:text-amber-200">
@@ -1240,6 +1241,9 @@ export const Layout = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* p276: mobile bottom navigation */}
+      <MobileBottomBar language={language} isCashier={isCashier} onMore={() => setSidebarOpen(true)} />
 
       {/* Global Search Modal (Ctrl+K) */}
       <GlobalSearchModal

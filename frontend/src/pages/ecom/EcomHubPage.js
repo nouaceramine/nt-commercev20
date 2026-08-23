@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
 import { EcomManualOrderDialog } from './EcomManualOrderDialog';
 import { EcomOrderDetailDialog } from './EcomOrderDetailDialog';
+import { ResponsiveTable } from '../../components/ResponsiveTable';
 import { useEcomOrderNotifications, requestNotificationPermission, playNewOrderChime } from '../../hooks/useEcomOrderNotifications';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 
@@ -240,7 +241,7 @@ export default function EcomHubPage() {
               جميع طلباتك من Shopify و Facebook و Instagram و WhatsApp و TikTok في مكان واحد.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={loadAll} disabled={loading} data-testid="ecom-refresh-btn">
               <RefreshCcw className={`w-4 h-4 ml-1 ${loading ? 'animate-spin' : ''}`} />
               تحديث
@@ -497,78 +498,60 @@ export default function EcomHubPage() {
                 </Button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-xs">
-                    <tr>
-                      <th className="text-right p-2">رقم الطلب</th>
-                      <th className="text-right p-2">القناة</th>
-                      <th className="text-right p-2">الزبون</th>
-                      <th className="text-right p-2">المنتجات</th>
-                      <th className="text-right p-2">الإجمالي</th>
-                      <th className="text-right p-2">الحالة</th>
-                      <th className="text-right p-2">التاريخ</th>
-                      <th className="text-right p-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map((o) => {
-                      const chMeta = CHANNELS[o.channel] || CHANNELS.manual;
-                      const stMeta = ORDER_STATUSES[o.status] || ORDER_STATUSES.new;
-                      return (
-                        <tr key={o.id} className="border-t hover:bg-muted/20 transition-colors">
-                          <td className="p-2 font-mono text-xs">{o.order_code}</td>
-                          <td className="p-2">
-                            <Badge className={chMeta.color}>{chMeta.icon} {chMeta.labelAr}</Badge>
-                          </td>
-                          <td className="p-2">
-                            <div className="font-medium">{o.customer?.name || '—'}</div>
-                            {o.customer?.phone && <div className="text-xs text-muted-foreground">{o.customer.phone}</div>}
-                            {(o.customer?.wilaya || o.customer?.city) && (
-                              <div className="text-xs text-muted-foreground">
-                                {[o.customer?.wilaya, o.customer?.city].filter(Boolean).join(' · ')}
-                                {o.delivery_type === 'office' ? ' · 🏢' : o.delivery_type === 'home' ? ' · 🏠' : ''}
-                              </div>
-                            )}
-                            {o.blacklist?.flagged && (
-                              <Badge className="bg-red-100 text-red-700 mt-1" data-testid="blacklist-badge">
-                                ⚠ {o.blacklist.manual ? 'محظور' : `مُرجِع ×${o.blacklist.returned_count}`}
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="p-2 text-center">{o.items?.length || 0}</td>
-                          <td className="p-2 font-semibold">{Number(o.total).toLocaleString()} دج</td>
-                          <td className="p-2">
-                            <Badge className={stMeta.color}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${stMeta.dot} ml-1`} />
-                              {stMeta.labelAr}
-                            </Badge>
-                            {o.cod_risk && (
-                              <div className="mt-1">
-                                <Badge className={
-                                  o.cod_risk.risk_score >= 61 ? 'bg-red-100 text-red-700' :
-                                  o.cod_risk.risk_score >= 31 ? 'bg-amber-100 text-amber-700' :
-                                  'bg-green-100 text-green-700'
-                                }>
-                                  مخاطر {o.cod_risk.risk_score} — {o.cod_risk.action_ar}
-                                </Badge>
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(o.created_at).toLocaleDateString('ar-DZ')}
-                          </td>
-                          <td className="p-2">
-                            <Button size="sm" variant="ghost" onClick={() => setSelectedOrder(o)} data-testid={`view-order-${o.id}`}>
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <ResponsiveTable
+                tableClassName="w-full text-sm"
+                theadClassName="bg-muted/40 text-xs"
+                thClassName="text-right p-2"
+                tdClassName="p-2"
+                rowClassName="border-t hover:bg-muted/20 transition-colors"
+                rows={orders}
+                keyFn={(o) => o.id}
+                onRowClick={(o) => setSelectedOrder(o)}
+                columns={[
+                  { header: 'رقم الطلب', className: 'p-2 font-mono text-xs', render: (o) => o.order_code },
+                  { header: 'القناة', render: (o) => { const m = CHANNELS[o.channel] || CHANNELS.manual; return <Badge className={m.color}>{m.icon} {m.labelAr}</Badge>; } },
+                  { header: 'الزبون', render: (o) => (<>
+                    <div className="font-medium">{o.customer?.name || '—'}</div>
+                    {o.customer?.phone && <div className="text-xs text-muted-foreground">{o.customer.phone}</div>}
+                    {(o.customer?.wilaya || o.customer?.city) && (
+                      <div className="text-xs text-muted-foreground">
+                        {[o.customer?.wilaya, o.customer?.city].filter(Boolean).join(' · ')}
+                        {o.delivery_type === 'office' ? ' · 🏢' : o.delivery_type === 'home' ? ' · 🏠' : ''}
+                      </div>
+                    )}
+                    {o.blacklist?.flagged && (
+                      <Badge className="bg-red-100 text-red-700 mt-1" data-testid="blacklist-badge">
+                        ⚠ {o.blacklist.manual ? 'محظور' : `مُرجِع ×${o.blacklist.returned_count}`}
+                      </Badge>
+                    )}
+                  </>) },
+                  { header: 'المنتجات', className: 'p-2 text-center', render: (o) => o.items?.length || 0 },
+                  { header: 'الإجمالي', className: 'p-2 font-semibold', render: (o) => <>{Number(o.total).toLocaleString()} دج</> },
+                  { header: 'الحالة', render: (o) => { const stMeta = ORDER_STATUSES[o.status] || ORDER_STATUSES.new; return (<>
+                    <Badge className={stMeta.color}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${stMeta.dot} ml-1`} />
+                      {stMeta.labelAr}
+                    </Badge>
+                    {o.cod_risk && (
+                      <div className="mt-1">
+                        <Badge className={
+                          o.cod_risk.risk_score >= 61 ? 'bg-red-100 text-red-700' :
+                          o.cod_risk.risk_score >= 31 ? 'bg-amber-100 text-amber-700' :
+                          'bg-green-100 text-green-700'
+                        }>
+                          مخاطر {o.cod_risk.risk_score} — {o.cod_risk.action_ar}
+                        </Badge>
+                      </div>
+                    )}
+                  </>); } },
+                  { header: 'التاريخ', className: 'p-2 text-xs text-muted-foreground whitespace-nowrap', render: (o) => new Date(o.created_at).toLocaleDateString('ar-DZ') },
+                  { header: '', cardFull: true, render: (o) => (
+                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedOrder(o); }} data-testid={`view-order-${o.id}`}>
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                  ) },
+                ]}
+              />
             )}
           </CardContent>
         </Card>

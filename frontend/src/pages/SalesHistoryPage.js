@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import { Pagination } from '../components/Pagination';
+import { ResponsiveTable } from '../components/ResponsiveTable';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -181,74 +182,59 @@ export default function SalesHistoryPage() {
                 <h3 className="text-xl font-medium">{t.noProducts}</h3>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>{t.invoiceNumber}</th>
-                      <th style={{color:'var(--muted-foreground)', fontSize:'0.8rem'}}>{language === 'ar' ? 'الرمز' : 'Code'}</th>
-                      <th>{t.customerName}</th>
-                      <th>{t.total}</th>
-                      <th>{t.paidAmount}</th>
-                      <th>{t.remaining}</th>
-                      <th>{t.paymentMethod}</th>
-                      <th>{t.createdAt}</th>
-                      <th>{t.actions}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sales.map(sale => (
-                      <tr key={sale.id}>
-                        <td className="font-medium">
-                          {sale.invoice_number}
-                          {sale.source === 'webstore' && (
-                            <Badge className="mr-1 bg-indigo-100 text-indigo-700" data-testid="webstore-badge">{language === 'ar' ? 'متجر' : 'Boutique'}</Badge>
-                          )}
-                        </td>
-                        <td><span style={{fontFamily:'monospace',fontSize:'0.75rem',background:'var(--primary-foreground)',color:'var(--primary)',border:'1px solid var(--border)',borderRadius:'4px',padding:'1px 6px'}}>{sale.code || '—'}</span></td>
-                        <td>{sale.customer_name}</td>
-                        <td className="font-semibold">{sale.total.toFixed(2)} {t.currency}</td>
-                        <td>{sale.paid_amount.toFixed(2)} {t.currency}</td>
-                        <td className={sale.remaining > 0 ? 'text-amber-600' : ''}>
-                          {sale.remaining.toFixed(2)} {t.currency}
-                        </td>
-                        <td>
-                          <Badge variant="outline">
-                            {sale.payment_method === 'cash' ? t.cash : sale.payment_method === 'bank' ? t.bank : t.wallet}
-                          </Badge>
-                        </td>
-                        <td className="text-muted-foreground text-sm">{formatDate(sale.created_at)}</td>
-                        <td>
-                          <div className="flex gap-1 flex-wrap">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-1 text-primary border-primary/30 hover:bg-primary/10"
-                              onClick={() => { setSelectedSaleId(sale.id); setShowSaleDetail(true); }}
-                              title={language === 'ar' ? 'معاينة وتعديل' : 'Aperçu & modifier'}
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                              {language === 'ar' ? 'عرض' : 'Voir'}
-                            </Button>
-                            <PrintButton docType="sale" record={sale} size="sm" />
-                            {sale.status !== 'returned' && sale.source !== 'webstore' && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive"
-                                onClick={() => { setSelectedSale(sale); setReturnDialogOpen(true); }}
-                              >
-                                <RotateCcw className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                          {getStatusBadge(sale.status)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ResponsiveTable
+                rows={sales}
+                keyFn={(sale) => sale.id}
+                columns={[
+                  { header: t.invoiceNumber, className: 'font-medium', render: (sale) => (<>
+                    {sale.invoice_number}
+                    {sale.source === 'webstore' && (
+                      <Badge className="mr-1 bg-indigo-100 text-indigo-700" data-testid="webstore-badge">{language === 'ar' ? 'متجر' : 'Boutique'}</Badge>
+                    )}
+                  </>) },
+                  { header: <span style={{color:'var(--muted-foreground)', fontSize:'0.8rem'}}>{language === 'ar' ? 'الرمز' : 'Code'}</span>, render: (sale) => (
+                    <span style={{fontFamily:'monospace',fontSize:'0.75rem',background:'var(--primary-foreground)',color:'var(--primary)',border:'1px solid var(--border)',borderRadius:'4px',padding:'1px 6px'}}>{sale.code || '—'}</span>
+                  ) },
+                  { header: t.customerName, render: (sale) => sale.customer_name },
+                  { header: t.total, className: 'font-semibold', render: (sale) => <>{sale.total.toFixed(2)} {t.currency}</> },
+                  { header: t.paidAmount, render: (sale) => <>{sale.paid_amount.toFixed(2)} {t.currency}</> },
+                  { header: t.remaining, render: (sale) => (
+                    <span className={sale.remaining > 0 ? 'text-amber-600' : ''}>{sale.remaining.toFixed(2)} {t.currency}</span>
+                  ) },
+                  { header: t.paymentMethod, render: (sale) => (
+                    <Badge variant="outline">
+                      {sale.payment_method === 'cash' ? t.cash : sale.payment_method === 'bank' ? t.bank : t.wallet}
+                    </Badge>
+                  ) },
+                  { header: t.createdAt, className: 'text-muted-foreground text-sm', render: (sale) => formatDate(sale.created_at) },
+                  { header: t.actions, cardFull: true, render: (sale) => (<>
+                    <div className="flex gap-1 flex-wrap">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1 text-primary border-primary/30 hover:bg-primary/10"
+                        onClick={() => { setSelectedSaleId(sale.id); setShowSaleDetail(true); }}
+                        title={language === 'ar' ? 'معاينة وتعديل' : 'Aperçu & modifier'}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        {language === 'ar' ? 'عرض' : 'Voir'}
+                      </Button>
+                      <PrintButton docType="sale" record={sale} size="sm" />
+                      {sale.status !== 'returned' && sale.source !== 'webstore' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => { setSelectedSale(sale); setReturnDialogOpen(true); }}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    {getStatusBadge(sale.status)}
+                  </>) },
+                ]}
+              />
             )}
           </CardContent>
         </Card>
