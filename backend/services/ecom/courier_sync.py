@@ -39,6 +39,13 @@ COURIER_ADAPTERS = {
     "guepex":   {"adapter": "generic_http", "label_ar": "Guepex"},
 }
 
+# p256: every other registered courier defaults to the generic_http adapter —
+# entering base_url + api_token in its integration activates sync with no
+# code changes. Single source: services/ecom/algerian_couriers.py
+from .algerian_couriers import EXTRA_COURIERS as _EXTRA_COURIERS
+for _c in _EXTRA_COURIERS:
+    COURIER_ADAPTERS.setdefault(_c["id"], {"adapter": "generic_http", "label_ar": _c["name_ar"]})
+
 DELIVERED_KEYWORDS = ("livrée", "livre", "delivered", "تم التسليم", "delivred")
 RETURN_KEYWORDS = ("retourn", "retour", "échec", "echec", "failed", "return",
                    "refus", "مرتجع", "أرجع")

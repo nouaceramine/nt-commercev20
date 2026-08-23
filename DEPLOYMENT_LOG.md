@@ -4053,3 +4053,37 @@ GET /ecom/shipping/courier-adapters → الناقلون الستة (غير مه
 بانتظار مفاتيح المالك). المنطق مُختبَر E2E في p248/p250/p251.
 **البيانات الحقيقية:** لم تُمَس.
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p255/
+
+---
+
+## p256 — سجل شركات الشحن الجزائرية الكامل (78 شركة) في كل أنحاء نظام الشحن
+
+**السجل الموحد الجديد:** `backend/services/ecom/algerian_couriers.py` — 61 شركة جديدة
+(عائلة Ecotrack + شركات مستقلة: Abex, World Express, Allo Livraison, Zimou, Easy & Speed,
+Nord Ouest, Sogex…) بمعرّفات snake_case ثابتة + أسماء عربية — مصدر واحد تستورده كل المواضع.
+
+**المواضع الموسّعة (backend):**
+- `shipping_loyalty_routes.ALGERIAN_SHIPPING_COMPANIES`: 17 → 78 (كتالوج /shipping/companies،
+  إعدادات /shipping/settings، مقارنة الأسعار /shipping/calculate-rate).
+- `ecom/constants.py`: CHANNELS — كل شركة تحصل على مدخل kind='shipping' (تخزين الاعتماديات
+  في ecom_integrations — مسار الإنشاء يتحقق من CHANNEL_KEYS) + SHIPPING_PROVIDERS (18 → 79).
+- `courier_sync.COURIER_ADAPTERS`: 6 → 67 — كل شركة جديدة بمحوّل generic_http؛ إدخال
+  base_url + api_token في تكاملها يفعّل المزامنة دون أي كود.
+- `shipping_routes.COURIER_DISPLAY_NAMES` و`online_store_routes.PROVIDER_LABELS`: أسماء عربية
+  للسجل كاملاً (التسويات، خيارات شحن واجهة المتجر).
+
+**الواجهة:** `EcomShippingTab.COURIER_SCHEMA`: 3 → 64 صف ربط في بطاقة «ربط شركات الشحن»
+(الجديدة بحقول api_token + base_url)؛ بطاقة «مزامنة حالات الناقلين» (p255) تعرض الـ 67
+تلقائياً؛ `ecomConstants.SHIPPING_PROVIDERS` موسّع للتسميات.
+
+**الاختبار الحي (المستأجر الحقيقي):** /shipping/companies=78 ✓ courier-adapters=67 ✓
+/shipping/settings=79 ✓ calculate-rate لكل الـ78 ✓ مزامنة ناقل غير مهيأ → 400 بالعربية ✓
+تكامل TEST-P256 على قناة abex الجديدة → يُقبل (kind=shipping) ✓ mock_status → sync_ready
+والمزامنة تعمل (0 طلبات مشحونة) ✓ الحذف → صفر بقايا ✓.
+
+**البيانات الحقيقية:** القيود=2، ecom_store=2650، WEB000001=delivered. ملاحظة: لوحظ تحويل
+11300 دج من الصندوق النقدي إلى الخزنة بين الجلسات — عملية يدوية للمستأجر (الإجمالي ثابت)،
+لم تُمَس.
+
+**النشر:** main.33acc64f.js — الإصدار 20260823_133324.
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p256/

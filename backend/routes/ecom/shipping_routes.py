@@ -307,6 +307,10 @@ async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
 
 
 COURIER_DISPLAY_NAMES = {"yalidine": "يالدين", "zr": "ZR Express", "maystro": "مايسترو"}
+# p256: display names for the full courier registry (settlements, reports)
+from services.ecom.algerian_couriers import EXTRA_COURIERS as _EXTRA_COURIERS
+for _c in _EXTRA_COURIERS:
+    COURIER_DISPLAY_NAMES.setdefault(_c["id"], _c["name_ar"])
 
 
 @router.get("/ecom/shipping/courier-adapters")

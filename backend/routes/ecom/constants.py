@@ -34,6 +34,14 @@ CHANNELS = {
     "maystro":   {"label_ar": "Maystro (شحن)",       "label_en": "Maystro",   "icon": "🚚", "color": "#7c3aed", "kind": "shipping"},
 }
 
+# p256: every registered Algerian courier gets a shipping channel entry so its
+# credentials can live in ecom_integrations (the integrations route validates
+# CHANNEL_KEYS). kind='shipping' keeps them out of sales-channel stats.
+from services.ecom.algerian_couriers import EXTRA_COURIERS as _EXTRA_COURIERS
+for _c in _EXTRA_COURIERS:
+    CHANNELS.setdefault(_c["id"], {"label_ar": _c["name_ar"] + " (شحن)", "label_en": _c["name"],
+                                   "icon": "🚚", "color": "#64748b", "kind": "shipping"})
+
 CHANNEL_KEYS = set(CHANNELS.keys())
 SALES_CHANNEL_KEYS = {k for k, m in CHANNELS.items() if m.get("kind") != "shipping" and k not in ("pos", "manual")}
 
@@ -89,6 +97,10 @@ SHIPPING_PROVIDERS = {
     "algerie_poste": {"label_ar": "بريد الجزائر",       "label_en": "Algérie Poste",     "real": False},
     "other":         {"label_ar": "أخرى",              "label_en": "Other",             "real": False},
 }
+
+# p256: same extended registry in the provider catalog (labels for UI).
+for _c in _EXTRA_COURIERS:
+    SHIPPING_PROVIDERS.setdefault(_c["id"], {"label_ar": _c["name_ar"], "label_en": _c["name"], "real": False})
 
 SHIPPING_PROVIDER_KEYS = set(SHIPPING_PROVIDERS.keys())
 

@@ -328,6 +328,10 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             return {"success": True, "companies": []}
         w = (wilaya or "").strip()
         PROVIDER_LABELS = {"yalidine": "يالدين", "zr": "ZR Express", "maystro": "Maystro", "mock": "وهمي"}
+        # p256: full registry labels for storefront shipping options
+        from services.ecom.algerian_couriers import EXTRA_COURIERS as _EXTRA_COURIERS
+        for _c in _EXTRA_COURIERS:
+            PROVIDER_LABELS.setdefault(_c["id"], _c["name_ar"])
         options = []
         for ch in companies:
             row = None

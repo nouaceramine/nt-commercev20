@@ -41,6 +41,15 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
         {"id": "other", "name": "Autre", "name_ar": "أخرى", "website": "", "has_api": False}
     ]
 
+    # p256: extended registry — all major Algerian couriers (Ecotrack family +
+    # independents). Single source: services/ecom/algerian_couriers.py
+    from services.ecom.algerian_couriers import EXTRA_COURIERS as _EXTRA_COURIERS
+    ALGERIAN_SHIPPING_COMPANIES = ALGERIAN_SHIPPING_COMPANIES + [
+        {"id": c["id"], "name": c["name"], "name_ar": c["name_ar"],
+         "website": "", "has_api": True}
+        for c in _EXTRA_COURIERS
+    ]
+
     class ShippingCompanySettings(BaseModel):
         company_id: str
         enabled: bool = False
