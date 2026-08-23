@@ -658,11 +658,17 @@ async def _maybe_notify_customer(db, order: dict, new_status: str) -> None:
     if new_status == "shipped":
         tn = (order.get("tracking_number") or "").strip()
         courier = (order.get("courier") or "").strip()
-        c_name, c_link = {
+        _courier_map = {
             "yalidine": ("يالدين", "https://yalidine.com/suivi/?tracking={tn}"),
             "zr":       ("ZR Express", "https://zrexpress.dz/suivi"),
             "maystro":  ("مايسترو", "https://maystro-delivery.com"),
-        }.get(courier, ("", ""))
+        }
+        # p256: every other registered courier at least gets its Arabic name in
+        # the shipped message (tracking link only where the public URL is known).
+        from services.ecom.algerian_couriers import EXTRA_COURIERS as _XC
+        for _c in _XC:
+            _courier_map.setdefault(_c["id"], (_c["name_ar"], ""))
+        c_name, c_link = _courier_map.get(courier, ("", ""))
         parts = [f"📦 تم شحن طلبك {order.get('order_code', '')}" + (f" عبر {c_name}." if c_name else ".")]
         if tn:
             parts.append(f"رقم التتبع: {tn}")

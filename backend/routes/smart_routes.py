@@ -151,8 +151,12 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
         # Candidate prices: tenant delivery_rates (per-wilaya) + integrations
         wid = re.sub(r"\D", "", wilaya).zfill(2) if re.sub(r"\D", "", wilaya) else None
         rate = await db.delivery_rates.find_one({"id": wid}, {"_id": 0}) if wid else None
+        # p256: scan every active shipping-kind integration (all 78 couriers),
+        # not just the original three.
+        from routes.ecom.constants import CHANNELS as _CH
+        _ship_keys = [k for k, v in _CH.items() if v.get("kind") == "shipping"]
         integrations = await db.ecom_integrations.find(
-            {"channel": {"$in": ["yalidine", "zr", "maystro"]}, "is_active": True}, {"_id": 0}).to_list(10)
+            {"channel": {"$in": _ship_keys}, "is_active": True}, {"_id": 0}).to_list(50)
 
         candidates = []
         for integ in integrations:

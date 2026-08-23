@@ -4087,3 +4087,16 @@ Nord Ouest, Sogex…) بمعرّفات snake_case ثابتة + أسماء عرب
 
 **النشر:** main.33acc64f.js — الإصدار 20260823_133324.
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p256/
+
+### p256 (تدقيق شامل + تغطية موضعين إضافيين)
+تدقيق دقيق لظهور الـ 61 شركة الجديدة في كل طبقة: (1) داخل الكود — CHANNELS shipping=64،
+SHIPPING_PROVIDERS=79، COURIER_ADAPTERS=67، COURIER_DISPLAY_NAMES=64 — السجل مغطى 61/61
+في الجميع بلا تناقض تسميات؛ (2) عبر API الحي — /shipping/companies=78 فريدة بلا اسم عربي
+فارغ، /shipping/settings=79 (78 + سجل main الموجود مسبقاً)، calculate-rate=78،
+/ecom/channels=79 كلها kind=shipping، courier-adapters=67؛ (3) سلوكياً — شحن طلب بمزود
+جديد (sogex/nord_ouest/khotwa) يتجاوز تحقق المزود (404 لطلب وهمي) بينما مزود مختلق يُرفض
+400، وإنشاء/حذف تكامل على قنوات world_express/lynx/allo_livraison/abex ينجح بلا بقايا؛
+(4) الواجهة المنشورة — COURIER_SCHEMA=61/61 وSHIPPING_PROVIDERS=61/61 والأسماء اللاتينية
+كلها في main.33acc64f.js المخدومة من index.html. وأثناء التدقيق اكتُشف موضعان إضافيان
+فغُطّيا: اقتراح أرخص ناقل (smart_routes) صار يمسح كل تكاملات الشحن النشطة بدل الثلاثة
+الأولى، ورسالة «تم الشحن» (ecom_order_service) تعرض اسم أي ناقل من السجل بالعربية.
