@@ -12,8 +12,9 @@ import { Textarea } from '../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { LifeBuoy, Plus, RefreshCcw, Send, XCircle } from 'lucide-react';
+import { LifeBuoy, Plus, RefreshCcw, Send, X, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 
 const CATEGORY_AR = { technical: 'تقني', billing: 'فوترة', feature: 'اقتراح ميزة', other: 'أخرى' };
 const STATUS_AR = { open: 'مفتوحة', in_progress: 'قيد المعالجة', resolved: 'محلولة', closed: 'مغلقة' };
@@ -28,6 +29,7 @@ export default function SupportTicketsPage() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [active, setActive] = useState(null); // ticket with messages
+  const isTabletUp = useMediaQuery('(min-width: 768px)'); // p278
   const [reply, setReply] = useState('');
 
   const load = useCallback(async () => {
@@ -98,7 +100,7 @@ export default function SupportTicketsPage() {
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 space-y-4" dir="rtl" data-testid="support-tickets-page">
+      <div className={`p-4 md:p-6 space-y-4 ${active && isTabletUp ? 'md:grid md:grid-cols-2 md:gap-4 md:space-y-0' : ''}`} dir="rtl" data-testid="support-tickets-page">
         <Card>
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
@@ -150,6 +152,49 @@ export default function SupportTicketsPage() {
           </CardContent>
         </Card>
 
+        {/* p278: tablet+ master-detail — لوح التفاصيل بجانب القائمة */}
+        {active && isTabletUp && (
+          <Card data-testid="ticket-detail-pane" className="h-fit md:sticky md:top-4">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center justify-between flex-wrap gap-2">
+                <span>{active.subject} <span className="font-mono text-xs text-muted-foreground" dir="ltr">{active.code}</span></span>
+                <div className="flex gap-2">
+                  {active.status !== 'closed' && (
+                    <Button size="sm" variant="outline" className="gap-1" onClick={closeTicket} data-testid="ticket-close-btn-pane">
+                      <XCircle className="w-3.5 h-3.5" /> إغلاق
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => setActive(null)} data-testid="ticket-pane-close"><X className="w-4 h-4" /></Button>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto border rounded p-3 bg-muted/20" data-testid="ticket-messages-pane">
+                {(active.messages || []).map(m => (
+                  <div key={m.id} className={`flex ${m.sender === 'tenant' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`rounded-lg px-3 py-2 max-w-[85%] text-sm ${m.sender === 'tenant' ? 'bg-white border' : 'bg-primary/10'}`}>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">{m.sender === 'platform' ? 'فريق المنصة' : (m.name || 'أنت')}</p>
+                      <p className="whitespace-pre-wrap">{m.body}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1" dir="ltr">{(m.at || '').replace('T', ' ').slice(0, 16)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {active.status !== 'closed' ? (
+                <div className="flex gap-2">
+                  <Input value={reply} onChange={e => setReply(e.target.value)} placeholder="اكتب رداً…"
+                    onKeyDown={e => e.key === 'Enter' && sendReply()} data-testid="ticket-reply-input-pane" />
+                  <Button onClick={sendReply} disabled={saving || !reply.trim()} data-testid="ticket-reply-btn-pane">
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center">التذكرة مغلقة</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
           <DialogContent dir="rtl" data-testid="ticket-create-dialog">
             <DialogHeader><DialogTitle>تذكرة دعم جديدة</DialogTitle></DialogHeader>
@@ -189,7 +234,7 @@ export default function SupportTicketsPage() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={!!active} onOpenChange={(o) => !o && setActive(null)}>
+        <Dialog open={!!active && !isTabletUp} onOpenChange={(o) => !o && setActive(null)}>
           <DialogContent dir="rtl" className="max-w-xl" data-testid="ticket-dialog">
             <DialogHeader>
               <DialogTitle className="flex items-center justify-between">

@@ -11,8 +11,9 @@ import { Badge } from '../../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
-import { MessageSquare, Plus, RefreshCcw, Copy, Trash2, Send, ShoppingBag, XCircle, Inbox } from 'lucide-react';
+import { MessageSquare, Plus, RefreshCcw, Copy, Trash2, Send, ShoppingBag, X, XCircle, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 
 const CHANNEL_AR = { messenger: 'ماسنجر', instagram: 'إنستغرام', whatsapp: 'واتساب' };
 const STATUS_AR = { open: 'مفتوحة', converted: 'مُحوَّلة', closed: 'مغلقة' };
@@ -25,6 +26,7 @@ export default function EcomSocialInboxPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [filter, setFilter] = useState({ status: '', channel: '' });
   const [active, setActive] = useState(null); // {conversation, messages}
+  const isTabletUp = useMediaQuery('(min-width: 768px)'); // p278
   const [reply, setReply] = useState('');
   const [showSource, setShowSource] = useState(false);
   const [srcForm, setSrcForm] = useState({ channel: 'messenger', name: '' });
@@ -198,6 +200,8 @@ export default function EcomSocialInboxPage() {
         </CardContent>
       </Card>
 
+      {/* p278: tablet+ master-detail — قائمة المحادثات + لوح المحادثة جنباً إلى جنب */}
+      <div className={active && isTabletUp ? 'md:grid md:grid-cols-2 md:gap-4' : ''}>
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
@@ -262,8 +266,65 @@ export default function EcomSocialInboxPage() {
         </CardContent>
       </Card>
 
+      {/* p278: لوح المحادثة (تابلت+) — الجوال يبقى على الحوار */}
+      {active && isTabletUp && (
+        <Card data-testid="conversation-pane" className="h-fit md:sticky md:top-4">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between flex-wrap gap-2">
+              <span>{active.conversation?.customer_name || active.conversation?.external_user_id} — {CHANNEL_AR[active.conversation?.channel]}</span>
+              <div className="flex gap-2">
+                {active.conversation && !active.conversation.order_id && active.conversation.status !== 'closed' && (
+                  <Button size="sm" variant="outline" className="gap-1" onClick={() => {
+                    setConvForm({
+                      ...emptyConvert,
+                      customer_name: active.conversation.customer_name || '',
+                      phone: active.conversation.phone || '',
+                    });
+                    setShowConvert(true);
+                  }} data-testid="conv-convert-btn-pane">
+                    <ShoppingBag className="w-3.5 h-3.5" /> تحويل لطلب
+                  </Button>
+                )}
+                {active.conversation?.status !== 'closed' && (
+                  <Button size="sm" variant="outline" className="gap-1" onClick={closeConv} data-testid="conv-close-btn-pane">
+                    <XCircle className="w-3.5 h-3.5" /> إغلاق
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setActive(null)} data-testid="conv-pane-close"><X className="w-4 h-4" /></Button>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto border rounded p-3 bg-muted/20" data-testid="conversation-messages-pane">
+              {(active.messages || []).map(m => (
+                <div key={m.id} className={`flex ${m.direction === 'out' ? 'justify-start' : 'justify-end'}`}>
+                  <div className={`rounded-lg px-3 py-2 max-w-[80%] text-sm ${m.direction === 'out' ? 'bg-primary/10' : 'bg-white border'}`}>
+                    <p>{m.text}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1" dir="ltr">{(m.at || '').replace('T', ' ').slice(0, 16)}</p>
+                  </div>
+                </div>
+              ))}
+              {active.messages?.length === 0 && <p className="text-xs text-muted-foreground text-center">لا رسائل</p>}
+            </div>
+            {active.conversation?.order_id && (
+              <p className="text-xs text-green-700">✓ حُوِّلت إلى الطلب <span className="font-mono" dir="ltr">{active.conversation.order_code}</span></p>
+            )}
+            {active.conversation?.status !== 'closed' && (
+              <div className="flex gap-2">
+                <Input value={reply} onChange={e => setReply(e.target.value)} placeholder="اكتب رداً…"
+                  onKeyDown={e => e.key === 'Enter' && sendReply()} data-testid="reply-input-pane" />
+                <Button onClick={sendReply} disabled={saving || !reply.trim()} data-testid="reply-send-btn-pane">
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      </div>
+
       {/* thread dialog */}
-      <Dialog open={!!active} onOpenChange={(o) => !o && setActive(null)}>
+      <Dialog open={!!active && !isTabletUp} onOpenChange={(o) => !o && setActive(null)}>
         <DialogContent dir="rtl" className="max-w-xl" data-testid="conversation-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
