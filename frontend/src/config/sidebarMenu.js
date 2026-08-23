@@ -26,6 +26,7 @@ export const defaultMenuSections = [
       { id: 'customers', path: '/customers', icon: 'Users', labelAr: 'الزبائن', labelFr: 'Clients', visible: true, minRole: 'cashier' },
       { id: 'customer-families', path: '/customer-families', icon: 'FolderTree', labelAr: 'عائلات الزبائن', labelFr: 'Familles clients', visible: true },
       { id: 'customer-debts', path: '/customer-debts', icon: 'CreditCard', labelAr: 'ديون الزبائن', labelFr: 'Dettes clients', visible: true },
+      { id: 'ecom-hub-store-loyalty', path: '/ecom-hub/store/loyalty', icon: 'Award', labelAr: 'الولاء', labelFr: 'Fidélité', visible: true },  // p270 sync
     ]
   },
   {
@@ -44,6 +45,7 @@ export const defaultMenuSections = [
       { id: 'bulk-price-update', path: '/bulk-price-update', icon: 'DollarSign', labelAr: 'تحديث الأسعار الجماعي', labelFr: 'Mise à jour prix en masse', visible: true },
       { id: 'price-history', path: '/price-history', icon: 'Clock', labelAr: 'سجل الأسعار', labelFr: 'Historique prix', visible: true },
       { id: 'products-defective-goods', path: '/defective-goods', icon: 'Package', labelAr: 'بضائع معيبة', labelFr: 'Défectueux', visible: true },
+      { id: 'expiry-report', path: '/expiry-report', icon: 'CalendarClock', labelAr: 'انتهاء الصلاحية', labelFr: 'Expirations', visible: true },  // p270 sync
     ]
   },
   {
@@ -75,6 +77,11 @@ export const defaultMenuSections = [
       { id: 'reports', path: '/reports', icon: 'BarChart3', labelAr: 'التقارير', labelFr: 'Rapports', visible: true },
       { id: 'analytics', path: '/analytics', icon: 'BarChart3', labelAr: 'إحصائيات متقدمة', labelFr: 'Analyses', visible: true },
       { id: 'smart-reports', path: '/smart-reports', icon: 'Star', labelAr: 'تقارير ذكية', labelFr: 'Rapports IA', visible: true },
+      { id: 'installments', path: '/installments', icon: 'CreditCard', labelAr: 'الأقساط', labelFr: 'Versements', visible: true },  // p270 sync
+      { id: 'daily-report', path: '/daily-report', icon: 'Calendar', labelAr: 'التقرير اليومي', labelFr: 'Rapport Journalier', visible: true },  // p270 sync
+      { id: 'auto-reports', path: '/auto-reports', icon: 'Calendar', labelAr: 'التقارير التلقائية', labelFr: 'Rapports auto', visible: true },  // p270 sync
+      { id: 'commissions', path: '/commissions', icon: 'Percent', labelAr: 'العمولات', labelFr: 'Commissions', visible: true },  // p270 sync
+      { id: 'marketplace', path: '/marketplace', icon: 'Globe', labelAr: 'السوق الموحد', labelFr: 'Marché', visible: true },  // p270 sync
     ]
   },
   {
@@ -105,6 +112,8 @@ export const defaultMenuSections = [
       { id: 'ai-chat', path: '/ai-chat', icon: 'Star', labelAr: 'المحاسب الذكي', labelFr: 'Comptable IA', visible: true },
       { id: 'ai-agents', path: '/ai-agents', icon: 'Zap', labelAr: 'الوكلاء الذكيين', labelFr: 'Agents IA', visible: true },
       { id: 'robots', path: '/robots', icon: 'Zap', labelAr: 'الروبوتات', labelFr: 'Robots', visible: true },
+      { id: 'partners', path: '/partners', icon: 'Handshake', labelAr: 'الشركاء والأرباح', labelFr: 'Associés & bénéfices', visible: true },  // p270 sync
+      { id: 'accounting', path: '/accounting', icon: 'BookOpen', labelAr: 'ميزان المراجعة', labelFr: 'Balance de vérification', visible: true },  // p270 sync
     ]
   },
   {
@@ -118,6 +127,7 @@ export const defaultMenuSections = [
       { id: 'employees', path: '/employees', icon: 'Users', labelAr: 'الموظفين', labelFr: 'Employés', visible: true },
       { id: 'employee-alerts', path: '/employee-alerts', icon: 'Bell', labelAr: 'تنبيهات الحدود', labelFr: 'Alertes', visible: true },
       { id: 'task-management', path: '/task-management', icon: 'ClipboardList', labelAr: 'المهام', labelFr: 'Tâches', visible: true },
+      { id: 'employee-activity', path: '/employee-activity', icon: 'Activity', labelAr: 'سجل النشاط', labelFr: 'Activité', visible: true },  // p270 sync
     ]
   },
   {
@@ -153,6 +163,7 @@ export const defaultMenuSections = [
       { id: 'wallet-management', path: '/wallet-management', icon: 'Wallet', labelAr: 'المحفظة', labelFr: 'Portefeuille', visible: true },
       { id: 'sim-management', path: '/sim-management', icon: 'Zap', labelAr: 'إدارة الشرائح', labelFr: 'Gestion SIM', visible: true },
       { id: 'telecom-stock', path: '/telecom-stock', icon: 'Package', labelAr: 'مخزون الشحن', labelFr: 'Stock recharge', visible: true },
+      { id: 'margin-rules', path: '/margin-rules', icon: 'Percent', labelAr: 'هوامش الأسعار', labelFr: 'Marges', visible: true },  // p270 sync
     ]
   },
   {
@@ -180,7 +191,7 @@ export const defaultMenuSections = [
       { id: 'repairs', path: '/repairs', icon: 'Wrench', labelAr: 'الصيانة', labelFr: 'Réparations', visible: true },
       { id: 'repairs-new', path: '/repairs/new', icon: 'Smartphone', labelAr: 'استقبال جهاز', labelFr: 'Réception', visible: true },
       { id: 'defective-goods', path: '/defective-goods', icon: 'Package', labelAr: 'بضائع معيبة', labelFr: 'Défectueux', visible: true },
-      { id: 'whatsapp', path: '/ecom-hub/channels', icon: 'Smartphone', labelAr: 'واتساب', labelFr: 'WhatsApp', visible: true },
+      { id: 'repairs-parts', path: '/repairs/parts', icon: 'Package', labelAr: 'قطع الغيار', labelFr: 'Pièces', visible: true },  // p270 sync
     ]
   },
   {
@@ -191,14 +202,9 @@ export const defaultMenuSections = [
     visible: true,
     isCustom: false,
     items: [
-      { id: 'store', path: '/store', icon: 'Store', labelAr: 'المتجر', labelFr: 'Boutique', visible: true },
       { id: 'digital-services', path: '/digital-services', icon: 'Smartphone', labelAr: 'الخدمات الرقمية', labelFr: 'Services digitaux', visible: true },
       { id: 'digital-admin', path: '/digital-admin', icon: 'Settings', labelAr: 'إدارة الخدمات الرقمية', labelFr: 'Admin services digitaux', visible: true },
-      { id: 'loyalty', path: '/loyalty', icon: 'Award', labelAr: 'الولاء', labelFr: 'Fidélité', visible: true },
-      { id: 'woocommerce', path: '/woocommerce', icon: 'Store', labelAr: 'WooCommerce', labelFr: 'WooCommerce', visible: true },
-      { id: 'integrations-status', path: '/integrations/status', icon: 'Settings', labelAr: 'حالة التكاملات', labelFr: 'Intégrations', visible: true },
-      { id: 'two-factor', path: '/two-factor', icon: 'Shield', labelAr: 'المصادقة الثنائية', labelFr: '2FA', visible: true },
-      { id: 'api-keys', path: '/api-keys', icon: 'Key', labelAr: 'مفاتيح API', labelFr: 'Clés API', visible: true },
+      { id: 'ecom-hub', path: '/ecom-hub', icon: 'Inbox', labelAr: 'صندوق الطلبات الموحَّد', labelFr: 'Boîte unifiée', visible: true },  // p270 sync
     ]
   },
   {
@@ -209,8 +215,28 @@ export const defaultMenuSections = [
     visible: true,
     isCustom: false,
     items: [
-      { id: 'shipping', path: '/shipping', icon: 'Truck', labelAr: 'الشحن', labelFr: 'Livraison', visible: true },
-      { id: 'yalidine', path: '/integrations/yalidine', icon: 'Truck', labelAr: 'ياليدين', labelFr: 'Yalidine', visible: true },
+    ]
+  },
+  {
+    id: 'rental',
+    titleAr: 'الكراء',
+    titleFr: 'Location',
+    icon: 'KeyRound',
+    visible: true,
+    isCustom: false,
+    items: [
+      { id: 'rentals', path: '/rentals', icon: 'KeyRound', labelAr: 'الكراء', labelFr: 'Location', visible: true },
+    ]
+  },
+  {
+    id: 'production',
+    titleAr: 'الإنتاج',
+    titleFr: 'Production',
+    icon: 'Factory',
+    visible: true,
+    isCustom: false,
+    items: [
+      { id: 'production', path: '/production', icon: 'Factory', labelAr: 'الإنتاج', labelFr: 'Production', visible: true },
     ]
   },
   {
@@ -226,6 +252,10 @@ export const defaultMenuSections = [
       { id: 'data-import-export', path: '/data-import-export', icon: 'FileText', labelAr: 'استيراد/تصدير', labelFr: 'Import/Export', visible: true },
       { id: 'motherboard', path: '/motherboard', icon: 'Settings', labelAr: 'اللوحة الأم', labelFr: 'Carte mère', visible: true, minRole: 'super_admin' },
       { id: 'sidebar-settings', path: '/settings/sidebar', icon: 'LayoutDashboard', labelAr: 'ترتيب القائمة', labelFr: 'Ordre menu', visible: true },
+      { id: 'import-wizard', path: '/import-wizard', icon: 'Sparkles', labelAr: 'الاستيراد الذكي', labelFr: 'Import intelligent', visible: true },  // p270 sync
+      { id: 'settings-datetime', path: '/settings/datetime', icon: 'Clock', labelAr: 'التاريخ والوقت', labelFr: 'Date & heure', visible: true },  // p270 sync
+      { id: 'settings-printing-template-editor', path: '/settings/printing/template-editor', icon: 'FileText', labelAr: 'قوالب الطباعة', labelFr: 'Modèles impression', visible: true },  // p270 sync
+      { id: 'features', path: '/features', icon: 'Key', labelAr: 'إدارة الميزات', labelFr: 'Gestion fonctionnalités', visible: true },  // p270 sync
     ]
   },
   {
@@ -236,10 +266,12 @@ export const defaultMenuSections = [
     visible: true,
     isCustom: false,
     items: [
+      { id: 'whatsapp', path: '/whatsapp', icon: 'MessageSquare', labelAr: 'WhatsApp', labelFr: 'WhatsApp', visible: true },  // p270 sync
       { id: 'notifications', path: '/notifications', icon: 'Bell', labelAr: 'الإشعارات', labelFr: 'Notifications', visible: true },
       { id: 'smart-notifications', path: '/smart-notifications', icon: 'Bell', labelAr: 'إشعارات ذكية', labelFr: 'Notif. IA', visible: true },
       { id: 'email-notifications', path: '/email-notifications', icon: 'FileText', labelAr: 'إشعارات البريد', labelFr: 'Email', visible: true },
       { id: 'internal-chat', path: '/internal-chat', icon: 'Users', labelAr: 'الدردشة', labelFr: 'Chat', visible: true },
+      { id: 'support', path: '/support', icon: 'LifeBuoy', labelAr: 'تذاكر الدعم', labelFr: 'Support', visible: true },  // p270 sync
     ]
   },
 ];

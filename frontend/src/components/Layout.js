@@ -419,7 +419,7 @@ export const Layout = ({ children }) => {
         { path: '/saas-admin/feature-flags',       icon: Shield,        label: language === 'ar' ? 'إدارة الميزات' : 'Feature Flags' },
         { path: '/saas-admin/event-bus',           icon: Zap,           label: language === 'ar' ? 'ناقل الأحداث' : 'Event Bus' },
         { path: '/saas-admin/email-settings',      icon: Mail,          label: language === 'ar' ? 'إعدادات البريد' : 'Email & Resend' },
-        { path: '/saas-admin/data-browser',      icon: Database,      label: language === 'ar' ? 'متصفح البيانات' : 'Explorateur' },  // p268
+        { path: '/saas-admin/data-browser',       icon: Database,      label: language === 'ar' ? 'متصفح البيانات' : 'Explorateur' },
         { path: '/security-dashboard',             icon: Shield,        label: language === 'ar' ? 'لوحة الأمان' : 'Sécurité' },
         { path: '/backup-system',                  icon: Database,      label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes' },
         { path: '/data-import-export',             icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
@@ -631,7 +631,7 @@ export const Layout = ({ children }) => {
     {
       id: 'ecommerce',
       featureKey: null,
-      title: language === 'ar' ? '🛍️ التجارة الإلكترونية' : 'E-Commerce',
+      title: language === 'ar' ? 'التجارة الإلكترونية' : 'E-Commerce',
       icon: Store,
       items: [
         // ── p46: single entry — كل التجارة الإلكترونية داخل المركز ──
@@ -652,6 +652,7 @@ export const Layout = ({ children }) => {
           { path: '/settings/sidebar', icon: LayoutDashboard, label: language === 'ar' ? 'ترتيب القائمة' : 'Ordre menu' },
           { path: '/settings/datetime', icon: Clock, label: language === 'ar' ? 'التاريخ والوقت' : 'Date & heure' },
           { path: '/settings/printing/template-editor', icon: FileText, label: language === 'ar' ? 'قوالب الطباعة' : 'Modèles impression' },
+          { path: '/features', icon: Key, label: language === 'ar' ? 'إدارة الميزات' : 'Gestion fonctionnalités' },  // p270
         ] : []),
         ...(isEffectiveSuperAdmin ? [
           { path: '/motherboard', icon: CircuitBoard, label: language === 'ar' ? 'اللوحة الأم' : 'Carte mère', minRole: 'super_admin' },
