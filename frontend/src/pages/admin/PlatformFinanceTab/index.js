@@ -26,6 +26,7 @@ import { PurchaseFormDialog, UploadCodesForPurchaseDialog } from "./PurchaseDial
 import { CodeTraceCard } from "./CodeTraceCard";
 import { ProductProfitabilityCard } from "./ProductProfitabilityCard";
 import { AiBillingCard } from "./AiBillingCard";  // p224
+import { PlatformCommissionsCard } from "./PlatformCommissionsCard";  // p267
 
 export function PlatformFinanceTab() {
   const [subTab, setSubTab] = useState("dashboard");
@@ -110,6 +111,7 @@ export function PlatformFinanceTab() {
           <TabsTrigger value="profitability" data-testid="finance-tab-profitability">🎯 ربحية المنتج</TabsTrigger>
           <TabsTrigger value="trace" data-testid="finance-tab-trace">🔍 تتبُّع كود</TabsTrigger>
           <TabsTrigger value="ai-billing" data-testid="finance-tab-ai-billing">🤖 فوترة الذكاء</TabsTrigger>
+          <TabsTrigger value="platform-commissions" data-testid="finance-tab-pcom">💰 عمولات المنصة</TabsTrigger>
         </TabsList>
 
         {/* ── DASHBOARD ─────────────────────────────────────────────────── */}
@@ -357,6 +359,9 @@ export function PlatformFinanceTab() {
 
         <TabsContent value="ai-billing" className="space-y-4 mt-3">
           <AiBillingCard />
+        </TabsContent>
+        <TabsContent value="platform-commissions" className="mt-3">
+          <PlatformCommissionsCard />
         </TabsContent>
 
         {/* ── PRODUCT PROFITABILITY ─────────────────────────────────────── */}

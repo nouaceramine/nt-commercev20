@@ -41,10 +41,10 @@ async def record_platform_commission(
         return None  # no spread configured — nothing earned, nothing to record
 
     now = datetime.now(timezone.utc).isoformat()
-    count = await main_db.platform_commissions.count_documents({})
+    from services.code_generator import public_order_code as _poc  # p267: atomic codes
     doc = {
         "id": str(uuid.uuid4()),
-        "code": f"PCOM-{str(count + 1).zfill(5)}",
+        "code": await _poc(main_db, "platform_commissions", "PCOM", 5, field="code"),
         "service_type": service_type,
         "tenant_id": tenant_id,
         "operator": operator,
