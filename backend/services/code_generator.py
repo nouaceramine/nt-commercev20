@@ -129,6 +129,11 @@ def _short_id_to_stamp(short_id: str) -> str:
     return f"NT{int(m.group(1))}" if m else ""
 
 
+def short_id_to_stamp(short_id: str) -> str:
+    """Public alias of _short_id_to_stamp."""
+    return _short_id_to_stamp(short_id)
+
+
 def stamp_to_short_id(stamp: str) -> str:
     """Reverse of the stamp: 'NT4' -> 'NT-0004'."""
     m = _re.match(r"^NT(\d+)$", (stamp or "").strip().upper())
@@ -158,14 +163,17 @@ async def db_stamp(db) -> str:
 
 
 async def public_order_code(db, collection: str, prefix: str, digits: int = 6,
-                            field: str = "order_code") -> str:
+                            field: str = "order_code", stamp: str = None) -> str:
     """Tenant-stamped atomic public code: PREFIX-NTx-000123.
 
     The counter seeds from legacy unstamped codes (WEB000001, MP00001) via
     the same _legacy_max scan, so the numeric sequence continues without
     reuse. Unknown/platform tenants fall back to the legacy unstamped format.
+    Pass `stamp` explicitly for platform-side collections (main_db) where the
+    owning tenant is known from context (p259 marketplace listing codes).
     """
-    stamp = await db_stamp(db)
+    if stamp is None:
+        stamp = await db_stamp(db)
     key = f"{collection}:{field}:{prefix}:ever"
     counters = db["_code_counters"]
     if not await counters.find_one({"_id": key}):

@@ -572,11 +572,23 @@ async def handle_product_published(event: Event) -> None:
         return
     from config.database import main_db
     now = datetime.now(timezone.utc).isoformat()
+    # p259: composite public identity — every catalog row carries a globally
+    # unique stamped listing code (MPR-NTx-NNNNN). Existing rows keep theirs;
+    # the code is drawn only for rows that lack one (idempotent republish).
+    existing = await main_db.marketplace_catalog.find_one(
+        {"tenant_id": tenant_id, "product_id": pid}, {"_id": 0, "listing_code": 1})
+    listing_code = (existing or {}).get("listing_code") or ""
+    if not listing_code:
+        from services.code_generator import public_order_code, short_id_to_stamp
+        listing_code = await public_order_code(
+            main_db, "marketplace_catalog", "MPR", 5, field="listing_code",
+            stamp=short_id_to_stamp(p.get("short_id") or ""))
     await main_db.marketplace_catalog.update_one(
         {"tenant_id": tenant_id, "product_id": pid},
         {"$set": {
             "tenant_id": tenant_id,
             "product_id": pid,
+            "listing_code": listing_code,
             "tenant_name": p.get("tenant_name", ""),
             "short_id": p.get("short_id", ""),
             "name_ar": p.get("name_ar", ""),

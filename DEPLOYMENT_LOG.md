@@ -4171,3 +4171,40 @@ ECO/XL/SOC/IN) كانت فريدة داخل المستأجر فقط — نفس �
   ‏GET /track/MP-NT4-99999 → found:false فوري (مسار سريع) ✓
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p258/
+
+---
+
+## 2026-08-23 — p259: الهوية المركبة لمنتجات السوق الموحد (listing codes)
+
+**الوضع قبل:** كتالوج السوق الموحد (main_db.marketplace_catalog) كان يُعرَف بـ
+(tenant_id + product_id) — فهرس فريد مركب موجود منذ p227، لكن بلا معرّف علني
+فريد عالمياً يمكن لزبون أو نظام خارجي الإشارة به لمنتج معين عند مستأجر معين.
+
+**الحل:** كل صف كتالوج تحمل الآن `listing_code` عاماً مختوماً بالمستأجر:
+‏MPR-NT1-00001 (منصة-واسع، عدّاد ذري في main_db._code_counters، الختم من
+short_id للمستأجر الناشر). يُسحب مرة واحدة عند أول نشر ويبقى ثابتاً عبر
+إعادة النشر (idempotent — إعادة النشر تحدّث الهامش/السعر فقط).
+
+**الملفات:**
+- services/code_generator.py: ‏`public_order_code` قبل معامل `stamp` صريحاً
+  (لمجموعات المنصة في main_db حيث المستأجر معروف من السياق) + ‏`short_id_to_stamp`
+  علنية
+- services/event_consumers.py (handle_product_published): سحب listing_code عند
+  أول upsert والاحتفاظ به لاحقاً
+- routes/marketplace_routes.py: ‏POST /marketplace/order يقبل `listing_code`
+  (المسار الأساسي) أو `product_id` (توافق مع الروابط القديمة) أو 400؛ صف
+  marketplace_orders يسجّل listing_code؛ الكتالوج العام يعرضه
+- main.py: فهرس فريد جزئي `marketplace_listing_code_unique` على listing_code
+  (يتسامح مع الصفوف القديمة بلا كود)
+
+**الاختبار (المستأجر التجريبي، تنظيف دقيق كامل):**
+- نشر منتج → صف الكتالوج listing_code=MPR-NT1-00001 ✓ short_id=NT-0001 ✓
+- إعادة نشر بهامش مختلف → نفس الكود، سعر محدّث (110→120) ✓
+- طلب عام بـ listing_code → order_code=MP-NT1-00001، مخزون 5→3، صف تسوية
+  المنصة يحمل listing_code ✓
+- طلب عام بـ product_id (توافق قديم) → MP-NT1-00002 ✓
+- طلب بلا معرّف → 400 «معرّف المنتج مطلوب» ✓
+- التنظيف: حذف الطلبين + صفوف التسوية + صف الكتالوج + الإدراج + المنتج +
+  العدادين — 0 بقايا، الكتالوج والتسويات فارغة كما كانت ✓
+
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p259/

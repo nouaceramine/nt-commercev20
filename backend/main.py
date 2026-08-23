@@ -657,6 +657,13 @@ async def startup_event():
                 [("tenant_id", 1), ("product_id", 1)],
                 unique=True, name="marketplace_catalog_unique",
             )
+            # p259: globally unique public listing code (tolerant of legacy
+            # rows without one)
+            await main_db.marketplace_catalog.create_index(
+                [("listing_code", 1)], unique=True,
+                partialFilterExpression={"listing_code": {"$gt": ""}},
+                name="marketplace_listing_code_unique",
+            )
         except Exception as wal_exc:
             logger.warning("wallets unique index: %s", wal_exc)
 

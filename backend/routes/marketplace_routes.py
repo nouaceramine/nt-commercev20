@@ -136,7 +136,8 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
 
     # ── p237: cross-tenant order placement (public, COD) ─────────────────
     class OrderIn(BaseModel):
-        product_id: str
+        product_id: str = ""
+        listing_code: str = ""  # p259: composite public identity (MPR-NTx-NNNNN)
         quantity: int = 1
         customer_name: str
         phone: str
@@ -158,10 +159,20 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
         if not name or not phone:
             raise HTTPException(status_code=400, detail="الاسم ورقم الهاتف مطلوبان")
 
-        row = await main_db.marketplace_catalog.find_one(
-            {"product_id": data.product_id, "active": True}, {"_id": 0})
+        # p259: accept the composite listing code (globally unique) or the
+        # legacy bare product_id (kept for older mall frontend links)
+        lc = (data.listing_code or "").strip().upper()
+        if lc:
+            row = await main_db.marketplace_catalog.find_one(
+                {"listing_code": lc, "active": True}, {"_id": 0})
+        elif (data.product_id or "").strip():
+            row = await main_db.marketplace_catalog.find_one(
+                {"product_id": data.product_id.strip(), "active": True}, {"_id": 0})
+        else:
+            raise HTTPException(status_code=400, detail="معرّف المنتج مطلوب")
         if not row:
             raise HTTPException(status_code=404, detail="المنتج غير متوفر في السوق")
+        data.product_id = row["product_id"]
         tenant_id = row["tenant_id"]
         unit_price = float(row.get("price") or 0)
         if unit_price <= 0:
@@ -240,6 +251,7 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
                 "tenant_name": row.get("tenant_name", ""),
                 "short_id": row.get("short_id", ""),
                 "product_id": data.product_id,
+                "listing_code": row.get("listing_code", ""),
                 "qty": qty,
                 "unit_price": unit_price,
                 "total": total,
