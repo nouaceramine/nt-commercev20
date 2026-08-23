@@ -259,6 +259,7 @@ class AgentUpdate(BaseModel):
 
 class AgentResponse(BaseModel):
     id: str
+    agent_code: str = ""  # p266/p269
     name: str
     email: str
     phone: str = ""

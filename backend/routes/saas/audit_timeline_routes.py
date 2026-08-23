@@ -183,6 +183,50 @@ async def audit_timeline(
                     },
                 })
 
+    # ── 4) Security events: password resets (p269) ──
+    if not types_filter or "password_reset" in types_filter:
+        q = {}
+        if admin_id:
+            q["admin_id"] = admin_id
+        if tenant_id:
+            q["target_id"] = tenant_id
+        rows = await main_db.saas_security_events.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+        for r in rows:
+            events.append({
+                "id": f"sec:{r.get('id')}",
+                "type": "password_reset",
+                "severity": "warning",
+                "timestamp": r.get("created_at"),
+                "admin_id": r.get("admin_id"),
+                "admin_email": r.get("admin_email"),
+                "tenant_id": r.get("target_id") if r.get("target_type") == "tenant" else None,
+                "tenant_name": r.get("target_name", ""),
+                "ip": r.get("ip"),
+                "summary": f"غيّر المشرف كلمة مرور {'المشترك' if r.get('target_type') == 'tenant' else 'الوكيل'} {r.get('target_name', '')}",
+                "details": {"target_type": r.get("target_type"), "target_id": r.get("target_id")},
+            })
+
+    # ── 5) Data-browser reads (p268/p269) ──
+    if not types_filter or "data_access" in types_filter:
+        q = {}
+        if tenant_id:
+            q["tenant_id"] = tenant_id
+        if admin_id:
+            q["admin_id"] = admin_id
+        rows = await main_db.saas_data_access_log.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+        for r in rows:
+            events.append({
+                "id": f"acc:{r.get('_id', r.get('created_at'))}",
+                "type": "data_access",
+                "severity": "info",
+                "timestamp": r.get("created_at"),
+                "admin_id": r.get("admin_id"),
+                "admin_email": r.get("admin_email"),
+                "tenant_id": r.get("tenant_id"),
+                "summary": f"اطّلع على {r.get('action', '')} للمشترك" + (f" — بحث: {r.get('query')}" if r.get("query") else ""),
+                "details": {"action": r.get("action"), "query": r.get("query")},
+            })
+
     # ── Enrich tenant_name on events that have tenant_id but no name yet ──
     missing_names = [e["tenant_id"] for e in events if e.get("tenant_id") and not e.get("tenant_name")]
     if missing_names:

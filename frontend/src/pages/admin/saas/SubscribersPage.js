@@ -35,7 +35,7 @@ import {
 } from '../../../components/ui/select';
 import {
   Users, Plus, Edit, Trash2, RefreshCw, Eye, EyeOff, Ban, Check,
-  ShoppingBag, Truck, Store, Wallet, Sliders, LogIn, Copy,
+  ShoppingBag, Truck, Store, Wallet, Sliders, LogIn, Copy, KeyRound,
   Banknote, CreditCard, Wifi, Server, UserCog, Search, AlertTriangle,
 } from 'lucide-react';
 import { formatShortDate } from '../../../utils/globalDateFormatter';
@@ -112,6 +112,9 @@ export default function SubscribersPage() {
   });
 
   // — Impersonate dialog
+  const [resetPwTenant, setResetPwTenant] = useState(null);
+  const [resetPwValue, setResetPwValue] = useState('');
+  const [resetPwBusy, setResetPwBusy] = useState(false);
   const [impersonateDialogOpen, setImpersonateDialogOpen] = useState(false);
   const [impersonateTenant, setImpersonateTenant] = useState(null);
   const [impersonateLoading, setImpersonateLoading] = useState(false);
@@ -281,6 +284,26 @@ export default function SubscribersPage() {
     } catch (error) {
       toast.error(errText(error) ||  'فشل الدخول لحساب المشترك');
       setImpersonateLoading(false);
+    }
+  };
+
+  // p269: reset tenant password (bcrypt is one-way — set new, never view)
+  const handleResetTenantPassword = async () => {
+    if (!resetPwTenant) return;
+    if (!resetPwValue || resetPwValue.length < 8) {
+      toast.error('كلمة المرور يجب أن تكون 8 أحرف على الأقل');
+      return;
+    }
+    setResetPwBusy(true);
+    try {
+      await apiClient.post(`/saas/tenants/${resetPwTenant.id}/reset-password`, { new_password: resetPwValue });
+      toast.success('تم تغيير كلمة مرور المشترك');
+      setResetPwTenant(null);
+      setResetPwValue('');
+    } catch (error) {
+      toast.error(errText(error) || 'فشل تغيير كلمة المرور');
+    } finally {
+      setResetPwBusy(false);
     }
   };
 
@@ -553,6 +576,9 @@ export default function SubscribersPage() {
                         <Button variant="ghost" size="sm" onClick={() => openImpersonateDialog(tenant)} title="انتحال (الدخول لحساب المشترك)" data-testid={`impersonate-btn-${tenant.id}`}>
                           <LogIn className="h-4 w-4 text-purple-500" />
                         </Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setResetPwTenant(tenant); setResetPwValue(''); }} title="تغيير كلمة المرور" data-testid={`resetpw-btn-${tenant.id}`}>
+                          <KeyRound className="h-4 w-4 text-orange-500" />
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => toggleTenantStatus(tenant.id)} title={tenant.is_active ? 'تعطيل' : 'تفعيل'}>
                           {tenant.is_active ? <Ban className="h-4 w-4 text-amber-500" /> : <Check className="h-4 w-4 text-green-500" />}
                         </Button>
@@ -769,7 +795,31 @@ export default function SubscribersPage() {
           </DialogContent>
         </Dialog>
 
-        {/* ── Wallet Charge Dialog ── */}
+                {/* ── p269: Reset Password Dialog ── */}
+        <Dialog open={!!resetPwTenant} onOpenChange={(o) => { if (!o) setResetPwTenant(null); }}>
+          <DialogContent className="max-w-sm" data-testid="tenant-reset-dialog">
+            <DialogHeader className="pb-2">
+              <DialogTitle className="text-lg">تغيير كلمة مرور المشترك</DialogTitle>
+              <DialogDescription>
+                {resetPwTenant?.name} — لا يمكن عرض كلمة المرور الحالية (مشفّرة بتجزئة أحادية الاتجاه)، لكن يمكنك تعيين كلمة جديدة فوراً.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-3">
+              <Label>كلمة المرور الجديدة</Label>
+              <Input type="text" value={resetPwValue} onChange={e => setResetPwValue(e.target.value)}
+                     placeholder="8 أحرف على الأقل" data-testid="tenant-reset-input" />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setResetPwTenant(null)}>إلغاء</Button>
+              <Button onClick={handleResetTenantPassword} disabled={resetPwBusy} data-testid="tenant-reset-save">
+                {resetPwBusy ? <RefreshCw className="h-4 w-4 animate-spin ml-2" /> : <KeyRound className="h-4 w-4 ml-2" />}
+                تغيير
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+{/* ── Wallet Charge Dialog ── */}
         <Dialog open={walletChargeDialogOpen} onOpenChange={setWalletChargeDialogOpen}>
           <DialogContent className="max-w-md" data-testid="wallet-charge-dialog">
             <DialogHeader>

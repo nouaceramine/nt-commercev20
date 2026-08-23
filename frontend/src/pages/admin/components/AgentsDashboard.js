@@ -44,7 +44,7 @@ import {
   Phone, Mail, Building, MapPin, Percent,
   ArrowUpRight, ArrowDownRight, RefreshCw,
   Eye, EyeOff, Filter, Download, Star,
-  AlertTriangle, CheckCircle, Clock, Target, Shield, UserCog
+  AlertTriangle, CheckCircle, Clock, Target, Shield, UserCog, LogIn, KeyRound
 } from 'lucide-react';
 import { AgentPermissionsDialog } from './AgentPermissionsDialog';
 import { AgentTenantsDialog } from './AgentTenantsDialog';
@@ -101,6 +101,10 @@ export const AgentsDashboard = () => {
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [transactionsDialogOpen, setTransactionsDialogOpen] = useState(false);
+  const [resetAgentOpen, setResetAgentOpen] = useState(false);
+  const [resetAgentPw, setResetAgentPw] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [impersonating, setImpersonating] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
@@ -273,6 +277,50 @@ export const AgentsDashboard = () => {
       fetchAgents();
     } catch (error) {
       toast.error(errText(error) ||  'حدث خطأ');
+    }
+  };
+
+  // p269: impersonate agent (same UX as tenant impersonation)
+  const handleImpersonateAgent = async (agent) => {
+    setImpersonating(true);
+    try {
+      const originalToken = localStorage.getItem('token');
+      const originalUser = localStorage.getItem('user');
+      const res = await apiClient.post(`/saas/impersonate-agent/${agent.id}`, {});
+      const data = res.data;
+      if (originalToken) localStorage.setItem('super_admin_token', originalToken);
+      if (originalUser) localStorage.setItem('super_admin_user', originalUser);
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.setItem('user_type', 'agent');
+      localStorage.setItem('is_impersonating', '1');
+      if (data.impersonation_session_id) {
+        localStorage.setItem('impersonation_session_id', data.impersonation_session_id);
+      }
+      window.location.href = data.redirect_to || '/agent/dashboard';
+    } catch (error) {
+      toast.error(errText(error) || 'فشل الدخول لحساب الوكيل');
+      setImpersonating(false);
+    }
+  };
+
+  // p269: reset agent password (viewing is impossible — bcrypt one-way)
+  const handleResetAgentPassword = async () => {
+    if (!selectedAgent) return;
+    if (!resetAgentPw || resetAgentPw.length < 8) {
+      toast.error('كلمة المرور يجب أن تكون 8 أحرف على الأقل');
+      return;
+    }
+    setResetBusy(true);
+    try {
+      await apiClient.post(`/saas/agents/${selectedAgent.id}/reset-password`, { new_password: resetAgentPw });
+      toast.success('تم تغيير كلمة مرور الوكيل');
+      setResetAgentOpen(false);
+      setResetAgentPw('');
+    } catch (error) {
+      toast.error(errText(error) || 'فشل تغيير كلمة المرور');
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -624,6 +672,12 @@ export const AgentsDashboard = () => {
                       <Button variant="ghost" size="sm" onClick={() => openTransactionsDialog(agent)} title="المعاملات">
                         <FileText className="h-4 w-4 text-purple-500" />
                       </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleImpersonateAgent(agent)} disabled={impersonating} title="الدخول لحساب الوكيل" data-testid={`agent-impersonate-${agent.id}`}>
+                        <LogIn className="h-4 w-4 text-purple-500" />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => { setSelectedAgent(agent); setResetAgentPw(''); setResetAgentOpen(true); }} title="تغيير كلمة المرور" data-testid={`agent-resetpw-${agent.id}`}>
+                        <KeyRound className="h-4 w-4 text-orange-500" />
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => openAgentDialog(agent)} title="تعديل">
                         <Edit className="h-4 w-4 text-amber-500" />
                       </Button>
@@ -834,6 +888,30 @@ export const AgentsDashboard = () => {
             <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>إغلاق</Button>
             <Button onClick={() => { setDetailsDialogOpen(false); openAgentDialog(selectedAgent); }}>
               <Edit className="h-4 w-4 mr-2" /> تعديل
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* p269: Reset agent password dialog */}
+      <Dialog open={resetAgentOpen} onOpenChange={setResetAgentOpen}>
+        <DialogContent className="max-w-sm" data-testid="agent-reset-dialog">
+          <DialogHeader>
+            <DialogTitle>تغيير كلمة مرور الوكيل</DialogTitle>
+            <DialogDescription>
+              {selectedAgent?.name} — لا يمكن عرض كلمة المرور الحالية (مشفّرة)، لكن يمكنك تعيين كلمة جديدة.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3">
+            <Label>كلمة المرور الجديدة</Label>
+            <Input type="text" value={resetAgentPw} onChange={e => setResetAgentPw(e.target.value)}
+                   placeholder="8 أحرف على الأقل" data-testid="agent-reset-input" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetAgentOpen(false)}>إلغاء</Button>
+            <Button onClick={handleResetAgentPassword} disabled={resetBusy} data-testid="agent-reset-save">
+              {resetBusy ? <RefreshCw className="h-4 w-4 animate-spin ml-2" /> : <KeyRound className="h-4 w-4 ml-2" />}
+              تغيير
             </Button>
           </DialogFooter>
         </DialogContent>

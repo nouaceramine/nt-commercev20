@@ -1312,6 +1312,7 @@ _AUTO_REG_MODULES = [
     'routes.saas.business_profiles_routes',  # p183: business activity profiles
     'routes.saas.id_audit_routes',  # p266: ID-system audit for super admin
     'routes.saas.data_browser_routes',  # p268: cross-tenant data browser (read-only)
+    'routes.saas.account_control_routes',  # p269: agent impersonation + password resets
     'routes.rental_routes',  # p185: rental module (cars & properties)
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
     'routes.serials_routes',  # p187: IMEI/serial tracking

@@ -4374,3 +4374,21 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - products: 7,415 منتجاً مع الأسعار ✓ | search «BV»: 10 مبيعات + 3 منتجات ✓
 - access-log سجّل القراءتين ببريد المشرف ✓
 - bundle main.d61d6335.js؛ العلامات db-* ✓ | لا كتابة إطلاقاً (لا يوجد أي POST/PUT في الوحدة).
+
+## p269 — انتحال الوكلاء + إعادة تعيين كلمات المرور + توسيع خط المراقبة (2026-08-23)
+
+### التغييرات
+- backend/routes/saas/account_control_routes.py (جديد):
+  - POST /saas/impersonate-agent/{id} — نفس تجربة انتحال المشتركين (token بصيغة agent + impersonated_by، جلسة مُدوَّنة في impersonation_logs مع target_type=agent + IP + UA).
+  - POST /saas/tenants/{id}/reset-password — يحدّث saas_tenants.password + مزامنة users.hashed_password في قاعدة المستأجر (نفس البريد).
+  - POST /saas/agents/{id}/reset-password.
+  - ملاحظة مبدئية: «عرض» كلمة المرور مستحيل تقنياً (bcrypt أحادي الاتجاه) — الواجهة تعرض «تعيين كلمة جديدة» فقط مع توضيح ذلك.
+- audit_timeline_routes.py: نوعان جديدان — password_reset (من saas_security_events) وdata_access (من سجل متصفح البيانات p268) → مراقبة موحدة لعمليات المشتركين والوكلاء.
+- AgentResponse يعرض agent_code (كان محذوفاً من الاستجابة رغم وجوده في القاعدة).
+- الواجهة: زر «دخول كوكيل» + زر «تغيير كلمة المرور» في جدول الوكلاء؛ زر «تغيير كلمة المرور» في جدول المشتركين؛ حوارات بنفس نمط التصميم.
+
+### الاختبارات
+- انتحال الوكيل: token + session صادران ✓ (يظهر في الخط الزمني).
+- دورة كاملة على المستأجر التجريبي NT-0013: تعيين كلمة مؤقتة → استعادة Demo@2026 → دخول موحد ناجح عبر /auth/unified-login ✓ (تحقق bcrypt مباشرة من القاعدة ✓).
+- الخط الزمني: by_type يضم password_reset + impersonation (وكيل) + data_access ✓.
+- bundle main.15c39ff9.js؛ العلامات agent-impersonate/agent-reset-dialog/resetpw-btn/tenant-reset-dialog ✓.
