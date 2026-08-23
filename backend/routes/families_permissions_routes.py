@@ -759,6 +759,13 @@ async def get_whatsapp_settings(user: dict = Depends(require_tenant)):
 async def update_whatsapp_settings(settings: WhatsAppSettings, user: dict = Depends(require_tenant)):
     """Update WhatsApp settings"""
     settings_data = settings.model_dump()
+    # p272: never overwrite the stored token with the "***" mask; encrypt at rest
+    if settings_data.get("access_token") == "***":
+        _ex = await db.whatsapp_settings.find_one({}, {"_id": 0, "access_token": 1})
+        settings_data["access_token"] = (_ex or {}).get("access_token")
+    elif settings_data.get("access_token"):
+        from services.crypto_fields import encrypt_field as _ef
+        settings_data["access_token"] = _ef(settings_data["access_token"])
     settings_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     settings_data["updated_by"] = user["id"]
 
@@ -778,6 +785,8 @@ async def send_whatsapp_message_v2(message: WhatsAppMessage, user: dict = Depend
 
     if not settings.get("access_token") or not settings.get("phone_number_id"):
         raise HTTPException(status_code=400, detail="إعدادات WhatsApp غير مكتملة")
+    from services.crypto_fields import decrypt_field as _df  # p272
+    settings["access_token"] = _df(settings["access_token"]) or ""
 
     # Format phone number (remove leading 0 and add country code)
     phone = message.phone.strip()

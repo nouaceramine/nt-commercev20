@@ -16,6 +16,7 @@ from services.email_service import (
     get_email_provider_async,
 )
 from .helpers import get_super_admin
+from services.crypto_fields import decrypt_field  # p272
 
 router = APIRouter(tags=["SaaS Email Settings"])
 
@@ -33,13 +34,14 @@ def _mask(value: str) -> str:
 async def get_email_settings(admin: dict = Depends(get_super_admin)):
     """Current effective email settings — keys MASKED. Includes the active provider."""
     doc = await main_db.platform_settings.find_one({"_id": "email_settings"}) or {}
+    from services.crypto_fields import decrypt_field as _dec  # p272
     return {
         "provider":             await get_email_provider_async(),
         "provider_preference":  doc.get("provider_preference") or "auto",
         "sender_email":         doc.get("sender_email") or "",
-        "resend_api_key_masked":   _mask(doc.get("resend_api_key", "")),
-        "sendgrid_api_key_masked": _mask(doc.get("sendgrid_api_key", "")),
-        "brevo_api_key_masked":    _mask(doc.get("brevo_api_key", "")),
+        "resend_api_key_masked":   _mask(_dec(doc.get("resend_api_key", ""))),
+        "sendgrid_api_key_masked": _mask(_dec(doc.get("sendgrid_api_key", ""))),
+        "brevo_api_key_masked":    _mask(_dec(doc.get("brevo_api_key", ""))),  # p272
         "has_resend_key":   bool(doc.get("resend_api_key")),
         "has_sendgrid_key": bool(doc.get("sendgrid_api_key")),
         "has_brevo_key":    bool(doc.get("brevo_api_key")),
@@ -66,6 +68,9 @@ async def update_email_settings(body: dict, admin: dict = Depends(get_super_admi
             cleaned = str(val).strip()
             if key == "provider_preference" and cleaned not in ("auto", "resend", "sendgrid", "brevo", "mock"):
                 raise HTTPException(status_code=400, detail=f"قيمة مزوِّد غير صالحة: {cleaned}")
+            if key.endswith("_api_key") and cleaned:
+                from services.crypto_fields import encrypt_field as _ef  # p272
+                cleaned = _ef(cleaned)
             updates[key] = cleaned
 
     merged = {**existing, **updates, "_id": "email_settings"}
@@ -117,7 +122,8 @@ async def test_email_settings(body: dict, admin: dict = Depends(get_super_admin)
 @router.get("/saas/alert-settings")
 async def get_alert_settings(admin: dict = Depends(get_super_admin)):
     doc = await main_db.platform_settings.find_one({"_id": "alert_settings"}) or {}
-    tok = doc.get("telegram_bot_token", "")
+    from services.crypto_fields import decrypt_field as _df  # p272
+    tok = _df(doc.get("telegram_bot_token", "")) or ""
     return {
         "has_token": bool(tok),
         "token_masked": _mask(tok),
@@ -134,7 +140,8 @@ async def update_alert_settings(body: dict, admin: dict = Depends(get_super_admi
         tok = str(body["telegram_bot_token"]).strip()
         if ":" not in tok:
             raise HTTPException(status_code=400, detail="صيغة توكن البوت غير صحيحة (يجب أن تحتوي :)")
-        updates["telegram_bot_token"] = tok
+        from services.crypto_fields import encrypt_field as _ef  # p272
+        updates["telegram_bot_token"] = _ef(tok)
     if "telegram_chat_id" in body:
         updates["telegram_chat_id"] = str(body["telegram_chat_id"]).strip()
     merged = {**existing, **updates, "_id": "alert_settings"}
@@ -145,7 +152,8 @@ async def update_alert_settings(body: dict, admin: dict = Depends(get_super_admi
 @router.post("/saas/alert-settings/test")
 async def test_alert_settings(admin: dict = Depends(get_super_admin)):
     doc = await main_db.platform_settings.find_one({"_id": "alert_settings"}) or {}
-    tok = doc.get("telegram_bot_token", "")
+    from services.crypto_fields import decrypt_field as _df  # p272
+    tok = _df(doc.get("telegram_bot_token", "")) or ""
     chat = doc.get("telegram_chat_id", "")
     if not tok or not chat:
         raise HTTPException(status_code=400, detail="احفظ توكن البوت ومعرّف المحادثة أولاً")
@@ -174,6 +182,6 @@ async def internal_alert_config(x_internal_key: str = Header("")):
         raise HTTPException(status_code=404, detail="Not found")
     doc = await main_db.platform_settings.find_one({"_id": "alert_settings"}) or {}
     return {
-        "token": doc.get("telegram_bot_token", ""),
+        "token": decrypt_field(doc.get("telegram_bot_token", "")) or "",  # p272
         "chat_id": doc.get("telegram_chat_id", ""),
     }

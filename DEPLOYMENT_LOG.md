@@ -4428,3 +4428,27 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - تنظيف دقيق: حذف تنبيه TEST-P271، بقايا 0 ✓.
 - عطل عابر: docker daemon توقف أثناء الاختبار (Start request repeated too quickly) — استُعيد بـ systemctl reset-failed + start، كل الحاويات عادت تلقائياً، health 200.
 - bundle main.3bde6f31.js منشور؛ العلامات autoheal-location/autoheal-record ✓؛ health 200 ✓.
+
+## p272 — تدقيق التشفير: تعميم AES-256-GCM على كل الأسرار المخزنة (2026-08-23)
+
+### التدقيق
+جرد كامل لمسارات تخزين الأسرار كشف أن التشفير (p226) كان يغطي bridge_secret وself_bridge_api_key فقط، بينما بقيت مخازن رئيسية بنص صريح:
+- ecom_integrations.credentials (مفاتيح الناقلين/القنوات: api_token, access_token, webhook_secret...)
+- store_settings: fb_access_token / tiktok_access_token / telegram_bot_token
+- whatsapp_settings.access_token (إشعارات الصيانة)
+- email_integration_settings.api_key + system_settings (SendGrid/Resend على مستوى المستأجر)
+- platform_settings: مفاتيح البريد (resend/sendgrid/brevo) + توكن بوت التنبيهات
+
+### التغييرات (15 ملف backend + 1 frontend)
+- crypto_fields.py: SENSITIVE_CRED_KEYS + encrypt_credentials()/decrypt_credentials() (تشفير/فك قواميس الاعتماد، idempotent، النص الصريح يمرّ للتوافق).
+- الكتابة: إنشاء/تحديث تكاملات ecom (مع دمج آمن: فك→دمج→إعادة تشفير)، إعدادات SendGrid/Resend للمستأجر، whatsapp_settings (مع حماية من استبدال التوكن بقناع «***»)، store_settings، مفاتيح بريد المنصة، توكن تنبيهات Telegram.
+- القراءة: courier_sync, yalidine_service, whatsapp_service, webhooks (HMAC), ad_webhooks (leadgen), sendgrid (_get_sendgrid_config + الإرسال + الإخفاء)، إرسال WhatsApp، get_store_settings (round-trip للواجهة)، test_telegram، telegram_daily، conversions_api (فك مركزي في send_event)، email_service (مفاتيح المنصة)، /internal/alert-config (alert.sh يستلم نصاً مفكوكاً).
+- security_routes.py: encryption-status يغطي الآن 10 مخازن (عدّ encrypted/plaintext لكل مخزن)؛ encrypt-secrets-now يرحّلها كلها (idempotent). إصلاح 3 إسقاطات mongo كانت ترجع _id فقط.
+- الواجهة: بطاقة «تشفير الأسرار المخزنة» في صفحة إعدادات البريد (عدّادات + زر ترحيل يظهر فقط عند وجود نص صريح).
+
+### الاختبارات
+- دورة كاملة على NT-0001: إنشاء تكامل yalidine بتوكن تجريبي → التخزين v1. (مشفر) ✓ والإخفاء يعرض آخر 4 من الأصل ✓ → تحديث جزئي (webhook_secret) نجا التوكن القديم ✓ → حذف، بقايا 0 ✓ (TEST-P272).
+- الترحيل الفعلي: 1 تكامل + 2 توكن متجر + 2 مفتاح بريد منصة → الحالة النهائية: encrypted=5, plaintext=0 عبر كل المخازن ✓.
+- فك أسرار المستأجر الحقيقي (fb_access_token + yalidine api_token) داخل الحاوية: decrypt_ok=True ✓ (التكاملات الحية لن تتعطل).
+- إخفاء مفاتيح المنصة في GET /saas/email-settings يعرض الآخر 4 الحقيقية (فك قبل الإخفاء) ✓.
+- bundle main.ac8c4647.js منشور؛ العلامات encryption-status-card/enc-migrate-btn ✓؛ health 200 ✓.

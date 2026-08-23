@@ -143,7 +143,8 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
             {"channel": "facebook", "is_active": True},
             {"_id": 0, "credentials": 1},
         )
-        token = ((intg or {}).get("credentials") or {}).get("access_token", "")
+        from services.crypto_fields import decrypt_field as _df  # p272
+        token = _df(((intg or {}).get("credentials") or {}).get("access_token", "")) or ""
         if not token:
             logger.warning("FB leadgen received but no facebook access_token saved for this tenant")
             return []

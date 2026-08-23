@@ -174,6 +174,11 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
     @router.get("/store/settings")
     async def get_store_settings(admin: dict = Depends(get_tenant_admin)):
         settings = await db.store_settings.find_one({}, {"_id": 0})
+        if settings:  # p272: decrypt secrets for the admin UI round-trip
+            from services.crypto_fields import decrypt_field as _df
+            for _k in ("fb_access_token", "tiktok_access_token", "telegram_bot_token"):
+                if settings.get(_k):
+                    settings[_k] = _df(settings[_k]) or ""
         return settings or StoreSettings().model_dump()
 
     @router.put("/store/settings")
@@ -189,7 +194,12 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             })
             if _clash:
                 raise HTTPException(status_code=400, detail=f"اسم المتجر '{_name}' مستخدم من متجر آخر — اختر اسماً مختلفاً")
-        await db.store_settings.update_one({}, {"$set": settings.model_dump()}, upsert=True)
+        _sd = settings.model_dump()
+        from services.crypto_fields import encrypt_field as _ef  # p272: secrets at rest
+        for _k in ("fb_access_token", "tiktok_access_token", "telegram_bot_token"):
+            if _sd.get(_k):
+                _sd[_k] = _ef(_sd[_k])
+        await db.store_settings.update_one({}, {"$set": _sd}, upsert=True)
         if settings.store_slug:
             # Ownership check must look up the SLUG, not the tenant —
             # the previous query-by-tenant made this guard a no-op and
@@ -355,7 +365,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         """p84: إرسال رسالة اختبار بالمفاتيح المرسلة أو المحفوظة."""
         data = data or {}
         st = await db.store_settings.find_one({}, {"_id": 0}) or {}
-        token = (data.get("bot_token") or st.get("telegram_bot_token") or "").strip()
+        from services.crypto_fields import decrypt_field as _dft  # p272
+        token = (data.get("bot_token") or _dft(st.get("telegram_bot_token") or "") or "").strip()
         chat = (data.get("chat_id") or st.get("telegram_chat_id") or "").strip()
         if not token or not chat:
             raise HTTPException(status_code=400, detail="أدخل توكن البوت ومعرف المحادثة أولاً")

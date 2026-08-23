@@ -14,7 +14,7 @@ import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Badge } from '../../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Mail, Save, Send, ArrowRight, AlertTriangle, ExternalLink, Globe, MessageSquare } from 'lucide-react';
+import { Mail, Save, Send, ArrowRight, AlertTriangle, ExternalLink, Globe, MessageSquare, ShieldCheck } from 'lucide-react';  // p272 +ShieldCheck
 import { toast } from 'sonner';
 
 const PROVIDER_LABELS = {
@@ -43,11 +43,14 @@ export default function EmailSettingsPage() {
   const [alertForm, setAlertForm] = useState({ telegram_bot_token: '', telegram_chat_id: '' });
   const [alertSaving, setAlertSaving] = useState(false);
   const [alertTesting, setAlertTesting] = useState(false);
+  const [encStatus, setEncStatus] = useState(null);      // p272: secrets encryption audit
+  const [encMigrating, setEncMigrating] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       const res = await apiClient.get('/saas/email-settings');
+      apiClient.get('/saas/security/encryption-status').then(r => setEncStatus(r.data)).catch(() => {});  // p272
       apiClient.get('/saas/alert-settings')
         .then(r => {
           setAlertInfo(r.data || {});
@@ -144,6 +147,33 @@ export default function EmailSettingsPage() {
     }
   };
 
+  const handleEncryptNow = async () => {  // p272
+    setEncMigrating(true);
+    try {
+      await apiClient.post('/saas/security/encrypt-secrets-now');
+      toast.success('تم تشفير الأسرار القديمة');
+      const st = await apiClient.get('/saas/security/encryption-status');
+      setEncStatus(st.data);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'فشل التشفير');
+    } finally {
+      setEncMigrating(false);
+    }
+  };
+
+  const encTotals = (() => {  // p272
+    if (!encStatus) return null;
+    const all = {
+      ...(encStatus.stores || {}),
+      ...(encStatus.platform || {}),
+      bridge_secrets: encStatus.bridge_secrets || {},
+      bridge_api_keys: encStatus.bridge_api_keys || {},
+    };
+    let enc = 0, plain = 0;
+    Object.values(all).forEach(s => { enc += s.encrypted || 0; plain += s.plaintext || 0; });
+    return { enc, plain };
+  })();
+
   const providerBadge = PROVIDER_LABELS[settings.provider] || PROVIDER_LABELS.mock;
 
   return (
@@ -209,6 +239,34 @@ export default function EmailSettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* ── p272: secrets encryption status ────────────────────────────── */}
+        {encStatus && encTotals && (
+          <Card data-testid="encryption-status-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="w-4 h-4" /> تشفير الأسرار المخزنة</CardTitle>
+              <CardDescription>تُخزَّن كل المفاتيح والتوكنات مشفّرة بـ {encStatus.algorithm} وتُفكّ تلقائياً لحظة الاستعمال فقط.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm">أسرار مشفّرة:</span>
+                <Badge className="bg-emerald-100 text-emerald-800" data-testid="enc-total-encrypted">{encTotals.enc}</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">أسرار قديمة غير مشفّرة:</span>
+                <Badge className={encTotals.plain > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'} data-testid="enc-total-plaintext">{encTotals.plain}</Badge>
+              </div>
+              {encTotals.plain > 0 && (
+                <Button size="sm" variant="outline" onClick={handleEncryptNow} disabled={encMigrating} data-testid="enc-migrate-btn">
+                  {encMigrating ? 'جارٍ التشفير…' : 'تشفير الأسرار القديمة الآن'}
+                </Button>
+              )}
+              {encTotals.plain === 0 && (
+                <div className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-2" data-testid="enc-all-secure">✅ كل الأسرار المخزنة مشفّرة.</div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Provider picker + keys ─────────────────────────────────────── */}
         <Card>

@@ -34,7 +34,8 @@ class YalidineAPIError(Exception):
 def _extract_creds(integration: Optional[dict]) -> tuple[str, str]:
     if not integration:
         raise YalidineCredentialsMissing("no integration row")
-    creds = integration.get("credentials") or {}
+    from services.crypto_fields import decrypt_credentials as _dc  # p272
+    creds = _dc(integration.get("credentials") or {})
     api_id = (creds.get("api_id") or "").strip()
     api_token = (creds.get("api_token") or "").strip()
     if not api_id or not api_token:

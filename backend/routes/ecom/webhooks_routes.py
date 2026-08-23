@@ -54,7 +54,8 @@ async def shopify_order_webhook(
         raise HTTPException(status_code=404, detail="Shopify integration not found")
 
     raw_body = await request.body()
-    webhook_secret = (integration.get("credentials") or {}).get("webhook_secret", "")
+    from services.crypto_fields import decrypt_field as _df  # p272
+    webhook_secret = _df((integration.get("credentials") or {}).get("webhook_secret", "")) or ""
     if not webhook_secret:
         # Tenant must set a webhook_secret in credentials to enable webhooks.
         raise HTTPException(status_code=400, detail="webhook_secret not configured for this integration")
@@ -105,7 +106,8 @@ async def shopify_product_webhook(
     integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "shopify"})
     if not integration:
         raise HTTPException(status_code=404, detail="Shopify integration not found")
-    secret = (integration.get("credentials") or {}).get("webhook_secret", "")
+    from services.crypto_fields import decrypt_field as _df2  # p272
+    secret = _df2((integration.get("credentials") or {}).get("webhook_secret", "")) or ""
     raw_body = await request.body()
     if not verify_shopify_hmac(raw_body, x_shopify_hmac_sha256 or "", secret):
         raise HTTPException(status_code=401, detail="HMAC verification failed")

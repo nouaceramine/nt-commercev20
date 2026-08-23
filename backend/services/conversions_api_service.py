@@ -48,6 +48,9 @@ class ConversionsAPIService:
         fb_access_token = (px.get("fb_access_token") or "").strip() or self.fb_access_token
         tiktok_pixel_id = (px.get("tiktok_pixel_id") or "").strip() or self.tiktok_pixel_id
         tiktok_access_token = (px.get("tiktok_access_token") or "").strip() or self.tiktok_access_token
+        from services.crypto_fields import decrypt_field as _df  # p272
+        fb_access_token = _df(fb_access_token) or ""
+        tiktok_access_token = _df(tiktok_access_token) or ""
 
         # Facebook CAPI
         if fb_pixel_id and fb_access_token:

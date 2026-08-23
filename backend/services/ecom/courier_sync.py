@@ -77,6 +77,8 @@ class CourierNotConfigured(Exception):
 async def fetch_courier_status(courier: str, integration: dict, tracking: str) -> str:
     """-> raw status string from the courier. Mock mode short-circuits HTTP."""
     creds = (integration or {}).get("credentials") or {}
+    from services.crypto_fields import decrypt_credentials as _dc  # p272
+    creds = _dc(creds)
     if creds.get("mock_status"):
         return str(creds["mock_status"])
 
@@ -131,6 +133,8 @@ async def sync_courier_orders(db, courier: str, user: dict) -> dict:
     if not integration:
         raise CourierNotConfigured(f"تكامل {meta['label_ar']} غير موجود أو معطّل")
     creds = integration.get("credentials") or {}
+    from services.crypto_fields import decrypt_credentials as _dc  # p272
+    creds = _dc(creds)
     if not creds.get("mock_status") and meta["adapter"] == "generic_http" \
             and not (creds.get("base_url") and (creds.get("api_token") or creds.get("api_key"))):
         raise CourierNotConfigured(

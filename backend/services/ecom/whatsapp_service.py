@@ -48,7 +48,8 @@ def parse_incoming_message(payload: dict) -> Optional[dict]:
 
 async def send_text_message(integration: dict, to_phone: str, body: str) -> bool:
     """Send a WhatsApp text message via Cloud API. Returns True on success."""
-    creds = integration.get("credentials") or {}
+    from services.crypto_fields import decrypt_credentials as _dc  # p272
+    creds = _dc(integration.get("credentials") or {})
     phone_id = (creds.get("phone_number_id") or "").strip()
     token = (creds.get("access_token") or "").strip()
     if not phone_id or not token:

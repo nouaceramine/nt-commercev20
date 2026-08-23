@@ -16,6 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from config.database import db
 from utils.auth import require_tenant
 from .constants import CHANNELS, CHANNEL_KEYS, require_ecom_feature
+from services.crypto_fields import (
+    encrypt_credentials as _encrypt_creds,
+    decrypt_credentials as _decrypt_creds,
+    decrypt_field as _decrypt_field,
+)  # p272
 
 router = APIRouter(tags=["E-Commerce Integrations"])
 
@@ -27,7 +32,10 @@ def _redact(integration: dict) -> dict:
         return integration
     creds = integration.get("credentials") or {}
     integration["credentials_keys"] = list(creds.keys())
-    integration["credentials"] = {k: ("••••" + str(v)[-4:] if v else "") for k, v in creds.items()}
+    integration["credentials"] = {  # p272: decrypt before masking (at-rest encrypted)
+        k: ("••••" + str(_decrypt_field(v) or "")[-4:] if v else "")
+        for k, v in creds.items()
+    }
     return integration
 
 
@@ -72,6 +80,7 @@ async def create_integration(body: dict, user: dict = Depends(require_tenant)):
 
     # If credentials are populated, mark mode='live' so the UI shows the real status.
     has_real_creds = any(bool(str(v).strip()) for v in credentials.values())
+    credentials = _encrypt_creds(credentials)  # p272: secrets encrypted at rest
 
     integration_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -117,8 +126,8 @@ async def update_integration(integration_id: str, body: dict, user: dict = Depen
             raise HTTPException(status_code=400, detail="سعر الإرجاع يجب أن يكون رقماً")
     if "credentials" in body and isinstance(body["credentials"], dict):
         # Merge — clients can send {api_key: 'new'} without resending all keys.
-        merged = {**(existing.get("credentials") or {}), **body["credentials"]}
-        updates["credentials"] = merged
+        merged = {**_decrypt_creds(existing.get("credentials") or {}), **body["credentials"]}  # p272
+        updates["credentials"] = _encrypt_creds(merged)  # p272
 
     await db.ecom_integrations.update_one({"id": integration_id}, {"$set": updates})
     refreshed = await db.ecom_integrations.find_one({"id": integration_id}, {"_id": 0})

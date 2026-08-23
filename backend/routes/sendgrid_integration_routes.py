@@ -46,6 +46,9 @@ def create_sendgrid_integration_routes(db, get_current_user, get_tenant_admin, r
                 "from_name": "NT Commerce",
                 "enabled": bool(api_key),
             }
+        if config.get("api_key"):
+            from services.crypto_fields import decrypt_field as _df  # p272
+            config["api_key"] = _df(config["api_key"]) or ""
         return config
 
     async def _send_email(config, to_emails, subject, html_content) -> dict:
@@ -92,7 +95,8 @@ def create_sendgrid_integration_routes(db, get_current_user, get_tenant_admin, r
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         if settings.api_key:
-            update["api_key"] = settings.api_key
+            from services.crypto_fields import encrypt_field as _ef  # p272
+            update["api_key"] = _ef(settings.api_key)
         await db.email_integration_settings.update_one(
             {"tenant_id": tenant_id}, {"$set": update}, upsert=True
         )

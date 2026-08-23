@@ -81,7 +81,8 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         if not settings or not settings.get("api_key"):
             raise HTTPException(status_code=400, detail="يرجى إعداد مفتاح SendGrid أولاً")
         try:
-            sg = SendGridAPIClient(settings["api_key"])
+            from services.crypto_fields import decrypt_field as _df2  # p272
+            sg = SendGridAPIClient(_df2(settings["api_key"]))
             from_email = Email(settings.get("sender_email", "noreply@ntcommerce.com"), settings.get("sender_name", "NT Commerce"))
             to_email_obj = To(to_email)
             content = Content("text/html", html_content)
@@ -119,7 +120,8 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         if not settings:
             return SendGridSettings().model_dump()
         if settings.get("api_key"):
-            key = settings["api_key"]
+            from services.crypto_fields import decrypt_field as _df  # p272
+            key = _df(settings["api_key"]) or ""
             settings["api_key"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "***configured***"
         return settings
 
@@ -132,6 +134,9 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         if settings.api_key and ("..." in settings.api_key or settings.api_key == "***configured***"):
             if existing and existing.get("api_key"):
                 settings_dict["api_key"] = existing["api_key"]
+        if settings_dict.get("api_key"):
+            from services.crypto_fields import encrypt_field as _ef  # p272
+            settings_dict["api_key"] = _ef(settings_dict["api_key"])
         await db.system_settings.update_one(
             {"type": "sendgrid_settings"},
             {"$set": {**settings_dict, "type": "sendgrid_settings", "updated_at": datetime.now(timezone.utc).isoformat()}},
@@ -236,7 +241,8 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         if not settings:
             return EmailSettings().model_dump()
         if settings.get("resend_api_key"):
-            key = settings["resend_api_key"]
+            from services.crypto_fields import decrypt_field as _dfr  # p272
+            key = _dfr(settings["resend_api_key"]) or ""
             settings["resend_api_key"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "***configured***"
         return settings
 
@@ -249,9 +255,13 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         if settings.resend_api_key and ("..." in settings.resend_api_key or settings.resend_api_key == "***configured***"):
             if existing and existing.get("resend_api_key"):
                 settings_dict["resend_api_key"] = existing["resend_api_key"]
+        _db_dict = dict(settings_dict)  # p272: encrypt at rest, keep env var plaintext
+        if _db_dict.get("resend_api_key") and "..." not in _db_dict["resend_api_key"]:
+            from services.crypto_fields import encrypt_field as _ef2
+            _db_dict["resend_api_key"] = _ef2(_db_dict["resend_api_key"])
         await db.system_settings.update_one(
             {"type": "email_settings"},
-            {"$set": {**settings_dict, "type": "email_settings", "updated_at": datetime.now(timezone.utc).isoformat()}},
+            {"$set": {**_db_dict, "type": "email_settings", "updated_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True
         )
         if settings_dict.get("resend_api_key") and "..." not in settings_dict["resend_api_key"]:
@@ -269,7 +279,8 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         settings = await db.system_settings.find_one({"type": "email_settings"})
         if not settings or not settings.get("resend_api_key"):
             raise HTTPException(status_code=400, detail="يرجى إدخال مفتاح API أولاً")
-        resend.api_key = settings.get("resend_api_key")
+        from services.crypto_fields import decrypt_field as _df3  # p272
+        resend.api_key = _df3(settings.get("resend_api_key"))
         user_record = await db.users.find_one({"id": user["id"]})
         if not user_record or not user_record.get("email"):
             raise HTTPException(status_code=400, detail="لم يتم العثور على بريدك الإلكتروني")

@@ -76,10 +76,11 @@ class EmailService:
     async def _resolved_config(self) -> dict:
         """Merge env vars with optional DB overrides. DB values win."""
         db_settings = await _load_db_settings()
+        from services.crypto_fields import decrypt_field as _dec  # p272
         return {
-            "resend_key":   (db_settings.get("resend_api_key")   or self._env_resend_key   or "").strip(),
-            "sendgrid_key": (db_settings.get("sendgrid_api_key") or self._env_sendgrid_key or "").strip(),
-            "brevo_key":    (db_settings.get("brevo_api_key")    or self._env_brevo_key    or "").strip(),
+            "resend_key":   (_dec(db_settings.get("resend_api_key"))   or self._env_resend_key   or "").strip(),
+            "sendgrid_key": (_dec(db_settings.get("sendgrid_api_key")) or self._env_sendgrid_key or "").strip(),
+            "brevo_key":    (_dec(db_settings.get("brevo_api_key"))    or self._env_brevo_key    or "").strip(),  # p272
             "sender":       (db_settings.get("sender_email")     or self._env_sender       or "onboarding@resend.dev").strip(),
             "preference":   (db_settings.get("provider_preference") or "auto").strip().lower(),
         }

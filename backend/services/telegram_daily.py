@@ -116,7 +116,8 @@ async def _daily_cycle(main_db, get_tenant_db) -> None:
             st = await tdb.store_settings.find_one({}, {"_id": 0})
             if not st or not st.get("telegram_daily_enabled"):
                 continue
-            token = (st.get("telegram_bot_token") or "").strip()
+            from services.crypto_fields import decrypt_field as _df  # p272
+            token = (_df(st.get("telegram_bot_token") or "") or "").strip()
             chat = (st.get("telegram_chat_id") or "").strip()
             if not token or not chat:
                 continue
@@ -156,7 +157,8 @@ async def notify_new_order(db, order: dict) -> None:
             {}, {"_id": 0, "telegram_bot_token": 1, "telegram_chat_id": 1, "telegram_notify_new_order": 1})
         if not st or not st.get("telegram_notify_new_order"):
             return
-        token = (st.get("telegram_bot_token") or "").strip()
+        from services.crypto_fields import decrypt_field as _df  # p272
+        token = (_df(st.get("telegram_bot_token") or "") or "").strip()
         chat = (st.get("telegram_chat_id") or "").strip()
         if not token or not chat:
             return

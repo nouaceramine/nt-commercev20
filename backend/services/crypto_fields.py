@@ -85,3 +85,28 @@ def decrypt_field(value):
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     raw = base64.urlsafe_b64decode(value[len(_PREFIX):].encode())
     return AESGCM(_key).decrypt(raw[:12], raw[12:], None).decode()
+
+
+
+# ── p272: credential-dict helpers (ecom integrations, courier keys, etc.) ────
+SENSITIVE_CRED_KEYS = frozenset({
+    "api_key", "api_token", "api_secret", "access_token", "refresh_token",
+    "app_secret", "client_secret", "consumer_key", "consumer_secret",
+    "webhook_secret", "bot_token", "auth_token", "private_key", "token",
+})
+
+
+def encrypt_credentials(creds):
+    """Encrypt values of sensitive keys in a credentials dict (idempotent)."""
+    if not isinstance(creds, dict):
+        return creds
+    return {k: (encrypt_field(v) if k in SENSITIVE_CRED_KEYS and isinstance(v, str) else v)
+            for k, v in creds.items()}
+
+
+def decrypt_credentials(creds):
+    """Return a copy with sensitive values decrypted (plaintext passes through)."""
+    if not isinstance(creds, dict):
+        return creds
+    return {k: (decrypt_field(v) if k in SENSITIVE_CRED_KEYS and isinstance(v, str) else v)
+            for k, v in creds.items()}
