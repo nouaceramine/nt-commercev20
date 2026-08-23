@@ -36,9 +36,10 @@ from .constants import (
 router = APIRouter(tags=["E-Commerce Orders"])
 
 
-def _generate_order_code() -> str:
-    """Short uppercase code: ECO-XXXXXXXX (8 hex chars)."""
-    return f"ECO-{uuid.uuid4().hex[:8].upper()}"
+async def _generate_order_code() -> str:
+    """p258: tenant-stamped code ECO-NTx-XXXXXXXX (legacy ECO-XXXXXXXX on platform)."""
+    from services.code_generator import public_hex_code
+    return await public_hex_code(db, "ECO")
 
 
 
@@ -324,7 +325,7 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
     order_id = str(uuid.uuid4())
     doc = {
         "id": order_id,
-        "order_code": _generate_order_code(),
+        "order_code": await _generate_order_code(),
         "channel": channel,
         "external_id": (body.get("external_id") or "").strip(),
         "integration_id": body.get("integration_id"),

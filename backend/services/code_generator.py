@@ -110,3 +110,78 @@ async def generate_session_code(db) -> str:
 async def generate_repair_code(db) -> str:
     """Generate repair ticket code: RP00001/26"""
     return await next_code(db, "repair_tickets", "RP", 5, True)
+
+
+# ── p258: tenant-stamped public codes ─────────────────────────────────────
+# Public codes (webstore / marketplace / ecom intake channels) carry the
+# tenant stamp derived from the platform short_id:  NT-0004 -> "NT4".
+# e.g. WEB-NT4-000123, MP-NT4-00002, ECO-NT4-A1B2C3D4.
+# The stamp makes every public code globally unique across tenants and lets
+# public tracking resolve the owning tenant in O(1) instead of scanning.
+import re as _re
+import uuid as _uuid
+
+_stamp_cache: dict = {}
+
+
+def _short_id_to_stamp(short_id: str) -> str:
+    m = _re.match(r"^NT-?(\d+)$", (short_id or "").strip().upper())
+    return f"NT{int(m.group(1))}" if m else ""
+
+
+def stamp_to_short_id(stamp: str) -> str:
+    """Reverse of the stamp: 'NT4' -> 'NT-0004'."""
+    m = _re.match(r"^NT(\d+)$", (stamp or "").strip().upper())
+    return f"NT-{int(m.group(1)):04d}" if m else ""
+
+
+async def tenant_stamp(tenant_id: str) -> str:
+    """Platform stamp for a tenant id, cached (short_id never changes)."""
+    if not tenant_id:
+        return ""
+    if tenant_id in _stamp_cache:
+        return _stamp_cache[tenant_id]
+    from config.database import main_db
+    t = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "short_id": 1})
+    stamp = _short_id_to_stamp((t or {}).get("short_id") or "")
+    if stamp:
+        _stamp_cache[tenant_id] = stamp
+    return stamp
+
+
+async def db_stamp(db) -> str:
+    """Stamp of the tenant owning this DB handle ('' for platform/unknown)."""
+    name = getattr(db, "name", "") or ""
+    if name.startswith("tenant_"):
+        return await tenant_stamp(name[len("tenant_"):].replace("_", "-"))
+    return ""
+
+
+async def public_order_code(db, collection: str, prefix: str, digits: int = 6,
+                            field: str = "order_code") -> str:
+    """Tenant-stamped atomic public code: PREFIX-NTx-000123.
+
+    The counter seeds from legacy unstamped codes (WEB000001, MP00001) via
+    the same _legacy_max scan, so the numeric sequence continues without
+    reuse. Unknown/platform tenants fall back to the legacy unstamped format.
+    """
+    stamp = await db_stamp(db)
+    key = f"{collection}:{field}:{prefix}:ever"
+    counters = db["_code_counters"]
+    if not await counters.find_one({"_id": key}):
+        maxnum = await _legacy_max(db, collection, prefix, "", field)
+        try:
+            await counters.insert_one({"_id": key, "seq": maxnum})
+        except DuplicateKeyError:
+            pass  # a concurrent request initialised it first — fine
+    doc = await counters.find_one_and_update(
+        {"_id": key}, {"$inc": {"seq": 1}}, return_document=ReturnDocument.AFTER)
+    num = str(int(doc["seq"])).zfill(digits)
+    return f"{prefix}-{stamp}-{num}" if stamp else f"{prefix}{num}"
+
+
+async def public_hex_code(db, prefix: str) -> str:
+    """Tenant-stamped random public code: PREFIX-NTx-XXXXXXXX (8 hex chars)."""
+    stamp = await db_stamp(db)
+    hx = _uuid.uuid4().hex[:8].upper()
+    return f"{prefix}-{stamp}-{hx}" if stamp else f"{prefix}-{hx}"

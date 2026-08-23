@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from config.database import db, main_db, get_tenant_db
+from services.code_generator import public_hex_code
 from utils.auth import require_tenant
 from routes.ecom.constants import require_ecom_feature
 
@@ -190,7 +191,7 @@ def create_social_inbox_routes() -> dict:
         order_id = str(uuid.uuid4())
         doc = {
             "id": order_id,
-            "order_code": f"SOC-{uuid.uuid4().hex[:8].upper()}",
+            "order_code": await public_hex_code(db, "SOC"),  # p258: tenant-stamped
             "channel": conv["channel"],
             "external_id": "",
             "integration_id": conv.get("source_id"),

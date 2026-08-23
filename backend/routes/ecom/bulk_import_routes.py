@@ -36,6 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 
 from config.database import db
+from services.code_generator import public_hex_code
 from utils.auth import require_tenant
 from routes.ecom.constants import require_ecom_feature
 from services.application.ecom_order_service import normalize_phone
@@ -168,7 +169,7 @@ async def bulk_upload(file: UploadFile = File(...), user: dict = Depends(require
         ts = datetime.now(timezone.utc).isoformat()
         doc = {
             "id": order_id,
-            "order_code": f"XL-{uuid.uuid4().hex[:8].upper()}",
+            "order_code": await public_hex_code(db, "XL"),  # p258: tenant-stamped
             "channel": "excel",
             "external_id": "",
             "integration_id": None,

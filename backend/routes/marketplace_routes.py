@@ -195,13 +195,9 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
 
         order_id = str(uuid.uuid4())
         try:
-            # MP-prefixed order code (ecom_orders has a unique order_code index)
-            order_code = ""
-            for _attempt in range(3):
-                n = await tdb.ecom_orders.count_documents({"order_code": {"$regex": "^MP"}})
-                order_code = f"MP{n + 1:05d}"
-                if not await tdb.ecom_orders.find_one({"order_code": order_code}, {"_id": 1}):
-                    break
+            # p258: atomic tenant-stamped code (ecom_orders has a unique order_code index)
+            from services.code_generator import public_order_code
+            order_code = await public_order_code(tdb, "ecom_orders", "MP", 5)
             total = round(unit_price * qty, 2)
             order_doc = {
                 "id": order_id,

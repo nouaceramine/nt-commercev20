@@ -59,6 +59,23 @@ def create_public_track_routes(main_db) -> dict:
 
         order, tenant = None, None
 
+        # p258 fast path: stamped codes (PREFIX-NTx-...) name their tenant —
+        # resolve it in O(1) instead of scanning every tenant database.
+        m = re.match(r"^[A-Za-z]{1,4}-NT(\d+)-", code)
+        if m:
+            short_id = f"NT-{int(m.group(1)):04d}"
+            t = await main_db.saas_tenants.find_one(
+                {"short_id": short_id, "is_permanent_test": {"$ne": True}},
+                {"_id": 0, "id": 1, "name": 1})
+            if t:
+                try:
+                    order = await get_tenant_db(t["id"]).ecom_orders.find_one(
+                        {"order_code": code}, {"_id": 0})
+                    if order:
+                        tenant = t
+                except Exception:  # noqa: BLE001 — fall through to legacy scan
+                    order = None
+
         # fast path: marketplace orders carry their tenant id in main_db
         mo = await main_db.marketplace_orders.find_one(
             {"order_code": code}, {"_id": 0, "tenant_id": 1})

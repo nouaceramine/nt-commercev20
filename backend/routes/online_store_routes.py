@@ -14,6 +14,7 @@ from services.whatsapp_service import whatsapp_service
 from services.coupon_service import coupon_service
 from services.loyalty_service import loyalty_service
 from services.shipping_tracker import shipping_tracker
+from services.code_generator import public_order_code
 from fastapi.responses import Response as _ImgResponse
 import base64 as _b64
 import io as _io
@@ -842,8 +843,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             if vidx is not None and product.get("has_variants"):
                 await tenant_db_inst.products.update_one({"id": pid}, {"$inc": {f"variants.{vidx}.quantity": -qty}})
             _claimed.append((pid, qty, vidx))
-        count = await tenant_db_inst.store_orders.count_documents({}) + 1
-        order_number = f"WEB{count:06d}"
+        # p258: atomic tenant-stamped code (race-proof; sequence continues from legacy max)
+        order_number = await public_order_code(
+            tenant_db_inst, "store_orders", "WEB", 6, field="order_number")
         order_data = {
             "id": str(uuid.uuid4()),
             "order_number": order_number,
