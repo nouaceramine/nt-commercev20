@@ -4244,3 +4244,33 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
   global-search-input ✓
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p260/
+
+---
+
+## 2026-08-23 — p261: باركود + QR على الفواتير والوصولات
+
+**الهدف:** كل كود نظام يُطبع على مستنداته قابلاً للمسح — QR لكاميرا الهاتف
+وCode128 خطي لقارئات الباركود في نقطة البيع.
+
+**المكونات:**
+- backend/routes/qr_routes.py (جديد، مسجَّل في _AUTO_REG_MODULES):
+  ‏GET /api/qr.png?text=...&size=140 — توليد QR PNG عام (qrcode==8.2)، بلا
+  مصادقة (يرسّم نصاً فقط، لا يكشف بيانات)، حد 300 حرف، حجم 60–400px،
+  Cache-Control يوم كامل
+- frontend/src/lib/docCodes.js (جديد): ‏`barcodeDataURL` (Code128 عبر JsBarcode
+  على canvas مخفي — يعمل دون اتصال)، `qrImgUrl` (نفس الأصل /api/qr.png)،
+  `docCodesHtml` (كتلة موحّدة QR+باركود لكل القوالب)
+- الوصولات الحرارية (ReceiptService): كتلة QR+باركود لكود الفاتورة قبل التذييل
+- المستندات العامة (printDocuments — بيع/شراء/مصروف/زبون/منتج، 58/80مم وA4):
+  ‏showCodes افتراضياً true (قابلة للإيقاف بـ options.showCodes=false)
+- فاتورة طلب التجارة الإلكترونية (ecomOrderInvoice): QR يفتح صفحة التتبع
+  العامة ‏{origin}/track/{order_code} على هاتف الزبون + باركود الكود
+
+**الاختبار:**
+- ‏GET /api/qr.png?text=https://nt-commerce.net/track/WEB-NT4-000003 → PNG
+  ‏140×140 ✓ نص فارغ → 400 ✓ health 200 بعد الإقلاع ✓
+- esbuild سليم للملفات الأربعة ✓
+- build → deploy: main.1e5ed5cd.js منشور ويحمل qr.png?text= و doc-codes ✓
+- لم تُلمس أي بيانات (تغيير كود بحت)
+
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p261/

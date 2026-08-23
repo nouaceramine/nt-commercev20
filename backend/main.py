@@ -1252,6 +1252,7 @@ _AUTO_REG_MODULES = [
     'routes.task_chat_routes',
     'routes.utility_routes',
     'routes.search_routes',  # p260: factory create_search_routes(db, get_current_user) — was dead code (two silent 'import router' failures)
+    'routes.qr_routes',  # p261: public QR PNG for printed documents
     'routes.warehouse_core_routes',
     'routes.whatsapp_integration_routes',
     'routes.yalidine_integration_routes',

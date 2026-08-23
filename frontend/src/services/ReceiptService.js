@@ -4,6 +4,8 @@
  * Addresses: Feature Envy, Long Method, Primitive Obsession
  */
 
+import { docCodesHtml } from '../lib/docCodes';
+
 export class ReceiptService {
   constructor(settings, language, isRTL, cashierName) {
     this.settings = settings;
@@ -46,6 +48,7 @@ ${sale.delivery?.fee > 0 ? `<div class="row"><span>${this.language === 'ar' ? '�
 <div class="double-line"></div>
 <div class="row total"><span>${this.language === 'ar' ? 'الإجمالي:' : 'TOTAL:'}</span><span>${this.formatCurrency(sale.total)} ${this.language === 'ar' ? 'دج' : 'DA'}</span></div>
 ${sale.paid_amount ? `<div class="row" style="margin-top:4px"><span>${this.language === 'ar' ? 'المدفوع:' : 'Paye:'}</span><span>${this.formatCurrency(sale.paid_amount)}</span></div>${sale.total - sale.paid_amount > 0 ? `<div class="row"><span>${this.language === 'ar' ? 'الباقي:' : 'Reste:'}</span><span>${this.formatCurrency(sale.total - sale.paid_amount)}</span></div>` : ''}` : ''}
+${docCodesHtml(sale.invoice_number || sale.code || '', { qrSize: 80, barcodeHeight: 30, label: this.language === 'ar' ? 'امسح الرمز لعرض بيانات الفاتورة' : 'Scannez pour voir la facture' })}
 <div class="footer center"><div class="line"></div><div style="margin-top:6px">${this.language === 'ar' ? 'شكراً لزيارتكم' : 'Merci de votre visite'}</div><div class="cashier">${this.language === 'ar' ? 'البائع:' : 'Caissier:'} ${this.cashierName}</div></div>
 </body></html>`;
   }

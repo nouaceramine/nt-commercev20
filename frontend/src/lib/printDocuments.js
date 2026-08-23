@@ -4,6 +4,7 @@
  * (الزبائن، المنتجات، المشتريات، المبيعات، المصاريف) بأحجام 58/80مم وA4.
  */
 import { formatCurrency, formatShortDate, formatDateTime } from '../utils/globalDateFormatter';
+import { docCodesHtml } from './docCodes';
 
 export const PRINT_DOC_TYPES = ['customer', 'product', 'purchase', 'sale', 'expense'];
 
@@ -248,6 +249,7 @@ export function buildPrintHTML({ docType, record, options = {}, branding = {}, l
   const showHeader = opt.showHeader !== false;
   const showFooter = opt.showFooter !== false;
   const showColumns = opt.showColumns !== false;
+  const showCodes = opt.showCodes !== false;  // p261: QR + Code128 of the doc code
 
   const model = getDocModel(docType, record, language);
   const storeName = esc(branding.name || opt.storeName || 'NT Commerce');
@@ -298,6 +300,7 @@ ${headerHtml}
 <div class="meta">${renderMetaRows(model.meta)}</div>
 ${itemsHtml}
 <div class="totals">${renderTotals(model.totals)}</div>
+${showCodes ? docCodesHtml(model.refNumber, { qrSize: p.isA4 ? 110 : 90, barcodeHeight: p.isA4 ? 40 : 34 }) : ''}
 ${showFooter ? `<div class="footer"><div class="line"></div>${footerText}</div>` : ''}
 </body></html>`;
 }

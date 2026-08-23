@@ -13,6 +13,7 @@
  *   - Notes + tracking number (if shipped)
  *   - Footer with thank-you note
  */
+import { docCodesHtml } from './docCodes';
 import { escapeHtml } from './escape';
 
 const ARABIC_MONTHS = [
@@ -73,6 +74,15 @@ export function buildEcomOrderInvoice({ storeName, order }) {
       <td class="num"><strong>${_fmtAmount(it.total)} دج</strong></td>
     </tr>
   `).join('');
+
+  // p261: QR opens the public tracking page (phone scan), barcode carries the order code
+  const _origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
+  const _trackUrl = _origin && order.order_code
+    ? `${_origin}/track/${encodeURIComponent(order.order_code)}` : '';
+  const codesBlock = docCodesHtml(order.order_code || '', {
+    qrText: _trackUrl, qrSize: 100, barcodeHeight: 36,
+    label: 'امسح QR لتتبع طلبك مباشرة',
+  });
 
   const trackingBlock = order.tracking_number
     ? `<div class="tracking">رقم التتبع: <span class="mono">${escapeHtml(order.tracking_number)}</span> (${escapeHtml(order.courier || '')})</div>`
@@ -170,6 +180,7 @@ export function buildEcomOrderInvoice({ storeName, order }) {
       ${notesBlock}
     </section>
 
+    ${codesBlock}
     <footer>
       شكراً لاختياركم <strong>${store}</strong> — للاستفسار، الرجاء التواصل معنا مع الاحتفاظ برقم الفاتورة <strong>${code}</strong>.
     </footer>
