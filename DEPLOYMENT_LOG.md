@@ -4296,3 +4296,24 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - النشر: main.27f65811.js (one-provider-enough-note ✓ business-profiles ✓)
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p262, p263
+
+## p264 — إدارة الميزات في الخطط + توحيد مفاتيح الأنشطة (2026-08-23)
+
+### المشكلات المكتشفة والمُصلحة
+1. **فقدان صامت لبيانات الخطط**: نموذج PlansPage كان يرسل مفاتيح قديمة (price_monthly, limits.max_products, features.pos/ai_tips) لا تطابق مخطط PlanCreate/PlanFeatures — pydantic كان يحذفها بصمت، فلم تُحفظ أي ميزة تُعدَّل من الواجهة إطلاقاً.
+2. **مفتاح نشاط غير صالح**: القيمة الافتراضية "retailer" ليست مفتاحاً صالحاً في BUSINESS_PROFILES (الصحيح: "retail") — كانت الشارات لا تُعرض بشكل صحيح.
+
+### التغييرات
+- backend/routes/saas/schemas.py: إضافة business_type إلى PlanCreate/PlanUpdate/PlanResponse؛ تصحيح الافتراضي retailer→retail (موضعان).
+- backend/routes/saas/tenants_routes.py: عند إنشاء مشترك، نوع النشاط يُرث من خطة الاشتراك (plan.business_type) كقيمة افتراضية؛ تطبيع retailer→retail وwholesaler→wholesale.
+- backend/routes/saas/agent_self_service_routes.py: نفس التطبيع في مسار الوكيل.
+- backend/models/schemas/saas.py: تصحيح الافتراضي في المخطط القديم (موضعان).
+- **ترحيل بيانات**: 4 مستأجرين business_type: retailer→retail (NT-0001, NT-0004, NT-0005, NT-0006). features_override لمُستأجر الإنتاج {has_woocommerce:true} سليم. (ملاحظة: business_profiles.py يملك خريطة أسماء مستعارة تدعم retailer أصلاً، فالسلوك متطابق).
+- frontend PlansPage.js: إعادة كتابة كاملة — مفاتيح المخطط الحقيقية (monthly_price/six_month_price/yearly_price/features.max_*/14 ميزة has_*) + قائمة نوع النشاط من /saas/business-profiles (23 نشاطاً) + شارات ∞ للحدود غير المقيدة + testids (plan-monthly-price, plan-max-products, plan-business-type, plan-feature-{key}, save-plan-btn).
+- frontend AgentDashboardPage.js: قيم select الأنشطة retailer→retail وwholesaler→wholesale (التسميات العربية دون تغيير).
+- frontend SubscribersPage.js: القيم الافتراضية retailer→retail.
+
+### الاختبارات
+- إنشاء خطة TEST-P264 بـ business_type=pharmacy + features → استرجاع → تحديث (repair, max_products=999, has_pos=false) → تحقق من mongo مباشرة → حذف → بقايا TEST: 0.
+- الثوابت: journal_entries=2، store_orders=2، cash_boxes دون تغيير.
+- bundle main.c6900a45.js منشور؛ العلامات: plan-business-type ✓، plan-monthly-price ✓، save-plan-btn ✓، plan-feature- (ديناميكي) ✓، business-profiles ✓.

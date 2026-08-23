@@ -119,7 +119,7 @@ export default function AgentDashboardPage() {
   
   const [tenantForm, setTenantForm] = useState({
     name: '', email: '', password: '', phone: '', company_name: '',
-    plan_id: '', subscription_type: 'monthly', business_type: 'retailer', notes: ''
+    plan_id: '', subscription_type: 'monthly', business_type: 'retail', notes: ''
   });
 
   const agentData = JSON.parse(localStorage.getItem('agentData') || '{}');
@@ -328,7 +328,7 @@ export default function AgentDashboardPage() {
   const openAddTenant = () => {
     setTenantForm({
       name: '', email: '', password: '', phone: '', company_name: '',
-      plan_id: plans[0]?.id || '', subscription_type: 'monthly', business_type: 'retailer', notes: ''
+      plan_id: plans[0]?.id || '', subscription_type: 'monthly', business_type: 'retail', notes: ''
     });
     setAddTenantDialogOpen(true);
   };
@@ -1369,8 +1369,8 @@ export default function AgentDashboardPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="retailer">تاجر تجزئة</SelectItem>
-                  <SelectItem value="wholesaler">تاجر جملة</SelectItem>
+                  <SelectItem value="retail">تاجر تجزئة</SelectItem>
+                  <SelectItem value="wholesale">تاجر جملة</SelectItem>
                   <SelectItem value="distributor">موزع</SelectItem>
                 </SelectContent>
               </Select>

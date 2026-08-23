@@ -290,6 +290,17 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
     tenant_id = str(uuid.uuid4())
     hashed_password = bcrypt.hashpw(tenant.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
+    # p264: plan's business_type is the default when the form left it empty;
+    # 'retail' (not 'retailer') is the valid BUSINESS_PROFILES fallback key.
+    _plan_bt = ""
+    if tenant.plan_id:
+        _pl = await db.saas_plans.find_one({"id": tenant.plan_id}, {"_id": 0, "business_type": 1})
+        _plan_bt = (_pl or {}).get("business_type") or ""
+    _bt_create = (getattr(tenant, "business_type", "") or "").strip()
+    if _bt_create == "retailer":
+        _bt_create = "retail"
+    _bt_create = _bt_create or _plan_bt or "retail"
+
     tenant_doc = {
         "id": tenant_id,
         "name": tenant.name,
@@ -308,7 +319,7 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
         "features_override": {},
         "limits_override": {},
         "notes": "",
-        "business_type": tenant.business_type if hasattr(tenant, 'business_type') else "retailer",
+        "business_type": _bt_create,
         "short_id": await next_tenant_short_id(),
         "database_initialized": False,
         "recharge_mode": "owner_bridge",

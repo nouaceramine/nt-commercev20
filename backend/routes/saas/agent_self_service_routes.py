@@ -134,7 +134,9 @@ async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_cu
         "subscription_starts_at": now.isoformat(),
         "features_override": {},
         "limits_override": {},
-        "business_type": tenant.business_type or "retailer",
+        "business_type": {"retailer": "retail", "wholesaler": "wholesale"}.get(
+            (tenant.business_type or "").strip() or "retail",
+            (tenant.business_type or "").strip() or "retail"),  # p264: normalize legacy aliases
         "database_initialized": False,
         "created_at": now.isoformat()
     }

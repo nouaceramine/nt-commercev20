@@ -56,7 +56,7 @@ class TenantCreate(BaseModel):
     plan_id: str
     agent_id: Optional[str] = None  # الوكيل المسؤول
     subscription_type: str = "monthly"  # monthly, 6months, yearly
-    business_type: Optional[str] = "retailer"  # retailer, wholesaler, distributor
+    business_type: Optional[str] = "retail"  # retailer, wholesaler, distributor
     role: Optional[str] = "admin"  # admin, manager, seller, etc.
     notes: Optional[str] = ""
 
@@ -94,7 +94,7 @@ class TenantResponse(BaseModel):
     limits_override: dict = {}
     notes: str = ""
     stats: Optional[dict] = None
-    business_type: Optional[str] = "retailer"
+    business_type: Optional[str] = "retail"
     database_initialized: bool = False
     created_at: str = ""
 

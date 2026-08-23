@@ -49,6 +49,7 @@ class PlanCreate(BaseModel):
     yearly_price: float = 0
     six_month_price: float = 0
     features: PlanFeatures = Field(default_factory=PlanFeatures)
+    business_type: str = ""  # p264: suggested business profile for tenants on this plan
     is_active: bool = True
     sort_order: int = 0
     is_popular: bool = False
@@ -66,6 +67,7 @@ class PlanUpdate(BaseModel):
     yearly_price: Optional[float] = None
     six_month_price: Optional[float] = None
     features: Optional[PlanFeatures] = None
+    business_type: Optional[str] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     is_popular: Optional[bool] = None
@@ -84,6 +86,7 @@ class PlanResponse(BaseModel):
     yearly_price: float = 0
     six_month_price: float = 0
     features: dict = {}
+    business_type: str = ""
     is_active: bool = True
     sort_order: int = 0
     is_popular: bool = False
@@ -108,7 +111,7 @@ class TenantCreate(BaseModel):
     plan_id: str
     subscription_type: str = "monthly"
     agent_id: Optional[str] = None
-    business_type: str = "retailer"
+    business_type: str = "retail"
     role: str = "admin"
 
     @field_validator("email")
@@ -159,7 +162,7 @@ class TenantResponse(BaseModel):
     limits_override: dict = {}
     notes: str = ""
     stats: TenantStats = Field(default_factory=TenantStats)
-    business_type: str = "retailer"
+    business_type: str = "retail"
     database_initialized: bool = False
     created_at: Optional[str] = None
     recharge_mode: str = "owner_bridge"

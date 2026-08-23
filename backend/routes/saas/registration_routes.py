@@ -146,7 +146,7 @@ async def register_tenant(tenant: TenantCreate):
         "features_override": {},
         "limits_override": {},
         "notes": "",
-        "business_type": tenant.business_type if hasattr(tenant, 'business_type') else "retailer",
+        "business_type": tenant.business_type if hasattr(tenant, 'business_type') else "retail",
         "short_id": await next_tenant_short_id(),
         "database_initialized": False,
         "created_at": now.isoformat()
