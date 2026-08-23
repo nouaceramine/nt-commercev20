@@ -306,7 +306,7 @@ export default function WalletPage() {
                         {r.request_type === 'topup' ? (isAr ? 'شحن' : 'Top-up') : (isAr ? 'سحب' : 'Withdraw')} — {r.amount?.toLocaleString()} DA
                         {isSuperAdmin && r.entity_name ? ` • ${r.entity_name}` : ''}
                       </p>
-                      <p className="text-xs text-muted-foreground">{r.note || ''} {new Date(r.created_at).toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">{r.code ? <span className="font-mono" data-testid="req-code">{r.code} • </span> : null}{r.note || ''} {new Date(r.created_at).toLocaleString()}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

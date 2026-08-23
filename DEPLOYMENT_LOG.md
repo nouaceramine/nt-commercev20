@@ -4331,3 +4331,18 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - التتبع العام يستثني الحسابات التجريبية: WEB-NT7-000001 → found:false دون تسريب؛ WEB000001 (حقيقي) يعمل.
 - /saas/tenants يعرض 24 حساباً دائماً (23 + NT-0001).
 - bundle main.9b73d965.js منشور؛ العلامة perm-test-badge ✓؛ الثوابت المالية سليمة.
+
+## p266 — أكواد ذرية للمحافظ والمدفوعات وكيانات السوبر أدمن + تدقيق الأكواد (2026-08-23)
+
+### التغييرات
+- **توحيد مصانع المحافظ**: 4 نسخ get_or_create_wallet متناثرة (wallet_service + 3 مضمنة في wallet routes) كانت تُنشئ بلا كود ومعرضة لتعارض السباق → كلها تفوِّض الآن للمصنع القانوني في services/wallet_service.py: كود WL ذري + إعادة قراءة آمنة عند DuplicateKeyError.
+- أكواد جديدة عند كل نقطة إنشاء: المحافظ WL-XXXXXX (main + كل قاعدة مستأجر)، طلبات الشحن/السحب WR-XXXXXX (مسارا المستأجر والوكيل)، الوكلاء AG-XXXX، مدفوعات الاشتراكات PAY-XXXXXX، مدفوعات الموردين SP-XXXXXX (موضعان).
+- **فهارس فريدة** (main.py): wallets.code + wallet_requests.code + saas_agents.agent_code + saas_payments.payment_code + supplier_payments.payment_code على القاعدة الرئيسية؛ wallets.code + (entity_type, entity_id) على كل قاعدة مستأجر. (فهرس (entity_type, entity_id) الفريد على main موجود منذ p205.)
+- **ملء رجعي**: 5 محافظ رئيسية (WL000001–5)، طلبان (WR000001–2)، وكيل (AG0001)، محافظ المستأجرين — كلها بالعدّاد الذري public_order_code.
+- **endpoint تدقيق جديد**: GET /saas/id-audit (سوبر أدمن) — تقرير تغطية الأكواد والمكررات للقاعدة الرئيسية وكل قواعد المستأجرين.
+- الواجهة: عمود «الكود» في صفحة مدفوعات الاشتراكات (data-testid=payment-code) + كود الطلب في بطاقات المحفظة (req-code). payment_code أضيف إلى SubscriptionPaymentResponse.
+
+### الاختبارات
+- E2E: طلب شحن جديد عبر واجهة API للمستأجر التجريبي حصل على WR000003 ذرياً → حُذف → بقايا 0.
+- id-audit: total_missing=0، total_duplicate_codes=0 عبر 27 مستأجراً.
+- الثوابت المالية سليمة. bundle main.8b2f8a2e.js منشور، العلامات payment-code/req-code ✓.

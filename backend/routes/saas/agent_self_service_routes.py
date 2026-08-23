@@ -248,6 +248,8 @@ async def create_agent_wallet_request(data: dict, agent: dict = Depends(get_curr
         "processed_by": None,
         "processed_at": None,
     }
+    from services.code_generator import public_order_code as _poc
+    req["code"] = await _poc(db, "wallet_requests", "WR", 6, field="code")
     await db.wallet_requests.insert_one(dict(req))
     req.pop("_id", None)
     return req

@@ -54,8 +54,11 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
     async def _get_wallet(user_id: str) -> dict:
         w = await db.wallets.find_one({"entity_type": "user", "entity_id": user_id}, {"_id": 0})
         if not w:
+            # p266: coded tenant wallet
+            from services.code_generator import public_order_code as _poc
             w = {
                 "id": str(uuid.uuid4()), "entity_type": "user", "entity_id": user_id,
+                "code": await _poc(db, "wallets", "WL", 6, field="code"),
                 "balance": 0, "currency": "DZD", "created_at": _now(),
             }
             await db.wallets.insert_one(dict(w))

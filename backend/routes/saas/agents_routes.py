@@ -78,6 +78,9 @@ async def create_agent(agent: AgentCreate, admin: dict = Depends(get_super_admin
         "is_active": agent.is_active,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
+    # p266: every agent gets an atomic public code (AG-0001, ...)
+    from services.code_generator import public_order_code as _poc
+    agent_doc["agent_code"] = await _poc(db, "saas_agents", "AG", 4, field="agent_code")
 
     await db.saas_agents.insert_one(agent_doc)
     await register_identity(agent_email, "agent", agent_doc["id"], name=agent.name)

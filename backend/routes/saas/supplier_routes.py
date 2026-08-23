@@ -103,15 +103,22 @@ async def _ensure_wallet(entity_id: str) -> dict:
     w = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
     if w:
         return w
+    # p266: coded, race-safe wallet creation
+    from services.code_generator import public_order_code as _poc
+    from pymongo.errors import DuplicateKeyError as _DKE
     doc = {
         "id": str(uuid.uuid4()),
         "entity_id": entity_id,
         "entity_type": "tenant" if entity_id != PLATFORM_WALLET_ID else "platform",
+        "code": await _poc(main_db, "wallets", "WL", 6, field="code"),
         "balance": 0.0,
         "currency": "DZD",
         "created_at": _now(),
     }
-    await main_db.wallets.insert_one(doc)
+    try:
+        await main_db.wallets.insert_one(doc)
+    except _DKE:
+        doc = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
     return doc
 
 

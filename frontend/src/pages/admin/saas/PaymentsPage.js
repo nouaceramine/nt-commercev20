@@ -52,6 +52,7 @@ export default function PaymentsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>الكود</TableHead>
                     <TableHead>المشترك</TableHead>
                     <TableHead>المبلغ</TableHead>
                     <TableHead>نوع الاشتراك</TableHead>
@@ -63,6 +64,7 @@ export default function PaymentsPage() {
                 <TableBody data-testid="payments-table">
                   {payments.map(payment => (
                     <TableRow key={payment.id} data-testid={`payment-row-${payment.id}`}>
+                      <TableCell className="font-mono text-xs" data-testid="payment-code">{payment.payment_code || "—"}</TableCell>
                       <TableCell className="font-medium">{payment.tenant_name}</TableCell>
                       <TableCell>{(payment.amount || 0).toLocaleString()} دج</TableCell>
                       <TableCell>

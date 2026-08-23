@@ -559,6 +559,16 @@ async def startup_event():
                 await _d.sales.create_index([("code", 1)], sparse=True, name="p257_sales_code")
             except Exception:
                 pass
+            # p266: tenant wallets — atomic codes + no entity duplicates
+            try:
+                await _d.wallets.create_index(
+                    [("code", 1)], unique=True,
+                    partialFilterExpression={"code": {"$gt": ""}}, name="p266_wallet_code")
+                await _d.wallets.create_index(
+                    [("entity_type", 1), ("entity_id", 1)], unique=True, sparse=True,
+                    name="p266_wallet_entity")
+            except Exception:
+                pass
             # p260: invoice_number lookup indexes for global search prefix scans
             for _coll in ("sales", "purchases"):
                 try:
@@ -667,6 +677,22 @@ async def startup_event():
             )
             # p259: globally unique public listing code (tolerant of legacy
             # rows without one)
+            # p266: atomic human codes — one per wallet / request / agent / payment
+            await main_db.wallets.create_index(
+                [("code", 1)], unique=True,
+                partialFilterExpression={"code": {"$gt": ""}}, name="p266_wallet_code")
+            await main_db.wallet_requests.create_index(
+                [("code", 1)], unique=True,
+                partialFilterExpression={"code": {"$gt": ""}}, name="p266_wreq_code")
+            await main_db.saas_agents.create_index(
+                [("agent_code", 1)], unique=True,
+                partialFilterExpression={"agent_code": {"$gt": ""}}, name="p266_agent_code")
+            await main_db.saas_payments.create_index(
+                [("payment_code", 1)], unique=True,
+                partialFilterExpression={"payment_code": {"$gt": ""}}, name="p266_payment_code")
+            await main_db.supplier_payments.create_index(
+                [("payment_code", 1)], unique=True,
+                partialFilterExpression={"payment_code": {"$gt": ""}}, name="p266_sp_code")
             await main_db.marketplace_catalog.create_index(
                 [("listing_code", 1)], unique=True,
                 partialFilterExpression={"listing_code": {"$gt": ""}},
@@ -1281,6 +1307,7 @@ _AUTO_REG_MODULES = [
     'routes.wallet.wallet_billing_routes',
     'routes.partners_routes',  # p182: partners & profit distribution
     'routes.saas.business_profiles_routes',  # p183: business activity profiles
+    'routes.saas.id_audit_routes',  # p266: ID-system audit for super admin
     'routes.rental_routes',  # p185: rental module (cars & properties)
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
     'routes.serials_routes',  # p187: IMEI/serial tracking

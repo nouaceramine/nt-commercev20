@@ -221,8 +221,11 @@ def build_financial_router() -> APIRouter:
 
         # If paid > 0, record an implicit payment row too — keeps audit clean
         if paid > 0:
+            _sp_doc_pid = str(uuid.uuid4())
+            from services.code_generator import public_order_code as _poc
             await main_db.supplier_payments.insert_one({
-                "id": str(uuid.uuid4()),
+                "id": _sp_doc_pid,
+                "payment_code": await _poc(main_db, "supplier_payments", "SP", 6, field="payment_code"),
                 "supplier_id": payload.supplier_id,
                 "amount": paid,
                 "method": "cash",
@@ -279,6 +282,8 @@ def build_financial_router() -> APIRouter:
             "created_at": _now(),
             "created_by": admin.get("id"),
         }
+        from services.code_generator import public_order_code as _poc2
+        doc["payment_code"] = await _poc2(main_db, "supplier_payments", "SP", 6, field="payment_code")
         await main_db.supplier_payments.insert_one(doc)
         new_balance = await _recompute_supplier_balance(sid)
         doc.pop("_id", None)

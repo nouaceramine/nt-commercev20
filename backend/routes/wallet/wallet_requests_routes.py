@@ -22,20 +22,9 @@ def create_wallet_requests_routes(main_db, get_current_user, get_super_admin, bl
         return user.get("id", ""), "admin"
 
     async def _get_or_create_wallet(entity_id, entity_type="tenant"):
-        wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
-        if not wallet:
-            wallet = {
-                "id": str(uuid.uuid4()),
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "balance": 0.0,
-                "currency": "DZD",
-                "low_balance_threshold": 1000.0,
-                "auto_pay_subscription": False,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            await main_db.wallets.insert_one(dict(wallet))
-        return wallet
+        # p266: delegate to the canonical coded, race-safe factory
+        from services.wallet_service import get_or_create_wallet as _gcw
+        return await _gcw(main_db, entity_id, entity_type)
 
     async def _record_txn(wallet, txn_type, amount, ref_type, ref_id, description, created_by):
         from pymongo import ReturnDocument
@@ -112,6 +101,8 @@ def create_wallet_requests_routes(main_db, get_current_user, get_super_admin, bl
             "processed_by": None,
             "processed_at": None,
         }
+        from services.code_generator import public_order_code as _poc
+        req["code"] = await _poc(main_db, "wallet_requests", "WR", 6, field="code")
         await main_db.wallet_requests.insert_one(dict(req))
         return req
 

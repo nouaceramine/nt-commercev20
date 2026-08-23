@@ -25,20 +25,9 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
         return user.get("id", ""), "admin"
 
     async def _get_or_create_wallet(entity_id, entity_type="tenant"):
-        wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
-        if not wallet:
-            wallet = {
-                "id": str(uuid.uuid4()),
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "balance": 0.0,
-                "currency": "DZD",
-                "low_balance_threshold": DEFAULT_LOW_BALANCE,
-                "auto_pay_subscription": False,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            await main_db.wallets.insert_one(dict(wallet))
-        return wallet
+        # p266: delegate to the canonical coded, race-safe factory
+        from services.wallet_service import get_or_create_wallet as _gcw
+        return await _gcw(main_db, entity_id, entity_type)
 
     async def _lookup_plan_and_price(tenant):
         sub_type = tenant.get("subscription_type", "monthly")

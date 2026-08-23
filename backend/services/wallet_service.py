@@ -90,17 +90,26 @@ PLATFORM_WALLET_ID = "platform_main"
 async def get_or_create_wallet(main_db, entity_id, entity_type="tenant"):
     wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
     if not wallet:
+        # p266: every wallet gets its own atomic human code; the unique
+        # (entity_type, entity_id) index makes the insert race-safe — a loser
+        # of the race simply re-reads the winner's wallet.
+        from services.code_generator import public_order_code
+        from pymongo.errors import DuplicateKeyError
         wallet = {
             "id": str(uuid.uuid4()),
             "entity_type": entity_type,
             "entity_id": entity_id,
+            "code": await public_order_code(main_db, "wallets", "WL", 6, field="code"),
             "balance": 0.0,
             "currency": "DZD",
             "low_balance_threshold": DEFAULT_LOW_BALANCE,
             "auto_pay_subscription": False,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        await main_db.wallets.insert_one(dict(wallet))
+        try:
+            await main_db.wallets.insert_one(dict(wallet))
+        except DuplicateKeyError:
+            wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
     return wallet
 
 

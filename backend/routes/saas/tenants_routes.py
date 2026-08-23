@@ -831,6 +831,9 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
         "created_by": admin.get("id", ""),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
+    # p266: every recorded subscription payment gets an atomic code
+    from services.code_generator import public_order_code as _poc
+    payment_doc["payment_code"] = await _poc(db, "saas_payments", "PAY", 6, field="payment_code")
     await db.saas_payments.insert_one(payment_doc)
 
     return {"new_subscription_ends_at": new_end.isoformat()}

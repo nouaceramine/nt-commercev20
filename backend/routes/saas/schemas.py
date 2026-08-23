@@ -196,6 +196,7 @@ class SubscriptionPayment(BaseModel):
 
 class SubscriptionPaymentResponse(BaseModel):
     id: str
+    payment_code: str = ""  # p266
     tenant_id: str
     tenant_name: str = ""
     amount: float
