@@ -163,6 +163,7 @@ class TenantResponse(BaseModel):
     notes: str = ""
     stats: TenantStats = Field(default_factory=TenantStats)
     business_type: str = "retail"
+    is_permanent_test: bool = False  # p265: badge permanent demo accounts
     database_initialized: bool = False
     created_at: Optional[str] = None
     recharge_mode: str = "owner_bridge"

@@ -4317,3 +4317,17 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - إنشاء خطة TEST-P264 بـ business_type=pharmacy + features → استرجاع → تحديث (repair, max_products=999, has_pos=false) → تحقق من mongo مباشرة → حذف → بقايا TEST: 0.
 - الثوابت: journal_entries=2، store_orders=2، cash_boxes دون تغيير.
 - bundle main.c6900a45.js منشور؛ العلامات: plan-business-type ✓، plan-monthly-price ✓، save-plan-btn ✓، plan-feature- (ديناميكي) ✓، business-profiles ✓.
+
+## p265 — حسابات تجريبية دائمة لكل نوع نشاط (2026-08-23)
+
+### التنفيذ
+- إنشاء 23 حساباً تجريبياً دائماً (NT-0007 → NT-0029) — حساب لكل نشاط من BUSINESS_PROFILES الـ23 عبر POST /saas/tenants (تهيئة كاملة: نسخ قاعدة القالب + تطبيق ملف النشاط features_override + عائلات منتجات مبدئية).
+- تعليمها is_permanent_test=true + notes موثقة؛ بيانات الدخول الموحدة: demo-{profile}@nt-commerce.net / Demo@2026 (مثال: demo-pharmacy@nt-commerce.net).
+- TenantResponse أضيف is_permanent_test؛ شارة «تجريبي دائم» في قائمة المشتركين (data-testid=perm-test-badge) بنفس نمط الشارات الحالي.
+
+### الاختبارات
+- 23/23 مُهيأة بالكامل (database_initialized + عائلات > 0).
+- دخول demo-pharmacy ناجح.
+- التتبع العام يستثني الحسابات التجريبية: WEB-NT7-000001 → found:false دون تسريب؛ WEB000001 (حقيقي) يعمل.
+- /saas/tenants يعرض 24 حساباً دائماً (23 + NT-0001).
+- bundle main.9b73d965.js منشور؛ العلامة perm-test-badge ✓؛ الثوابت المالية سليمة.

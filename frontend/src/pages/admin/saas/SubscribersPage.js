@@ -506,6 +506,7 @@ export default function SubscribersPage() {
                     <TableCell>
                       <Badge variant="outline">{tenant.plan_name}</Badge>
                       {tenant.is_trial && <Badge variant="secondary" className="mr-1">تجريبي</Badge>}
+                      {tenant.is_permanent_test && <Badge variant="secondary" className="mr-1" data-testid="perm-test-badge">تجريبي دائم</Badge>}
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-3 text-sm">
