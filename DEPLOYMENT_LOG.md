@@ -4452,3 +4452,24 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - فك أسرار المستأجر الحقيقي (fb_access_token + yalidine api_token) داخل الحاوية: decrypt_ok=True ✓ (التكاملات الحية لن تتعطل).
 - إخفاء مفاتيح المنصة في GET /saas/email-settings يعرض الآخر 4 الحقيقية (فك قبل الإخفاء) ✓.
 - bundle main.ac8c4647.js منشور؛ العلامات encryption-status-card/enc-migrate-btn ✓؛ health 200 ✓.
+
+## p273 — الأداء: تخزين مؤقت + فهارس + تقسيم الحزمة (2026-08-23)
+
+### التدقيق
+- /stats كان مخزَّناً مسبقاً (Redis, cache_service) — لكن /dashboard/sales-stats (6 تجميعات) و/dashboard/profit-stats (حتى 6000 وثيقة بيع) و/reports/daily-full (قوائم ×5000) تُحسب من الصفر كل طلب.
+- لوحة التحكم كانت تحمّل كل المنتجات (7,415 وثيقة عند المستأجر الحقيقي) لعرض 6 منتجات فقط + احتياطي إحصائيات (اتضح أنه كود ميت: {} من catch قيمة truthy).
+- فهرس expenses على expense_date بينما الاستعلامات الفعلية تستخدم الحقل date → فحص كامل.
+- الواجهة: حزمة واحدة 5.4MB لكل 139 صفحة.
+
+### التغييرات
+- stats_routes.py: كاش Redis (60 ثانية) لـ sales-stats وprofit-stats؛ daily-full بكاش 60 ثانية لليوم الحالي و3600 ثانية للأيام الماضية (ثابتة تاريخياً). نقطة جديدة خفيفة GET /stats/stock-summary (عدّادان فقط عبر count_documents).
+- sales_service.py: إبطال كاشات لوحة التحكم فور إنشاء بيع (delete بالأنماط، محمي بـ try).
+- main.py: فهرس expenses.date.
+- DashboardPage.js: /products/paginated?page_size=6 بدل التحميل الكامل؛ إصلاح شرط الاحتياطي الميت + ربطه بـ stock-summary.
+- App.js: تحويل 139 استيراد صفحة إلى React.lazy + Suspense (fallback spinner بنمط lucide الموجود) — تقسيم تلقائي لكل مسار.
+
+### القياسات (المستأجر الحقيقي 36,708 مبيعات / 7,415 منتج)
+- sales-stats: 78ms → 14ms | profit-stats: 32ms → 9ms | daily-full: 66ms → 10ms.
+- الحزمة الرئيسية: 5,485,830 → 452,343 بايت (12× أصغر) + 97 chunk تُحمَّل عند الحاجة.
+- إبطال الكاش مثبت E2E على NT-0001: بيع TEST-P273 → مفاتيح stats:* للمستأجر اختفت فوراً → حذف البيع، المخزون عاد 6، بقايا 0 ✓.
+- تحقق عرض فعلي (headless): الصفحة الرئيسية + /login + /track كلها render بنجاح مع الحزم المقسّمة ✓؛ health 200 ✓؛ bundle main.820c8ca0.js.

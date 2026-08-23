@@ -1,8 +1,9 @@
 import "@/App.css";
+import { RefreshCw } from "lucide-react";  // p273: suspense fallback
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";  // p273
 import { LanguageProvider } from "./contexts/LanguageContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -11,7 +12,7 @@ import { FeatureFlagProvider } from "./contexts/FeatureFlagContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { defaultMenuSections } from "./config/sidebarMenu";
 import FeatureDisabledPage from "./components/FeatureDisabledPage";
-import AccessDeniedPage from "./pages/AccessDeniedPage";
+const AccessDeniedPage = lazy(() => import("./pages/AccessDeniedPage"));  // p273
 
 // Import global date formatter to apply Western numerals system-wide
 import './utils/globalDateFormatter';
@@ -28,156 +29,156 @@ const CASHIER_ALLOWED_PATHS = defaultMenuSections.flatMap(section =>
 );
 
 // Pages
-import DashboardPage from "./pages/DashboardPage";
-import ProductsPage from "./pages/ProductsPage";
-import ProductDetailPage from "./pages/store/ProductDetailPage";
-import StoreLandingPage from "./pages/store/StoreLandingPage";
-import OrderTrackingPage from "./pages/store/OrderTrackingPage";
-import GlobalTrackingPage from "./pages/store/GlobalTrackingPage";
-import DriverPage from "./pages/store/DriverPage";
-import AddProductPage from "./pages/AddProductPage";
-import EditProductPage from "./pages/EditProductPage";
-import UsersPage from "./pages/UsersPage";
-import POSPage from "./pages/POSPage";
-import CustomersPage from "./pages/CustomersPage";
-import SuppliersPage from "./pages/SuppliersPage";
-import CashManagementPage from "./pages/CashManagementPage";
-import SalesHistoryPage from "./pages/SalesHistoryPage";
-import InstallmentsPage from "./pages/InstallmentsPage";
-import EmployeesPage from "./pages/EmployeesPage";
-import EmployeeActivityPage from "./pages/EmployeeActivityPage";
-import DebtsPage from "./pages/DebtsPage";
-import ReportsPage from "./pages/ReportsPage";
-import ApiKeysPage from "./pages/ApiKeysPage";
-import RechargePage from "./pages/RechargePage";
-import DigitalPanelPage from "./pages/DigitalPanelPage";
-import IptvSubscriptionsPage from "./pages/IptvSubscriptionsPage";
-import ResellersPage from "./pages/ResellersPage";
-import DigitalServicesCatalogPage from "./pages/DigitalServicesCatalogPage";
-import ProductFamiliesPage from "./pages/ProductFamiliesPage";
-import CustomerDebtsPage from "./pages/CustomerDebtsPage";
-import SettingsPage from "./pages/SettingsPage";
-import BulkPriceUpdatePage from "./pages/BulkPriceUpdatePage";
-import PurchasesPage from "./pages/PurchasesPage";
-import WarehousesPage from "./pages/WarehousesPage";
-import InventoryCountPage from "./pages/InventoryCountPage";
-import BarcodePrintPage from "./pages/BarcodePrintPage";
-import DailySessionsPage from "./pages/DailySessionsPage";
-import CustomerFamiliesPage from "./pages/CustomerFamiliesPage";
-import SupplierFamiliesPage from "./pages/SupplierFamiliesPage";
-import WooCommercePage from "./pages/WooCommercePage";
-import ShippingPage from "./pages/ShippingPage";
-import SimManagementPage from "./pages/SimManagementPage";
-import TelecomStockPage from "./pages/TelecomStockPage";
-import AdvancedAnalyticsPage from "./pages/AdvancedAnalyticsPage";
-import LoyaltyPage from "./pages/LoyaltyPage";
-import WholesaleServicesPage from "./pages/WholesaleServicesPage";
-import FlexyServicePage from "./pages/FlexyServicePage";
-import IdoomServicePage from "./pages/IdoomServicePage";
-import CardsServicePage from "./pages/CardsServicePage";
-import OperationsPage from "./pages/OperationsPage";
-import ProfitRatesPage from "./pages/ProfitRatesPage";
-import TransfersPage from "./pages/TransfersPage";
-import PhoneDirectoryPage from "./pages/PhoneDirectoryPage";
-import SidebarSettingsPage from "./pages/SidebarSettingsPage";
-import RepairReceptionPage from "./pages/RepairReceptionPage";
-import RepairTrackingPage from "./pages/RepairTrackingPage";
-import SparePartsPage from "./pages/SparePartsPage";
-import ExpensesPage from "./pages/ExpensesPage";
-import PartnersPage from "./pages/PartnersPage";
-import RentalsPage from "./pages/RentalsPage";
-import ProductionPage from "./pages/ProductionPage";  // p188
-import AccountingPage from "./pages/AccountingPage";  // p196
-import NotificationsPage from "./pages/NotificationsPage";
-import AdvancedSalesReportPage from "./pages/AdvancedSalesReportPage";
-import SalesPermissionsPage from "./pages/SalesPermissionsPage";
-import PriceHistoryPage from "./pages/PriceHistoryPage";
-import ExpiryReportPage from "./pages/ExpiryReportPage";
-import SmartReportsPage from "./pages/SmartReportsPage";
-import EmployeeAlertsPage from "./pages/EmployeeAlertsPage";
-import FeaturesPage from "./pages/FeaturesPage";
-import PermissionsPage from "./pages/PermissionsPage";
-import SystemUpdatesPage from "./pages/SystemUpdatesPage";
-import AgentDashboardPage from "./pages/AgentDashboardPage";
-import UnifiedLoginPage from "./pages/UnifiedLoginPage";
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));  // p273
+const ProductsPage = lazy(() => import("./pages/ProductsPage"));  // p273
+const ProductDetailPage = lazy(() => import("./pages/store/ProductDetailPage"));  // p273
+const StoreLandingPage = lazy(() => import("./pages/store/StoreLandingPage"));  // p273
+const OrderTrackingPage = lazy(() => import("./pages/store/OrderTrackingPage"));  // p273
+const GlobalTrackingPage = lazy(() => import("./pages/store/GlobalTrackingPage"));  // p273
+const DriverPage = lazy(() => import("./pages/store/DriverPage"));  // p273
+const AddProductPage = lazy(() => import("./pages/AddProductPage"));  // p273
+const EditProductPage = lazy(() => import("./pages/EditProductPage"));  // p273
+const UsersPage = lazy(() => import("./pages/UsersPage"));  // p273
+const POSPage = lazy(() => import("./pages/POSPage"));  // p273
+const CustomersPage = lazy(() => import("./pages/CustomersPage"));  // p273
+const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));  // p273
+const CashManagementPage = lazy(() => import("./pages/CashManagementPage"));  // p273
+const SalesHistoryPage = lazy(() => import("./pages/SalesHistoryPage"));  // p273
+const InstallmentsPage = lazy(() => import("./pages/InstallmentsPage"));  // p273
+const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));  // p273
+const EmployeeActivityPage = lazy(() => import("./pages/EmployeeActivityPage"));  // p273
+const DebtsPage = lazy(() => import("./pages/DebtsPage"));  // p273
+const ReportsPage = lazy(() => import("./pages/ReportsPage"));  // p273
+const ApiKeysPage = lazy(() => import("./pages/ApiKeysPage"));  // p273
+const RechargePage = lazy(() => import("./pages/RechargePage"));  // p273
+const DigitalPanelPage = lazy(() => import("./pages/DigitalPanelPage"));  // p273
+const IptvSubscriptionsPage = lazy(() => import("./pages/IptvSubscriptionsPage"));  // p273
+const ResellersPage = lazy(() => import("./pages/ResellersPage"));  // p273
+const DigitalServicesCatalogPage = lazy(() => import("./pages/DigitalServicesCatalogPage"));  // p273
+const ProductFamiliesPage = lazy(() => import("./pages/ProductFamiliesPage"));  // p273
+const CustomerDebtsPage = lazy(() => import("./pages/CustomerDebtsPage"));  // p273
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));  // p273
+const BulkPriceUpdatePage = lazy(() => import("./pages/BulkPriceUpdatePage"));  // p273
+const PurchasesPage = lazy(() => import("./pages/PurchasesPage"));  // p273
+const WarehousesPage = lazy(() => import("./pages/WarehousesPage"));  // p273
+const InventoryCountPage = lazy(() => import("./pages/InventoryCountPage"));  // p273
+const BarcodePrintPage = lazy(() => import("./pages/BarcodePrintPage"));  // p273
+const DailySessionsPage = lazy(() => import("./pages/DailySessionsPage"));  // p273
+const CustomerFamiliesPage = lazy(() => import("./pages/CustomerFamiliesPage"));  // p273
+const SupplierFamiliesPage = lazy(() => import("./pages/SupplierFamiliesPage"));  // p273
+const WooCommercePage = lazy(() => import("./pages/WooCommercePage"));  // p273
+const ShippingPage = lazy(() => import("./pages/ShippingPage"));  // p273
+const SimManagementPage = lazy(() => import("./pages/SimManagementPage"));  // p273
+const TelecomStockPage = lazy(() => import("./pages/TelecomStockPage"));  // p273
+const AdvancedAnalyticsPage = lazy(() => import("./pages/AdvancedAnalyticsPage"));  // p273
+const LoyaltyPage = lazy(() => import("./pages/LoyaltyPage"));  // p273
+const WholesaleServicesPage = lazy(() => import("./pages/WholesaleServicesPage"));  // p273
+const FlexyServicePage = lazy(() => import("./pages/FlexyServicePage"));  // p273
+const IdoomServicePage = lazy(() => import("./pages/IdoomServicePage"));  // p273
+const CardsServicePage = lazy(() => import("./pages/CardsServicePage"));  // p273
+const OperationsPage = lazy(() => import("./pages/OperationsPage"));  // p273
+const ProfitRatesPage = lazy(() => import("./pages/ProfitRatesPage"));  // p273
+const TransfersPage = lazy(() => import("./pages/TransfersPage"));  // p273
+const PhoneDirectoryPage = lazy(() => import("./pages/PhoneDirectoryPage"));  // p273
+const SidebarSettingsPage = lazy(() => import("./pages/SidebarSettingsPage"));  // p273
+const RepairReceptionPage = lazy(() => import("./pages/RepairReceptionPage"));  // p273
+const RepairTrackingPage = lazy(() => import("./pages/RepairTrackingPage"));  // p273
+const SparePartsPage = lazy(() => import("./pages/SparePartsPage"));  // p273
+const ExpensesPage = lazy(() => import("./pages/ExpensesPage"));  // p273
+const PartnersPage = lazy(() => import("./pages/PartnersPage"));  // p273
+const RentalsPage = lazy(() => import("./pages/RentalsPage"));  // p273
+const ProductionPage = lazy(() => import("./pages/ProductionPage"));  // p273  // p188
+const AccountingPage = lazy(() => import("./pages/AccountingPage"));  // p273  // p196
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));  // p273
+const AdvancedSalesReportPage = lazy(() => import("./pages/AdvancedSalesReportPage"));  // p273
+const SalesPermissionsPage = lazy(() => import("./pages/SalesPermissionsPage"));  // p273
+const PriceHistoryPage = lazy(() => import("./pages/PriceHistoryPage"));  // p273
+const ExpiryReportPage = lazy(() => import("./pages/ExpiryReportPage"));  // p273
+const SmartReportsPage = lazy(() => import("./pages/SmartReportsPage"));  // p273
+const EmployeeAlertsPage = lazy(() => import("./pages/EmployeeAlertsPage"));  // p273
+const FeaturesPage = lazy(() => import("./pages/FeaturesPage"));  // p273
+const PermissionsPage = lazy(() => import("./pages/PermissionsPage"));  // p273
+const SystemUpdatesPage = lazy(() => import("./pages/SystemUpdatesPage"));  // p273
+const AgentDashboardPage = lazy(() => import("./pages/AgentDashboardPage"));  // p273
+const UnifiedLoginPage = lazy(() => import("./pages/UnifiedLoginPage"));  // p273
 // p160: TenantDashboardPage merged into DashboardPage (route redirects to /)
-import EmailNotificationsPage from "./pages/EmailNotificationsPage";
-import PaymentsPage from "./pages/PaymentsPage";
+const EmailNotificationsPage = lazy(() => import("./pages/EmailNotificationsPage"));  // p273
+const PaymentsPage = lazy(() => import("./pages/PaymentsPage"));  // p273
 
 // E-Commerce Hub (P1+, gated by ecommerce_hub feature flag)
-import EcomHubPage from "./pages/ecom/EcomHubPage";
-import EcomHubShell from "./pages/ecom/EcomHubShell";
-import EcomChannelsPage from "./pages/ecom/EcomChannelsPage";
-import EcomGuidePage from "./pages/ecom/EcomGuidePage";
-import EcomAnalyticsPage from "./pages/ecom/EcomAnalyticsPage";
-import EcomStoreTab from "./pages/ecom/EcomStoreTab";
-import DigitalServicesPage from "./pages/digital/DigitalServicesPage";
-import DigitalAdminPage from "./pages/digital/DigitalAdminPage";
-import EcomAdsTab from "./pages/ecom/EcomAdsTab";
-import EcomShippingTab from "./pages/ecom/EcomShippingTab";
-import EcomDriversPage from "./pages/ecom/EcomDriversPage";
-import EcomReferralsPage from "./pages/ecom/EcomReferralsPage";
-import EcomSocialInboxPage from "./pages/ecom/EcomSocialInboxPage";
-import EcomIntakeSourcesPage from "./pages/ecom/EcomIntakeSourcesPage";
-import EcomMultiStorePage from "./pages/ecom/EcomMultiStorePage";
-import SupportTicketsPage from "./pages/SupportTicketsPage";
-import SaasSupportPage from "./pages/admin/saas/SaasSupportPage";
+const EcomHubPage = lazy(() => import("./pages/ecom/EcomHubPage"));  // p273
+const EcomHubShell = lazy(() => import("./pages/ecom/EcomHubShell"));  // p273
+const EcomChannelsPage = lazy(() => import("./pages/ecom/EcomChannelsPage"));  // p273
+const EcomGuidePage = lazy(() => import("./pages/ecom/EcomGuidePage"));  // p273
+const EcomAnalyticsPage = lazy(() => import("./pages/ecom/EcomAnalyticsPage"));  // p273
+const EcomStoreTab = lazy(() => import("./pages/ecom/EcomStoreTab"));  // p273
+const DigitalServicesPage = lazy(() => import("./pages/digital/DigitalServicesPage"));  // p273
+const DigitalAdminPage = lazy(() => import("./pages/digital/DigitalAdminPage"));  // p273
+const EcomAdsTab = lazy(() => import("./pages/ecom/EcomAdsTab"));  // p273
+const EcomShippingTab = lazy(() => import("./pages/ecom/EcomShippingTab"));  // p273
+const EcomDriversPage = lazy(() => import("./pages/ecom/EcomDriversPage"));  // p273
+const EcomReferralsPage = lazy(() => import("./pages/ecom/EcomReferralsPage"));  // p273
+const EcomSocialInboxPage = lazy(() => import("./pages/ecom/EcomSocialInboxPage"));  // p273
+const EcomIntakeSourcesPage = lazy(() => import("./pages/ecom/EcomIntakeSourcesPage"));  // p273
+const EcomMultiStorePage = lazy(() => import("./pages/ecom/EcomMultiStorePage"));  // p273
+const SupportTicketsPage = lazy(() => import("./pages/SupportTicketsPage"));  // p273
+const SaasSupportPage = lazy(() => import("./pages/admin/saas/SaasSupportPage"));  // p273
 
 // AI & Smart Accounting Pages
 // p160: SmartDashboardPage merged into DashboardPage (route redirects to /)
-import AIChatPage from "./pages/AIChatPage";
-import AIAgentsPage from "./pages/AIAgentsPage";
-import DateTimeSettingsPage from "./pages/DateTimeSettingsPage";
+const AIChatPage = lazy(() => import("./pages/AIChatPage"));  // p273
+const AIAgentsPage = lazy(() => import("./pages/AIAgentsPage"));  // p273
+const DateTimeSettingsPage = lazy(() => import("./pages/DateTimeSettingsPage"));  // p273
 
 // New Feature Pages
-import WhatsAppPage from "./pages/WhatsAppPage";
-import IntegrationStatusPage from "./pages/IntegrationStatusPage";
-import TaxReportsPage from "./pages/TaxReportsPage";
-import CurrenciesPage from "./pages/CurrenciesPage";
-import BankingPage from "./pages/BankingPage";
-import RobotsPage from "./pages/RobotsPage";
-import AutoReportsPage from "./pages/AutoReportsPage";
-import CommissionsPage from "./pages/CommissionsPage";  // p221
-import MarginRulesPage from "./pages/MarginRulesPage";  // p223
-import MarketplacePage from "./pages/MarketplacePage";  // p227
+const WhatsAppPage = lazy(() => import("./pages/WhatsAppPage"));  // p273
+const IntegrationStatusPage = lazy(() => import("./pages/IntegrationStatusPage"));  // p273
+const TaxReportsPage = lazy(() => import("./pages/TaxReportsPage"));  // p273
+const CurrenciesPage = lazy(() => import("./pages/CurrenciesPage"));  // p273
+const BankingPage = lazy(() => import("./pages/BankingPage"));  // p273
+const RobotsPage = lazy(() => import("./pages/RobotsPage"));  // p273
+const AutoReportsPage = lazy(() => import("./pages/AutoReportsPage"));  // p273
+const CommissionsPage = lazy(() => import("./pages/CommissionsPage"));  // p273  // p221
+const MarginRulesPage = lazy(() => import("./pages/MarginRulesPage"));  // p273  // p223
+const MarketplacePage = lazy(() => import("./pages/MarketplacePage"));  // p273  // p227
 
 // Legendary Build Pages
-import DefectiveGoodsPage from "./pages/DefectiveGoodsPage";
-import BackupSystemPage from "./pages/BackupSystemPage";
-import SecurityDashboardPage from "./pages/SecurityDashboardPage";
-import WalletPage from "./pages/WalletPage";
-import TaskManagementPage from "./pages/TaskManagementPage";
-import InternalChatPage from "./pages/InternalChatPage";
-import SupplierTrackingPage from "./pages/SupplierTrackingPage";
-import TwoFactorPage from "./pages/TwoFactorPage";
-import SmartNotificationsPage from "./pages/SmartNotificationsPage";
+const DefectiveGoodsPage = lazy(() => import("./pages/DefectiveGoodsPage"));  // p273
+const BackupSystemPage = lazy(() => import("./pages/BackupSystemPage"));  // p273
+const SecurityDashboardPage = lazy(() => import("./pages/SecurityDashboardPage"));  // p273
+const WalletPage = lazy(() => import("./pages/WalletPage"));  // p273
+const TaskManagementPage = lazy(() => import("./pages/TaskManagementPage"));  // p273
+const InternalChatPage = lazy(() => import("./pages/InternalChatPage"));  // p273
+const SupplierTrackingPage = lazy(() => import("./pages/SupplierTrackingPage"));  // p273
+const TwoFactorPage = lazy(() => import("./pages/TwoFactorPage"));  // p273
+const SmartNotificationsPage = lazy(() => import("./pages/SmartNotificationsPage"));  // p273
 
 // Landing & SaaS Pages
-import LandingPage from "./pages/landing/LandingPage";
-import SaasRegisterPage from "./pages/landing/RegisterPage";
-import VerifyEmailPage from "./pages/landing/VerifyEmailPage"; // p156
-import PricingPage from "./pages/landing/PricingPage";
-import SaasAdminPage from "./pages/admin/SaasAdminPage";
-import FeatureFlagsPage from "./pages/admin/FeatureFlagsPage";
-import SystemLogsPage from "./pages/SystemLogsPage";
-import SupplierAdminPage from "./pages/admin/SupplierAdminPage";
-import EventBusDashboard from "./pages/admin/EventBusDashboard";
-import SaasPaymentsPage from "./pages/admin/saas/PaymentsPage";
-import SaasDataBrowserPage from "./pages/admin/saas/DataBrowserPage";
-import SaasPlansPage from "./pages/admin/saas/PlansPage";
-import SaasTenantDebtsPage from "./pages/admin/saas/TenantDebtsPage";
-import SaasAuditTimelinePage from "./pages/admin/saas/AuditTimelinePage";
-import SaasSubscribersPage from "./pages/admin/saas/SubscribersPage";
-import SaasAgentsPage from "./pages/admin/saas/AgentsPage";
-import SaasEmailSettingsPage from "./pages/admin/saas/EmailSettingsPage";
-import AutoHealPage from "./pages/admin/saas/AutoHealPage";
-import StoreManagementPage from "./pages/store/StoreManagementPage";
-import PublicStorePage from "./pages/store/PublicStorePage";
-import DataImportExportPage from "./pages/DataImportExportPage";
-import ImportDataPage from "./pages/ImportDataPage";  // p151
-import MotherboardPage from "./pages/MotherboardPage";
-import TemplateEditorPage from "./pages/settings/TemplateEditorPage";
-import DailyReportPage from "./pages/DailyReportPage";
+const LandingPage = lazy(() => import("./pages/landing/LandingPage"));  // p273
+const SaasRegisterPage = lazy(() => import("./pages/landing/RegisterPage"));  // p273
+const VerifyEmailPage = lazy(() => import("./pages/landing/VerifyEmailPage"));  // p273 // p156
+const PricingPage = lazy(() => import("./pages/landing/PricingPage"));  // p273
+const SaasAdminPage = lazy(() => import("./pages/admin/SaasAdminPage"));  // p273
+const FeatureFlagsPage = lazy(() => import("./pages/admin/FeatureFlagsPage"));  // p273
+const SystemLogsPage = lazy(() => import("./pages/SystemLogsPage"));  // p273
+const SupplierAdminPage = lazy(() => import("./pages/admin/SupplierAdminPage"));  // p273
+const EventBusDashboard = lazy(() => import("./pages/admin/EventBusDashboard"));  // p273
+const SaasPaymentsPage = lazy(() => import("./pages/admin/saas/PaymentsPage"));  // p273
+const SaasDataBrowserPage = lazy(() => import("./pages/admin/saas/DataBrowserPage"));  // p273
+const SaasPlansPage = lazy(() => import("./pages/admin/saas/PlansPage"));  // p273
+const SaasTenantDebtsPage = lazy(() => import("./pages/admin/saas/TenantDebtsPage"));  // p273
+const SaasAuditTimelinePage = lazy(() => import("./pages/admin/saas/AuditTimelinePage"));  // p273
+const SaasSubscribersPage = lazy(() => import("./pages/admin/saas/SubscribersPage"));  // p273
+const SaasAgentsPage = lazy(() => import("./pages/admin/saas/AgentsPage"));  // p273
+const SaasEmailSettingsPage = lazy(() => import("./pages/admin/saas/EmailSettingsPage"));  // p273
+const AutoHealPage = lazy(() => import("./pages/admin/saas/AutoHealPage"));  // p273
+const StoreManagementPage = lazy(() => import("./pages/store/StoreManagementPage"));  // p273
+const PublicStorePage = lazy(() => import("./pages/store/PublicStorePage"));  // p273
+const DataImportExportPage = lazy(() => import("./pages/DataImportExportPage"));  // p273
+const ImportDataPage = lazy(() => import("./pages/ImportDataPage"));  // p273  // p151
+const MotherboardPage = lazy(() => import("./pages/MotherboardPage"));  // p273
+const TemplateEditorPage = lazy(() => import("./pages/settings/TemplateEditorPage"));  // p273
+const DailyReportPage = lazy(() => import("./pages/DailyReportPage"));  // p273
 
 
 // Protected Route Component
@@ -357,6 +358,7 @@ const DashboardRouter = () => {
 
 function AppRoutes() {
   return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-[40vh]"><RefreshCw className="h-8 w-8 animate-spin text-primary" /></div>}>  {/* p273 */}
     <Routes>
       {/* Landing & SaaS Public Routes */}
       <Route path="/landing" element={<LandingPage />} />
@@ -1209,6 +1211,7 @@ function AppRoutes() {
       {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 

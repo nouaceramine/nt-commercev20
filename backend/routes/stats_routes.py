@@ -173,6 +173,11 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     # ── Dashboard Sales Stats ──
     @router.get("/dashboard/sales-stats")
     async def get_sales_stats(user: dict = Depends(block_cashier)):
+        from services.cache_service import cache  # p273
+        _ck = f"stats:sales:{user.get('tenant_id', 'main')}"
+        _hit = cache.get(_ck)
+        if _hit:
+            return _hit
         now = datetime.now(timezone.utc)
         today = now.strftime("%Y-%m-%d")
         month_start = now.strftime("%Y-%m-01")
@@ -211,16 +216,23 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         def _merge(pos, store):
             return {"total": round(pos["total"] + store["total"], 2), "count": pos["count"] + store["count"]}
 
-        return {
+        _out = {
             "today": _merge(pos_today, store_today),
             "month": _merge(pos_month, store_month),
             "year": _merge(pos_year, store_year),
             "store": {"today": store_today, "month": store_month, "year": store_year},
         }
+        cache.set(_ck, _out, ttl=60)  # p273
+        return _out
 
     # ── Profit Stats ──
     @router.get("/dashboard/profit-stats")
     async def get_profit_stats(user: dict = Depends(block_cashier)):
+        from services.cache_service import cache  # p273
+        _ck = f"stats:profit:{user.get('tenant_id', 'main')}"
+        _hit = cache.get(_ck)
+        if _hit:
+            return _hit
         now = datetime.now(timezone.utc)
         month_start = now.strftime("%Y-%m-01")
 
@@ -264,7 +276,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         except Exception:
             ecom_revenue = ecom_cogs = 0
 
-        return {
+        _out = {
             "monthly_revenue": monthly_revenue,
             "monthly_purchase_cost": monthly_purchase_cost,
             "monthly_expenses": monthly_expenses,
@@ -272,6 +284,15 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "ecom_revenue": ecom_revenue,
             "ecom_cogs": ecom_cogs,
         }
+        cache.set(_ck, _out, ttl=60)  # p273
+        return _out
+
+    # ── p273: lightweight product counts (dashboard fallback — no doc transfer) ──
+    @router.get("/stats/stock-summary")
+    async def get_stock_summary(user: dict = Depends(require_tenant)):
+        total = await db.products.count_documents({})
+        agg = await db.products.aggregate([{"$match": low_stock_filter()}, {"$count": "count"}]).to_list(1)
+        return {"total": total, "low_stock_count": agg[0]["count"] if agg else 0}
 
     # ── Analytics: Sales Chart ──
     @router.get("/analytics/sales-chart")
@@ -501,6 +522,11 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
         day = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         next_day = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         in_day = {"$gte": day, "$lt": next_day}
+        from services.cache_service import cache  # p273
+        _ck = f"stats:dailyfull:{admin.get('tenant_id', 'main')}:{day}"
+        _hit = cache.get(_ck)
+        if _hit:
+            return _hit
 
         # 1) POS / inventory sales (webstore mirror rows are counted in the ecom line)
         pos_docs = await db.sales.find({"created_at": in_day, "source": {"$ne": "webstore"},
@@ -659,7 +685,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
         total_revenue = round(pos["total"] + ecom["delivered_total"] + recharge["amount"] + digital["revenue"] + digital["subs_revenue"] + sim_activations["revenue"] + cards["revenue"] + repairs["revenue"], 2)
 
-        return {
+        _out = {
             "date": day,
             "pos": pos, "ecom": ecom, "recharge": recharge,
             "digital": digital, "repairs": repairs,
@@ -674,5 +700,8 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             "iptv_panel_balance": iptv_panel2,
             "total_revenue": total_revenue,
         }
+        _is_today = day == datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cache.set(_ck, _out, ttl=60 if _is_today else 3600)  # p273: past days are immutable
+        return _out
 
     return router

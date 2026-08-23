@@ -766,6 +766,7 @@ async def startup_event():
         await db.expenses.create_index("expense_number", unique=True, sparse=True)  # p196: docs without the field (tenant UI expenses) must not collide on null
         await db.expenses.create_index("category")
         await db.expenses.create_index("expense_date")
+        await db.expenses.create_index("date")  # p273: actual query field (daily-full / profit-stats)
         await db.ai_insights.create_index("id", unique=True)
         await db.ai_insights.create_index("insight_type")
         await db.ai_insights.create_index("priority")

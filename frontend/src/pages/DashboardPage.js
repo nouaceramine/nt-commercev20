@@ -69,8 +69,9 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes] = await Promise.all([
-          apiClient.get(`/products`),
+        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes, stockRes] = await Promise.all([
+          apiClient.get(`/products/paginated?page=1&page_size=6`),  // p273: was full /products (7k+ docs)
+          apiClient.get(`/stats/stock-summary`).catch(() => ({ data: {} })),  // p273
           apiClient.get(`/stats`).catch(() => ({ data: {} })),
           apiClient.get(`/dashboard/sales-stats`).catch(() => ({ data: null })),
           apiClient.get(`/dashboard/profit-stats`).catch(() => ({ data: null })),
@@ -79,7 +80,7 @@ export default function DashboardPage() {
           apiClient.get(`/expenses/estimated-cost`).catch(() => ({ data: null }))
         ]);
         
-        setRecentProducts(productsRes.data.slice(0, 6));
+        setRecentProducts((productsRes.data.items || productsRes.data || []).slice(0, 6));  // p273
 
         if (walletRes.data) {
           setWalletBalance(walletRes.data.balance || 0);
@@ -88,13 +89,13 @@ export default function DashboardPage() {
           setWalletOverdue(!!walletRes.data.subscription_overdue);
         }
         
-        if (statsRes.data) {
+        if (statsRes.data && Object.keys(statsRes.data).length > 0) {  // p273: {} from catch was truthy — fallback was dead code
           setStats(statsRes.data);
         } else {
           setStats(prev => ({
             ...prev,
-            total_products: productsRes.data.length,
-            low_stock_count: productsRes.data.filter(p => p.quantity < (p.low_stock_threshold || 10)).length
+            total_products: stockRes.data.total ?? productsRes.data.total ?? 0,
+            low_stock_count: stockRes.data.low_stock_count ?? 0
           }));
         }
         

@@ -306,6 +306,16 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         session=_tx,
     )
 
+    # p273: bust dashboard caches so stats stay fresh after a new sale
+    try:
+        from services.cache_service import cache as _cache
+        _tid = user.get("tenant_id") or "main"
+        for _p in ("dashboard", "sales", "profit"):
+            _cache.delete(f"stats:{_p}:{_tid}")
+        _cache.delete_pattern(f"stats:dailyfull:{_tid}:*")
+    except Exception:
+        pass
+
     return sale_doc
 
 
