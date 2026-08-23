@@ -158,7 +158,7 @@ export default function EmailSettingsPage() {
             إعدادات البريد الإلكتروني
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            اختر مزوِّد البريد المناسب لمنطقتك. <strong>Brevo</strong> موصى به للجزائر والشرق الأوسط.
+            مزوِّد واحد يكفي — أضِف مفتاح أي مزوِّد وسيستعمله النظام تلقائياً على كامل المنصة.  <strong>Brevo</strong> موصى به للجزائر والشرق الأوسط.
           </p>
         </div>
 
@@ -182,23 +182,28 @@ export default function EmailSettingsPage() {
               <span className="text-sm">عنوان المُرسِل (Sender):</span>
               <span className="text-sm font-mono">{settings.sender_email || '—'}</span>
             </div>
+            {(settings.has_resend_key || settings.has_sendgrid_key || settings.has_brevo_key) && (
+              <div className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-2 mt-2" data-testid="one-provider-enough-note">
+                ✅ مزوِّد واحد يكفي — سيُستعمل المفتاح المتوفر على كافة النظام، والحقول الفارغة اختيارية.
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t">
               <div className="text-xs">
                 <div className="text-muted-foreground">Resend</div>
-                <div className={settings.has_resend_key ? 'font-semibold text-emerald-700' : 'text-rose-600'}>
-                  {settings.has_resend_key ? settings.resend_api_key_masked : 'غير مُعَدّ'}
+                <div className={settings.has_resend_key ? 'font-semibold text-emerald-700' : 'text-muted-foreground'}>
+                  {settings.has_resend_key ? settings.resend_api_key_masked : 'غير مُعَدّ (اختياري)'}
                 </div>
               </div>
               <div className="text-xs">
                 <div className="text-muted-foreground">SendGrid</div>
-                <div className={settings.has_sendgrid_key ? 'font-semibold text-emerald-700' : 'text-rose-600'}>
-                  {settings.has_sendgrid_key ? settings.sendgrid_api_key_masked : 'غير مُعَدّ'}
+                <div className={settings.has_sendgrid_key ? 'font-semibold text-emerald-700' : 'text-muted-foreground'}>
+                  {settings.has_sendgrid_key ? settings.sendgrid_api_key_masked : 'غير مُعَدّ (اختياري)'}
                 </div>
               </div>
               <div className="text-xs">
                 <div className="text-muted-foreground">Brevo 🇩🇿</div>
-                <div className={settings.has_brevo_key ? 'font-semibold text-emerald-700' : 'text-rose-600'}>
-                  {settings.has_brevo_key ? settings.brevo_api_key_masked : 'غير مُعَدّ'}
+                <div className={settings.has_brevo_key ? 'font-semibold text-emerald-700' : 'text-muted-foreground'}>
+                  {settings.has_brevo_key ? settings.brevo_api_key_masked : 'غير مُعَدّ (اختياري)'}
                 </div>
               </div>
             </div>
@@ -215,7 +220,7 @@ export default function EmailSettingsPage() {
             <Select value={form.provider_preference} onValueChange={(v) => setForm({ ...form, provider_preference: v })}>
               <SelectTrigger data-testid="provider-preference-select"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">تلقائي (Brevo أولاً للجزائر)</SelectItem>
+                <SelectItem value="auto">تلقائي (أول مفتاح متوفر: Brevo ← Resend ← SendGrid)</SelectItem>
                 <SelectItem value="brevo">Brevo 🇩🇿 (موصى به للجزائر)</SelectItem>
                 <SelectItem value="resend">Resend</SelectItem>
                 <SelectItem value="sendgrid">SendGrid</SelectItem>

@@ -40,6 +40,18 @@ import {
 } from 'lucide-react';
 import { formatShortDate } from '../../../utils/globalDateFormatter';
 import { SaasPageHeader } from './SaasPageHeader';
+
+// p263: full business-type labels (all 23 profiles, not just 3 hardcoded)
+let _profilesCache = null;
+async function loadProfiles() {
+  if (_profilesCache) return _profilesCache;
+  try {
+    const res = await apiClient.get('/saas/business-profiles');
+    _profilesCache = {};
+    for (const pr of (res.data?.profiles || [])) _profilesCache[pr.key] = pr.name_ar || pr.key;
+  } catch { _profilesCache = {}; }
+  return _profilesCache;
+}
 import { EntityCode } from '../components/EntityCode';
 
 const ALL_FEATURES = [
@@ -76,6 +88,8 @@ const isExpired = (endDate) => !!endDate && new Date(endDate) < new Date();
 
 export default function SubscribersPage() {
   const [tenants, setTenants] = useState([]);
+  const [profileNames, setProfileNames] = useState({});
+  useEffect(() => { loadProfiles().then(setProfileNames); }, []);
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -480,12 +494,12 @@ export default function SubscribersPage() {
                         tenant.business_type === 'distributor' ? 'bg-orange-50 text-orange-700 border-orange-200' :
                         'bg-blue-50 text-blue-700 border-blue-200'
                       }>
-                        {tenant.business_type === 'wholesaler' ? (
-                          <><ShoppingBag className="h-3 w-3 me-1" />تاجر جملة</>
+                        {tenant.business_type === 'wholesaler' || tenant.business_type === 'wholesale' ? (
+                          <><ShoppingBag className="h-3 w-3 me-1" />{profileNames[tenant.business_type] || 'تاجر جملة'}</>
                         ) : tenant.business_type === 'distributor' ? (
-                          <><Truck className="h-3 w-3 me-1" />موزع</>
+                          <><Truck className="h-3 w-3 me-1" />{profileNames[tenant.business_type] || 'موزع'}</>
                         ) : (
-                          <><Store className="h-3 w-3 me-1" />تاجر تجزئة</>
+                          <><Store className="h-3 w-3 me-1" />{profileNames[tenant.business_type] || profileNames.retail || 'تاجر تجزئة'}</>
                         )}
                       </Badge>
                     </TableCell>
