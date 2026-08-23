@@ -854,9 +854,9 @@ export default function POSPage() {
           {/* p164: middle column — flexy/sell-card above the cart (layout per user sketch) */}
           <div className="col-span-1 md:col-span-7 flex flex-col gap-2 min-h-0" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>  {/* p178: was 6 — كسب مساحة الاختصارات */}
             <div className="md:hidden flex items-center gap-2 mb-1 overflow-x-auto pb-1">
-              <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowProductsDialog(true)}><Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}</Button>
-              <Button size="sm" variant={cart.returnMode ? "destructive" : "outline"} className="gap-1 shrink-0" onClick={() => handleTaskClick('return')}><Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}</Button>
-              <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => setShowCustomersDialog(true)}><Users className="h-4 w-4" />{language === 'ar' ? 'زبون' : 'Client'}</Button>
+              <Button size="sm" variant="outline" className="gap-1 shrink-0 min-h-[44px]" onClick={() => setShowProductsDialog(true)}><Plus className="h-4 w-4" />{language === 'ar' ? 'منتج' : 'Produit'}</Button>
+              <Button size="sm" variant={cart.returnMode ? "destructive" : "outline"} className="gap-1 shrink-0 min-h-[44px]" onClick={() => handleTaskClick('return')}><Undo2 className="h-4 w-4" />{language === 'ar' ? 'إرجاع' : 'Retour'}</Button>
+              <Button size="sm" variant="outline" className="gap-1 shrink-0 min-h-[44px]" onClick={() => setShowCustomersDialog(true)}><Users className="h-4 w-4" />{language === 'ar' ? 'زبون' : 'Client'}</Button>
             </div>
             <div className="flex-1 min-h-0 flex flex-col" data-testid="pos-cart-wrap">
             <POSCart

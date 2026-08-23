@@ -272,15 +272,15 @@ export default function POSCart({
                       <p className="text-xs text-muted-foreground">{item.article_code || item.barcode}</p>
                       {item.serial_number && <p className="text-[10px] font-mono text-muted-foreground">SN: {item.serial_number}</p>}
                     </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive shrink-0" onClick={() => removeFromCart(item.cart_item_id)}>
-                      <Trash2 className="h-3 w-3" />
+                    <Button variant="ghost" size="icon" className="h-11 w-11 text-destructive shrink-0" onClick={() => removeFromCart(item.cart_item_id)}>
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                   <div className="flex items-center justify-between mt-2 gap-2">
                     <div className="flex items-center gap-1">
-                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartItemQuantity(item.cart_item_id, item.quantity - 1)}><Minus className="h-3 w-3" /></Button>
-                      <Input type="number" value={item.quantity} onChange={(e) => updateCartItemQuantity(item.cart_item_id, parseInt(e.target.value) || 1)} className="w-12 h-7 text-center text-sm" />
-                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateCartItemQuantity(item.cart_item_id, item.quantity + 1)}><Plus className="h-3 w-3" /></Button>
+                      <Button variant="outline" size="icon" className="h-11 w-11" onClick={() => updateCartItemQuantity(item.cart_item_id, item.quantity - 1)}><Minus className="h-4 w-4" /></Button>
+                      <Input type="number" value={item.quantity} onChange={(e) => updateCartItemQuantity(item.cart_item_id, parseInt(e.target.value) || 1)} className="w-14 h-11 text-center text-base" />
+                      <Button variant="outline" size="icon" className="h-11 w-11" onClick={() => updateCartItemQuantity(item.cart_item_id, item.quantity + 1)}><Plus className="h-4 w-4" /></Button>
                     </div>
                     <div className="text-end">
                       <p className="text-xs text-muted-foreground">{formatCurrency(item.unit_price)} x {item.quantity}</p>
@@ -292,7 +292,7 @@ export default function POSCart({
                     placeholder={language === 'ar' ? 'ملاحظة...' : 'Note...'}
                     value={item.note || ''}
                     onChange={e => updateCartItemNote(item.cart_item_id, e.target.value)}
-                    className="mt-2 h-7 text-xs"
+                    className="mt-2 h-11 text-sm"
                   />
                 </div>
               ))
@@ -301,7 +301,7 @@ export default function POSCart({
         </div>
 
         {/* ── Payment Type Selector ── */}
-        <div className="border-t px-2 pt-2 space-y-1.5">
+        <div className="border-t px-2 pt-2 space-y-1.5 max-sm:sticky max-sm:bottom-16 max-sm:z-20 max-sm:bg-card max-sm:shadow-[0_-4px_12px_rgba(0,0,0,0.08)]" data-testid="pos-payment-footer">
           <div className="flex gap-1">
             {paymentTypes.map(({ key, label, icon: Icon }) => (
               <button
@@ -310,7 +310,7 @@ export default function POSCart({
                   setPaymentType(key);
                   if (key === 'installment') onInstallmentClick?.();
                 }}
-                className={`flex-1 min-w-[48px] flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg border text-[11px] font-medium transition-all ${
+                className={`flex-1 min-w-[48px] max-sm:min-h-[48px] flex flex-col items-center justify-center gap-0.5 py-1.5 px-1 rounded-lg border text-[11px] font-medium transition-all ${
                   paymentType === key
                     ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                     : 'bg-background text-muted-foreground border-border hover:border-primary/40 hover:text-primary'
@@ -471,7 +471,7 @@ export default function POSCart({
                 variant="outline"
                 onClick={() => parkCart(selectedCustomer)}  // p180: الزبون يُحفظ مع السلة
                 disabled={cart.length === 0}
-                className="h-9 px-2 gap-1 text-amber-600 border-amber-300 hover:bg-amber-50"
+                className="h-9 max-sm:min-h-[48px] px-2 gap-1 text-amber-600 border-amber-300 hover:bg-amber-50"
                 title={language === 'ar' ? 'حفظ السلة مؤقتاً' : 'Mettre en attente'}
               >
                 <PauseCircle className="h-4 w-4" />
@@ -480,7 +480,7 @@ export default function POSCart({
               <Button
                 variant="outline"
                 onClick={clearCart}
-                className="h-9 px-3 gap-1 flex-1 sm:flex-none"
+                className="h-9 max-sm:min-h-[48px] px-3 gap-1 flex-1 sm:flex-none"
                 data-testid="annuler-btn"
               >
                 <X className="h-4 w-4" />
@@ -489,7 +489,7 @@ export default function POSCart({
               <Button
                 onClick={completeSale}
                 disabled={loading || cart.length === 0 || !hasOpenSession}
-                className="h-9 px-4 gap-1 flex-1 sm:flex-none"
+                className="h-9 max-sm:min-h-[48px] px-4 gap-1 flex-1 sm:flex-none"
                 data-testid="vente-btn"
               >
                 <Check className="h-4 w-4" />
