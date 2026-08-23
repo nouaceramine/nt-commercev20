@@ -62,6 +62,112 @@ async def list_integrations(user: dict = Depends(require_tenant)):
     return {"items": [_redact(r) for r in rows]}
 
 
+PLATFORM_BASE_URL = "https://nt-commerce.net"
+
+
+async def _ping_meta_channel(integration: dict) -> dict:
+    """p274: real Graph API ping for Meta channels (whatsapp/facebook/messenger/instagram)."""
+    import httpx
+    creds = _decrypt_creds(integration.get("credentials") or {})
+    channel = integration.get("channel", "")
+    mode = integration.get("mode", "live")
+    token = (creds.get("access_token") or "").strip()
+    if not token:
+        return {"ok": False, "mode": mode, "channel": channel,
+                "error": "missing_token", "message": "❌ أدخل Access Token أولاً"}
+    if channel == "whatsapp":
+        node = (creds.get("phone_number_id") or "").strip()
+        fields = "display_phone_number,verified_name"
+        label = "واتساب"
+    elif channel == "instagram":
+        node = (creds.get("account_id") or "").strip()
+        fields = "username"
+        label = "إنستغرام"
+    else:  # facebook / messenger → Page Access Token
+        node = (creds.get("page_id") or "").strip()
+        fields = "name"
+        label = "صفحة فيسبوك"
+    if not node:
+        return {"ok": False, "mode": mode, "channel": channel,
+                "error": "missing_id", "message": "❌ أدخل معرّف العقدة (phone_number_id / page_id / account_id) أولاً"}
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as cl:
+            r = await cl.get(
+                f"https://graph.facebook.com/v21.0/{node}",
+                params={"fields": fields},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code == 200 and data.get("id"):
+            name = (data.get("verified_name") or data.get("name") or data.get("username")
+                    or data.get("display_phone_number") or node)
+            return {"ok": True, "mode": "live", "channel": channel, "details": data,
+                    "message": f"✅ متصل بنجاح بـ {label} — {name}"}
+        err = ((data or {}).get("error") or {}).get("message") or r.text[:150]
+        return {"ok": False, "mode": mode, "channel": channel, "error": err,
+                "message": f"❌ رفض Meta: {err}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "mode": mode, "channel": channel, "error": str(exc)[:150],
+                "message": f"❌ تعذّر الوصول إلى Meta: {str(exc)[:120]}"}
+
+
+@router.get("/ecom/social-setup-info")
+async def social_setup_info(user: dict = Depends(require_tenant)):
+    """p274: guided-connection data for the social-channels wizard (static guidance)."""
+    await require_ecom_feature(user)
+    wa_hook = f"{PLATFORM_BASE_URL}/api/integrations/whatsapp/webhook"
+    return {
+        "platform_webhook_url": wa_hook,
+        "channels": {
+            "whatsapp": {
+                "title_ar": "واتساب للأعمال (Cloud API)",
+                "steps_ar": [
+                    "افتح developers.facebook.com وأنشئ تطبيقاً من نوع «Business» (أو استعمل تطبيقاً موجوداً).",
+                    "أضِف منتج «WhatsApp» إلى التطبيق واربط رقم هاتفك التجاري.",
+                    "من لوحة WhatsApp ← «API Setup» انسخ «Phone Number ID» وأنشئ توكن دائماً (System User Token بصلاحية whatsapp_business_messaging).",
+                    "ألصق القيمتين في الخطوة التالية ثم اضغط «حفظ واختبار».",
+                    "لاستقبال الرسائل الواردة: في إعدادات Webhook داخل تطبيق Meta ألصق رابط الويب هوك أدناه (اختر أي Verify Token — المنصة تقبله) واشترك في حقل messages.",
+                ],
+                "webhook_url": wa_hook,
+                "fields": [["phone_number_id", "Phone Number ID"], ["access_token", "WhatsApp Cloud API Token"]],
+            },
+            "facebook": {
+                "title_ar": "صفحة فيسبوك",
+                "steps_ar": [
+                    "افتح developers.facebook.com وأنشئ تطبيقاً وأضف منتج «Messenger».",
+                    "اربط صفحتك بالتطبيق من Messenger ← Settings ← Access Tokens.",
+                    "ولّد «Page Access Token» للصفحة وانسخه مع معرّف الصفحة (Page ID).",
+                    "ألصق القيمتين في الخطوة التالية ثم اضغط «حفظ واختبار».",
+                ],
+                "webhook_url": "",
+                "fields": [["page_id", "معرّف صفحة Facebook"], ["access_token", "Page Access Token"]],
+            },
+            "messenger": {
+                "title_ar": "ماسنجر",
+                "steps_ar": [
+                    "ماسنجر يعمل عبر صفحة فيسبوك: أنشئ تطبيقاً على developers.facebook.com وأضف منتج «Messenger».",
+                    "اربط صفحتك من Messenger ← Settings ← Access Tokens وولّد «Page Access Token».",
+                    "انسخ معرّف الصفحة (Page ID) والتوكن وألصقهما في الخطوة التالية ثم اضغط «حفظ واختبار».",
+                    "لاستقبال رسائل ماسنجر: فعّل Webhooks لحقل messages في تطبيق Meta (نفس رابط الويب هوك للمنصة).",
+                ],
+                "webhook_url": wa_hook,
+                "fields": [["page_id", "معرّف صفحة Facebook"], ["access_token", "Page Access Token"]],
+            },
+            "instagram": {
+                "title_ar": "إنستغرام للأعمال",
+                "steps_ar": [
+                    "حوّل حساب إنستغرام إلى حساب «Business» واربطه بصفحة فيسبوك.",
+                    "من developers.facebook.com أنشئ تطبيقاً وأضف منتج «Instagram» (أو Messenger مع دعم Instagram).",
+                    "انسخ «Instagram Business Account ID» وولّد Access Token بصلاحية instagram_manage_messages.",
+                    "ألصق القيمتين في الخطوة التالية ثم اضغط «حفظ واختبار».",
+                ],
+                "webhook_url": "",
+                "fields": [["account_id", "معرّف حساب Instagram Business"], ["access_token", "Access Token"]],
+            },
+        },
+    }
+
+
 @router.post("/ecom/integrations")
 async def create_integration(body: dict, user: dict = Depends(require_tenant)):
     """Create a new channel integration for the current tenant.
@@ -186,7 +292,11 @@ async def test_integration(integration_id: str, user: dict = Depends(require_ten
             return {"ok": False, "mode": mode, "channel": "yalidine", "error": str(exc),
                     "message": f"❌ {exc}"}
 
-    # ── Others (FB / IG / TikTok / WhatsApp / Telegram / Viber) ──────
+    # ── Meta channels (p274): real Graph API ping ────────────────────
+    if channel in ("whatsapp", "facebook", "messenger", "instagram"):
+        return await _ping_meta_channel(existing)
+
+    # ── Others (TikTok / Telegram / Viber) ───────────────────────────
     # No live ping helper yet — surface mock status honestly.
     return {
         "ok": True,

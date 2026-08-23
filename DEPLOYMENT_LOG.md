@@ -4473,3 +4473,21 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - الحزمة الرئيسية: 5,485,830 → 452,343 بايت (12× أصغر) + 97 chunk تُحمَّل عند الحاجة.
 - إبطال الكاش مثبت E2E على NT-0001: بيع TEST-P273 → مفاتيح stats:* للمستأجر اختفت فوراً → حذف البيع، المخزون عاد 6، بقايا 0 ✓.
 - تحقق عرض فعلي (headless): الصفحة الرئيسية + /login + /track كلها render بنجاح مع الحزم المقسّمة ✓؛ health 200 ✓؛ bundle main.820c8ca0.js.
+
+## p274 — معالج ربط القنوات الاجتماعية (WhatsApp/Messenger/Instagram) (2026-08-23)
+
+### التغييرات
+- ecom/integrations_routes.py:
+  - _ping_meta_channel(): فحص اتصال حقيقي عبر Graph API v21.0 — whatsapp (GET /{phone_number_id} display_phone_number+verified_name)، facebook/messenger (GET /{page_id} name)، instagram (GET /{account_id} username). يفك التشفير تلقائياً (p272) ويعيد ok/error برسالة عربية واضحة.
+  - test endpoint يوجّه قنوات Meta الأربع للفحص الحقيقي (كان «وضع المحاكاة» لكل ما عدا shopify/yalidine).
+  - GET /ecom/social-setup-info: تعليمات خطوة-بخطوة لكل قناة + رابط الويب هوك للمنصة (/api/integrations/whatsapp/webhook) + الحقول المطلوبة.
+- SocialConnectWizard.js (جديد): معالج 3 خطوات (تعليمات ← بيانات ← اختبار حقيقي) بمؤشر خطوات، نسخ رابط الويب هوك، إنشاء التكامل ثم فحصه فوراً وعرض النتيجة (نجاح أخضر / فشل أحمر مع خطأ Meta) وإمكانية الرجوع للتعديل.
+- EcomChannelsPage.js: القنوات الأربع تفتح المعالج بدل حوار البيانات الخام (باقي القنوات دون تغيير).
+
+### الاختبارات
+- E2E على NT-0001: إنشاء تكامل whatsapp بتوكن وهمي → الفحص الحقيقي وصل Meta فعلاً وأعاد «Invalid OAuth access token» (مسار كامل: تشفير p272 عند التخزين → فك عند الفحص → طلب Graph API) ✓ → حذف، بقايا 0 ✓.
+- /ecom/social-setup-info: 4 قنوات، 5 خطوات لواتساب، رابط الويب هوك صحيح ✓.
+- bundle main.3c7ddcaf.js؛ المعالج في chunk كسول مستقل (4727.*) ✓؛ health 200 ✓.
+
+### المتبقي (بند المالك)
+- مفاتيح تطبيق Meta على مستوى المنصة (App ID/Secret + Embedded Signup + مراجعة التطبيق) لتحويل الربط اليدوي إلى OAuth تلقائي — الواجهة جاهزة وتعمل بالتوكنات اليدوية إلى حينها.

@@ -10,6 +10,7 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { Switch } from '../../components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../components/ui/dialog';
+import SocialConnectWizard from './SocialConnectWizard';  // p274
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckCircle2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
@@ -230,6 +231,7 @@ export default function EcomChannelsPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ channel: 'shopify', name: '', credentials: {}, is_active: true, return_fee: '' });
   const [saving, setSaving] = useState(false);
+  const [wizardChannel, setWizardChannel] = useState(null);  // p274
 
   const load = async () => {
     setLoading(true);
@@ -245,6 +247,10 @@ export default function EcomChannelsPage() {
   useEffect(() => { load(); }, []);
 
   const openCreate = (channel) => {
+    if (['whatsapp', 'facebook', 'messenger', 'instagram'].includes(channel)) {  // p274: guided wizard
+      setWizardChannel(channel);
+      return;
+    }
     setEditing(null);
     setForm({ channel, name: CHANNELS[channel]?.labelAr || channel, credentials: {}, is_active: true, return_fee: '' });
     setOpen(true);
@@ -540,6 +546,15 @@ export default function EcomChannelsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* p274: guided wizard for Meta social channels */}
+      <SocialConnectWizard
+        channel={wizardChannel}
+        channelMeta={CHANNELS[wizardChannel]}
+        open={!!wizardChannel}
+        onClose={() => setWizardChannel(null)}
+        onDone={load}
+      />
     </>
   );
 }
