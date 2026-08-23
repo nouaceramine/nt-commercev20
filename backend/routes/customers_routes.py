@@ -131,15 +131,9 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Generate Customer Code ──
     @router.get("/generate-code")
     async def generate_customer_code(user: dict = Depends(require_tenant)):
-        pipeline = [
-            {"$match": {"code": {"$regex": "^CL\\d+$"}}},
-            {"$project": {"num": {"$toInt": {"$substrCP": ["$code", 2, {"$subtract": [{"$strLenCP": "$code"}, 2]}]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.customers.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"CL{str(next_num).zfill(4)}"}
+        # p257: atomic counter
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "customers", "CL", 4, False)}
 
     # ── p172: Customer 360° overview — activity across all five categories ──
     @router.get("/cross-sell/summary")

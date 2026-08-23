@@ -514,6 +514,55 @@ async def startup_event():
     except Exception as e:
         logger.warning("Barcode index ensure: %s", e)
 
+    # p257: unique entity codes per tenant DB (safety net behind the atomic
+    # counters). Sparse: legacy docs without the field are ignored. Each index
+    # is attempted independently — a pre-existing duplicate in one collection
+    # (e.g. sales.code MP00001 on NT-0004) only skips that one index.
+    try:
+        from config.database import get_tenant_db as _get_tenant_db2, main_db as _main_db2
+        _dbs2 = []
+        async for t in _main_db2.saas_tenants.find({}, {"_id": 0, "id": 1}):
+            if t.get("id"):
+                try:
+                    _dbs2.append(_get_tenant_db2(t["id"]))
+                except Exception:
+                    pass
+        _CODE_INDEXES = [
+            ("purchases", "code"), ("customers", "code"),
+            ("products", "article_code"), ("products", "sku"),
+            ("expenses", "code"), ("repair_tickets", "code"),
+            ("suppliers", "code"), ("employees", "code"),
+            ("warehouses", "code"), ("inventory_sessions", "code"),
+            ("price_update_logs", "code"), ("daily_sessions", "code"),
+            ("product_families", "code"), ("recharges", "code"),
+            # sales.code intentionally non-unique for now: the real tenant has a
+            # pre-existing duplicate (MP00001 x2) from the pre-p257 race; owner
+            # decision needed before enforcing uniqueness there.
+        ]
+        for _d in _dbs2:
+            for _coll, _field in _CODE_INDEXES:
+                try:
+                    # drop any earlier-spec same-name index (spec changed during p257 rollout)
+                    try:
+                        await _d[_coll].drop_index(f"p257_unique_{_field}")
+                    except Exception:
+                        pass
+                    await _d[_coll].create_index(
+                        [(_field, 1)], unique=True,
+                        partialFilterExpression={_field: {"$gt": ""}},
+                        name=f"p257_unique_{_field}")
+                except Exception as _ie:
+                    logger.warning("p257 index %s.%s on %s: %s",
+                                   _coll, _field, getattr(_d, "name", "?"), str(_ie)[:120])
+            # sales.code stays a plain lookup index (fast search, no uniqueness yet)
+            try:
+                await _d.sales.create_index([("code", 1)], sparse=True, name="p257_sales_code")
+            except Exception:
+                pass
+        logger.info("p257 unique code indexes ensured on %d tenant databases", len(_dbs2))
+    except Exception as e:
+        logger.warning("p257 index ensure: %s", e)
+
     # p190: actually START the bus — register handlers, bind Mongo, run consumer.
     # Previously `event_bus.start()` was called without await/args: a dead
     # coroutine, so no handler was ever registered and nothing was consumed.

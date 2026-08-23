@@ -65,17 +65,9 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
     # ── Generate Sale Code ──
     @router.get("/generate-code")
     async def generate_sale_code(user: dict = Depends(require_tenant)):
-        from datetime import datetime as dt
-        year = str(dt.now().year)[2:]
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^BV\\d+/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substrCP": ["$code", 2, {"$subtract": [{"$strLenCP": "$code"}, 5]}]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.sales.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"BV{str(next_num).zfill(4)}/{year}"}
+        # p257: atomic counter — race-proof, sequence continues from existing max
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "sales", "BV", 4, True)}
 
     # ── Get Single Sale ──
     @router.get("/{sale_id}")

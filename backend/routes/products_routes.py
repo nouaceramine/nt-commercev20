@@ -402,21 +402,16 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             family = await db.product_families.find_one({"id": family_id}, {"_id": 0, "name_en": 1})
             if family:
                 prefix = family["name_en"][:2].upper()
-        count = await db.products.count_documents({})
-        return {"sku": f"{prefix}-{str(count + 1).zfill(5)}"}
+        # p257: atomic per-prefix counter (was count+1 — collides after deletions)
+        from services.code_generator import next_code
+        return {"sku": await next_code(db, "products", f"{prefix}-", 5, False, field="sku")}
 
     # ── Generate Article Code ──
     @router.get("/generate-article-code")
     async def generate_article_code(admin: dict = Depends(get_current_user)):
-        pipeline = [
-            {"$match": {"article_code": {"$regex": "^AR\\d{4}$"}}},
-            {"$project": {"num": {"$toInt": {"$substr": ["$article_code", 2, 4]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.products.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"article_code": f"AR{str(next_num).zfill(4)}"}
+        # p257: atomic counter (field is article_code on products)
+        from services.code_generator import next_code
+        return {"article_code": await next_code(db, "products", "AR", 4, False, field="article_code")}
 
     # ── Low Stock Alert ──
     @router.get("/alerts/low-stock")

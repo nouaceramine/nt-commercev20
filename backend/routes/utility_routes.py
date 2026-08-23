@@ -24,74 +24,39 @@ def create_utility_routes(db, require_tenant, get_tenant_admin, PriceHistoryResp
     @router.get("/suppliers/generate-code", operation_id="generate_supplier_code_util")
     async def generate_supplier_code_util():
         """Generate next supplier code (FR0001/26, etc.)"""
-        year = str(datetime.now().year)[2:]  # 2026 -> 26
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^FR\\d{{4}}/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.suppliers.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"FR{str(next_num).zfill(4)}/{year}"}
+        # p257: atomic counter — race-proof, continues from existing max
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "suppliers", "FR", 4, True)}
 
 
 
     @router.get("/expenses/generate-code")
     async def generate_expense_code():
         """Generate next expense code (CH0001/26, etc.)"""
-        year = str(datetime.now().year)[2:]  # 2026 -> 26
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^CH\\d{{4}}/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.expenses.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"CH{str(next_num).zfill(4)}/{year}"}
+        # p257: atomic counter — race-proof, continues from existing max
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "expenses", "CH", 4, True)}
 
     @router.get("/inventory-sessions/generate-code")
     async def generate_inventory_code():
         """Generate next inventory code (IN0001/26, etc.)"""
-        year = str(datetime.now().year)[2:]  # 2026 -> 26
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^IN\\d{{4}}/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.inventory_sessions.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"IN{str(next_num).zfill(4)}/{year}"}
+        # p257: atomic counter — race-proof, continues from existing max
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "inventory_sessions", "IN", 4, True)}
 
     @router.get("/price-updates/generate-code")
     async def generate_price_update_code():
         """Generate next price update code (MT0001/26, etc.)"""
-        year = str(datetime.now().year)[2:]  # 2026 -> 26
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^MT\\d{{4}}/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substr": ["$code", 2, 4]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.price_update_logs.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"MT{str(next_num).zfill(4)}/{year}"}
+        # p257: atomic counter — race-proof, continues from existing max
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "price_update_logs", "MT", 4, True)}
 
     @router.get("/daily-sessions/generate-code")
     async def generate_session_code():
         """Generate next session code (S001/26, etc.)"""
-        year = str(datetime.now().year)[2:]  # 2026 -> 26
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^S\\d{{3}}/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substr": ["$code", 1, 3]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.daily_sessions.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"S{str(next_num).zfill(3)}/{year}"}
+        # p257: atomic counter — race-proof, continues from existing max
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "daily_sessions", "S", 3, True)}
 
     # ============ PRICE HISTORY ROUTES ============
 

@@ -331,17 +331,9 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     @router.get("/generate-code")
     async def generate_purchase_code(user: dict = Depends(require_tenant)):
-        from datetime import datetime as dt
-        year = str(dt.now().year)[2:]
-        pipeline = [
-            {"$match": {"code": {"$regex": f"^AC\\d+/{year}$"}}},
-            {"$project": {"num": {"$toInt": {"$substrCP": ["$code", 2, {"$subtract": [{"$strLenCP": "$code"}, 5]}]}}}},
-            {"$sort": {"num": -1}},
-            {"$limit": 1}
-        ]
-        result = await db.purchases.aggregate(pipeline).to_list(1)
-        next_num = result[0]["num"] + 1 if result else 1
-        return {"code": f"AC{str(next_num).zfill(4)}/{year}"}
+        # p257: atomic counter
+        from services.code_generator import next_code
+        return {"code": await next_code(db, "purchases", "AC", 4, True)}
 
     # ── Get Single Purchase ──
     @router.post("/{purchase_id}/confirm-stock")
