@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Input } from './ui/input';
-import { Badge } from './ui/badge';
 import {
   Search, Package, Users, Receipt, ArrowLeft, ArrowRight,
-  Hash, X, Loader2, TrendingUp,
+  X, Loader2, TrendingUp, Truck, ShoppingCart, Banknote,
+  Contact, UserSquare, Wrench, Globe, Store, Clock,
+  ClipboardList, Tag, Handshake, Warehouse, CalendarClock,
+  Smartphone, Tv,
 } from 'lucide-react';
 
 function useDebounce(value, delay) {
@@ -18,13 +20,37 @@ function useDebounce(value, delay) {
   return debouncedValue;
 }
 
+// p260: one backend endpoint now searches every coded entity — the modal
+// renders whatever groups the server returns, in server order.
+const GROUP_META = {
+  product:              { icon: Package,       color: 'blue',    ar: 'المنتجات',            en: 'Produits' },
+  customer:             { icon: Users,         color: 'purple',  ar: 'الزبائن',             en: 'Clients' },
+  supplier:             { icon: Truck,         color: 'purple',  ar: 'الموردون',            en: 'Fournisseurs' },
+  sale:                 { icon: Receipt,       color: 'emerald', ar: 'المبيعات',            en: 'Ventes' },
+  purchase:             { icon: ShoppingCart,  color: 'emerald', ar: 'المشتريات',           en: 'Achats' },
+  expense:              { icon: Banknote,      color: 'emerald', ar: 'المصاريف',            en: 'Dépenses' },
+  employee:             { icon: Contact,       color: 'purple',  ar: 'الموظفون',            en: 'Employés' },
+  system_user:          { icon: UserSquare,    color: 'purple',  ar: 'المستخدمون',          en: 'Utilisateurs' },
+  repair_ticket:        { icon: Wrench,        color: 'blue',    ar: 'تذاكر الصيانة',       en: 'Réparations' },
+  ecom_order:           { icon: Globe,         color: 'blue',    ar: 'طلبات التجارة',       en: 'Commandes ecom' },
+  store_order:          { icon: Store,         color: 'blue',    ar: 'طلبات المتجر',        en: 'Commandes boutique' },
+  daily_session:        { icon: Clock,         color: 'emerald', ar: 'الجلسات اليومية',     en: 'Sessions' },
+  inventory_session:    { icon: ClipboardList, color: 'emerald', ar: 'جرد المخزون',         en: 'Inventaires' },
+  price_update:         { icon: Tag,           color: 'emerald', ar: 'سجلات الأسعار',       en: 'Historique prix' },
+  partner:              { icon: Handshake,     color: 'purple',  ar: 'الشركاء',             en: 'Partenaires' },
+  warehouse:            { icon: Warehouse,     color: 'purple',  ar: 'المخازن',             en: 'Dépôts' },
+  installment:          { icon: CalendarClock, color: 'emerald', ar: 'الأقساط',             en: 'Échéances' },
+  recharge:             { icon: Smartphone,    color: 'blue',    ar: 'شحن الرصيد',          en: 'Recharges' },
+  digital_subscription: { icon: Tv,            color: 'blue',    ar: 'الاشتراكات الرقمية',  en: 'Abonnements' },
+};
+
 export function GlobalSearchModal({ open, onClose, language }) {
   const navigate = useNavigate();
   const inputRef = useRef(null);
   const ar = language === 'ar';
 
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState({ products: [], customers: [], sales: [] });
+  const [groups, setGroups] = useState({});
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(0);
   const debouncedQuery = useDebounce(query, 280);
@@ -33,7 +59,7 @@ export function GlobalSearchModal({ open, onClose, language }) {
   useEffect(() => {
     if (open) {
       setQuery('');
-      setResults({ products: [], customers: [], sales: [] });
+      setGroups({});
       setSelected(0);
       setTimeout(() => inputRef.current?.focus(), 80);
     }
@@ -42,29 +68,21 @@ export function GlobalSearchModal({ open, onClose, language }) {
   // Search
   const doSearch = useCallback(async (q) => {
     if (!q || q.length < 2) {
-      setResults({ products: [], customers: [], sales: [] });
+      setGroups({});
       return;
     }
-    // Super-admin has no tenant DB — these tenant endpoints would 403. Skip silently.
+    // Super-admin has no tenant DB — this tenant endpoint would 403. Skip silently.
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       if (user.role === 'super_admin') {
-        setResults({ products: [], customers: [], sales: [] });
+        setGroups({});
         return;
       }
     } catch { /* noop */ }
     setLoading(true);
     try {
-      const [pRes, cRes, sRes] = await Promise.allSettled([
-        apiClient.get(`/products?search=${encodeURIComponent(q)}&limit=5`),
-        apiClient.get(`/customers?search=${encodeURIComponent(q)}&limit=5`),
-        apiClient.get(`/sales?search=${encodeURIComponent(q)}&limit=5`),
-      ]);
-      setResults({
-        products: pRes.status === 'fulfilled' ? (pRes.value.data || []).slice(0, 5) : [],
-        customers: cRes.status === 'fulfilled' ? (cRes.value.data || []).slice(0, 5) : [],
-        sales: sRes.status === 'fulfilled' ? (sRes.value.data || []).slice(0, 5) : [],
-      });
+      const res = await apiClient.get(`/search/global?q=${encodeURIComponent(q)}`);
+      setGroups(res.data?.groups || {});
       setSelected(0);
     } catch {
       // silent
@@ -77,19 +95,15 @@ export function GlobalSearchModal({ open, onClose, language }) {
     doSearch(debouncedQuery);
   }, [debouncedQuery, doSearch]);
 
-  // Flatten all results for keyboard nav
-  const allItems = [
-    ...results.products.map(p => ({ type: 'product', item: p })),
-    ...results.customers.map(c => ({ type: 'customer', item: c })),
-    ...results.sales.map(s => ({ type: 'sale', item: s })),
-  ];
+  // Flatten all results for keyboard nav (server group order)
+  const groupEntries = Object.entries(groups).filter(([, items]) => items.length);
+  const allItems = groupEntries.flatMap(([type, items]) =>
+    items.map(item => ({ type, item })));
 
   const handleSelect = (type, item) => {
     onClose();
     setQuery('');
-    if (type === 'product') navigate(`/products?id=${item.id}`);
-    else if (type === 'customer') navigate(`/customers?id=${item.id}`);
-    else if (type === 'sale') navigate(`/sales?invoice=${item.invoice_number}`);
+    if (item.link) navigate(item.link);
   };
 
   const handleKeyDown = (e) => {
@@ -119,7 +133,7 @@ export function GlobalSearchModal({ open, onClose, language }) {
           const isSelected = selected === globalIndex;
           return (
             <button
-              key={item.id}
+              key={`${type}-${item.id || i}`}
               onMouseEnter={() => setSelected(globalIndex)}
               onClick={() => handleSelect(type, item)}
               className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-start ${
@@ -131,26 +145,12 @@ export function GlobalSearchModal({ open, onClose, language }) {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">
-                  {type === 'product' && (ar ? item.name_ar : item.name_en) || item.name}
-                  {type === 'customer' && item.name}
-                  {type === 'sale' && item.invoice_number}
+                  {item.title || item.code}
                 </p>
                 <p className={`text-xs truncate ${isSelected ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                  {type === 'product' && `${item.quantity || 0} ${ar ? 'في المخزون' : 'en stock'} · ${item.retail_price || item.selling_price || 0} DA`}
-                  {type === 'customer' && (item.phone || (ar ? 'بدون هاتف' : 'Sans téléphone'))}
-                  {type === 'sale' && `${item.total?.toFixed(2) || 0} DA · ${item.customer_name || (ar ? 'عابر' : 'Client')}`}
+                  {item.code && item.code !== item.title ? `${item.code} · ` : ''}{item.subtitle || ''}
                 </p>
               </div>
-              {type === 'product' && item.quantity <= (item.min_quantity || 0) && (
-                <Badge className="bg-red-100 text-red-700 text-[10px] px-1.5">
-                  {ar ? 'منخفض' : 'Bas'}
-                </Badge>
-              )}
-              {type === 'sale' && item.remaining > 0.01 && (
-                <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1.5">
-                  {ar ? 'دين' : 'Crédit'}
-                </Badge>
-              )}
               <span className={`text-xs ${isSelected ? 'text-primary-foreground/60' : 'text-muted-foreground/40'}`}>
                 {ar ? <ArrowLeft className="h-3.5 w-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}
               </span>
@@ -161,9 +161,7 @@ export function GlobalSearchModal({ open, onClose, language }) {
     );
   };
 
-  const productOffset = 0;
-  const customerOffset = results.products.length;
-  const saleOffset = results.products.length + results.customers.length;
+  let offset = 0;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -182,8 +180,9 @@ export function GlobalSearchModal({ open, onClose, language }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={ar ? 'ابحث في المنتجات، الزبائن، الفواتير...' : 'Chercher produits, clients, factures...'}
+            placeholder={ar ? 'ابحث بأي كود أو اسم: BV، CL، AR، WEB، ECO...' : 'Chercher par code ou nom...'}
             className="border-0 shadow-none focus-visible:ring-0 h-8 p-0 text-base"
+            data-testid="global-search-input"
           />
           {query && (
             <button onClick={() => setQuery('')} className="text-muted-foreground hover:text-foreground">
@@ -210,34 +209,22 @@ export function GlobalSearchModal({ open, onClose, language }) {
             </div>
           )}
 
-          {hasResults && (
-            <>
+          {groupEntries.map(([type, items]) => {
+            const meta = GROUP_META[type] || { icon: Search, color: 'blue', ar: type, en: type };
+            const section = (
               <Section
-                icon={Package}
-                label={ar ? 'المنتجات' : 'Produits'}
-                type="product"
-                items={results.products}
-                color="blue"
-                indexOffset={productOffset}
+                key={type}
+                icon={meta.icon}
+                label={ar ? meta.ar : meta.en}
+                type={type}
+                items={items}
+                color={meta.color}
+                indexOffset={offset}
               />
-              <Section
-                icon={Users}
-                label={ar ? 'الزبائن' : 'Clients'}
-                type="customer"
-                items={results.customers}
-                color="purple"
-                indexOffset={customerOffset}
-              />
-              <Section
-                icon={Receipt}
-                label={ar ? 'الفواتير' : 'Factures'}
-                type="sale"
-                items={results.sales}
-                color="emerald"
-                indexOffset={saleOffset}
-              />
-            </>
-          )}
+            );
+            offset += items.length;
+            return section;
+          })}
         </div>
 
         {/* Footer */}

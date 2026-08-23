@@ -559,6 +559,14 @@ async def startup_event():
                 await _d.sales.create_index([("code", 1)], sparse=True, name="p257_sales_code")
             except Exception:
                 pass
+            # p260: invoice_number lookup indexes for global search prefix scans
+            for _coll in ("sales", "purchases"):
+                try:
+                    await _d[_coll].create_index(
+                        [("invoice_number", 1)], sparse=True,
+                        name="p260_invoice_number")
+                except Exception:
+                    pass
         logger.info("p257 unique code indexes ensured on %d tenant databases", len(_dbs2))
     except Exception as e:
         logger.warning("p257 index ensure: %s", e)
@@ -1243,6 +1251,7 @@ _AUTO_REG_MODULES = [
     'routes.suppliers_routes',
     'routes.task_chat_routes',
     'routes.utility_routes',
+    'routes.search_routes',  # p260: factory create_search_routes(db, get_current_user) — was dead code (two silent 'import router' failures)
     'routes.warehouse_core_routes',
     'routes.whatsapp_integration_routes',
     'routes.yalidine_integration_routes',

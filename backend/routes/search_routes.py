@@ -9,50 +9,105 @@ import uuid
 import time
 
 
+# p260: every entity with a public code is searchable from one endpoint.
+# Each spec: (group, collection, code fields [prefix-matched, index-friendly],
+#             name/label fields [substring-matched], title fields in order,
+#             subtitle fields in order, link template).
+# Large collections (sales/purchases) use prefix matching for name fields too,
+# so a full-collection substring scan never happens on tens of thousands of rows.
+_SEARCH_SPECS = [
+    ("product",           "products",           ["article_code", "barcode", "sku"],        ["name"],                    ["name"],                    ["article_code", "barcode"], "/products?id={id}"),
+    ("customer",          "customers",          ["code", "phone"],                          ["name"],                    ["name"],                    ["code", "phone"],           "/customers?id={id}"),
+    ("supplier",          "suppliers",          ["code", "phone"],                          ["name"],                    ["name"],                    ["code", "phone"],           "/suppliers?id={id}"),
+    ("sale",              "sales",              ["code", "invoice_number"],                 ["customer_name|prefix"],    ["customer_name", "code"],   ["code", "invoice_number"],  "/sales?invoice={invoice_number}"),
+    ("purchase",          "purchases",          ["code", "invoice_number"],                 ["supplier_name|prefix"],    ["supplier_name", "code"],   ["code", "invoice_number"],  "/purchases?id={id}"),
+    ("expense",           "expenses",           ["code"],                                   ["title"],                   ["title", "code"],           ["code"],                    "/expenses?id={id}"),
+    ("employee",          "employees",          ["code", "phone"],                          ["name"],                    ["name"],                    ["code", "phone"],           "/employees?id={id}"),
+    ("system_user",       "users",              ["email"],                                  ["name"],                    ["name"],                    ["email"],                   "/users?id={id}"),
+    ("repair_ticket",     "repair_tickets",     ["code", "ticket_number", "imei", "phone"], ["customer_name"],           ["customer_name", "code"],   ["code", "ticket_number"],   "/repairs?id={id}"),
+    ("ecom_order",        "ecom_orders",        ["order_code", "tracking_number", "customer.phone"], ["customer.name"],  ["customer.name", "order_code"], ["order_code", "tracking_number"], "/ecom-hub?order={id}"),
+    ("store_order",       "store_orders",       ["order_number", "customer_phone"],         ["customer_name"],           ["customer_name", "order_number"], ["order_number"],        "/ecom-hub/store?order={id}"),
+    ("daily_session",     "daily_sessions",     ["code"],                                   ["user_name"],               ["code", "user_name"],       ["user_name"],               "/daily-sessions?id={id}"),
+    ("inventory_session", "inventory_sessions", ["code"],                                   ["name"],                    ["name", "code"],            ["code"],                    "/inventory-count?id={id}"),
+    ("price_update",      "price_update_logs",  ["code"],                                   [],                          ["code"],                    [],                          "/price-history?id={id}"),
+    ("partner",           "partners",           ["phone"],                                  ["name"],                    ["name"],                    ["phone"],                   "/partners?id={id}"),
+    ("warehouse",         "warehouses",         [],                                         ["name", "location"],        ["name"],                    ["location"],                "/warehouses?id={id}"),
+    ("installment",       "installments",       ["code"],                                   ["customer_name"],           ["customer_name", "code"],   ["code"],                    "/installments?id={id}"),
+    ("recharge",          "recharges",          ["code", "phone"],                          ["customer_name"],           ["customer_name", "code"],   ["code", "phone"],           "/recharge?id={id}"),
+    ("digital_subscription", "digital_subscriptions", ["code", "username"],                 ["customer_name"],           ["customer_name", "code"],   ["code", "username"],        "/digital-panel/subscriptions?id={id}"),
+]
+
+_PER_GROUP = 5
+
+
+def _dig(doc: dict, dotted: str):
+    cur = doc
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _first(doc: dict, fields) -> str:
+    for f in fields:
+        v = _dig(doc, f)
+        if v not in (None, ""):
+            return str(v)
+    return ""
+
+
 def create_search_routes(db, get_current_user) -> dict:
     router = APIRouter(prefix="/search", tags=["search"])
 
     @router.get("/global")
     async def global_search(q: str, limit: int = 20, user: dict = Depends(get_current_user)):
-        if not q or len(q) < 2:
-            return {"results": [], "total": 0}
+        if not q or len(q.strip()) < 2:
+            return {"results": [], "groups": {}, "total": 0}
+        q = q.strip()
+
+        import asyncio
+        import re as _re
 
         start = time.time()
-        results = []
-        regex = {"$regex": q, "$options": "i"}
+        esc = _re.escape(q)
+        sub = {"$regex": esc, "$options": "i"}
+        pre = {"$regex": f"^{esc}", "$options": "i"}
 
-        # Search products
-        products = await db.products.find(
-            {"$or": [{"name": regex}, {"article_code": regex}, {"barcode": regex}]},
-            {"_id": 0, "id": 1, "name": 1, "article_code": 1, "retail_price": 1}
-        ).limit(limit).to_list(limit)
-        for p in products:
-            results.append({"type": "product", "id": p["id"], "title": p.get("name", ""), "subtitle": p.get("article_code", "")})
+        async def _scan(spec):
+            group, coll, code_fields, name_fields, title_f, sub_f, link_t = spec
+            clauses = [{f: pre} for f in code_fields]
+            for f in name_fields:
+                if f.endswith("|prefix"):
+                    clauses.append({f[:-7]: pre})
+                else:
+                    clauses.append({f: sub})
+            if not clauses:
+                return group, []
+            try:
+                docs = await db[coll].find(
+                    {"$or": clauses}, {"_id": 0}
+                ).limit(_PER_GROUP).to_list(_PER_GROUP)
+            except Exception:  # noqa: BLE001 — one missing collection must not break search
+                return group, []
+            items = []
+            for d in docs:
+                link = link_t
+                for m in _re.findall(r"{(\w+)}", link_t):
+                    link = link.replace("{%s}" % m, str(_dig(d, m) or d.get("id") or ""))
+                items.append({
+                    "type": group,
+                    "id": d.get("id", ""),
+                    "title": _first(d, title_f),
+                    "subtitle": _first(d, sub_f),
+                    "code": _first(d, code_fields),
+                    "link": link,
+                })
+            return group, items
 
-        # Search customers
-        customers = await db.customers.find(
-            {"$or": [{"name": regex}, {"phone": regex}]},
-            {"_id": 0, "id": 1, "name": 1, "phone": 1}
-        ).limit(limit).to_list(limit)
-        for c in customers:
-            results.append({"type": "customer", "id": c["id"], "title": c.get("name", ""), "subtitle": c.get("phone", "")})
-
-        # Search suppliers
-        suppliers = await db.suppliers.find(
-            {"$or": [{"name": regex}, {"phone": regex}]},
-            {"_id": 0, "id": 1, "name": 1, "phone": 1}
-        ).limit(limit).to_list(limit)
-        for s in suppliers:
-            results.append({"type": "supplier", "id": s["id"], "title": s.get("name", ""), "subtitle": s.get("phone", "")})
-
-        # Search repair tickets
-        tickets = await db.repair_tickets.find(
-            {"$or": [{"ticket_number": regex}, {"customer_name": regex}, {"imei": regex}]},
-            {"_id": 0, "id": 1, "ticket_number": 1, "customer_name": 1, "status": 1}
-        ).limit(limit).to_list(limit)
-        for t in tickets:
-            results.append({"type": "repair_ticket", "id": t["id"], "title": t.get("ticket_number", ""), "subtitle": t.get("customer_name", "")})
-
+        pairs = await asyncio.gather(*[_scan(s) for s in _SEARCH_SPECS])
+        groups = {g: items for g, items in pairs if items}
+        results = [it for _, items in pairs for it in items]
         elapsed = time.time() - start
 
         # Save search history
@@ -79,6 +134,7 @@ def create_search_routes(db, get_current_user) -> dict:
 
         return {
             "results": results[:limit],
+            "groups": groups,
             "total": len(results),
             "execution_time": round(elapsed, 4),
         }

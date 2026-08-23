@@ -4208,3 +4208,39 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
   العدادين — 0 بقايا، الكتالوج والتسويات فارغة كما كانت ✓
 
 **النسخ الاحتياطي:** /opt/ntcommerce/backups/p259/
+
+---
+
+## 2026-08-23 — p260: البحث الشامل بكل الأكواد (global search over all entity codes)
+
+**اكتشاف:** ‏/api/search/global كان **كوداً ميتاً** — main.py يستورد `router`
+من routes.search_routes بينما الملف يعرّف مصنعاً فقط، ففشل الاستيراد silently
+مرتين ولم يُسجَّل المسار إطلاقاً. الواجهة (GlobalSearchModal) كانت تستدعي
+/products /customers /sales منفصلة — أي أن البحث بأي كود آخر كان مستحيلاً.
+
+**الحل:**
+- routes/search_routes.py: إعادة كتابة /search/global — مواصفات ‏19 نوع كيان
+  (منتج AR/باركود/SKU، زبون CL، مورد FR، بيع BV/رقم فاتورة، شراء AC، مصروف CH،
+  موظف، مستخدم، صيانة RP/ticket/IMEI، طلب ecom ECO/WEB/MP + رقم تتبع الناقل +
+  هاتف الزبون، طلب متجر WEB، جلسة يومية S، جرد IN، سجل أسعار MT، شريك، مخزن،
+  قسط، شحن رصيد، اشتراك رقمي) — حقول الأكواد تُطابَق ببادئة (index-friendly)
+  والأسماء باحتواء؛ sales/purchases الضخمة (36.7 ألف) prefix فقط حتى لا يحدث
+  مسح كامل. الاستعلامات الـ19 متوازية (asyncio.gather)، كل مجموعة 5 نتائج،
+  وكل نتيجة تحمل `link` جاهزاً للتنقل. الرد: groups + results (توافق قديم)
+- main.py: تسجيل routes.search_routes في _AUTO_REG_MODULES (المصنع يستلم
+  db + get_current_user من السياق) + فهرسا p260_invoice_number على
+  sales/purchases
+- frontend GlobalSearchModal.js: انتقال من 3 استدعاءات إلى /search/global واحد —
+  يعرض المجموعات التي يرجعها الخادم بترتيبه، نفس التصميم تماماً (نفس Section/
+  الصفوف/التذييل)، أيقونة وتسمية عربية لكل نوع، التنقل عبر item.link
+
+**الاختبار (curl على المستأجر الحقيقي — قراءة فقط):**
+- BV0004 → sales ✓ CL0193 → customers ✓ AR9218 → products ✓
+- WEB000001 → sale + ecom_order + store_order معاً ✓ CH00001 → expenses ✓
+  FR0112 → suppliers ✓ AZIZ (اسم) → customer + sale ✓
+- الزمن 60–90ms رغم 36.7 ألف بيع ✓ suggestions/history يعملان ✓ q<2 → فارغ ✓
+- تنظيف دقيق لسجلات البحث التي أحدثها الاختبار (7+7 → 0) ✓
+- الواجهة: build → deploy → main.55f0a2ba.js يحمل search/global +
+  global-search-input ✓
+
+**النسخ الاحتياطي:** /opt/ntcommerce/backups/p260/
