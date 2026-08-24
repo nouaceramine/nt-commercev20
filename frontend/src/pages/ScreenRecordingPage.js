@@ -1,5 +1,6 @@
 // p281: تسجيل الشاشة عبر Screen2ipcam — دليل الإعداد + سجل أجهزة الكاشير ↔ قنوات DVR.
-import { useState, useEffect, useCallback } from 'react';
+// p282: معاينة حية WebRTC عبر MediaMTX المحلي (WHEP) + فتح صفحة المشغّل في تبويب جديد.
+import { useState, useEffect, useCallback, useRef } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -10,10 +11,93 @@ import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { ResponsiveTable } from '../components/ResponsiveTable';
-import { Cctv, Plus, Pencil, Trash2, Download, Copy, RefreshCcw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Cctv, Plus, Pencil, Trash2, Download, Copy, RefreshCcw, AlertTriangle, CheckCircle2, MonitorPlay, ExternalLink, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
-const emptyForm = { device_name: '', pc_ip: '', rtsp_port: 8554, stream_name: 'screen', dvr_channel: '', dvr_ip: '', notes: '' };
+const emptyForm = { device_name: '', pc_ip: '', rtsp_port: 8554, stream_name: 'screen', dvr_channel: '', dvr_ip: '', notes: '', preview_port: 8889 };
+
+// p282: مشغّل WebRTC مدمج عبر بروتوكول WHEP (MediaMTX) — يعمل عندما يكون المتصفح على نفس الشبكة المحلية.
+function WhepPlayer({ url, ar }) {
+  const videoRef = useRef(null);
+  const pcRef = useRef(null);
+  const [status, setStatus] = useState('connecting'); // connecting | playing | failed
+
+  useEffect(() => {
+    let cancelled = false;
+    const start = async () => {
+      try {
+        const pc = new RTCPeerConnection();
+        pcRef.current = pc;
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+        pc.ontrack = (ev) => {
+          if (videoRef.current && ev.streams?.[0]) videoRef.current.srcObject = ev.streams[0];
+        };
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await new Promise((res) => {
+          if (pc.iceGatheringState === 'complete') return res();
+          const t = setTimeout(res, 2500);
+          pc.addEventListener('icegatheringstatechange', () => {
+            if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); }
+          });
+        });
+        if (cancelled) return;
+        const base = url.replace(/\/$/, '');
+        const r = await fetch(`${base}/whep`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: pc.localDescription.sdp,
+        });
+        if (!r.ok) throw new Error('WHEP ' + r.status);
+        const answer = await r.text();
+        if (cancelled) return;
+        await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+      } catch (e) {
+        if (!cancelled) setStatus('failed');
+      }
+    };
+    start();
+    return () => {
+      cancelled = true;
+      try { pcRef.current?.close(); } catch (e) { /* noop */ }
+      pcRef.current = null;
+    };
+  }, [url]);
+
+  return (
+    <div>
+      <div className="relative bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className="w-full h-full object-contain"
+          onPlaying={() => setStatus('playing')}
+          data-testid="sr-preview-video"
+        />
+        {status !== 'playing' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/80 text-sm p-4 text-center" data-testid="sr-preview-status">
+            {status === 'connecting' ? (
+              <>
+                <RefreshCcw className="w-6 h-6 animate-spin" />
+                <span>{ar ? 'جارٍ الاتصال بالبث المحلي…' : 'Connexion au flux local…'}</span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-6 h-6 text-amber-400" />
+                <span>{ar
+                  ? 'تعذّرت المعاينة المدمجة. تأكد أن MediaMTX يعمل على جهاز الكاشير وأنك على نفس الشبكة المحلية — أو استخدم زر «فتح في تبويب» بالأسفل.'
+                  : 'Aperçu intégré impossible. Vérifiez MediaMTX et le réseau local — ou ouvrez dans un nouvel onglet.'}</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ScreenRecordingPage() {
   const { language } = useLanguage();
@@ -25,6 +109,7 @@ export default function ScreenRecordingPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState(null); // p282
 
   const load = useCallback(async () => {
     try {
@@ -48,7 +133,8 @@ export default function ScreenRecordingPage() {
     setEditing(d);
     setForm({
       device_name: d.device_name, pc_ip: d.pc_ip || '', rtsp_port: d.rtsp_port || 8554,
-      stream_name: d.stream_name || 'screen', dvr_channel: d.dvr_channel ?? '', dvr_ip: d.dvr_ip || '', notes: d.notes || '',
+      stream_name: d.stream_name || 'screen', dvr_channel: d.dvr_channel ?? '', dvr_ip: d.dvr_ip || '',
+      notes: d.notes || '', preview_port: d.preview_port || 8889,
     });
     setShowForm(true);
   };
@@ -57,7 +143,12 @@ export default function ScreenRecordingPage() {
     if (!form.device_name.trim()) { toast.error(ar ? 'اسم الجهاز مطلوب' : 'Nom requis'); return; }
     setSaving(true);
     try {
-      const body = { ...form, dvr_channel: form.dvr_channel === '' ? null : parseInt(form.dvr_channel) || null, rtsp_port: parseInt(form.rtsp_port) || 8554 };
+      const body = {
+        ...form,
+        dvr_channel: form.dvr_channel === '' ? null : parseInt(form.dvr_channel) || null,
+        rtsp_port: parseInt(form.rtsp_port) || 8554,
+        preview_port: parseInt(form.preview_port) || 8889,
+      };
       if (editing) await apiClient.put(`/screen-recording/devices/${editing.id}`, body);
       else await apiClient.post('/screen-recording/devices', body);
       toast.success(ar ? 'حُفظ' : 'Enregistré');
@@ -85,6 +176,8 @@ export default function ScreenRecordingPage() {
     navigator.clipboard?.writeText(text);
     toast.success(ar ? 'نُسخ' : 'Copié');
   };
+
+  const lp = info?.live_preview;
 
   return (
     <Layout>
@@ -137,6 +230,45 @@ export default function ScreenRecordingPage() {
           </CardContent>
         </Card>
 
+        {/* p282: Live preview guide */}
+        {lp && (
+          <Card data-testid="sr-live-section">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <MonitorPlay className="w-5 h-5 text-primary" /> {lp.title}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">{lp.summary}</p>
+              <ol className="space-y-2">
+                {lp.steps.map((s, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">{i + 1}</span>
+                    <span className="pt-0.5">{s}</span>
+                  </li>
+                ))}
+              </ol>
+              <div>
+                <Label className="text-xs text-muted-foreground">mediamtx.yml</Label>
+                <pre dir="ltr" className="bg-muted/50 rounded-lg p-3 text-xs font-mono overflow-x-auto mt-1" data-testid="sr-mtx-config">{lp.config_sample}</pre>
+              </div>
+              <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 space-y-1 text-sm">
+                {lp.notes.map((n, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sky-900">
+                    <Info className="w-4 h-4 text-sky-600 mt-0.5 shrink-0" />
+                    <span>{n}</span>
+                  </div>
+                ))}
+              </div>
+              <a href={lp.download} target="_blank" rel="noreferrer">
+                <Button variant="outline" size="sm" className="gap-1" data-testid="sr-download-mediamtx">
+                  <Download className="w-4 h-4" /> MediaMTX ({ar ? 'مجاني' : 'gratuit'})
+                </Button>
+              </a>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Devices */}
         <Card>
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
@@ -173,11 +305,14 @@ export default function ScreenRecordingPage() {
                         <Copy className="w-3.5 h-3.5" />
                       </Button>
                     </span>
-                  ) },
+                  ), cardHidden: true },
                   { header: ar ? 'قناة DVR' : 'Canal DVR', render: (d) => d.dvr_channel ? <Badge variant="outline">{ar ? 'قناة' : 'Canal'} {d.dvr_channel}</Badge> : '—' },
                   { header: ar ? 'ملاحظات' : 'Notes', render: (d) => <span className="text-xs text-muted-foreground">{d.notes || '—'}</span>, cardHidden: true },
                   { header: '', cardFull: true, render: (d) => (
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
+                      <Button size="sm" variant="outline" className="gap-1" onClick={(e) => { e.stopPropagation(); setPreviewDevice(d); }} data-testid={`sr-preview-btn-${d.id}`}>
+                        <MonitorPlay className="w-3.5 h-3.5" /> {ar ? 'معاينة حية' : 'Aperçu'}
+                      </Button>
                       <Button size="sm" variant="outline" className="gap-1" onClick={(e) => { e.stopPropagation(); openEdit(d); }} data-testid={`sr-edit-${d.id}`}>
                         <Pencil className="w-3.5 h-3.5" /> {ar ? 'تعديل' : 'Modifier'}
                       </Button>
@@ -191,6 +326,34 @@ export default function ScreenRecordingPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* p282: Live preview dialog */}
+        <Dialog open={!!previewDevice} onOpenChange={(o) => { if (!o) setPreviewDevice(null); }}>
+          <DialogContent dir="rtl" data-testid="sr-preview-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <MonitorPlay className="w-5 h-5 text-primary" />
+                {ar ? `معاينة حية — ${previewDevice?.device_name || ''}` : `Aperçu — ${previewDevice?.device_name || ''}`}
+              </DialogTitle>
+            </DialogHeader>
+            {previewDevice && (
+              <div className="space-y-3">
+                <WhepPlayer url={previewDevice.preview_url} ar={ar} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <a href={previewDevice.preview_url} target="_blank" rel="noreferrer">
+                    <Button variant="outline" size="sm" className="gap-1" data-testid="sr-preview-open-tab">
+                      <ExternalLink className="w-4 h-4" /> {ar ? 'فتح في تبويب (يعمل دائماً داخل الشبكة)' : 'Ouvrir dans un onglet'}
+                    </Button>
+                  </a>
+                  <Button variant="ghost" size="sm" className="gap-1" onClick={() => copy(previewDevice.preview_url)} data-testid="sr-preview-copy">
+                    <Copy className="w-4 h-4" />
+                    <code dir="ltr" className="text-xs font-mono">{previewDevice.preview_url}</code>
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Add/Edit dialog */}
         <Dialog open={showForm} onOpenChange={setShowForm}>
@@ -220,6 +383,10 @@ export default function ScreenRecordingPage() {
                   <Label>{ar ? 'رقم القناة في جهاز التسجيل' : 'Canal DVR'}</Label>
                   <Input dir="ltr" type="number" inputMode="numeric" value={form.dvr_channel} onChange={e => setForm({ ...form, dvr_channel: e.target.value })} placeholder="9" data-testid="sr-form-channel" />
                 </div>
+                <div>
+                  <Label>{ar ? 'منفذ المعاينة (MediaMTX)' : 'Port aperçu'}</Label>
+                  <Input dir="ltr" type="number" inputMode="numeric" value={form.preview_port} onChange={e => setForm({ ...form, preview_port: e.target.value })} placeholder="8889" data-testid="sr-form-preview-port" />
+                </div>
               </div>
               <div>
                 <Label>{ar ? 'IP جهاز التسجيل (اختياري)' : 'IP du DVR (optionnel)'}</Label>
@@ -239,7 +406,7 @@ export default function ScreenRecordingPage() {
             </div>
             <DialogFooter>
               <Button onClick={save} disabled={saving} data-testid="sr-save-btn">
-                {saving ? (ar ? 'جارٍ الحفظ…' : 'Enregistrement…') : (ar ? 'حفظ' : 'Enregistrer')}
+                {saving ? (ar ? 'جارٍ الحفظ…' : 'Enregistrant…') : (ar ? 'حفظ' : 'Enregistrer')}
               </Button>
             </DialogFooter>
           </DialogContent>

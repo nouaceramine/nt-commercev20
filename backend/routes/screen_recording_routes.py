@@ -26,6 +26,7 @@ class DeviceIn(BaseModel):
     dvr_channel: Optional[int] = None
     dvr_ip: Optional[str] = ""
     notes: Optional[str] = ""
+    preview_port: Optional[int] = 8889
 
 
 class DeviceUpdate(BaseModel):
@@ -36,6 +37,7 @@ class DeviceUpdate(BaseModel):
     dvr_channel: Optional[int] = None
     dvr_ip: Optional[str] = None
     notes: Optional[str] = None
+    preview_port: Optional[int] = None
 
 
 def _now() -> str:
@@ -53,6 +55,13 @@ def _rtsp_url(d: dict) -> str:
     return f"rtsp://{ip}:{port}/{name}"
 
 
+def _preview_url(d: dict) -> str:
+    ip = d.get("pc_ip") or "<IP>"
+    port = d.get("preview_port") or 8889
+    name = d.get("stream_name") or "screen"
+    return f"http://{ip}:{port}/{name}"
+
+
 @router.get("/devices")
 async def list_devices(user: dict = Depends(require_tenant)):
     tenant_id = user.get("tenant_id") or user.get("id")
@@ -61,6 +70,7 @@ async def list_devices(user: dict = Depends(require_tenant)):
     ).sort("created_at", 1).to_list(200)
     for r in rows:
         r["rtsp_url"] = _rtsp_url(r)
+        r["preview_url"] = _preview_url(r)
     return {"items": rows, "count": len(rows)}
 
 
@@ -80,12 +90,14 @@ async def create_device(body: DeviceIn, user: dict = Depends(require_tenant)):
         "dvr_channel": body.dvr_channel,
         "dvr_ip": (body.dvr_ip or "").strip(),
         "notes": (body.notes or "").strip(),
+        "preview_port": int(body.preview_port or 8889),
         "created_at": _now(),
         "updated_at": _now(),
     }
     await main_db.screen_recording_devices.insert_one(doc)
     out = _public(doc)
     out["rtsp_url"] = _rtsp_url(doc)
+    out["preview_url"] = _preview_url(doc)
     return {"ok": True, "device": out}
 
 
@@ -108,6 +120,7 @@ async def update_device(device_id: str, body: DeviceUpdate, user: dict = Depends
         {"id": device_id, "tenant_id": tenant_id}, {"_id": 0}
     )
     doc["rtsp_url"] = _rtsp_url(doc)
+    doc["preview_url"] = _preview_url(doc)
     return {"ok": True, "device": doc}
 
 
@@ -142,5 +155,22 @@ async def setup_info(user: dict = Depends(require_tenant)):
             "في جهاز التسجيل: أضف قناة IP جديدة — سيكتشف الجهاز تلقائياً عبر ONVIF، أو أدخل رابط RTSP يدوياً.",
             "سجّل الجهاز هنا في هذه الصفحة واربطه برقم القناة في جهاز التسجيل لتعرف أي قناة تخص أي كاشير.",
         ],
+        "live_preview": {
+            "title": "المعاينة الحية داخل لوحة التحكم (اختياري)",
+            "summary": "لمشاهدة شاشة الكاشير مباشرة من صفحة «تسجيل الشاشة» دون فتح شاشة الـ DVR، ثبّت برنامج MediaMTX المجاني مفتوح المصدر على نفس كمبيوتر الكاشير — يحوّل بث RTSP إلى WebRTC يفهمه المتصفح.",
+            "download": "https://github.com/bluenviron/mediamtx/releases",
+            "config_sample": "paths:\n  screen:\n    source: rtsp://localhost:8554/screen",
+            "steps": [
+                "حمّل MediaMTX لنظام Windows من صفحة الإصدارات الرسمية (ملف واحد، بلا تثبيت).",
+                "أنشئ ملف mediamtx.yml بجانبه بالمحتوى الموضح (يسحب البث من Screen2ipcam محلياً).",
+                "شغّل mediamtx.exe — يصبح البث متاحاً للمتصفح على المنفذ 8889.",
+                "من صفحة «تسجيل الشاشة» اضغط زر «معاينة حية» بجانب الجهاز.",
+            ],
+            "notes": [
+                "المعاينة تعمل فقط من جهاز متصل بنفس الشبكة المحلية للمحل — البث لا يمر عبر الإنترنت.",
+                "من كمبيوتر الكاشير نفسه تعمل المعاينة المدمجة مباشرة؛ من جهاز آخر استخدم زر «فتح في تبويب» لأن المتصفحات تحمي الصفحات المشفرة من المحتوى المحلي.",
+                "MediaMTX مجاني بالكامل ومفتوح المصدر — لا رخصة إضافية.",
+            ],
+        },
         "rtsp_hint": "rtsp://<IP-الجهاز>:<المنفذ>/<اسم-البث> — مثال: rtsp://192.168.1.50:8554/screen",
     }

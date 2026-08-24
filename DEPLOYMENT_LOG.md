@@ -4589,3 +4589,21 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 
 **Deploy:** releases 20260824_005458 (broken Cctv) → 20260824_010356 (final). Backend restarted via docker-compose.
 **Cleanup:** TEST-P281 devices removed; collection count = 0. Real tenant untouched.
+
+## p282 — Screen Recording Phase 2: Live WebRTC Preview (2026-08-24)
+
+**Goal:** Live preview of the cashier screen inside the dashboard without opening the DVR monitor.
+
+**Architecture decision (documented for the owner):** the RTSP stream lives on the subscriber's LAN — the cloud server cannot reach it. Therefore MediaMTX (free, open-source, single binary) runs ON the cashier PC next to Screen2ipcam, converting RTSP → WebRTC (WHEP) on port 8889. Viewing works from any device on the same local network; the stream never crosses the internet.
+
+**Backend** (`routes/screen_recording_routes.py`): added `preview_port` (default 8889) to DeviceIn/DeviceUpdate; computed `preview_url` (`http://{pc_ip}:{preview_port}/{stream_name}`) attached in list/create/update responses via `_preview_url()`; `setup-info` gained a `live_preview` section (title, summary, MediaMTX download URL, mediamtx.yml config sample, 4 steps, 3 notes incl. mixed-content explanation).
+
+**Frontend** (`pages/ScreenRecordingPage.js`):
+- New guide card «المعاينة الحية داخل لوحة التحكم» with steps, config sample (sr-mtx-config), notes, MediaMTX download button (sr-download-mediamtx).
+- Per-device «معاينة حية» button (sr-preview-btn-{id}) → dialog (sr-preview-dialog) with embedded WhepPlayer (RTCPeerConnection + WHEP POST, ICE-gather wait 2.5s, graceful failure with Arabic guidance), «فتح في تبويب» fallback button (top-level navigation bypasses mixed-content blocking), copy preview URL.
+- Form gained preview_port field (sr-form-preview-port).
+
+**E2E proof (full chain, TEST-P282):** MediaMTX 1.9.3 + ffmpeg testsrc (1280x720 H264, drawtext TEST-P282) in docker on server (--network host) → WHEP handshake 201 Created with SDP answer (verified via HTTP) → Chromium played the live stream in the MediaMTX player page (readyState=4, 1280px, currentTime advancing, screenshot shows TEST-P282 pattern). Dashboard: all testids present at 375px + 1440px, dialog opens, embedded player fails gracefully with guidance when the browser blocks mixed content (expected off-LAN; works on-LAN/localhost), open-tab href correct, zero overflow, zero JS errors.
+
+**Deploy:** release 20260824_120259. Backend restarted.
+**Cleanup (residue 0):** TEST-P282 device deleted (db count 0), test containers p282-mtx/p282-ff removed, temporary ufw rules 8889/tcp + 8189/udp deleted (firewall back to Cloudflare-only), docker images kept (harmless). Real tenant untouched.
