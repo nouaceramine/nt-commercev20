@@ -51,6 +51,7 @@ const EmployeeActivityPage = lazy(() => import("./pages/EmployeeActivityPage"));
 const DebtsPage = lazy(() => import("./pages/DebtsPage"));  // p273
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));  // p273
 const ApiKeysPage = lazy(() => import("./pages/ApiKeysPage"));  // p273
+const IntegrationsHubPage = lazy(() => import("./pages/IntegrationsHubPage"));  // p287
 const RechargePage = lazy(() => import("./pages/RechargePage"));  // p273
 const DigitalPanelPage = lazy(() => import("./pages/DigitalPanelPage"));  // p273
 const IptvSubscriptionsPage = lazy(() => import("./pages/IptvSubscriptionsPage"));  // p273
@@ -474,6 +475,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+            <Route path="/integrations" element={<ProtectedRoute adminOnly><IntegrationsHubPage /></ProtectedRoute>} />  {/* p287 */}
             <Route path="/integrations/status" element={<Navigate to="/ecom-hub/channels/status" replace />} />
             <Route path="/integrations/yalidine" element={<Navigate to="/ecom-hub/shipping/yalidine" replace />} />
       <Route

@@ -1244,6 +1244,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.shipping_routes',
     'routes.ecom.webhooks_routes',
     'routes.ecom.shipping_webhook_routes',  # p284: instant courier status webhooks
+    'routes.integrations_hub_routes',  # p287: unified integrations hub
     # ── factory modules ──
     'routes.advanced_sales_routes',
     'routes.agent_hierarchy_routes',

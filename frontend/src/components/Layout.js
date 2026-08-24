@@ -654,6 +654,7 @@ export const Layout = ({ children }) => {
           { path: '/settings/datetime', icon: Clock, label: language === 'ar' ? 'التاريخ والوقت' : 'Date & heure' },
           { path: '/settings/printing/template-editor', icon: FileText, label: language === 'ar' ? 'قوالب الطباعة' : 'Modèles impression' },
           { path: '/features', icon: Key, label: language === 'ar' ? 'إدارة الميزات' : 'Gestion fonctionnalités' },  // p270
+          { path: '/integrations', icon: KeyRound, label: language === 'ar' ? 'مركز التكاملات' : 'Intégrations' },  // p287
           { path: '/screen-recording', icon: Cctv, label: language === 'ar' ? 'تسجيل الشاشة (DVR)' : 'Enregistrement écran' },  // p281
         ] : []),
         ...(isEffectiveSuperAdmin ? [
