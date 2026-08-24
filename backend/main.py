@@ -1329,6 +1329,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.public_track_routes',  # p244: public global order tracking
     'routes.ecom.referral_routes',  # p245: referral program
     'routes.support_routes',  # p246: tenant support tickets
+    'routes.screen_recording_routes',  # p281: Screen2ipcam DVR device registry
     'routes.ecom.driver_routes',  # p247: driver mobile web interface
     'routes.ecom.intake_routes',  # p251: YouCan/LightFunnels/Sheets order intake
     'routes.ecom.social_inbox_routes',  # p249: social inbox -> order conversion

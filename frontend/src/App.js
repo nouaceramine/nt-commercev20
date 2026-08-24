@@ -44,6 +44,7 @@ const CustomersPage = lazy(() => import("./pages/CustomersPage"));  // p273
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));  // p273
 const CashManagementPage = lazy(() => import("./pages/CashManagementPage"));  // p273
 const SalesHistoryPage = lazy(() => import("./pages/SalesHistoryPage"));  // p273
+const ScreenRecordingPage = lazy(() => import("./pages/ScreenRecordingPage"));  // p281
 const InstallmentsPage = lazy(() => import("./pages/InstallmentsPage"));  // p273
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));  // p273
 const EmployeeActivityPage = lazy(() => import("./pages/EmployeeActivityPage"));  // p273
@@ -406,6 +407,10 @@ function AppRoutes() {
       <Route
         path="/support"
         element={<ProtectedRoute><SupportTicketsPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/screen-recording"
+        element={<ProtectedRoute><ScreenRecordingPage /></ProtectedRoute>}
       />
       {/* E-Commerce Hub — gated by ecommerce_hub feature flag (super-admin opt-in) */}
       <Route

@@ -4572,3 +4572,20 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - E2E حي: جلسة متصفح على /ecom-hub (NT-0001) + إنشاء طلب يدوي TEST-P280 عبر API → وصل ecom_order.created لحظياً بالحمولة الكاملة (order_id/ECO-NT1-6A6092CB/500) خلال ≤ ثانيتين ✓ (نفس مسار sale.completed المثبت سابقاً).
 - التنظيف: الطلب + سند البيع المرآتي (sync_sale_doc) + وسم الزبون حُذفت — بقايا 0 ✓.
 - الصفحات الأربع المعدّلة render بلا أخطاء JS (pageerror: NONE) ✓؛ health 200 ✓؛ release 20260824_003425 ✓.
+
+## p281 — Screen2ipcam DVR Integration Phase 1 (2026-08-24)
+
+**Goal:** Let subscribers register cashier PCs running Screen2ipcam and link them to DVR/NVR channels (user request: screen2ipcam integration + work plan).
+
+**Backend** (`backend/routes/screen_recording_routes.py`, new; registered in `main.py` `_AUTO_REG_MODULES`):
+- `GET /api/screen-recording/setup-info` — Arabic setup guide: download sources (SourceForge + Microsoft Store), license note (14-day trial then $20 lifetime/device), requirements (Win7+, NVR/hybrid-XVR with IP channels, same LAN), 5 setup steps, RTSP hint.
+- CRUD `GET/POST/PUT/DELETE /api/screen-recording/devices` — tenant-scoped registry in `main_db.screen_recording_devices`; computed `rtsp_url` (`rtsp://{pc_ip}:{port}/{stream_name}`). PUT accepts partial updates (DeviceUpdate model, exclude_unset) — fixed after first test showed full-model requirement.
+
+**Frontend:**
+- `src/pages/ScreenRecordingPage.js` (new): guide card (requirements amber box, 5 numbered steps, download buttons, license badge) + devices card via ResponsiveTable (mobile cards / desktop table, RTSP copy button) + add/edit dialog with live RTSP URL preview. Route `/screen-recording` in App.js (lazy); sidebar item "تسجيل الشاشة (DVR)" with Cctv icon in Layout.js settings section.
+- Fix: Cctv initially added to iconMap only, not the lucide-react import — runtime ReferenceError caught by E2E, import corrected, rebuilt.
+
+**Verification:** backend CRUD cycle TEST-P281 (create/list/partial-update/delete, residue 0); playwright E2E 375px + 1440px — all testids (screen-recording-page, sr-guide, sr-empty, sr-add-btn, sr-device-dialog, sr-save-btn), live RTSP preview, zero overflow, zero JS errors, sidebar link on desktop. Desktop layout pixel-unchanged elsewhere.
+
+**Deploy:** releases 20260824_005458 (broken Cctv) → 20260824_010356 (final). Backend restarted via docker-compose.
+**Cleanup:** TEST-P281 devices removed; collection count = 0. Real tenant untouched.

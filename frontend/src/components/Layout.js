@@ -80,7 +80,7 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory, Percent, LifeBuoy
+  KeyRound, Factory, Percent, LifeBuoy, Cctv
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -100,7 +100,7 @@ const getAIContext = (pathname) => {
 const iconMap = {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, CreditCard, Wallet,
   BarChart3, Settings, Bell, Wrench, Receipt, FolderTree, Warehouse,
-  ClipboardList, QrCode, DollarSign, ShoppingBag, Clock, Smartphone, Store, Shield, Key, Award, Zap, Mail, Bot,
+  ClipboardList, QrCode, DollarSign, ShoppingBag, Clock, Smartphone, Store, Shield, Key, Award, Zap, Mail, Bot, Cctv,
   PackageX, Database, CheckSquare, MessageCircle, Download, Tv, Boxes
 };
 
@@ -654,6 +654,7 @@ export const Layout = ({ children }) => {
           { path: '/settings/datetime', icon: Clock, label: language === 'ar' ? 'التاريخ والوقت' : 'Date & heure' },
           { path: '/settings/printing/template-editor', icon: FileText, label: language === 'ar' ? 'قوالب الطباعة' : 'Modèles impression' },
           { path: '/features', icon: Key, label: language === 'ar' ? 'إدارة الميزات' : 'Gestion fonctionnalités' },  // p270
+          { path: '/screen-recording', icon: Cctv, label: language === 'ar' ? 'تسجيل الشاشة (DVR)' : 'Enregistrement écran' },  // p281
         ] : []),
         ...(isEffectiveSuperAdmin ? [
           { path: '/motherboard', icon: CircuitBoard, label: language === 'ar' ? 'اللوحة الأم' : 'Carte mère', minRole: 'super_admin' },
