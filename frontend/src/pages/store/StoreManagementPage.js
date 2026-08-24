@@ -731,22 +731,17 @@ export default function StoreManagementPage() {
                     {/* p84: Telegram daily summary */}
                     <div className="border-t pt-3 mt-3 space-y-2" data-testid="telegram-daily-card">
                       <Label className="font-semibold">📊 الملخص اليومي عبر تيليجرام (21:00)</Label>
+                      {/* p288: مفاتيح تيليغرام تُدار من مركز التكاملات فقط */}
+                      <div className="rounded-md border border-dashed p-3 text-sm bg-muted/30" data-testid="tg-hub-note">
+                        {storeSettings.telegram_bot_token
+                          ? (language === 'ar' ? '✅ بوت تيليغرام مربوط.' : '✅ Bot Telegram lié.')
+                          : (language === 'ar' ? 'لم يُربط بوت تيليغرام بعد.' : 'Aucun bot Telegram lié.')}
+                        {' '}
+                        <a href="/integrations" className="text-emerald-700 underline font-medium" data-testid="tg-hub-link">
+                          {language === 'ar' ? 'إدارة المفاتيح من مركز التكاملات ←' : 'Gérer depuis le Centre d’intégrations ←'}
+                        </a>
+                      </div>
                       <div className="space-y-2">
-                        <Input
-                          type="password"
-                          value={storeSettings.telegram_bot_token || ''}
-                          onChange={(e) => setStoreSettings(prev => ({ ...prev, telegram_bot_token: e.target.value.trim() }))}
-                          placeholder="توكن البوت (من BotFather)"
-                          dir="ltr"
-                          data-testid="tg-token-input"
-                        />
-                        <Input
-                          value={storeSettings.telegram_chat_id || ''}
-                          onChange={(e) => setStoreSettings(prev => ({ ...prev, telegram_chat_id: e.target.value.trim() }))}
-                          placeholder="معرف المحادثة (Chat ID)"
-                          dir="ltr"
-                          data-testid="tg-chat-input"
-                        />
                         <div className="flex items-center gap-3 flex-wrap">
                           <label className="flex items-center gap-2 text-sm">
                             <input
@@ -780,7 +775,7 @@ export default function StoreManagementPage() {
                           </Button>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          أنشئ بوتاً من @BotFather، أرسل له أي رسالة، ثم احفظ التوكن والمعرف هنا واضغط حفظ — يصلك كل مساء: طلبات اليوم والمُسلَّم والمُرجع وصافي الربح. تأكيد واتساب يتطلب تكامل واتساب مضبوطاً (مركز التجارة ← القنوات) — يصل الزبون رسالة «رد بـ 1 للتأكيد أو 2 للإلغاء» ويُحجز الطلب حتى يرد.
+                          مفاتيح البوت تُدار من مركز التكاملات (تيليغرام بوت) — بعد الربط يصلك كل مساء: طلبات اليوم والمُسلَّم والمُرجع وصافي الربح. تأكيد واتساب يتطلب تكامل واتساب مضبوطاً (مركز التكاملات أيضاً) — يصل الزبون رسالة «رد بـ 1 للتأكيد أو 2 للإلغاء» ويُحجز الطلب حتى يرد.
                         </p>
                       </div>
                     </div>
@@ -1360,87 +1355,33 @@ export default function StoreManagementPage() {
         </Card>
       )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>{language === 'ar' ? 'الطلبات' : 'Orders'}</span>
-                  <Button variant="outline" size="sm" onClick={fetchData}>
-                    <RefreshCw className="h-4 w-4 me-2" />
-                    {language === 'ar' ? 'تحديث' : 'Refresh'}
-                  </Button>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {orders.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <ShoppingCart className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                    <p>{language === 'ar' ? 'لا توجد طلبات بعد' : 'No orders yet'}</p>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{language === 'ar' ? 'رقم الطلب' : 'Order #'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'الزبون' : 'Customer'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'الحالة' : 'Status'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'الإجراءات' : 'Actions'}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orders.map(order => (
-                          <TableRow key={order.id}>
-                            <TableCell className="font-mono">{order.order_number}</TableCell>
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{order.customer_name}</p>
-                                <p className="text-xs text-muted-foreground">{order.customer_phone}</p>
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-semibold">{order.total} {language === 'ar' ? 'دج' : 'DZD'}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {new Date(order.created_at).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell>
-                              <Select 
-                                value={order.status} 
-                                onValueChange={(status) => updateOrderStatus(order.id, status)}
-                              >
-                                <SelectTrigger className="w-32">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="pending">{language === 'ar' ? 'قيد الانتظار' : 'Pending'}</SelectItem>
-                                  <SelectItem value="confirmed">{language === 'ar' ? 'مؤكد' : 'Confirmed'}</SelectItem>
-                                  <SelectItem value="processing">{language === 'ar' ? 'قيد المعالجة' : 'Processing'}</SelectItem>
-                                  <SelectItem value="shipped">{language === 'ar' ? 'تم الشحن' : 'Shipped'}</SelectItem>
-                                  <SelectItem value="delivered">{language === 'ar' ? 'تم التوصيل' : 'Delivered'}</SelectItem>
-                                  <SelectItem value="cancelled">{language === 'ar' ? 'ملغي' : 'Cancelled'}</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {/* p138: نوع التوصيل — مكتب أم باب المنزل */}
-                              <Select
-                                value={order.delivery_type || 'home'}
-                                onValueChange={(dt) => updateDeliveryType(order.id, dt)}
-                              >
-                                <SelectTrigger className="w-32 mt-1" data-testid={`store-dt-${order.order_number}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="home">{language === 'ar' ? '🏠 باب المنزل' : '🏠 Home'}</SelectItem>
-                                  <SelectItem value="office">{language === 'ar' ? '🏢 مكتب' : '🏢 Office'}</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+            {/* p288: الطلبات وُحّدت في لوحة /ecom-hub — هنا بطاقة توجيه فقط */}
+            <Card data-testid="store-orders-moved-card">
+              <CardContent className="py-10 text-center space-y-4">
+                <ShoppingCart className="h-12 w-12 mx-auto opacity-40" />
+                <div>
+                  <p className="font-semibold text-lg">{language === 'ar' ? 'الطلبات أصبحت في لوحة الطلبيات الموحّدة' : 'Commandes déplacées vers le hub unifié'}</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {language === 'ar'
+                      ? 'كل طلبات المتجر والقنوات في مكان واحد: المعالجة اليدوية/التلقائية، شركات الشحن، البوالص، والتتبع اللحظي.'
+                      : 'Toutes les commandes (boutique + canaux) au même endroit : traitement, transporteurs, bordereaux et suivi.'}
+                  </p>
+                </div>
+                {orders.filter(o => o.status === 'pending').length > 0 && (
+                  <Badge variant="destructive" data-testid="store-pending-badge">
+                    {language === 'ar'
+                      ? `${orders.filter(o => o.status === 'pending').length} طلب بانتظار المعالجة`
+                      : `${orders.filter(o => o.status === 'pending').length} commandes en attente`}
+                  </Badge>
                 )}
+                <div>
+                  <a href="/ecom-hub" data-testid="go-unified-orders">
+                    <Button className="gap-2">
+                      <ExternalLink className="h-4 w-4" />
+                      {language === 'ar' ? 'فتح لوحة الطلبيات' : 'Ouvrir le tableau des commandes'}
+                    </Button>
+                  </a>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

@@ -61,10 +61,17 @@ export default function EmailTab({ initialSettings }) {
 
           {settings.enabled && (
             <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
-              <div className="space-y-2">
-                <Label>{language === 'ar' ? 'مفتاح Resend API' : 'Clé API Resend'}</Label>
-                <Input type="password" placeholder="re_xxxxxxxx..." value={settings.resend_api_key} onChange={(e) => setSettings(prev => ({ ...prev, resend_api_key: e.target.value }))} dir="ltr" />
-                <p className="text-xs text-muted-foreground">{language === 'ar' ? 'احصل على مفتاح API من resend.com/api-keys' : 'Obtenez votre clé API sur resend.com/api-keys'}</p>
+              {/* p288: مفتاح Resend يُدار من مركز التكاملات فقط */}
+              <div className="rounded-md border border-dashed p-3 text-sm" data-testid="email-hub-note">
+                {settings.resend_api_key
+                  ? (language === 'ar' ? `✅ المفتاح محفوظ (${settings.resend_api_key})` : `✅ Clé enregistrée (${settings.resend_api_key})`)
+                  : (language === 'ar' ? 'لم يُدخل مفتاح Resend بعد.' : 'Aucune clé Resend saisie.')}
+                {' '}
+                {language === 'ar' ? 'المفتاح يُدار من' : 'La clé est gérée depuis'}{' '}
+                <a href="/integrations" className="text-emerald-700 underline font-medium" data-testid="email-hub-link">
+                  {language === 'ar' ? 'مركز التكاملات' : 'le Centre d’intégrations'}
+                </a>
+                {language === 'ar' ? ' — مع شرح خطوة بخطوة وفحص تلقائي للمفتاح.' : ' — avec guide et test automatique.'}
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -75,15 +82,6 @@ export default function EmailTab({ initialSettings }) {
                   <Label>{language === 'ar' ? 'اسم المرسل' : 'Nom expéditeur'}</Label>
                   <Input placeholder="NT POS System" value={settings.sender_name} onChange={(e) => setSettings(prev => ({ ...prev, sender_name: e.target.value }))} />
                 </div>
-              </div>
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">{language === 'ar' ? 'خطوات الإعداد:' : 'Étapes de configuration:'}</h4>
-                <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-decimal list-inside">
-                  <li>{language === 'ar' ? 'أنشئ حساب على resend.com' : 'Créez un compte sur resend.com'}</li>
-                  <li>{language === 'ar' ? 'انتقل إلى API Keys وأنشئ مفتاح جديد' : 'Allez sur API Keys et créez une nouvelle clé'}</li>
-                  <li>{language === 'ar' ? 'انسخ المفتاح والصقه هنا' : 'Copiez la clé et collez-la ici'}</li>
-                  <li>{language === 'ar' ? 'أضف نطاقك (Domain) للحصول على بريد مخصص' : 'Ajoutez votre domaine pour un email personnalisé'}</li>
-                </ol>
               </div>
             </div>
           )}

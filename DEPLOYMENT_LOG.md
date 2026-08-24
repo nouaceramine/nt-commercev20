@@ -4691,3 +4691,23 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 **الاختبارات (NT-0001، TEST-P287):** كتالوج 18 عنصراً ✓؛ ربط تيليغرام بتوكن مزيف → رفض getMe وحفظ بدون تفعيل ✓؛ ياليدين بمفاتيح مزيفة → رفض API حقيقي (HTTP 400 Invalid API ID) مع masking ✓؛ تحقق الحقول المطلوبة ✓؛ SMS حفظ وتفعيل ✓؛ SendGrid 401 ✓؛ WooCommerce فحص حقيقي (unreachable/401) ✓؛ disconnect ✓؛ E2E: الصفحة بلا أخطاء، 18 بطاقة سطح مكتب وجوال، حوار ياليدين (دليل+حقول+ويب هوك)، ربط من الواجهة يعرض رسالة الرفض ويحدّث شارة البطاقة إلى «خطأ في المفتاح» ✓؛ رابط القائمة الجانبية ✓؛ بلا تمرير أفقي 375px ✓. **بقايا = 0** (مستندات الاختبار + hub_audit حُذفت؛ توكنات Webhook الكسولة صفوف ميزة مشروعة تُركت).
 
 **النشر:** release 20260824_155526، main.0ae0167d.js.
+
+
+## p288 — توحيد الطلبات وإعادة هيكلة مركز التجارة + إزالة حقول المفاتيح المبعثرة (2026-08-24)
+
+**طلب المالك:** توحيد الطلبات في /ecom-hub، إعادة هيكلة تبويبات مركز التجارة (الطلبات/المتجر/القنوات والتكاملات/الإعلانات/الشحن/التحليلات/مركز التكاملات)، وحذف حقول إدخال المفاتيح المبعثرة لتُدار كلها من مركز التكاملات.
+
+**Backend (`routes/integrations_hub_routes.py`):**
+- تكامل جديد «بريد النظام (Resend)» (19 تكاملاً): adapter=resend يكتب نفس مخزن EmailTab (system_settings type=email_settings — resend_api_key مشفّر + sender_email/name)، فحص حقيقي عبر GET api.resend.com/api-keys، تفعيل عند النجاح فقط.
+- مرايا تخزين عند connect/disconnect حتى تستمر الميزات القائمة: whatsapp → whatsapp_integration_settings (api_token/phone_number_id/enabled)؛ telegram → store_settings (telegram_bot_token مشفّر + telegram_chat_id؛ عند الإلغاء تُمسح من store_settings وتبقى مشفّرة في المركز)؛ resend → enabled يعكس نتيجة الفحص.
+
+**Frontend:**
+- `components/ecom/EcomHubTabs.js`: تبويب رئيسي جديد «مركز التكاملات» (/integrations) — الهيكلة السباعية مكتملة.
+- `pages/store/StoreManagementPage.js`: تبويب «الطلبات» في إدارة المتجر أصبح بطاقة توجيه إلى لوحة الطلبيات الموحّدة /ecom-hub (store-orders-moved-card + عداد الطلبات المعلّقة)؛ حقول توكن تيليغرام/Chat ID حُذفت واستُبدلت ببطاقة حالة + رابط للمركز (tg-hub-note) — تبقى مفاتيح التفعيل والتنبيهات.
+- `pages/ecom/EcomChannelsPage.js`: قنوات Meta/Shopify لم تعد تعرض حقول مفاتيح في حوار الإضافة/التعديل (creds-hub-note + رابط)؛ إنشاء قنوات Meta يوجّه مباشرة إلى /integrations؛ معالج SocialConnectWizard أُزيل من الاستخدام (الملف يبقى يتيماً بلا استيراد). tiktok/viber تبقى بالحقول القديمة (غير مغطاة بالمركز بعد).
+- `pages/ecom/EcomShippingTab.js`: حوار إعدادات الناقلين الستة المغطاة بالمركز (ياليدين/Guepex/ZR/مايسترو/Ecotrack/NOEST) يعرض courier-hub-note بدل حقول المفاتيح مع إبقاء سعر الإرجاع والتفعيل؛ بقية الناقلين (~35) دون تغيير.
+- `pages/settings/WhatsAppTab.js` و `EmailTab.js`: حقول المفاتيح (Access Token / Phone Number ID / Resend API Key) حُذفت واستُبدلت ببطاقات حالة + روابط للمركز (wa-hub-note / email-hub-note)؛ مفاتيح التفعيل وبريد/اسم المرسل تبقى.
+
+**الاختبارات (NT-0001، TEST-P288):** كتالوج 19 عنصراً ✓؛ ربط واتساب/تيليغرام/Resend بمفاتيح مزيفة → رفض حقيقي من Meta/Telegram/Resend وعدم تفعيل ✓؛ المرايا كُتبت (WA نصّي كما يتوقع النظام القديم، TG مشفّر v1.، Resend مشفّر) ✓؛ disconnect يعكس المرايا (telegram تُمسح من store_settings، resend/wa enabled=false) ✓؛ E2E: hub-tab-integrations ✓، بطاقة توحيد الطلبات ✓، tg-hub-note والحقول محذوفة ✓، courier-hub-note لياليدين وبقاء حقول abex ✓، القنوات بلا أخطاء ✓، بطاقة resend وحوارها ✓، إعدادات البريد/واتساب تعرض ملاحظات المركز ✓، صفر أخطاء صفحات ✓. **بقايا = 0**.
+
+**النشر:** release 20260824_170026، main.2918c306.js.

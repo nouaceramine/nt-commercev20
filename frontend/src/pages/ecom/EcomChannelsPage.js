@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';  // p288: +useNavigate
 import apiClient from '../../lib/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { Layout } from '../../components/Layout';
@@ -10,7 +10,7 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { Switch } from '../../components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../../components/ui/dialog';
-import SocialConnectWizard from './SocialConnectWizard';  // p274
+// p288: SocialConnectWizard removed — مفاتيح قنوات Meta تُدار من مركز التكاملات /integrations
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Link2, Plus, RefreshCcw, Zap, Trash2, ArrowRight, AlertTriangle, CheckCircle2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
@@ -231,7 +231,7 @@ export default function EcomChannelsPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ channel: 'shopify', name: '', credentials: {}, is_active: true, return_fee: '' });
   const [saving, setSaving] = useState(false);
-  const [wizardChannel, setWizardChannel] = useState(null);  // p274
+  const navigate = useNavigate();  // p288: meta channels connect via hub
 
   const load = async () => {
     setLoading(true);
@@ -247,8 +247,8 @@ export default function EcomChannelsPage() {
   useEffect(() => { load(); }, []);
 
   const openCreate = (channel) => {
-    if (['whatsapp', 'facebook', 'messenger', 'instagram'].includes(channel)) {  // p274: guided wizard
-      setWizardChannel(channel);
+    if (['whatsapp', 'facebook', 'messenger', 'instagram'].includes(channel)) {  // p288: المفاتيح من مركز التكاملات
+      navigate('/integrations');
       return;
     }
     setEditing(null);
@@ -502,18 +502,27 @@ export default function EcomChannelsPage() {
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="integration-name-input" />
             </div>
 
-            {schema.map(([key, label]) => (
-              <div key={key}>
-                <Label>{label}</Label>
-                <Input
-                  type="password"
-                  placeholder={editing ? '••••••••  (اترك فارغاً للإبقاء)' : ''}
-                  value={form.credentials[key] || ''}
-                  onChange={e => setForm({ ...form, credentials: { ...form.credentials, [key]: e.target.value } })}
-                  data-testid={`integration-cred-${key}`}
-                />
+            {/* p288: مفاتيح القنوات المغطاة بالمركز تُدار من مركز التكاملات فقط */}
+            {['shopify', 'facebook', 'instagram', 'whatsapp', 'telegram'].includes(form.channel) ? (
+              <div className="rounded-md border border-dashed p-3 text-sm bg-muted/30" data-testid="creds-hub-note">
+                🔑 مفاتيح هذه القناة تُدار من{' '}
+                <a href="/integrations" className="text-emerald-700 underline font-medium" data-testid="creds-hub-link">مركز التكاملات</a>
+                {' '}— أدخلها هناك واضغط «حفظ واختبار» فتُفعَّل القناة تلقائياً. هنا يمكنك فقط تعديل الاسم والتفعيل.
               </div>
-            ))}
+            ) : (
+              schema.map(([key, label]) => (
+                <div key={key}>
+                  <Label>{label}</Label>
+                  <Input
+                    type="password"
+                    placeholder={editing ? '••••••••  (اترك فارغاً للإبقاء)' : ''}
+                    value={form.credentials[key] || ''}
+                    onChange={e => setForm({ ...form, credentials: { ...form.credentials, [key]: e.target.value } })}
+                    data-testid={`integration-cred-${key}`}
+                  />
+                </div>
+              ))
+            )}
 
             {CHANNELS[form.channel]?.kind === 'shipping' && (
               <div>
@@ -547,14 +556,6 @@ export default function EcomChannelsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* p274: guided wizard for Meta social channels */}
-      <SocialConnectWizard
-        channel={wizardChannel}
-        channelMeta={CHANNELS[wizardChannel]}
-        open={!!wizardChannel}
-        onClose={() => setWizardChannel(null)}
-        onDone={load}
-      />
     </>
   );
 }

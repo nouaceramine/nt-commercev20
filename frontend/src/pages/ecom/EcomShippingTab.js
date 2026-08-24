@@ -804,19 +804,30 @@ export default function EcomShippingTab() {
           </DialogHeader>
           {courierDlg && (
             <div className="space-y-3 py-2">
-              {COURIER_SCHEMA[courierDlg].fields.map(([k, label]) => (
-                <div key={k}>
-                  <Label>{label}</Label>
-                  <Input
-                    type="password"
-                    dir="ltr"
-                    placeholder={courierIntg[courierDlg] ? '••••••••  (اترك فارغاً للإبقاء)' : ''}
-                    value={courierForm.credentials[k] || ''}
-                    onChange={e => setCourierForm({ ...courierForm, credentials: { ...courierForm.credentials, [k]: e.target.value } })}
-                    data-testid={`courier-cred-${k}`}
-                  />
+              {/* p288: مفاتيح الناقلين المغطاة بالمركز تُدار من مركز التكاملات */}
+              {['yalidine', 'guepex', 'zr', 'maystro', 'ecotrack', 'noest'].includes(courierDlg) ? (
+                <div className="rounded-md border border-dashed p-3 text-sm bg-muted/30" data-testid="courier-hub-note">
+                  🔑 {ar ? 'مفاتيح هذه الشركة تُدار من' : 'Clés gérées depuis'}{' '}
+                  <a href="/integrations" className="text-emerald-700 underline font-medium" data-testid="courier-hub-link">
+                    {ar ? 'مركز التكاملات' : "le Centre d'intégrations"}
+                  </a>
+                  {ar ? ' — أدخلها هناك واضغط «حفظ واختبار» فتُفعَّل تلقائياً. هنا تعدّل فقط سعر الإرجاع والتفعيل.' : ''}
                 </div>
-              ))}
+              ) : (
+                COURIER_SCHEMA[courierDlg].fields.map(([k, label]) => (
+                  <div key={k}>
+                    <Label>{label}</Label>
+                    <Input
+                      type="password"
+                      dir="ltr"
+                      placeholder={courierIntg[courierDlg] ? '••••••••  (اترك فارغاً للإبقاء)' : ''}
+                      value={courierForm.credentials[k] || ''}
+                      onChange={e => setCourierForm({ ...courierForm, credentials: { ...courierForm.credentials, [k]: e.target.value } })}
+                      data-testid={`courier-cred-${k}`}
+                    />
+                  </div>
+                ))
+              )}
               <div>
                 <Label>{ar ? 'سعر الإرجاع (دج)' : 'Frais de retour (DZD)'}</Label>
                 <Input

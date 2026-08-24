@@ -54,30 +54,17 @@ export default function WhatsAppTab({ initialSettings }) {
 
         {settings.enabled && (
           <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Phone Number ID</Label>
-                <Input placeholder="123456789012345" value={settings.phone_number_id} onChange={(e) => setSettings(prev => ({ ...prev, phone_number_id: e.target.value }))} />
-                <p className="text-xs text-muted-foreground">{language === 'ar' ? 'تجده في Meta Business Suite' : 'Trouvable dans Meta Business Suite'}</p>
-              </div>
-              <div className="space-y-2">
-                <Label>Business Account ID</Label>
-                <Input placeholder="123456789012345" value={settings.business_account_id} onChange={(e) => setSettings(prev => ({ ...prev, business_account_id: e.target.value }))} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Access Token</Label>
-              <Input type="password" placeholder="EAAxxxxxxx..." value={settings.access_token} onChange={(e) => setSettings(prev => ({ ...prev, access_token: e.target.value }))} />
-              <p className="text-xs text-muted-foreground">{language === 'ar' ? 'احصل على Access Token من Meta for Developers > WhatsApp > API Setup' : 'Obtenez le Access Token depuis Meta for Developers > WhatsApp > API Setup'}</p>
-            </div>
-            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">{language === 'ar' ? 'خطوات الإعداد:' : 'Étapes de configuration:'}</h4>
-              <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-decimal list-inside">
-                <li>{language === 'ar' ? 'انتقل إلى developers.facebook.com' : 'Allez sur developers.facebook.com'}</li>
-                <li>{language === 'ar' ? 'أنشئ تطبيق Business جديد' : 'Créez une nouvelle application Business'}</li>
-                <li>{language === 'ar' ? 'أضف WhatsApp product' : 'Ajoutez le produit WhatsApp'}</li>
-                <li>{language === 'ar' ? 'انسخ Phone Number ID و Access Token' : 'Copiez le Phone Number ID et Access Token'}</li>
-              </ol>
+            {/* p288: مفاتيح واتساب تُدار من مركز التكاملات فقط */}
+            <div className="rounded-md border border-dashed p-3 text-sm" data-testid="wa-hub-note">
+              {language === 'ar'
+                ? '🔑 مفاتيح WhatsApp (Phone Number ID و Access Token) تُدار من'
+                : '🔑 Les clés WhatsApp sont gérées depuis'}{' '}
+              <a href="/integrations" className="text-emerald-700 underline font-medium" data-testid="wa-hub-link">
+                {language === 'ar' ? 'مركز التكاملات' : 'le Centre d’intégrations'}
+              </a>
+              {language === 'ar'
+                ? ' — أدخلها هناك واضغط «حفظ واختبار» فتُفعَّل الخدمة تلقائياً، مع شرح خطوة بخطوة لجلب المفاتيح من Meta.'
+                : ' — avec guide pas-à-pas et activation automatique après test réussi.'}
             </div>
           </div>
         )}

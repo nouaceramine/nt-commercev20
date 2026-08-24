@@ -275,6 +275,26 @@ REGISTRY = {
             ],
         },
     },
+    # p288: Resend (بريد النظام) — نفس مخزن EmailTab (system_settings/email_settings)
+    "resend": {
+        "category": "messaging", "adapter": "resend", "name_ar": "بريد النظام (Resend)",
+        "test": "resend",
+        "desc_ar": "البريد الإلكتروني للمنصة: إيصالات، تقارير ذكية، إشعارات — عبر Resend.",
+        "fields": [
+            {"key": "api_key", "label_ar": "Resend API Key (re_...)", "secret": True},
+            {"key": "sender_email", "label_ar": "البريد المرسل (From)", "secret": False, "required": False},
+            {"key": "sender_name", "label_ar": "اسم المرسل", "secret": False, "required": False},
+        ],
+        "guide": {
+            "url": "https://resend.com/api-keys", "url_label": "resend.com/api-keys",
+            "steps_ar": [
+                "سجّل الدخول إلى resend.com ← API Keys ← Create API Key.",
+                "انسخ المفتاح (يبدأ بـ re_) وألصقه هنا.",
+                "لإرسال من نطاقك الخاص: أضف نطاقك من Domains وفعّل سجلات DNS ثم اكتب بريد المرسل.",
+                "بدون نطاق خاص استخدم onboarding@resend.dev (للتجربة فقط).",
+            ],
+        },
+    },
     # ── المتاجر ──
     "woocommerce": {
         "category": "stores", "adapter": "woocommerce", "name_ar": "WooCommerce",
@@ -387,6 +407,19 @@ async def _status_for(iid: str, entry: dict, tenant_id: str) -> dict:
             },
             "last_test": doc.get("hub_last_test"),
         }
+    if adapter == "resend":  # p288
+        doc = await db.system_settings.find_one({"type": "email_settings"}, {"_id": 0}) or {}
+        return {
+            "configured": bool(doc.get("resend_api_key")),
+            "active": bool(doc.get("enabled")) and bool(doc.get("resend_api_key")),
+            "mode": "",
+            "masked": {
+                "api_key": _mask(doc.get("resend_api_key")),
+                "sender_email": doc.get("sender_email") or "",
+                "sender_name": doc.get("sender_name") or "",
+            },
+            "last_test": doc.get("hub_last_test"),
+        }
     if adapter == "sms":
         doc = await db.ecom_sms_settings.find_one({"id": "global"}, {"_id": 0}) or {}
         prov = doc.get("provider") or {}
@@ -471,6 +504,20 @@ async def _run_test(iid: str, entry: dict, doc: Optional[dict]) -> dict:
             if r.status_code == 200:
                 return {"ok": True, "message": "✅ مفتاح SendGrid صالح"}
             return {"ok": False, "message": f"❌ رفض SendGrid (HTTP {r.status_code}) — تحقق من المفتاح"}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"❌ تعذّر الوصول: {str(exc)[:120]}"}
+    if kind == "resend":  # p288
+        doc = await db.system_settings.find_one({"type": "email_settings"}, {"_id": 0}) or {}
+        key = _df(doc.get("resend_api_key") or "") or ""
+        if not key:
+            return {"ok": False, "message": "❌ أدخل مفتاح Resend أولاً"}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as cl:
+                r = await cl.get("https://api.resend.com/api-keys",
+                                 headers={"Authorization": f"Bearer {key}"})
+            if r.status_code == 200:
+                return {"ok": True, "message": "✅ مفتاح Resend صالح — بريد النظام مفعّل"}
+            return {"ok": False, "message": f"❌ رفض Resend (HTTP {r.status_code}) — تحقق من المفتاح"}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "message": f"❌ تعذّر الوصول: {str(exc)[:120]}"}
     if kind == "woocommerce":
@@ -592,6 +639,26 @@ async def hub_connect(iid: str, body: dict, admin: dict = Depends(get_tenant_adm
                 {"$set": {"is_active": bool(test_result["ok"]),
                           "hub_last_test": {"ok": test_result["ok"],
                                             "message": test_result["message"], "at": _now()}}})
+        # p288: مرايا التخزين القديمة حتى تستمر الميزات القائمة بالعمل من المركز
+        creds_now = _dec_creds((doc or {}).get("credentials") or {})
+        active_now = bool((await _channel_doc(channel) or {}).get("is_active"))
+        if channel == "whatsapp":
+            wa_upd = {"tenant_id": admin.get("tenant_id"), "enabled": active_now,
+                      "updated_at": _now()}
+            if creds_now.get("access_token"):
+                wa_upd["api_token"] = creds_now["access_token"]
+            if creds_now.get("phone_number_id"):
+                wa_upd["phone_number_id"] = creds_now["phone_number_id"]
+            await db.whatsapp_integration_settings.update_one(
+                {"tenant_id": admin.get("tenant_id")}, {"$set": wa_upd}, upsert=True)
+        elif channel == "telegram":
+            tg_upd = {"updated_at": _now()}
+            if creds_now.get("bot_token"):
+                tg_upd["telegram_bot_token"] = _ef(creds_now["bot_token"])
+            if creds_now.get("chat_id"):
+                tg_upd["telegram_chat_id"] = creds_now["chat_id"]
+            if len(tg_upd) > 1:
+                await db.store_settings.update_one({}, {"$set": tg_upd}, upsert=True)
 
     elif entry["adapter"] == "sendgrid":
         upd = {"enabled": True, "updated_at": _now(),
@@ -620,6 +687,23 @@ async def hub_connect(iid: str, body: dict, admin: dict = Depends(get_tenant_adm
             {"$set": {"enabled": bool(test_result["ok"]),
                       "hub_last_test": {"ok": test_result["ok"],
                                         "message": test_result["message"], "at": _now()}}})
+
+    elif entry["adapter"] == "resend":  # p288 — نفس مخزن EmailTab
+        upd = {"type": "email_settings", "enabled": True}
+        if str(fields.get("api_key") or "").strip():
+            upd["resend_api_key"] = _ef(str(fields["api_key"]).strip())
+        if str(fields.get("sender_email") or "").strip():
+            upd["sender_email"] = str(fields["sender_email"]).strip()
+        if str(fields.get("sender_name") or "").strip():
+            upd["sender_name"] = str(fields["sender_name"]).strip()[:80]
+        await db.system_settings.update_one({"type": "email_settings"}, {"$set": upd}, upsert=True)
+        test_result = await _run_test(iid, entry, None)
+        await db.system_settings.update_one(
+            {"type": "email_settings"},
+            {"$set": {"enabled": bool(test_result["ok"]),
+                      "hub_last_test": {"ok": test_result["ok"],
+                                        "message": test_result["message"], "at": _now()}}},
+            upsert=True)
 
     elif entry["adapter"] == "sms":
         provider = {"type": "http",
@@ -659,6 +743,11 @@ async def hub_test(iid: str, admin: dict = Depends(get_tenant_admin)):
     elif entry["adapter"] == "sendgrid":
         await db.email_integration_settings.update_one(
             {}, {"$set": {"hub_last_test": {"ok": result["ok"], "message": result["message"], "at": _now()}}})
+    elif entry["adapter"] == "resend":  # p288
+        await db.system_settings.update_one(
+            {"type": "email_settings"},
+            {"$set": {"hub_last_test": {"ok": result["ok"], "message": result["message"], "at": _now()}}},
+            upsert=True)
     return result
 
 
@@ -672,6 +761,15 @@ async def hub_disconnect(iid: str, admin: dict = Depends(get_tenant_admin)):
         if doc:
             await db.ecom_integrations.update_one(
                 {"id": doc["id"]}, {"$set": {"is_active": False, "updated_at": _now()}})
+        # p288: عكس الإلغاء على المرايا
+        if entry["channel"] == "whatsapp":
+            await db.whatsapp_integration_settings.update_one(
+                {"tenant_id": admin.get("tenant_id")}, {"$set": {"enabled": False, "updated_at": _now()}})
+        elif entry["channel"] == "telegram":
+            await db.store_settings.update_one(
+                {}, {"$set": {"telegram_bot_token": "", "telegram_chat_id": "", "updated_at": _now()}})
+    elif entry["adapter"] == "resend":  # p288
+        await db.system_settings.update_one({"type": "email_settings"}, {"$set": {"enabled": False}})
     elif entry["adapter"] == "sendgrid":
         await db.email_integration_settings.update_one({}, {"$set": {"enabled": False}})
     elif entry["adapter"] == "woocommerce":
