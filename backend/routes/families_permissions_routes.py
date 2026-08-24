@@ -402,6 +402,7 @@ async def create_product_family(family: ProductFamilyCreate, admin: dict = Depen
         "parent_id": family.parent_id or "",
         "parent_name": parent_name,
         "product_count": 0,
+        "is_spare_parts": bool(getattr(family, "is_spare_parts", False)),  # p286
         "created_at": now
     }
     await db.product_families.insert_one(family_doc)

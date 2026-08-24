@@ -4650,3 +4650,23 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 **Fix:** destructuring realigned to `[productsRes, stockRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes]` + render hardening (optional chaining with numeric fallbacks on all salesStats reads) + shape validation at the setter with a forensic console log (`p285: unexpected sales-stats shape`) if the API ever returns an unexpected shape.
 
 **Verification:** after deploy the forensic log is EMPTY (correct shape flows), / and /dashboard render at 1440px + 375px with zero JS errors; screenshot confirms correct figures (capital, monthly profit, counts). Releases: 20260824_135913 (hardening) → 20260824_141126 (alignment fix).
+
+## p286 — عائلات قطع غيار الصيانة (spare-parts families) (2026-08-24)
+
+**طلب المالك:** تعليم عائلات منتجات كـ«قطع غيار صيانة» لتظهر منتجاتها في مخزون الصيانة وعند اختيار القطع لجهاز جديد، بينما يبقى مخزون المنتجات العام يعرض كل شيء.
+
+**Backend:**
+- `models/schemas/catalog.py`: حقل `is_spare_parts` في ProductFamilyCreate (bool=False) / Update (Optional) / Response (bool=False).
+- `routes/families_permissions_routes.py`: حفظ `is_spare_parts` عند إنشاء العائلة (PUT يمرره تلقائياً عبر model_dump الموجود).
+- `routes/repair_routes.py` GET /api/repairs/parts: كان يقرأ مجموعة spare_parts القديمة (غير مستخدم من الواجهة منذ p63) — أصبح يعيد مخزون الصيانة الموحد: منتجات العائلات المعلَّمة is_spare_parts + القطع القديمة الموسومة part_category (توافق رجعي)، مع search عبر name_ar/name_en/part_number/barcode/code وإلحاق family_name.
+
+**Frontend:**
+- `ProductFamiliesPage.js`: مفتاح Switch «عائلة قطع غيار صيانة» في حوار الإضافة/التعديل (family-spare-toggle) مع شرح مصغّر + شارة Wrench «قطع غيار» بجانب اسم العائلة المعلَّمة (spare-badge-{id}).
+- `SparePartsPage.js` (/repairs/parts): تجلب /repairs/parts بدل /products (لم تعد تعرض كل المنتجات) + قائمة «عائلة قطع الغيار» إلزامية في حوار القطعة من العائلات المعلَّمة فقط (part-family-select، اختيار تلقائي إن وُجدت عائلة واحدة) + لافتة إرشاد (no-spare-families-banner) برابط لعائلات المنتجات عند غياب أي عائلة معلَّمة.
+- `RepairTrackingPage.js`: بحث القطع عند تحديث التذكرة ينتقل من /products (كل المنتجات) إلى /repairs/parts?search= (مخزون الصيانة فقط).
+
+**حادثة أثناء التنفيذ:** بناء أول نُشر مع استيراد Switch مفقود (تعديل لم يُحفظ) → ReferenceError على /product-families — وهو على الأرجح نفس خطأ لقطة المالك (Cannot read properties / ErrorBoundary). أُصلح فوراً وأُعيد البناء والنشر، وأُضيفت خطوة تحقق إلزامية بالعلامات على الخادم قبل البناء.
+
+**الاختبارات (NT-0001، وسم TEST-P286):** إنشاء عائلة معلَّمة + منتج → ظهر في /repairs/parts مع family_name ✓؛ search ✓؛ إلغاء التعليم → اختفى ✓؛ منتج في عائلة عادية لا يتسرب ✓؛ إنشاء عائلة معلَّمة من الواجهة + شارة ✓؛ قائمة العائلات في حوار القطعة تعرض المعلَّمة فقط ✓؛ /repairs و/dashboard بلا أخطاء ✓؛ جوال 375px بلا تمرير أفقي ✓؛ سطح المكتب 1440px بلا تغيير بصري خارج الصفحتين المعدلتين. **التنظيف: بقايا = 0** (تصفير مخزون ← حذف منتج ← حذف عائلة). المستأجر الحقيقي لم يُمسّ.
+
+**النشر:** releases 20260824_145847 (معيب — Switch) ← 20260824_150634 (معيب — spareFamilies) ← 20260824_151741 (نهائي). main.bf981984.js.

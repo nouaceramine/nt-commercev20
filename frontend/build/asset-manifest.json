@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "/static/css/main.ee7083bc.css",
-    "main.js": "/static/js/main.27294e02.js",
+    "main.js": "/static/js/main.001ab665.js",
     "static/js/3801.c0c67eb0.chunk.js": "/static/js/3801.c0c67eb0.chunk.js",
     "static/js/5811.ef04602a.chunk.js": "/static/js/5811.ef04602a.chunk.js",
     "static/js/3257.85287c3f.chunk.js": "/static/js/3257.85287c3f.chunk.js",
@@ -30,7 +30,7 @@
     "static/js/3615.bc938b47.chunk.js": "/static/js/3615.bc938b47.chunk.js",
     "static/js/699.8453837c.chunk.js": "/static/js/699.8453837c.chunk.js",
     "static/js/7319.478d2021.chunk.js": "/static/js/7319.478d2021.chunk.js",
-    "static/js/4215.da3c143a.chunk.js": "/static/js/4215.da3c143a.chunk.js",
+    "static/js/4215.df9fc50c.chunk.js": "/static/js/4215.df9fc50c.chunk.js",
     "static/js/6638.fff2197a.chunk.js": "/static/js/6638.fff2197a.chunk.js",
     "static/js/2982.28e69977.chunk.js": "/static/js/2982.28e69977.chunk.js",
     "static/js/180.dd0596e6.chunk.js": "/static/js/180.dd0596e6.chunk.js",
@@ -57,8 +57,8 @@
     "static/js/4607.9d1cfb63.chunk.js": "/static/js/4607.9d1cfb63.chunk.js",
     "static/js/1041.0415b343.chunk.js": "/static/js/1041.0415b343.chunk.js",
     "static/js/4578.945ed731.chunk.js": "/static/js/4578.945ed731.chunk.js",
-    "static/js/8752.94d03629.chunk.js": "/static/js/8752.94d03629.chunk.js",
-    "static/js/6399.ddd68f7e.chunk.js": "/static/js/6399.ddd68f7e.chunk.js",
+    "static/js/8752.5350a304.chunk.js": "/static/js/8752.5350a304.chunk.js",
+    "static/js/6399.152b6786.chunk.js": "/static/js/6399.152b6786.chunk.js",
     "static/js/3078.ecfbe08f.chunk.js": "/static/js/3078.ecfbe08f.chunk.js",
     "static/js/5208.624c63cf.chunk.js": "/static/js/5208.624c63cf.chunk.js",
     "static/js/5651.693d30f8.chunk.js": "/static/js/5651.693d30f8.chunk.js",
@@ -280,7 +280,7 @@
     "static/media/manrope-cyrillic-ext-500-normal.woff2": "/static/media/manrope-cyrillic-ext-500-normal.c803169a005534ccd3ce.woff2",
     "static/media/manrope-cyrillic-ext-700-normal.woff2": "/static/media/manrope-cyrillic-ext-700-normal.4ee2708831b279ef20f1.woff2",
     "main.ee7083bc.css.map": "/static/css/main.ee7083bc.css.map",
-    "main.27294e02.js.map": "/static/js/main.27294e02.js.map",
+    "main.001ab665.js.map": "/static/js/main.001ab665.js.map",
     "3801.c0c67eb0.chunk.js.map": "/static/js/3801.c0c67eb0.chunk.js.map",
     "5811.ef04602a.chunk.js.map": "/static/js/5811.ef04602a.chunk.js.map",
     "3257.85287c3f.chunk.js.map": "/static/js/3257.85287c3f.chunk.js.map",
@@ -309,7 +309,7 @@
     "3615.bc938b47.chunk.js.map": "/static/js/3615.bc938b47.chunk.js.map",
     "699.8453837c.chunk.js.map": "/static/js/699.8453837c.chunk.js.map",
     "7319.478d2021.chunk.js.map": "/static/js/7319.478d2021.chunk.js.map",
-    "4215.da3c143a.chunk.js.map": "/static/js/4215.da3c143a.chunk.js.map",
+    "4215.df9fc50c.chunk.js.map": "/static/js/4215.df9fc50c.chunk.js.map",
     "6638.fff2197a.chunk.js.map": "/static/js/6638.fff2197a.chunk.js.map",
     "2982.28e69977.chunk.js.map": "/static/js/2982.28e69977.chunk.js.map",
     "180.dd0596e6.chunk.js.map": "/static/js/180.dd0596e6.chunk.js.map",
@@ -336,8 +336,8 @@
     "4607.9d1cfb63.chunk.js.map": "/static/js/4607.9d1cfb63.chunk.js.map",
     "1041.0415b343.chunk.js.map": "/static/js/1041.0415b343.chunk.js.map",
     "4578.945ed731.chunk.js.map": "/static/js/4578.945ed731.chunk.js.map",
-    "8752.94d03629.chunk.js.map": "/static/js/8752.94d03629.chunk.js.map",
-    "6399.ddd68f7e.chunk.js.map": "/static/js/6399.ddd68f7e.chunk.js.map",
+    "8752.5350a304.chunk.js.map": "/static/js/8752.5350a304.chunk.js.map",
+    "6399.152b6786.chunk.js.map": "/static/js/6399.152b6786.chunk.js.map",
     "3078.ecfbe08f.chunk.js.map": "/static/js/3078.ecfbe08f.chunk.js.map",
     "5208.624c63cf.chunk.js.map": "/static/js/5208.624c63cf.chunk.js.map",
     "5651.693d30f8.chunk.js.map": "/static/js/5651.693d30f8.chunk.js.map",
@@ -480,6 +480,6 @@
   },
   "entrypoints": [
     "static/css/main.ee7083bc.css",
-    "static/js/main.27294e02.js"
+    "static/js/main.001ab665.js"
   ]
 }

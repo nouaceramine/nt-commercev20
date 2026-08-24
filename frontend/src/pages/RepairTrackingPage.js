@@ -212,15 +212,15 @@ export default function RepairTrackingPage() {
     filterRepairs();
   }, [searchQuery, statusFilter, repairs]);
 
-  // Search products for spare parts
+  // p286: search maintenance stock only (families flagged is_spare_parts + legacy parts)
   const searchProducts = async (query) => {
     try {
       setSearchingProducts(true);
       const url = query 
-        ? `/products?search=${encodeURIComponent(query)}`
-        : `/products?limit=10`;
+        ? `/repairs/parts?search=${encodeURIComponent(query)}`
+        : `/repairs/parts`;
       const response = await apiClient.get(url);
-      setProductResults(response.data?.slice(0, 10) || []);
+      setProductResults((response.data || []).slice(0, 10));
     } catch (error) {
       console.error('Error searching products:', error);
     } finally {

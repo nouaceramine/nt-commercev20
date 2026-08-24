@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
@@ -145,6 +146,7 @@ export default function SparePartsPage() {
   const [editingPart, setEditingPart] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0, lowStock: 0, totalValue: 0 });
+  const [spareFamilies, setSpareFamilies] = useState([]);  // p286: العائلات المعلَّمة كقطع غيار
 
   const [formData, setFormData] = useState({
     name: '',
@@ -158,14 +160,26 @@ export default function SparePartsPage() {
     min_stock: '5',
     supplier: '',
     notes: '',
+    family_id: '',  // p286
   });
 
+  // p286: العائلات المعلَّمة كقطع غيار (من عائلات المنتجات)
+  const fetchSpareFamilies = async () => {
+    try {
+      const res = await apiClient.get('/product-families');
+      setSpareFamilies((res.data || []).filter(f => f.is_spare_parts));
+    } catch (e) {
+      console.error('Error fetching spare families:', e);
+    }
+  };
+
   // p63: full unification — spare parts ARE the main products inventory.
-  // One stock, one search: the page reads/writes /products directly.
+  // p286: the page reads /repairs/parts — products of families flagged is_spare_parts
+  // (+ legacy docs tagged part_category). Products inventory page still shows everything.
   const fetchParts = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get(`/products`);
+      const response = await apiClient.get(`/repairs/parts`);
       const data = response.data || [];
       // Map product fields to the page's part shape (same UI, unified stock)
       const mappedData = data.map(p => ({
@@ -199,6 +213,7 @@ export default function SparePartsPage() {
 
   useEffect(() => {
     fetchParts();
+    fetchSpareFamilies();  // p286
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -279,11 +294,17 @@ export default function SparePartsPage() {
       toast.error(language === 'ar' ? 'يرجى ملء الحقول المطلوبة' : 'Veuillez remplir les champs requis');
       return;
     }
+    // p286: القطعة تحتاج عائلة معلَّمة كقطع غيار لتبقى ظاهرة في مخزون الصيانة
+    if (spareFamilies.length > 0 && !formData.family_id) {
+      toast.error(language === 'ar' ? 'يرجى اختيار عائلة قطع الغيار' : 'Veuillez choisir la famille de pièces');
+      return;
+    }
 
     // p63: write straight to the unified products inventory
     const productPayload = {
       name_en: formData.name,  // إلزامي في مخطط المنتجات
       name_ar: formData.name_ar || formData.name,
+      family_id: formData.family_id || null,  // p286
       description_ar: formData.notes || '',
       purchase_price: parseFloat(formData.buy_price) || 0,
       retail_price: parseFloat(formData.sell_price) || 0,
@@ -357,6 +378,24 @@ export default function SparePartsPage() {
             {language === 'ar' ? 'إضافة قطعة' : 'Ajouter une pièce'}
           </Button>
         </div>
+
+        {/* p286: دليل عند غياب عائلات معلَّمة كقطع غيار */}
+        {!loading && spareFamilies.length === 0 && (
+          <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800" data-testid="no-spare-families-banner">
+            <CardContent className="p-4 flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                {language === 'ar'
+                  ? 'لم تُحدَّد أي عائلة كـ«قطع غيار صيانة» بعد. علّم العائلات المناسبة من صفحة '
+                  : 'Aucune famille marquée «pièces détachées». Marquez-les depuis '}
+                <Link to="/product-families" className="font-semibold underline" data-testid="go-families-link">
+                  {language === 'ar' ? 'عائلات المنتجات' : 'Familles de produits'}
+                </Link>
+                {language === 'ar' ? ' لتظهر منتجاتها هنا.' : ' pour les voir ici.'}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -575,6 +614,25 @@ export default function SparePartsPage() {
                   </Select>
                 </div>
               </div>
+
+              {/* p286: عائلة قطع الغيار (من العائلات المعلَّمة فقط) */}
+              {spareFamilies.length > 0 && (
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'عائلة قطع الغيار' : 'Famille de pièces'} *</Label>
+                  <Select value={formData.family_id} onValueChange={(value) => setFormData(prev => ({ ...prev, family_id: value }))}>
+                    <SelectTrigger data-testid="part-family-select">
+                      <SelectValue placeholder={language === 'ar' ? 'اختر العائلة...' : 'Choisir la famille...'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {spareFamilies.map(fam => (
+                        <SelectItem key={fam.id} value={fam.id}>
+                          {language === 'ar' ? (fam.name_ar || fam.name_en) : (fam.name_en || fam.name_ar)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>{language === 'ar' ? 'الموديلات المتوافقة' : 'Modèles compatibles'}</Label>

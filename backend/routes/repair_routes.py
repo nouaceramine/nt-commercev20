@@ -294,13 +294,34 @@ def create_repair_routes(db, get_current_user, get_tenant_admin, main_db=None) -
 
     @router.get("/parts")
     async def get_parts(search: Optional[str] = None, user: dict = Depends(get_current_user)):
-        query = {}
+        """p286: مخزون الصيانة = منتجات العائلات المعلَّمة is_spare_parts
+        (+ القطع القديمة المُنشأة من صفحة قطع الغيار عبر part_category)."""
+        flagged = await db.product_families.find(
+            {"is_spare_parts": True}, {"_id": 0, "id": 1, "name_ar": 1}).to_list(200)
+        fam_map = {f["id"]: f.get("name_ar", "") for f in flagged}
+        query = {"$or": [
+            {"family_id": {"$in": list(fam_map.keys())}},
+            {"part_category": {"$exists": True, "$nin": ["", None]}},
+        ]}
         if search:
-            query["$or"] = [
+            query["$and"] = [{"$or": [
                 {"name_ar": {"$regex": search, "$options": "i"}},
+                {"name_en": {"$regex": search, "$options": "i"}},
                 {"part_number": {"$regex": search, "$options": "i"}},
-            ]
-        return await db.spare_parts.find(query, {"_id": 0}).to_list(500)
+                {"barcode": {"$regex": search, "$options": "i"}},
+                {"code": {"$regex": search, "$options": "i"}},
+            ]}]
+        products = await db.products.find(query, {"_id": 0}).to_list(500)
+        # أسماء العائلات للعرض (استعلام واحد إضافي عند الحاجة)
+        missing = [fid for fid in {p.get("family_id") for p in products if p.get("family_id")} if fid not in fam_map]
+        if missing:
+            extra = await db.product_families.find(
+                {"id": {"$in": missing}}, {"_id": 0, "id": 1, "name_ar": 1}).to_list(200)
+            fam_map.update({f["id"]: f.get("name_ar", "") for f in extra})
+        for p in products:
+            if p.get("family_id") and not p.get("family_name"):
+                p["family_name"] = fam_map.get(p["family_id"], "")
+        return products
 
     @router.post("/tickets/{ticket_id}/use-part")
     async def use_part(ticket_id: str, data: dict, admin: dict = Depends(require_permission("repairs.edit"))):

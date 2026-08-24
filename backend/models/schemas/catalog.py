@@ -194,6 +194,7 @@ class ProductFamilyCreate(BaseModel):
     description_en: Optional[str] = ""
     description_ar: Optional[str] = ""
     parent_id: Optional[str] = None  # للعائلات الفرعية
+    is_spare_parts: bool = False  # p286: عائلة قطع غيار صيانة — تظهر منتجاتها في مخزون الصيانة
 
 class ProductFamilyUpdate(BaseModel):
     name_en: Optional[str] = None
@@ -201,6 +202,7 @@ class ProductFamilyUpdate(BaseModel):
     description_en: Optional[str] = None
     description_ar: Optional[str] = None
     parent_id: Optional[str] = None
+    is_spare_parts: Optional[bool] = None  # p286
 
 class ProductFamilyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -213,6 +215,7 @@ class ProductFamilyResponse(BaseModel):
     parent_id: str = ""
     parent_name: str = ""
     product_count: int = 0
+    is_spare_parts: bool = False  # p286
     created_at: str = ""
 
 # ============ OCR & OTHER MODELS ============

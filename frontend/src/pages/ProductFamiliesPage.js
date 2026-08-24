@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
+import { Switch } from '../components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -37,7 +38,8 @@ import {
   Package,
   ChevronRight,
   PlusCircle,
-  Save
+  Save,
+  Wrench
 } from 'lucide-react';
 
 export default function ProductFamiliesPage() {
@@ -49,7 +51,8 @@ export default function ProductFamiliesPage() {
   const [form, setForm] = useState({
     name: '',  // خانة واحدة فقط
     description: '',
-    parent_id: ''
+    parent_id: '',
+    is_spare_parts: false  // p286
   });
 
   useEffect(() => {
@@ -82,7 +85,8 @@ export default function ProductFamiliesPage() {
         name_ar: form.name,
         description_en: form.description,
         description_ar: form.description,
-        parent_id: form.parent_id || null
+        parent_id: form.parent_id || null,
+        is_spare_parts: !!form.is_spare_parts  // p286
       };
 
       if (editingFamily) {
@@ -113,7 +117,8 @@ export default function ProductFamiliesPage() {
     setForm({
       name: family.name_ar || family.name_en,
       description: family.description_ar || family.description_en,
-      parent_id: family.parent_id || ''
+      parent_id: family.parent_id || '',
+      is_spare_parts: !!family.is_spare_parts  // p286
     });
     setShowDialog(true);
   };
@@ -143,7 +148,8 @@ export default function ProductFamiliesPage() {
     setForm({
       name: '',
       description: '',
-      parent_id: ''
+      parent_id: '',
+      is_spare_parts: false  // p286
     });
   };
 
@@ -266,6 +272,12 @@ export default function ProductFamiliesPage() {
                         <span className="font-medium">
                           {language === 'ar' ? family.name_ar : family.name_en}
                         </span>
+                        {family.is_spare_parts && (
+                          <Badge variant="secondary" className="gap-1" data-testid={`spare-badge-${family.id}`}>
+                            <Wrench className="h-3 w-3" />
+                            {language === 'ar' ? 'قطع غيار' : 'Pièces'}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -360,6 +372,26 @@ export default function ProductFamiliesPage() {
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   placeholder={language === 'ar' ? 'وصف اختياري...' : 'Description optionnelle...'}
                   data-testid="family-desc-input"
+                />
+              </div>
+
+              {/* p286: تعليم العائلة كقطع غيار صيانة */}
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <Label className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4 text-muted-foreground" />
+                    {language === 'ar' ? 'عائلة قطع غيار صيانة' : 'Famille de pièces détachées'}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'ar'
+                      ? 'تظهر منتجات هذه العائلة في مخزون الصيانة وعند اختيار القطع لأجهزة الصيانة'
+                      : 'Ses produits apparaissent dans le stock maintenance'}
+                  </p>
+                </div>
+                <Switch
+                  checked={!!form.is_spare_parts}
+                  onCheckedChange={(v) => setForm({ ...form, is_spare_parts: v })}
+                  data-testid="family-spare-toggle"
                 />
               </div>
 
