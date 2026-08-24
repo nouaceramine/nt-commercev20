@@ -282,8 +282,8 @@ export function EcomManualOrderDialog({ open, onOpenChange, onCreated, integrati
                   )}
                 </div>
                 <Input className="col-span-2" placeholder="SKU" value={it.sku} onChange={e => updateItem(idx, 'sku', e.target.value)} />
-                <Input className="col-span-2" type="number" min="1" placeholder="الكمية" value={it.qty} onChange={e => updateItem(idx, 'qty', e.target.value)} data-testid={`manual-order-item-qty-${idx}`} />
-                <Input className="col-span-2" type="number" min="0" placeholder="السعر" value={it.price} onChange={e => updateItem(idx, 'price', e.target.value)} data-testid={`manual-order-item-price-${idx}`} />
+                <Input className="col-span-2" type="number" inputMode="numeric" min="1" placeholder="الكمية" value={it.qty} onChange={e => updateItem(idx, 'qty', e.target.value)} data-testid={`manual-order-item-qty-${idx}`} />
+                <Input className="col-span-2" type="number" inputMode="decimal" min="0" placeholder="السعر" value={it.price} onChange={e => updateItem(idx, 'price', e.target.value)} data-testid={`manual-order-item-price-${idx}`} />
                 <Button type="button" size="icon" variant="ghost" disabled={items.length === 1} onClick={() => setItems(items.filter((_, i) => i !== idx))} className="col-span-1" data-testid={`manual-order-remove-item-${idx}`}>
                   <Trash2 className="w-4 h-4 text-rose-500" />
                 </Button>

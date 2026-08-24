@@ -191,6 +191,7 @@ export default function POSCart({
                           </Button>
                           <Input
                             type="number"
+                            inputMode="numeric"
                             value={item.quantity}
                             onChange={(e) => updateCartItemQuantity(item.cart_item_id, parseInt(e.target.value) || 0)}
                             className="w-12 h-6 text-center text-sm p-0"
@@ -203,6 +204,7 @@ export default function POSCart({
                       <TableCell className="text-center py-1">
                         <Input
                           type="number"
+                          inputMode="decimal"
                           value={item.unit_price}
                           onChange={(e) => !item.is_fixed_price && updateCartItemPrice(item.cart_item_id, e.target.value)}
                           readOnly={!!item.is_fixed_price}
@@ -212,7 +214,7 @@ export default function POSCart({
                       </TableCell>
                       <TableCell className="text-center py-1">
                         <Input
-                          type="number" min="0" max="100"
+                          type="number" inputMode="numeric" min="0" max="100"
                           value={item.discount_percent || ''}
                           onChange={(e) => updateCartItemDiscount(item.cart_item_id, e.target.value)}
                           className="w-12 h-6 text-center text-sm p-0"
@@ -279,7 +281,7 @@ export default function POSCart({
                   <div className="flex items-center justify-between mt-2 gap-2">
                     <div className="flex items-center gap-1">
                       <Button variant="outline" size="icon" className="h-11 w-11" onClick={() => updateCartItemQuantity(item.cart_item_id, item.quantity - 1)}><Minus className="h-4 w-4" /></Button>
-                      <Input type="number" value={item.quantity} onChange={(e) => updateCartItemQuantity(item.cart_item_id, parseInt(e.target.value) || 1)} className="w-14 h-11 text-center text-base" />
+                      <Input type="number" inputMode="numeric" value={item.quantity} onChange={(e) => updateCartItemQuantity(item.cart_item_id, parseInt(e.target.value) || 1)} className="w-14 h-11 text-center text-base" />
                       <Button variant="outline" size="icon" className="h-11 w-11" onClick={() => updateCartItemQuantity(item.cart_item_id, item.quantity + 1)}><Plus className="h-4 w-4" /></Button>
                     </div>
                     <div className="text-end">
@@ -332,6 +334,7 @@ export default function POSCart({
                   </span>
                   <Input
                     type="number"
+                    inputMode="decimal"
                     value={paidAmount || ''}
                     onChange={e => setPaidAmount(parseFloat(e.target.value) || 0)}
                     placeholder={paymentType === 'partial'
@@ -362,12 +365,12 @@ export default function POSCart({
               <div className="flex items-center gap-2">
                 <Banknote className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                 <span className="text-[10px] text-muted-foreground shrink-0 w-16">{language === 'ar' ? 'نقدي:' : 'Espèces:'}</span>
-                <Input type="number" value={mixedCash || ''} onChange={e => setMixedCash?.(parseFloat(e.target.value) || 0)} placeholder="0" className="h-6 text-sm text-center flex-1" min={0} />
+                <Input type="number" inputMode="decimal" value={mixedCash || ''} onChange={e => setMixedCash?.(parseFloat(e.target.value) || 0)} placeholder="0" className="h-6 text-sm text-center flex-1" min={0} />
               </div>
               <div className="flex items-center gap-2">
                 <CreditCard className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                 <span className="text-[10px] text-muted-foreground shrink-0 w-16">{language === 'ar' ? 'بنك/شيك:' : 'Virement:'}</span>
-                <Input type="number" value={mixedBank || ''} onChange={e => setMixedBank?.(parseFloat(e.target.value) || 0)} placeholder="0" className="h-6 text-sm text-center flex-1" min={0} />
+                <Input type="number" inputMode="decimal" value={mixedBank || ''} onChange={e => setMixedBank?.(parseFloat(e.target.value) || 0)} placeholder="0" className="h-6 text-sm text-center flex-1" min={0} />
               </div>
               {((mixedCash || 0) + (mixedBank || 0)) > 0 && (() => {
                 const paid = (mixedCash || 0) + (mixedBank || 0);
@@ -429,6 +432,7 @@ export default function POSCart({
                 <div className="flex items-center gap-0.5">
                   <Input
                     type="number"
+                    inputMode="decimal"
                     value={discountDisplayValue || ''}
                     onChange={(e) => handleDiscountChange(e.target.value)}
                     className="w-14 sm:w-16 h-6 text-center text-sm"
