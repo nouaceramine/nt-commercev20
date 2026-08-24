@@ -2,7 +2,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Tabs, TabsList, TabsTrigger } from '../ui/tabs';
-import { ShoppingBag, Store, Link2, Megaphone, Truck, BarChart3, KeyRound } from 'lucide-react';
+import { ShoppingBag, Store, Link2, Megaphone, Truck, BarChart3, KeyRound, Users } from 'lucide-react';
 
 const HUB_TABS = [
   { key: 'orders',   path: '/ecom-hub',           icon: ShoppingBag, ar: 'الطلبات',    fr: 'Commandes' },
@@ -11,6 +11,7 @@ const HUB_TABS = [
   { key: 'ads',      path: '/ecom-hub/ads',       icon: Megaphone,   ar: 'الإعلانات',  fr: 'Publicités' },
   { key: 'shipping', path: '/ecom-hub/shipping',  icon: Truck,       ar: 'الشحن',      fr: 'Livraison' },
   { key: 'analytics',path: '/ecom-hub/analytics', icon: BarChart3,   ar: 'التحليلات',  fr: 'Analytique' },
+  { key: 'workers',  path: '/ecom-hub/workers',   icon: Users,      ar: 'العمال',     fr: 'Employes' },  // p293
   { key: 'integrations', path: '/integrations',   icon: KeyRound,    ar: 'مركز التكاملات', fr: "Centre d'intégrations" },  // p288
 ];
 

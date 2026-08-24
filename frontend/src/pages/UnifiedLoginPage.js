@@ -883,6 +883,16 @@ export default function UnifiedLoginPage() {
         <p className="text-center mt-2">
           <button
             type="button"
+            onClick={function() { navigate('/worker/login'); }}
+            className="text-xs text-emerald-200/90 hover:text-white inline-flex items-center gap-1"
+            data-testid="worker-login-link"
+          >
+            {'👷 ' + (language === 'ar' ? 'دخول عمال المتجر الإلكتروني' : 'Espace employe boutique')}
+          </button>
+        </p>
+        <p className="text-center mt-2">
+          <button
+            type="button"
             onClick={function() { navigate('/'); }}
             className="text-xs text-blue-200/80 hover:text-white inline-flex items-center gap-1"
             data-testid="back-home-link"

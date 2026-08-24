@@ -112,7 +112,10 @@ const EcomHubPage = lazy(() => import("./pages/ecom/EcomHubPage"));  // p273
 const EcomHubShell = lazy(() => import("./pages/ecom/EcomHubShell"));  // p273
 const EcomChannelsPage = lazy(() => import("./pages/ecom/EcomChannelsPage"));  // p273
 const EcomGuidePage = lazy(() => import("./pages/ecom/EcomGuidePage"));  // p273
-const EcomAnalyticsPage = lazy(() => import("./pages/ecom/EcomAnalyticsPage"));  // p273
+const EcomAnalyticsPage = lazy(() => import("./pages/ecom/EcomAnalyticsPage"));
+const EcomWorkersPage = lazy(() => import("./pages/ecom/EcomWorkersPage"));  // p293
+const WorkerLoginPage = lazy(() => import("./pages/worker/WorkerLoginPage"));  // p293
+const WorkerWorkspacePage = lazy(() => import("./pages/worker/WorkerWorkspacePage"));  // p293  // p273
 const EcomStoreTab = lazy(() => import("./pages/ecom/EcomStoreTab"));  // p273
 const DigitalServicesPage = lazy(() => import("./pages/digital/DigitalServicesPage"));  // p273
 const DigitalAdminPage = lazy(() => import("./pages/digital/DigitalAdminPage"));  // p273
@@ -375,6 +378,9 @@ function AppRoutes() {
       <Route path="/driver/:token" element={<DriverPage />} />
       
       {/* Unified Login - Single Entry Point for ALL users */}
+      {/* p293: worker workspace (public PIN area) */}
+      <Route path="/worker/login" element={<WorkerLoginPage />} />
+      <Route path="/worker" element={<WorkerWorkspacePage />} />
       <Route path="/portal" element={<UnifiedLoginPage />} />
       <Route path="/login" element={<Navigate to="/portal" replace />} />
       <Route path="/tenant-login" element={<Navigate to="/portal" replace />} />
@@ -441,6 +447,7 @@ function AppRoutes() {
         <Route path="shipping/drivers" element={<ProtectedRoute adminOnly><EcomDriversPage /></ProtectedRoute>} />
         <Route path="shipping/yalidine" element={<Navigate to="/ecom-hub/shipping" replace />} />  {/* p93: legacy status page removed — real Yalidine management lives in الشحن الموحَّد */}
         <Route path="analytics" element={<EcomAnalyticsPage />} />
+        <Route path="workers" element={<ProtectedRoute adminOnly><EcomWorkersPage /></ProtectedRoute>} />  {/* p293 */}
         <Route path="guide" element={<Navigate to="/ecom-hub/channels/guide" replace />} />
       </Route>
       <Route

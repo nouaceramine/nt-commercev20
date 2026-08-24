@@ -127,6 +127,22 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
         },
     )
 
+    # p293: سجّل «منفّذ الطلب» — أول من يؤكده (عامل أو مستخدم)؛ للّوحة وعمولات العمال
+    if new_status == "confirmed":
+        try:
+            _ex = {
+                "id": user.get("id"),
+                "name": user.get("name") or user.get("full_name") or user.get("email") or "",
+                "type": "worker" if (user.get("user_type") == "ecom_worker" or user.get("role") == "ecom_worker") else "user",
+                "at": now,
+            }
+            await db.ecom_orders.update_one(
+                {"id": order_id, "$or": [{"executor": {"$exists": False}}, {"executor": None}]},
+                {"$set": {"executor": _ex}},
+            )
+        except Exception as _exc:  # noqa: BLE001 — الإسناد لا يمنع تغيير الحالة
+            logger.warning("executor attribution failed for order %s: %s", order_id, _exc)
+
     inventory_result = await _sync_inventory_on_status_change(db, order, new_status, now)
 
     # p59: accounting lifecycle — ledger entries on confirm/deliver/return/cancel

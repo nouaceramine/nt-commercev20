@@ -297,7 +297,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
 
             if user is None:
-                if tenant:
+                # p293 security: البديل لرموز قديمة sub==tenant_id فقط — كان أي sub
+                # غير معروف مع tenant_id صحيح يتحول لمدير المستأجر (تصعيد صلاحيات)
+                if tenant and user_id == tenant_id:
                     user = {
                         "id": tenant["id"],
                         "email": tenant["email"],
@@ -1246,6 +1248,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.shipping_webhook_routes',  # p284: instant courier status webhooks
     'routes.integrations_hub_routes',  # p287: unified integrations hub
     'routes.ecom.order_dispatch_routes',  # p289: order dispatch workflow
+    'routes.ecom.workers_routes',  # p293: ecom workers (PIN login, order attribution, commissions)
     # ── factory modules ──
     'routes.advanced_sales_routes',
     'routes.agent_hierarchy_routes',

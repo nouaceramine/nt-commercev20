@@ -4777,3 +4777,25 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 
 **النشر (p291+p292):** release 20260824_195930، main.4af13762.js؛ backend أُعيد تشغيله (health 200).
 
+## p293+p294 — نظام عمال المتجر الإلكتروني: دخول PIN محدود + إسناد المنفِّذ + عمولات (ثابت+نسبة) (2026-08-24)
+
+**طلب المالك:** صفحة لإضافة عمال المتجر الإلكتروني — العامل يرى مساحة التجارة فقط (دون كامل النظام)، يتصل بالزبائن ويؤكد الطلبات، لوحة التحكم تعرض كل طلب ومن نفّذه، وكل عامل يأخذ عمولته حسب الطلبات المُسلَّمة. (اعتمد المالك: دخول هاتف+PIN، عمولة ثابت+نسبة معاً).
+
+**Backend:**
+- `routes/ecom/workers_routes.py` (جديد، مُسجَّل في _AUTO_REG_MODULES):
+  - عام: `POST /ecom-workers/login` (هاتف+PIN → JWT نوعه ecom_worker لمدة 12س؛ فهرس main_db.ecom_worker_index يربط الهاتف بالمستأجر؛ تطبيع جزائري 05…≡+213…).
+  - العامل (get_ecom_worker — قائمة بيضاء): `/ecom-workers/me` (+إحصاءاته)، `/me/orders?view=queue|mine`، `/me/orders/{id}`، `/me/orders/{id}/call-attempt` (نفس نتائج الاتصال الخمس؛ confirmed يؤكد عبر خدمة الحالة المركزية)، `/me/orders/{id}/confirm`.
+  - الإدارة (require_tenant + require_ecom_feature): `GET/POST /ecom-workers`، `PUT/DELETE /ecom-workers/{id}`، `GET /ecom-workers/{id}/commissions` (غير مصفّاة + سجل التصفيات)، `POST .../commissions/settle` (ختم الطلبات commission_settled + وثيقة ecom_worker_settlements + مصروف «عمولات العمال» بكود CH + خصم من الصندوق المختار + قيد يومية worker_settlement).
+- `services/application/ecom_order_service.py` — عند الانتقال إلى confirmed يُسجَّل `executor` (أول مؤكِّد: id/name/type/at) إن لم يوجد — يغطي المدير والعامل وأي مسار تأكيد.
+- **إصلاح أمني (ثغرة تصعيد صلاحيات):** `utils/auth.py` + `main.py` — المسار البديل في get_current_user كان يمنح أي رمز بـ tenant_id صحيح وsub مجهول صلاحيات مدير المستأجر كاملة؛ الآن مقيد بـ sub==tenant_id (الرموز القديمة المقصودة فقط). بدونه كان رمز العامل يفتح كل مسارات الإدارة.
+- فهارس: ecom_worker_index.phone (فريد منصّة)، ecom_workers.id، ecom_worker_settlements.id، ecom_orders(executor.id+status).
+
+**Frontend:**
+- `pages/ecom/EcomWorkersPage.js` (تبويب «العمال» الجديد في مركز التجارة): قائمة العمال بإحصاءاتهم (مؤكَّدة/مشحونة/مُسلَّمة/عمولة مستحقة)، إضافة/تعديل/إيقاف/حذف، حوار العمولات (جدول الطلبات غير المصفّاة بثابت+نسبة كلٍّ على حدة + إجمالي + اختيار الصندوق + زر «تصفية ودفع» + سجل التصفيات).
+- `pages/worker/WorkerLoginPage.js` (/worker/login عامة) + `pages/worker/WorkerWorkspacePage.js` (/worker): مساحة جوال أولاً — رأس باسم العامل وإحصاءاته وعمولته، طابور التأكيد/طلباتي، بطاقات طلبات بزر اتصال tel: والنتائج الخمس، تأكيد بلمسة.
+- `EcomHubTabs.js` +تبويب العمال؛ `App.js` +3 مسارات (workers داخل shell adminOnly + /worker/login + /worker عامّان)؛ `EcomHubPage.js` +عمود «المنفّذ» (👷 عامل / 👤 مستخدم) في جدول الطلبات؛ `UnifiedLoginPage.js` +رابط «دخول عمال المتجر».
+
+**الاختبارات (NT-0001):** API كاملة: إنشاء عامل (هاتف فريد منصّة)، دخول PIN صحيح/خاطئ، رفض رمز العامل في /ecom/orders و/expenses و/ecom-workers (401/403) بعد الإصلاح الأمني، رمز المدير يعمل (لا رجعة)، تأكيد عبر اتصال → executor=العامل، سلسلة packed→shipped→delivered، عمولة 220 = 100 ثابت + 5%×2400 (مطابقة يدوية)، تصفية → مصروف CH00003/26 + قيد + خصم cash، إعادة: 0 مستحق + تسوية واحدة. E2E كاملة: صفحة العمال، دخول العامل /worker/login→/worker، الطلب في الطابور، تأكيد من الجوال → ينتقل لـ«طلباتي» + إحصاءة مؤكَّدة=1، عمود المنفّذ «👷 كريم» في لوحة التحكم، حوار العمولات 600 = 50 + 10%×5500، «تصفية ودفع» من الواجهة → 0، رابط الدخول في /portal. **بقايا = 0** (طلبات + مبيعات مرآة + ماليات + إشعارات + زبائن + قيود + مصروف + تسوية + عامل + فهرس + استعادة cash −840 وecom_store 0).
+
+**النشر:** release 20260824_205108، main.d9a0a7e6.js.
+

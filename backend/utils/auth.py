@@ -78,7 +78,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 return user
             # Fallback: user_id might equal tenant_id (legacy tokens) -> build user from saas_tenants
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
-            if tenant:
+            # p293 security: هذا المسار البديل لرموز قديمة sub==tenant_id فقط —
+            # أي رمز بـ sub آخر غير معروف كان يتحول لمدير المستأجر (ثغرة تصعيد صلاحيات)
+            if tenant and user_id == tenant_id:
                 set_tenant_context(tenant_db)
                 return {
                     "id": tenant["id"],

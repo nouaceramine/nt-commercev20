@@ -592,6 +592,12 @@ export default function EcomHubPage() {
                       </div>
                     )}
                   </>); } },
+                  // p293: order executor - first confirmer (worker or user)
+                  { header: 'المنفّذ', render: (o) => o.executor?.name ? (
+                    <Badge variant="outline" className="text-xs gap-1" data-testid={`executor-${o.id}`}>
+                      {o.executor.type === 'worker' ? '👷' : '👤'} {o.executor.name}
+                    </Badge>
+                  ) : <span className="text-xs text-muted-foreground">—</span> },
                   // p289: حالة الشحن لدى الناقل — تُحدَّث تلقائياً عبر Webhooks/المزامنة
                   { header: 'الشحن', render: (o) => {
                     const cour = o.fulfillment?.courier || o.courier;
