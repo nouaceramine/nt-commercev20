@@ -8,7 +8,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Badge } from '../../components/ui/badge';
-import { Truck, Search, Settings, CheckCircle, AlertCircle } from 'lucide-react';
+import { Truck, Search, Settings, CheckCircle, AlertCircle, Zap, Copy } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
@@ -338,6 +338,42 @@ export default function EcomShippingTab() {
   const [courierForm, setCourierForm] = useState({ credentials: {}, return_fee: '', is_active: true });
   const [savingCourier, setSavingCourier] = useState(false);
 
+  // p284: instant webhook (courier -> system) info dialog
+  const [webhookDlg, setWebhookDlg] = useState(null);   // channel being shown
+  const [webhookInfo, setWebhookInfo] = useState(null); // fetched info payload
+  const [webhookBusy, setWebhookBusy] = useState(false);
+
+  const openWebhook = async (ch) => {
+    setWebhookDlg(ch);
+    setWebhookInfo(null);
+    setWebhookBusy(true);
+    try {
+      const r = await apiClient.get(`/ecom/shipping/webhook-info/${ch}`);
+      setWebhookInfo(r.data);
+    } catch (e) {
+      toast.error(ar ? 'فشل جلب معلومات الإشعار اللحظي' : 'Erreur webhook');
+      setWebhookDlg(null);
+    } finally { setWebhookBusy(false); }
+  };
+
+  const rotateWebhook = async () => {
+    if (!webhookDlg) return;
+    if (!window.confirm(ar ? 'توليد رابط جديد؟ الرابط القديم سيتوقف فوراً.' : 'Régénérer le lien ?')) return;
+    setWebhookBusy(true);
+    try {
+      const r = await apiClient.post(`/ecom/shipping/webhook-rotate/${webhookDlg}`);
+      setWebhookInfo(prev => ({ ...prev, webhook_url: r.data.webhook_url }));
+      toast.success(ar ? 'وُلّد رابط جديد — حدّثه في لوحة شركة الشحن' : 'Nouveau lien genere');
+    } catch (e) {
+      toast.error(ar ? 'فشل توليد الرابط' : 'Echec');
+    } finally { setWebhookBusy(false); }
+  };
+
+  const copyWebhook = (url) => {
+    navigator.clipboard?.writeText(url);
+    toast.success(ar ? 'نُسخ الرابط' : 'Copie');
+  };
+
   const fetchCouriers = async () => {
     try {
       const r = await apiClient.get('/ecom/integrations');
@@ -546,6 +582,9 @@ export default function EcomShippingTab() {
                         {ex.is_active ? (ar ? 'مُفعَّل' : 'Actif') : (ar ? 'مُوقَف' : 'Inactif')}
                       </Badge>
                     )}
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => openWebhook(ch)} data-testid={`courier-webhook-${ch}`} title={ar ? 'الإشعارات اللحظية (Webhook)' : 'Webhook'}>
+                      <Zap className="h-4 w-4" />{ar ? 'لحظي' : 'Webhook'}
+                    </Button>
                     <Button size="sm" variant="outline" className="gap-1" onClick={() => openCourier(ch)} data-testid={`courier-settings-${ch}`}>
                       <Settings className="h-4 w-4" />{ar ? 'الإعدادات' : 'Paramètres'}
                     </Button>
@@ -705,6 +744,55 @@ export default function EcomShippingTab() {
 
         <CourierSyncCard ar={ar} />
       </div>
+
+      {/* p284: instant webhook dialog */}
+      <Dialog open={!!webhookDlg} onOpenChange={(v) => { if (!v) { setWebhookDlg(null); setWebhookInfo(null); } }}>
+        <DialogContent className="max-w-md" dir={ar ? 'rtl' : 'ltr'} data-testid="webhook-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-primary" />
+              {webhookDlg ? (ar ? `الإشعارات اللحظية — ${COURIER_SCHEMA[webhookDlg]?.ar || webhookDlg}` : `Webhook — ${webhookDlg}`) : ''}
+            </DialogTitle>
+          </DialogHeader>
+          {webhookBusy && !webhookInfo && <p className="text-sm text-muted-foreground py-4 text-center">{ar ? 'جارٍ التحميل...' : '...'}</p>}
+          {webhookInfo && !webhookInfo.supported && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900" data-testid="webhook-unsupported">
+              {webhookInfo.note}
+            </div>
+          )}
+          {webhookInfo && webhookInfo.supported && (
+            <div className="space-y-3" data-testid="webhook-supported">
+              <p className="text-sm text-muted-foreground">
+                {ar
+                  ? 'فعّل هذا الرابط في لوحة شركة الشحن لتصلك تحديثات حالة الطرود لحظياً (تسليم/إرجاع) بدل انتظار المزامنة الدورية:'
+                  : 'Collez ce lien dans le portail du transporteur pour des mises a jour instantanees :'}
+              </p>
+              <div className="flex items-center gap-2">
+                <Input readOnly dir="ltr" value={webhookInfo.webhook_url} className="text-xs font-mono" data-testid="webhook-url-input" onFocus={(e) => e.target.select()} />
+                <Button size="icon" variant="outline" onClick={() => copyWebhook(webhookInfo.webhook_url)} data-testid="webhook-copy-btn">
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 text-sm text-sky-900" data-testid="webhook-instructions">
+                {webhookInfo.instructions}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {ar ? `الأحداث المستلمة حتى الآن: ${webhookInfo.events_received || 0}` : `Evenements: ${webhookInfo.events_received || 0}`}
+                {webhookInfo.last_event_at ? (ar ? ` — آخر حدث: ${new Date(webhookInfo.last_event_at).toLocaleString('ar-DZ')}` : '') : ''}
+              </p>
+              <p className="text-xs text-amber-700">{webhookInfo.security_note}</p>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            {webhookInfo?.supported && (
+              <Button variant="outline" onClick={rotateWebhook} disabled={webhookBusy} data-testid="webhook-rotate-btn">
+                {ar ? 'توليد رابط جديد' : 'Regenerer'}
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => { setWebhookDlg(null); setWebhookInfo(null); }}>{ar ? 'إغلاق' : 'Fermer'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* p94: courier settings dialog */}
       <Dialog open={!!courierDlg} onOpenChange={(v) => { if (!v) setCourierDlg(null); }}>

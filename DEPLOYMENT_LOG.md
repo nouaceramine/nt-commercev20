@@ -4623,3 +4623,20 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 4. Sanity: TEST-P283 sale created via API then deleted on NT-0001 — path intact, residue 0.
 
 **Result:** sales.code now has the same unique safety net as all other entity codes; the atomic counter engine (p257) + unique index (p283) = duplicates impossible. Future TEST-P2xx cleanup checklists must include mirrored sales docs for marketplace/ecom order tests.
+
+## p284 — Instant Shipping Webhooks (real-time parcel status) (2026-08-24)
+
+**Owner request:** instant parcel-status updates via webhooks, applied to all couriers in the system (instead of / in addition to the 2-hour polling).
+
+**Research:** Yalidine/Guepex (Gérer les Webhooks, CRC challenge), ZR Express (Procolis webhooks), Maystro (Paramètres→Webhooks, double-base64 JSON payloads), Ecotrack → documented webhook support. Noest and the rest → no public webhook API; the p80/p248 polling (2h) remains their update path.
+
+**Backend** (`routes/ecom/shipping_webhook_routes.py`, new; registered in `_AUTO_REG_MODULES`):
+- `POST /api/ecom/shipping/webhook/{channel}/{webhook_token}` — public receiver; tenant resolved via main_db.shipping_webhook_tokens lookup (unguessable 48-hex token = authentication; unknown token → 404). Per-courier normalisers: Yalidine CRC challenge acknowledged; Maystro double-base64 (wrapped {"data": ...} and bare-string bodies) decoded; generic deep key search (tracking/status aliases, nested payloads). Flow: order by tracking_number → map status (map_yalidine_status for yalidine/guepex, map_generic_status + integration status_map for others) → change_order_status real state machine (COD collect, profit, stock restore, ecom_order.* realtime events) → notify + shipping_activity_log. Idempotent (already-in-target no-op); transit states recorded on order.courier_last_status without state change.
+- `GET /api/ecom/shipping/webhook-info/{channel}` (require_tenant): lazily creates token, returns URL + per-courier Arabic instructions + events count; unsupported channels return supported:false with a polling-fallback note.
+- `POST /api/ecom/shipping/webhook-rotate/{channel}`: revoke + regenerate token.
+
+**Frontend** (`EcomShippingTab.js`): «لحظي» button per courier row → dialog (webhook-dialog) with URL + copy (webhook-url-input/webhook-copy-btn), per-courier instructions (webhook-instructions), events counter, rotate button (webhook-rotate-btn); unsupported couriers show the amber fallback note (webhook-unsupported).
+
+**Tests (NT-0001, TEST-P284):** yalidine webhook {Livrée} → shipped order auto-delivered ✓; repeat → idempotent ✓; CRC challenge → acknowledged ✓; wrong token → 404 ✓; Maystro double-base64 wrapped + bare-string bodies → refunded/delivered ✓ (fixed initial decoder bug); transit status recorded without state change ✓; notification posted ✓; public HTTPS route reachable end-to-end ✓; UI E2E (dialog/url/instructions/rotate/unsupported note, zero overflow, zero JS errors) ✓. Residue 0 (orders/customers/sales/logs/notifications/outbox all cleaned).
+
+**Deploy:** release 20260824_132239. Real tenant untouched.
