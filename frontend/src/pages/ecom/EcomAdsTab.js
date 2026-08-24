@@ -30,6 +30,8 @@ export default function EcomAdsTab() {
   const [usdWallet, setUsdWallet] = useState(null);     // p112
   const [adSpends, setAdSpends] = useState([]);
   const [adBusy, setAdBusy] = useState(false);
+  const [adProduct, setAdProduct] = useState('');          // p290: ربط الصرف بمنتج (اختياري)
+  const [productOpts, setProductOpts] = useState([]);      // p290
 
   const loadAdSpends = () => {
     apiClient.get('/expenses', { params: { category: 'إعلانات ممولة' } })
@@ -45,6 +47,11 @@ export default function EcomAdsTab() {
       .catch(() => {});
   };
   useEffect(() => { loadAdSpends(); loadUsdWallet(); }, []);
+  useEffect(() => {  // p290: قائمة المنتجات لربط الصرف الإعلاني
+    apiClient.get('/products', { params: { limit: 500 } })
+      .then(r => setProductOpts((Array.isArray(r.data) ? r.data : r.data?.items || []).map(p => ({ id: p.id, name: p.name }))))
+      .catch(() => {});
+  }, []);
 
   const saveAdSpend = async () => {
     const amount = parseFloat(adAmount) || 0;
@@ -60,6 +67,10 @@ export default function EcomAdsTab() {
         date: adDate,
       };
       if (adCurrency === 'USD') { payload.currency = 'USD'; payload.exchange_rate = parseFloat(adRate); }  // p112
+      if (adProduct) {  // p290: نسبة مباشرة للمنتج في تقرير الربحية
+        payload.product_id = adProduct;
+        payload.product_name = (productOpts.find(p => p.id === adProduct) || {}).name || '';
+      }
       await apiClient.post('/expenses', payload);
       toast.success(ar ? (adCurrency === 'USD' ? 'سُجّل الصرف بالدولار بسعره الحقيقي' : 'سُجّل الصرف الإعلاني وخُصم من الصندوق') : 'Dépense publicitaire enregistrée');
       setAdAmount('');
@@ -100,6 +111,12 @@ export default function EcomAdsTab() {
                 <div><Label>{ar ? 'المنصة' : 'Plateforme'}</Label>
                   <select className="w-full border rounded-md h-9 px-2 mt-1 bg-background" value={adPlatform} onChange={e => setAdPlatform(e.target.value)} data-testid="ad-platform-select">
                     <option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="google">Google</option><option value="other">{ar ? 'أخرى' : 'Autre'}</option>
+                  </select>
+                </div>
+                <div className="col-span-2"><Label>{ar ? 'المنتج المُعلَن عنه (اختياري — لنسبة الربحية)' : 'Produit (optionnel)'}</Label>
+                  <select className="w-full border rounded-md h-9 px-2 mt-1 bg-background" value={adProduct} onChange={e => setAdProduct(e.target.value)} data-testid="ad-product-select">
+                    <option value="">{ar ? '— بدون منتج محدد (يُوزَّع نسبياً) —' : '— Tous les produits —'}</option>
+                    {productOpts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
                 <div><Label>{adCurrency === 'USD' ? (ar ? 'المبلغ ($)' : 'Montant ($)') : (ar ? 'المبلغ (دج)' : 'Montant (DA)')}</Label><Input type="number" min="0" value={adAmount} onChange={e => setAdAmount(e.target.value)} className="mt-1" data-testid="ad-amount-input" /></div>

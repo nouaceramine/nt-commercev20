@@ -463,26 +463,43 @@ async def campaign_roas(days: int = Query(90, ge=1, le=365), user: dict = Depend
 
 @router.get("/ecom/analytics/product-pnl")
 async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
-    """p105: ربح وخسارة حقيقي لكل منتج — الإيراد من المُسلَّم فقط، ناقص تكلفة الشراء
-    والشحن وكلفة الإرجاع وحصة الإنفاق الإعلاني (توزيع نسبي حسب الإيراد)."""
+    """p105+p290: ربح وخسارة حقيقي لكل منتج — الإيراد من المُسلَّم فقط، ناقص تكلفة الشراء
+    والتغليف والشحن وكلفة الإرجاع (رسوم الإرجاع لدى الناقل + تغليف المرتجع) والإعلانات.
+
+    p290: الإنفاق الإعلاني المربوط بمنتج (expense.product_id) يُنسب مباشرة لذلك المنتج،
+    وغير المربوط يُوزَّع نسبياً حسب الإيراد. يُرجع أيضاً عدد المُسلَّم/المُرجَع
+    وقوائم المنتجات الرابحة/الخاسرة للمقارنة."""
     await require_ecom_feature(user)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     orders = await db.ecom_orders.find(
         {"created_at": {"$gte": since}},
-        {"_id": 0, "status": 1, "total": 1, "shipping_fee": 1, "items": 1},
+        {"_id": 0, "status": 1, "total": 1, "shipping_fee": 1, "packaging_cost": 1,
+         "items": 1, "courier": 1},
     ).to_list(20000)
 
     prod_cost = {}
     async for p in db.products.find({}, {"_id": 0, "id": 1, "purchase_price": 1}):
         prod_cost[p.get("id")] = float(p.get("purchase_price") or 0)
 
+    # p290: رسوم الإرجاع لكل ناقل من إعدادات تكامله
+    courier_return_fee: dict = {}
+    async for integ in db.ecom_integrations.find({}, {"_id": 0, "channel": 1, "return_fee": 1}):
+        ch = (integ.get("channel") or "").strip().lower()
+        if ch:
+            try:
+                courier_return_fee[ch] = max(0.0, float(integ.get("return_fee") or 0))
+            except (TypeError, ValueError):
+                courier_return_fee[ch] = 0.0
+
     rows: dict = {}
 
     def _row(key: str, name: str) -> dict:
         return rows.setdefault(key, {
+            "product_id": key if key in prod_cost else None,
             "product": name, "orders": 0, "delivered": 0, "returned": 0,
-            "revenue": 0.0, "cogs": 0.0, "shipping": 0.0, "return_cost": 0.0,
+            "revenue": 0.0, "cogs": 0.0, "shipping": 0.0, "packaging": 0.0,
+            "return_cost": 0.0, "ad_direct": 0.0,
         })
 
     def _item_total(i: dict) -> float:
@@ -499,6 +516,8 @@ async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(
         if not items:
             continue
         ship_fee = float(o.get("shipping_fee") or 0)
+        pack_fee = float(o.get("packaging_cost") or 0)  # p290
+        ret_fee = courier_return_fee.get((o.get("courier") or "").strip().lower(), 0.0)  # p290
         items_total = sum(_item_total(i) for i in items) or float(o.get("total") or 0) or 1.0
         for i in items:
             key = i.get("product_id") or i.get("name") or "؟"
@@ -510,40 +529,159 @@ async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(
                 r["revenue"] += _item_total(i)
                 r["cogs"] += prod_cost.get(i.get("product_id") or "", 0.0) * float(i.get("qty") or 1)
                 r["shipping"] += ship_fee * share
+                r["packaging"] += pack_fee * share  # p290: تغليف المُسلَّم كلفة
             else:
                 r["returned"] += 1
-                r["return_cost"] += ship_fee * share
+                r["return_cost"] += ship_fee * share + ret_fee * share + pack_fee * share  # p290: خسارة الإرجاع كاملة
 
     expenses = await db.expenses.find(
         {"created_at": {"$gte": since}},
-        {"_id": 0, "category": 1, "title": 1, "amount": 1},
+        {"_id": 0, "category": 1, "title": 1, "amount": 1, "product_id": 1},
     ).to_list(5000)
     ad_spend = 0.0
+    ad_attributed = 0.0  # p290: مربوط بمنتج مباشرة
     for e in expenses:
         blob = f"{e.get('category') or ''} {e.get('title') or ''}".lower()
-        if any(k in blob for k in AD_CATEGORY_KEYS):
-            ad_spend += float(e.get("amount") or 0)
+        if not any(k in blob for k in AD_CATEGORY_KEYS):
+            continue
+        amt = float(e.get("amount") or 0)
+        ad_spend += amt
+        pid = e.get("product_id")  # p290: نسبة مباشرة من تبويب الإعلانات
+        if pid and pid in rows:
+            rows[pid]["ad_direct"] += amt
+            ad_attributed += amt
+    ad_pool = ad_spend - ad_attributed  # ما لم يُربط بمنتج يُوزَّع نسبياً
 
     total_revenue = sum(r["revenue"] for r in rows.values())
     out = []
     for r in rows.values():
-        ad_alloc = round(ad_spend * (r["revenue"] / total_revenue), 2) if total_revenue > 0 else 0.0
-        net = round(r["revenue"] - r["cogs"] - r["shipping"] - r["return_cost"] - ad_alloc, 2)
+        ad_alloc = r["ad_direct"] + (ad_pool * (r["revenue"] / total_revenue) if total_revenue > 0 else 0.0)
+        ad_alloc = round(ad_alloc, 2)
+        net = round(r["revenue"] - r["cogs"] - r["shipping"] - r["packaging"] - r["return_cost"] - ad_alloc, 2)
         outcomes = r["delivered"] + r["returned"]
         out.append({
+            "product_id": r["product_id"],
             "product": r["product"],
             "orders": r["orders"], "delivered": r["delivered"], "returned": r["returned"],
             "return_rate": round(r["returned"] / outcomes * 100, 1) if outcomes else None,
             "revenue": round(r["revenue"], 2),
             "cogs": round(r["cogs"], 2),
             "shipping": round(r["shipping"], 2),
+            "packaging": round(r["packaging"], 2),
             "return_cost": round(r["return_cost"], 2),
             "ad_spend": ad_alloc,
+            "ad_direct": round(r["ad_direct"], 2),
             "net": net,
             "margin": round(net / r["revenue"] * 100, 1) if r["revenue"] > 0 else None,
         })
     out.sort(key=lambda r: r["net"], reverse=True)
-    return {"days": days, "rows": out, "ad_spend_total": round(ad_spend, 2)}
+    # p290: مقارنة الرابح/الخاسر
+    winners = [r for r in out if r["net"] > 0][:3]
+    losers = sorted([r for r in out if r["net"] < 0], key=lambda r: r["net"])[:3]
+    return {"days": days, "rows": out, "winners": winners, "losers": losers,
+            "ad_spend_total": round(ad_spend, 2), "ad_attributed": round(ad_attributed, 2)}
+
+
+# ============ p290: سجل المنتج — كل الطلبات والتكاليف على منتج واحد ============
+
+@router.get("/ecom/analytics/product-history")
+async def product_history(key: str, days: int = Query(90, ge=1, le=365),
+                          user: dict = Depends(require_tenant)):
+    """سجل منتج واحد: كل طلب ظهر فيه مع حصته من الإيراد/التكلفة/التغليف/الشحن/الإرجاع."""
+    await require_ecom_feature(user)
+    if not key:
+        raise HTTPException(status_code=400, detail="key مطلوب")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    prod_cost = 0.0
+    pdoc = await db.products.find_one({"id": key}, {"_id": 0, "purchase_price": 1, "name": 1})
+    prod_name = None
+    if pdoc:
+        prod_cost = float(pdoc.get("purchase_price") or 0)
+        prod_name = pdoc.get("name")
+
+    courier_return_fee: dict = {}
+    async for integ in db.ecom_integrations.find({}, {"_id": 0, "channel": 1, "return_fee": 1}):
+        ch = (integ.get("channel") or "").strip().lower()
+        if ch:
+            try:
+                courier_return_fee[ch] = max(0.0, float(integ.get("return_fee") or 0))
+            except (TypeError, ValueError):
+                courier_return_fee[ch] = 0.0
+
+    orders = await db.ecom_orders.find(
+        {"created_at": {"$gte": since},
+         "items": {"$elemMatch": {"$or": [{"product_id": key}, {"name": key}]}}},
+        {"_id": 0, "id": 1, "order_code": 1, "status": 1, "created_at": 1, "total": 1,
+         "shipping_fee": 1, "packaging_cost": 1, "courier": 1, "items": 1,
+         "customer.name": 1, "tracking_number": 1},
+    ).sort("created_at", -1).to_list(5000)
+
+    def _item_total(i: dict) -> float:
+        t = float(i.get("total") or 0)
+        if t > 0:
+            return t
+        return float(i.get("price") or 0) * float(i.get("qty") or 1)
+
+    history, totals = [], {"delivered": 0, "returned": 0, "pending": 0,
+                           "revenue": 0.0, "cogs": 0.0, "shipping": 0.0,
+                           "packaging": 0.0, "return_cost": 0.0}
+    for o in orders:
+        items = o.get("items") or []
+        match = [i for i in items if i.get("product_id") == key or i.get("name") == key]
+        if not match:
+            continue
+        items_total = sum(_item_total(i) for i in items) or float(o.get("total") or 0) or 1.0
+        ship_fee = float(o.get("shipping_fee") or 0)
+        pack_fee = float(o.get("packaging_cost") or 0)
+        ret_fee = courier_return_fee.get((o.get("courier") or "").strip().lower(), 0.0)
+        st = o.get("status")
+        for i in match:
+            qty = float(i.get("qty") or 1)
+            share = _item_total(i) / items_total if items_total else 1.0
+            row = {
+                "order_id": o.get("id"), "order_code": o.get("order_code"),
+                "date": (o.get("created_at") or "")[:10], "status": st,
+                "customer": (o.get("customer") or {}).get("name") or "",
+                "tracking_number": o.get("tracking_number"),
+                "courier": o.get("courier"),
+                "qty": qty, "item_revenue": round(_item_total(i), 2),
+                "cogs": 0.0, "shipping": 0.0, "packaging": 0.0, "return_cost": 0.0,
+            }
+            if st == "delivered":
+                row["cogs"] = round(prod_cost * qty, 2)
+                row["shipping"] = round(ship_fee * share, 2)
+                row["packaging"] = round(pack_fee * share, 2)
+                totals["delivered"] += 1
+                totals["revenue"] += row["item_revenue"]
+                totals["cogs"] += row["cogs"]
+                totals["shipping"] += row["shipping"]
+                totals["packaging"] += row["packaging"]
+            elif st in ("refunded", "returned"):
+                row["return_cost"] = round(ship_fee * share + ret_fee * share + pack_fee * share, 2)
+                totals["returned"] += 1
+                totals["return_cost"] += row["return_cost"]
+            else:
+                totals["pending"] += 1
+            history.append(row)
+            if not prod_name:
+                prod_name = i.get("name")
+
+    # إنفاق إعلاني مربوط مباشرة بهذا المنتج
+    ads = await db.expenses.find(
+        {"product_id": key, "created_at": {"$gte": since}},
+        {"_id": 0, "title": 1, "amount": 1, "date": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(500)
+    ad_rows = [{"title": a.get("title"), "amount": a.get("amount"),
+                "date": (a.get("date") or a.get("created_at") or "")[:10]} for a in ads]
+
+    return {
+        "key": key, "product": prod_name or key, "days": days,
+        "history": history[:300],
+        "totals": {k: (round(v, 2) if isinstance(v, float) else v) for k, v in totals.items()},
+        "ad_expenses": ad_rows,
+        "ad_total": round(sum(float(a.get("amount") or 0) for a in ads), 2),
+    }
 
 
 # ============ p106: التسعير الذكي المقترح ============

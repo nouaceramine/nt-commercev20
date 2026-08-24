@@ -27,6 +27,8 @@ def create_expenses_routes(db, get_current_user, get_tenant_admin, require_tenan
         code: Optional[str] = ""
         currency: str = "DZD"                      # p111: DZD or USD (ads bought at black-market rate)
         exchange_rate: Optional[float] = None      # p111: DZD paid per 1 USD
+        product_id: Optional[str] = None           # p290: ربط الصرف الإعلاني بمنتج (نسبة مباشرة في P&L)
+        product_name: Optional[str] = None         # p290
 
     class ExpenseUpdate(BaseModel):
         title: Optional[str] = None

@@ -17,6 +17,7 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { BarChart3, TrendingUp, Trophy, Activity, ArrowRight, RefreshCcw, Download } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';  // p290
 import { toast } from 'sonner';
 import { CHANNELS } from './ecomConstants';
 import { EcomCopilotChat } from './EcomCopilotChat';
@@ -39,7 +40,29 @@ export default function EcomAnalyticsPage() {
   const [wilayaRisk, setWilayaRisk] = useState([]);  // p92
   const [campaignRoas, setCampaignRoas] = useState([]);  // p102
   const [productPnl, setProductPnl] = useState([]);  // p105
+  const [pnlWinners, setPnlWinners] = useState([]);      // p290
+  const [pnlLosers, setPnlLosers] = useState([]);        // p290
+  const [pnlAdTotal, setPnlAdTotal] = useState(0);       // p290
+  const [pnlAdAttributed, setPnlAdAttributed] = useState(0);  // p290
+  const [historyFor, setHistoryFor] = useState(null);    // p290: {key, product}
+  const [historyData, setHistoryData] = useState(null);  // p290
+  const [historyBusy, setHistoryBusy] = useState(false); // p290
   const [pricing, setPricing] = useState([]);  // p106
+
+  // p290: سجل المنتج — كل الطلبات والتكاليف على منتج واحد
+  const openHistory = async (r) => {
+    const key = r.product_id || r.product;
+    setHistoryFor({ key, product: r.product });
+    setHistoryData(null);
+    setHistoryBusy(true);
+    try {
+      const res = await apiClient.get('/ecom/analytics/product-history', { params: { key, days } });
+      setHistoryData(res.data);
+    } catch {
+      toast.error('تعذّر جلب سجل المنتج');
+      setHistoryFor(null);
+    } finally { setHistoryBusy(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -60,6 +83,10 @@ export default function EcomAnalyticsPage() {
       setWilayaRisk(wr?.data?.wilayas || []);
       setCampaignRoas(ro?.data?.rows || []);
       setProductPnl(pnl?.data?.rows || []);
+      setPnlWinners(pnl?.data?.winners || []);          // p290
+      setPnlLosers(pnl?.data?.losers || []);            // p290
+      setPnlAdTotal(pnl?.data?.ad_spend_total || 0);    // p290
+      setPnlAdAttributed(pnl?.data?.ad_attributed || 0); // p290
       setPricing(pr?.data?.rows || []);
       setRevenue(rev.data);
       setFunnel(fun.data);
@@ -345,53 +372,98 @@ export default function EcomAnalyticsPage() {
             </Card>
           )}
 
-          {/* p105: true per-product P&L */}
+          {/* p105+p290: true per-product P&L — مُسلَّم/مُرجَع + تغليف + إعلان مباشر + رابح/خاسر + سجل المنتج */}
           {productPnl.length > 0 && (
             <Card data-testid="product-pnl-card">
               <CardHeader>
-                <CardTitle>💰 الربح الحقيقي لكل منتج — بعد التكلفة والشحن والإرجاع والإعلان</CardTitle>
+                <CardTitle>💰 الربح الحقيقي لكل منتج — بعد التكلفة والتغليف والشحن والإرجاع والإعلان</CardTitle>
               </CardHeader>
               <CardContent>
+                {/* p290: مقارنة الرابح/الخاسر */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 dark:bg-emerald-900/10 p-3" data-testid="pnl-winners-card">
+                    <div className="font-semibold text-emerald-800 dark:text-emerald-300 mb-2">🏆 المنتجات الرابحة</div>
+                    {pnlWinners.length === 0 ? <div className="text-xs text-muted-foreground">لا منتجات رابحة في الفترة</div> : (
+                      <div className="space-y-1">
+                        {pnlWinners.map((w, i) => (
+                          <div key={i} className="flex items-center justify-between text-sm" data-testid={`pnl-winner-${i}`}>
+                            <span className="truncate">{i + 1}. {w.product}</span>
+                            <span className="font-bold text-emerald-700 whitespace-nowrap">+{Number(w.net).toLocaleString()} دج</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-red-200 bg-red-50/40 dark:bg-red-900/10 p-3" data-testid="pnl-losers-card">
+                    <div className="font-semibold text-red-800 dark:text-red-300 mb-2">📉 المنتجات الخاسرة</div>
+                    {pnlLosers.length === 0 ? <div className="text-xs text-muted-foreground">لا منتجات خاسرة في الفترة 🎉</div> : (
+                      <div className="space-y-1">
+                        {pnlLosers.map((l, i) => (
+                          <div key={i} className="flex items-center justify-between text-sm" data-testid={`pnl-loser-${i}`}>
+                            <span className="truncate">{l.product}</span>
+                            <span className="font-bold text-red-700 whitespace-nowrap">{Number(l.net).toLocaleString()} دج</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {pnlAdTotal > 0 && (
+                  <p className="text-xs text-muted-foreground mb-2" data-testid="pnl-ad-note">
+                    الإعلانات: {Number(pnlAdTotal).toLocaleString()} دج إجمالاً — منها {Number(pnlAdAttributed).toLocaleString()} دج مربوطة مباشرة بمنتجات (من تبويب الإعلانات) والباقي موزَّع نسبياً حسب الإيراد.
+                  </p>
+                )}
                 <div className="rounded-lg border overflow-x-auto">
-                  <table className="w-full text-sm min-w-[640px]">
+                  <table className="w-full text-sm min-w-[900px]">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="p-2 text-right">المنتج</th>
-                        <th className="p-2 text-center">طلبات</th>
+                        <th className="p-2 text-center">مُسلَّم</th>
+                        <th className="p-2 text-center">مُرجَع</th>
                         <th className="p-2 text-center">إرجاع %</th>
                         <th className="p-2 text-center">الإيراد</th>
                         <th className="p-2 text-center">التكلفة</th>
+                        <th className="p-2 text-center">تغليف</th>
                         <th className="p-2 text-center">شحن+إرجاع</th>
                         <th className="p-2 text-center">إعلان</th>
                         <th className="p-2 text-center">صافي الربح</th>
                         <th className="p-2 text-center">الهامش</th>
+                        <th className="p-2 text-center">السجل</th>
                       </tr>
                     </thead>
                     <tbody>
                       {productPnl.map((r, idx) => (
                         <tr key={idx} className="border-t" data-testid={`pnl-row-${idx}`}>
                           <td className="p-2 font-medium">{r.product}</td>
-                          <td className="p-2 text-center">{r.orders}</td>
+                          <td className="p-2 text-center text-emerald-700" data-testid={`pnl-delivered-${idx}`}>{r.delivered}</td>
+                          <td className={`p-2 text-center ${r.returned > 0 ? 'text-red-700' : ''}`} data-testid={`pnl-returned-${idx}`}>{r.returned}</td>
                           <td className={`p-2 text-center ${r.return_rate >= 30 ? 'text-red-700 font-semibold' : ''}`}>{r.return_rate != null ? `${r.return_rate}%` : '—'}</td>
                           <td className="p-2 text-center">{Number(r.revenue).toLocaleString()}</td>
                           <td className="p-2 text-center text-muted-foreground">{Number(r.cogs).toLocaleString()}</td>
+                          <td className="p-2 text-center text-muted-foreground">{r.packaging > 0 ? Number(r.packaging).toLocaleString() : '—'}</td>
                           <td className="p-2 text-center text-muted-foreground">{Number(r.shipping + r.return_cost).toLocaleString()}</td>
-                          <td className="p-2 text-center text-muted-foreground">{r.ad_spend > 0 ? Number(r.ad_spend).toLocaleString() : '—'}</td>
+                          <td className="p-2 text-center text-muted-foreground" title={r.ad_direct > 0 ? `منها ${Number(r.ad_direct).toLocaleString()} دج مربوطة مباشرة` : ''}>{r.ad_spend > 0 ? Number(r.ad_spend).toLocaleString() : '—'}</td>
                           <td className={`p-2 text-center font-bold ${r.net < 0 ? 'text-red-700' : 'text-emerald-700'}`} data-testid={`pnl-net-${idx}`}>{Number(r.net).toLocaleString()} دج</td>
                           <td className={`p-2 text-center ${r.margin != null && r.margin < 10 ? 'text-red-700' : ''}`}>{r.margin != null ? `${r.margin}%` : '—'}</td>
+                          <td className="p-2 text-center">
+                            <Button size="sm" variant="ghost" data-testid={`pnl-history-${idx}`}
+                              onClick={() => openHistory(r)}>
+                              السجل
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  الإيراد من الطلبات المُسلَّمة فعلاً فقط. التكلفة = سعر شراء المنتج × الكمية. الإنفاق الإعلاني يُوزَّع على المنتجات بنسبة إيراد كل منتج. المنتج بالهامش السالب يأكل أرباح الباقين — أوقف إعلانه أو ارفع سعره.
+                  الإيراد من الطلبات المُسلَّمة فعلاً فقط. التكلفة = سعر شراء المنتج × الكمية. التغليف ورسوم الإرجاع لدى الناقل تُحسب بحصة المنتج من الطلب. الإعلان المربوط بمنتج من تبويب الإعلانات يُنسب له مباشرة وغير المربوط يُوزَّع نسبياً. المنتج بالهامش السالب يأكل أرباح الباقين — أوقف إعلانه أو ارفع سعره.
                 </p>
               </CardContent>
             </Card>
           )}
 
-          {/* p106: smart pricing suggestions */}
+{/* p106: smart pricing suggestions */}
           {pricing.length > 0 && (
             <Card data-testid="pricing-card">
               <CardHeader>
@@ -588,6 +660,77 @@ export default function EcomAnalyticsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* p290: سجل المنتج — الطلبات والتكاليف والإعلانات على منتج واحد */}
+      <Dialog open={!!historyFor} onOpenChange={(v) => !v && setHistoryFor(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto" dir="rtl" data-testid="pnl-history-dialog">
+          <DialogHeader>
+            <DialogTitle>📜 سجل المنتج — {historyFor?.product}</DialogTitle>
+          </DialogHeader>
+          {historyBusy && <div className="text-sm text-muted-foreground py-6 text-center">جارٍ التحميل…</div>}
+          {historyData && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
+                <div className="border rounded-md p-2" data-testid="hist-t-delivered"><div className="text-[10px] text-muted-foreground">مُسلَّم</div><div className="font-bold text-emerald-700">{historyData.totals.delivered}</div></div>
+                <div className="border rounded-md p-2" data-testid="hist-t-returned"><div className="text-[10px] text-muted-foreground">مُرجَع</div><div className="font-bold text-red-700">{historyData.totals.returned}</div></div>
+                <div className="border rounded-md p-2"><div className="text-[10px] text-muted-foreground">الإيراد</div><div className="font-bold">{Number(historyData.totals.revenue).toLocaleString()}</div></div>
+                <div className="border rounded-md p-2"><div className="text-[10px] text-muted-foreground">التكلفة</div><div className="font-bold text-muted-foreground">{Number(historyData.totals.cogs).toLocaleString()}</div></div>
+                <div className="border rounded-md p-2"><div className="text-[10px] text-muted-foreground">تغليف+شحن</div><div className="font-bold text-muted-foreground">{Number(historyData.totals.packaging + historyData.totals.shipping).toLocaleString()}</div></div>
+                <div className="border rounded-md p-2"><div className="text-[10px] text-muted-foreground">خسائر إرجاع</div><div className="font-bold text-red-700">{Number(historyData.totals.return_cost).toLocaleString()}</div></div>
+              </div>
+              {historyData.ad_total > 0 && (
+                <div className="border rounded-md p-2 text-sm" data-testid="hist-ads">
+                  📢 إعلانات مربوطة بهذا المنتج: <b>{Number(historyData.ad_total).toLocaleString()} دج</b>
+                  <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                    {historyData.ad_expenses.slice(0, 8).map((a2, i) => (
+                      <div key={i} className="flex justify-between"><span>{a2.date} — {a2.title}</span><span>{Number(a2.amount).toLocaleString()} دج</span></div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="rounded-lg border overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead className="bg-muted/50 text-xs">
+                    <tr>
+                      <th className="p-2 text-right">الطلب</th>
+                      <th className="p-2 text-center">التاريخ</th>
+                      <th className="p-2 text-center">الحالة</th>
+                      <th className="p-2 text-center">الزبون</th>
+                      <th className="p-2 text-center">كمية</th>
+                      <th className="p-2 text-center">إيراد</th>
+                      <th className="p-2 text-center">تكلفة</th>
+                      <th className="p-2 text-center">تغليف+شحن</th>
+                      <th className="p-2 text-center">خسارة إرجاع</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyData.history.map((h, i) => (
+                      <tr key={i} className="border-t" data-testid={`hist-row-${i}`}>
+                        <td className="p-2 font-mono text-xs">{h.order_code}</td>
+                        <td className="p-2 text-center text-xs">{h.date}</td>
+                        <td className="p-2 text-center">
+                          <Badge className={h.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' : (h.status === 'refunded' || h.status === 'returned') ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}>
+                            {h.status === 'delivered' ? 'مُسلَّم' : (h.status === 'refunded' || h.status === 'returned') ? 'مُرجَع' : 'قيد المعالجة'}
+                          </Badge>
+                        </td>
+                        <td className="p-2 text-center text-xs">{h.customer || '—'}</td>
+                        <td className="p-2 text-center">{h.qty}</td>
+                        <td className="p-2 text-center">{h.status === 'delivered' ? Number(h.item_revenue).toLocaleString() : '—'}</td>
+                        <td className="p-2 text-center text-muted-foreground">{h.cogs > 0 ? Number(h.cogs).toLocaleString() : '—'}</td>
+                        <td className="p-2 text-center text-muted-foreground">{(h.shipping + h.packaging) > 0 ? Number(h.shipping + h.packaging).toLocaleString() : '—'}</td>
+                        <td className="p-2 text-center text-red-700">{h.return_cost > 0 ? Number(h.return_cost).toLocaleString() : '—'}</td>
+                      </tr>
+                    ))}
+                    {historyData.history.length === 0 && (
+                      <tr><td colSpan={9} className="p-4 text-center text-muted-foreground text-sm">لا طلبات لهذا المنتج في الفترة</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
