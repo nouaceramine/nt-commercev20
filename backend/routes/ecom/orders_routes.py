@@ -424,6 +424,14 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
 
     await db.ecom_orders.insert_one(doc)
 
+    # p280: realtime event — other open sessions refresh instantly
+    try:
+        from services.outbox import outbox_write as _obw
+        from config.database import main_db as _mdb
+        await _obw(_mdb, "ecom_order.created", {"order_id": doc.get("id"), "order_code": doc.get("order_code", ""), "channel": doc.get("channel", ""), "total": doc.get("total", 0)}, tenant_id=user.get("tenant_id") or "", source="ecom.manual")
+    except Exception:
+        pass
+
     # p170: tag/create customer category (زبون التجارة الإلكترونية)
     try:
         from services.customer_sources import tag_customer_source, SOURCE_ECOM

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../lib/apiClient';
+import { startRealtime, onEvent } from '../../lib/realtime';
 import { Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -110,6 +111,16 @@ export default function EcomHubPage() {
   }, [activeStatus, channelFilter, search]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // p280: realtime — new/updated ecom orders refresh the hub instantly
+  useEffect(() => {
+    startRealtime();
+    const un1 = onEvent('ecom_order.created', loadAll);
+    const un2 = onEvent('ecom_order.cancelled', loadAll);
+    const un3 = onEvent('ecom_order.confirmed', loadAll);
+    const un4 = onEvent('ecom_order.delivered', loadAll);
+    return () => { un1(); un2(); un3(); un4(); };
+  }, [loadAll]);
 
   // p162d: silent auto-refresh every 20s — new store orders appear without manual reload
   const silentRefresh = useCallback(async () => {

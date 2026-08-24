@@ -238,6 +238,13 @@ def create_social_inbox_routes() -> dict:
         except Exception:  # noqa: BLE001
             pass
         await db.ecom_orders.insert_one(doc)
+        # p280: realtime event — other open sessions refresh instantly
+        try:
+            from services.outbox import outbox_write as _obw
+            from config.database import main_db as _mdb
+            await _obw(_mdb, "ecom_order.created", {"order_id": doc.get("id"), "order_code": doc.get("order_code", ""), "channel": doc.get("channel", ""), "total": doc.get("total", 0)}, tenant_id=user.get("tenant_id") or "", source="ecom.social_convert")
+        except Exception:
+            pass
         try:
             await sync_sale_doc(db, doc)
         except Exception:  # noqa: BLE001

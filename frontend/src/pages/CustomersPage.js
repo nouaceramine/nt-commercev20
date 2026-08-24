@@ -2,6 +2,7 @@ import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import EntityActivityTimeline from '../components/EntityActivityTimeline';  // p218
 import apiClient from '../lib/apiClient';
+import { startRealtime, onEvent } from '../lib/realtime';
 import { useLanguage } from '../contexts/LanguageContext';
 import PrintButton from '../components/print/PrintButton';
 import { Layout } from '../components/Layout';
@@ -327,6 +328,16 @@ export default function CustomersPage() {
     fetchBlacklist();
     fetchCustomerFamilies();
   }, [searchQuery, currentPage, itemsPerPage, sourceFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // p280: realtime — refresh instantly when any session changes data
+  useEffect(() => {
+    startRealtime();
+    const un1 = onEvent('customer.payment_received', fetchCustomers);
+    const un2 = onEvent('sale.completed', fetchCustomers);
+    const un3 = onEvent('sale.refunded', fetchCustomers);
+    const un4 = onEvent('sale.deleted', fetchCustomers);
+    return () => {{ un1(); un2(); un3(); un4(); }};
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (e, createNew = false) => {
     e?.preventDefault();

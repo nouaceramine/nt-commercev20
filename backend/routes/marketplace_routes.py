@@ -242,6 +242,13 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
                 order_doc["referral_reward_value"] = float(ref.get("reward_value") or 0)
 
             await tdb.ecom_orders.insert_one(order_doc)
+            # p280: realtime event — other open sessions refresh instantly
+            try:
+                from services.outbox import outbox_write as _obw
+                from config.database import main_db as _mdb
+                await _obw(_mdb, "ecom_order.created", {"order_id": order_doc.get("id"), "order_code": order_doc.get("order_code", ""), "channel": order_doc.get("channel", ""), "total": order_doc.get("total", 0)}, tenant_id=tenant_id, source="ecom.marketplace")
+            except Exception:
+                pass
 
             await main_db.marketplace_orders.insert_one({
                 "id": str(uuid.uuid4()),

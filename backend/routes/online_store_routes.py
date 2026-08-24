@@ -965,6 +965,13 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 logger.warning(f"p100 webstore reputation hook failed: {_ne}")
                 if not await tenant_db_inst.ecom_orders.find_one({"id": ecom_doc["id"]}):
                     await tenant_db_inst.ecom_orders.insert_one(ecom_doc)
+            # p280: realtime event — other open sessions refresh instantly
+            try:
+                from services.outbox import outbox_write as _obw
+                from config.database import main_db as _mdb
+                await _obw(_mdb, "ecom_order.created", {"order_id": ecom_doc.get("id"), "order_code": ecom_doc.get("order_code", ""), "channel": ecom_doc.get("channel", ""), "total": ecom_doc.get("total", 0)}, tenant_id=tenant_id or "", source="ecom.webstore")
+            except Exception:
+                pass
             try:  # p87: mirror into the POS sales ledger
                 from services.application.ecom_order_service import sync_sale_doc
                 await sync_sale_doc(tenant_db_inst, ecom_doc)

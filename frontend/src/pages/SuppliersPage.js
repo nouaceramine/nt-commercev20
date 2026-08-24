@@ -1,6 +1,7 @@
 import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
+import { startRealtime, onEvent } from '../lib/realtime';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -184,6 +185,16 @@ export default function SuppliersPage() {
     fetchSuppliers();
     fetchSupplierFamilies();
   }, [searchQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // p280: realtime — refresh instantly when any session changes data
+  useEffect(() => {
+    startRealtime();
+    const un1 = onEvent('supplier.payment_made', fetchSuppliers);
+    const un2 = onEvent('supplier.advance_paid', fetchSuppliers);
+    const un3 = onEvent('purchase.recorded', fetchSuppliers);
+    const un4 = onEvent('purchase.deleted', fetchSuppliers);
+    return () => {{ un1(); un2(); un3(); un4(); }};
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (e, createNew = false) => {
     if (e) e.preventDefault();

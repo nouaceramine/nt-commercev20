@@ -227,6 +227,15 @@ async def bulk_upload(file: UploadFile = File(...), user: dict = Depends(require
         created.append({"row": idx, "order_id": order_id, "order_code": doc["order_code"],
                         "phone": phone, "duplicate_warning": bool(doc.get("duplicate_warning"))})
 
+    # p280: single realtime event for the whole batch
+    try:
+        if created:
+            from services.outbox import outbox_write as _obw
+            from config.database import main_db as _mdb
+            await _obw(_mdb, "ecom_order.created", {"batch": True, "count": len(created)}, tenant_id=user.get("tenant_id") or "", source="ecom.bulk")
+    except Exception:
+        pass
+
     batch = {
         "id": batch_id,
         "filename": file.filename or "",

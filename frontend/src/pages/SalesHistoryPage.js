@@ -20,6 +20,7 @@ import {
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import { Pagination } from '../components/Pagination';
 import { ResponsiveTable } from '../components/ResponsiveTable';
+import { startRealtime, onEvent } from '../lib/realtime';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -87,6 +88,15 @@ export default function SalesHistoryPage() {
   useEffect(() => {
     fetchSales();
   }, [currentPage, itemsPerPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // p280: realtime — refresh instantly when any session changes data
+  useEffect(() => {
+    startRealtime();
+    const un1 = onEvent('sale.completed', fetchSales);
+    const un2 = onEvent('sale.refunded', fetchSales);
+    const un3 = onEvent('sale.deleted', fetchSales);
+    return () => {{ un1(); un2(); un3(); }};
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     apiClient.get('/customers').then(r => setCustomers(r.data || [])).catch(() => {});

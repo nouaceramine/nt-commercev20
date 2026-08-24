@@ -4556,3 +4556,19 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - 375px: خط الحقول 16px ✓؛ حوار إنشاء تذكرة: padding 16px، max-height 736px (92dvh)، overflow auto، عرض كامل بلا تمرير أفقي ✓.
 - 1440px: padding الحوار 24px وخط الحقول 14px — مطابق لما قبل ✓؛ health 200 ✓؛ release 20260824_001706 ✓.
 - **بهذا تكتمل خطة الجوال/التابلت بالكامل: أ+ب (p276) + ج (p277) + د (p278) + هـ (p279).**
+
+## p280 — توسيع التحديث اللحظي (بناءً على سؤال المالك عن تعدد المستخدمين) (2026-08-24)
+
+### التغييرات
+- حدث جديد ecom_order.created يُنشر من كل نقاط إنشاء طلبات التجارة (6 مواضع): يدوي (orders_routes)، ويب هوك وارد (webhooks_routes)، تحويل محادثة (social_inbox_routes)، طلب متجر إلكتروني (online_store_routes)، استيراد جماعي (حدث واحد لكل دفعة — bulk_import_routes)، طلب سوق (marketplace_routes). كلها fire-and-forget لا تكسر إنشاء الطلب.
+- اشتراكات لحظية جديدة عبر lib/realtime (SSE):
+  - SalesHistoryPage: sale.completed/refunded/deleted → تحديث القائمة فوراً.
+  - CustomersPage: customer.payment_received + sale.* → تحديث الديون فوراً.
+  - SuppliersPage: supplier.payment_made/advance_paid + purchase.recorded/deleted → تحديث فوري.
+  - EcomHubPage: ecom_order.created/cancelled/confirmed/delivered → تحديث صندوق الطلبات فوراً (يُكمل مؤقّت التنبيهات الموجود).
+- المغطى سابقاً (p191–p195): لوحة التحكم (7 أحداث)، المنتجات، POS.
+
+### الاختبارات
+- E2E حي: جلسة متصفح على /ecom-hub (NT-0001) + إنشاء طلب يدوي TEST-P280 عبر API → وصل ecom_order.created لحظياً بالحمولة الكاملة (order_id/ECO-NT1-6A6092CB/500) خلال ≤ ثانيتين ✓ (نفس مسار sale.completed المثبت سابقاً).
+- التنظيف: الطلب + سند البيع المرآتي (sync_sale_doc) + وسم الزبون حُذفت — بقايا 0 ✓.
+- الصفحات الأربع المعدّلة render بلا أخطاء JS (pageerror: NONE) ✓؛ health 200 ✓؛ release 20260824_003425 ✓.
