@@ -25,6 +25,7 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         closed_at: str
         notes: Optional[str] = ""
         status: str = "closed"
+        transfer_to_safe: bool = True  # p291: المبلغ الفعلي يُحوَّل تلقائياً من الصندوق إلى الخزنة
 
     class DailySessionResponse(BaseModel):
         model_config = ConfigDict(extra="ignore")
@@ -43,6 +44,7 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         status: str
         notes: str = ""
         created_by: str = ""
+        cash_transferred_to_safe: Optional[float] = None  # p291
 
     def _fix_session_fields(s, fallback_user_id="", fallback_name="") -> dict:
         if "user_id" not in s:
@@ -155,6 +157,41 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
             "debt_collections": debt_collections, "debt_payouts": debt_payouts,
         }
         await db.daily_sessions.update_one({"id": session_id}, {"$set": update_data})
+
+        # p291: عند الغلق يُحوَّل المبلغ الفعلي المعدود من الصندوق النقدي إلى الخزنة
+        # تلقائياً (حركة + قيدان في دفتر الحركات). idempotent: حقل
+        # cash_transferred_to_safe يمنع التحويل المزدوج عند إعادة الإغلاق/التعديل.
+        transferred = None
+        if closing_data.transfer_to_safe and closing_data.closing_cash > 0 \
+                and not session.get("cash_transferred_to_safe"):
+            now_iso = datetime.now(timezone.utc).isoformat()
+            amt = round(float(closing_data.closing_cash), 2)
+            # upsert آمِن للصندوقين ثم حركة متوازنة + قيدان في الدفتر
+            for box_id, box_name, box_fr, box_type in (
+                    ("cash", "الصندوق النقدي", "Caisse", "cash"),
+                    ("safe", "الخزنة", "Coffre-fort", "safe")):
+                await db.cash_boxes.update_one(
+                    {"id": box_id},
+                    {"$setOnInsert": {"name": box_name, "name_fr": box_fr,
+                                      "type": box_type, "balance": 0}},
+                    upsert=True)
+            await db.cash_boxes.update_one({"id": "cash"}, {"$inc": {"balance": -amt}, "$set": {"updated_at": now_iso}})
+            await db.cash_boxes.update_one({"id": "safe"}, {"$inc": {"balance": amt}, "$set": {"updated_at": now_iso}})
+            await db.transactions.insert_many([
+                {"id": str(uuid.uuid4()), "cash_box_id": "cash", "type": "expense",
+                 "amount": amt, "description": f"غلق الحصة — تحويل الحصيلة الفعلية إلى الخزنة",
+                 "reference_type": "session_close", "reference_id": session_id,
+                 "created_at": now_iso, "created_by": user.get("name", "")},
+                {"id": str(uuid.uuid4()), "cash_box_id": "safe", "type": "income",
+                 "amount": amt, "description": f"حصيلة حصة {session.get('user_name', session.get('created_by', 'موظف'))} (غلق الحصة)",
+                 "reference_type": "session_close", "reference_id": session_id,
+                 "created_at": now_iso, "created_by": user.get("name", "")},
+            ])
+            transferred = amt
+            update_data["cash_transferred_to_safe"] = amt
+            await db.daily_sessions.update_one(
+                {"id": session_id}, {"$set": {"cash_transferred_to_safe": amt}})
+
         updated = await db.daily_sessions.find_one({"id": session_id}, {"_id": 0})
         _fix_session_fields(updated, session_user_id, session.get("user_name", session.get("created_by", "")))
 

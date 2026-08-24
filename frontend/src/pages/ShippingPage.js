@@ -180,29 +180,14 @@ export default function ShippingPage() {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {company.has_api && (
-                        <>
-                          <div>
-                            <Label className="text-xs">API Key</Label>
-                            <Input
-                              value={setting.api_key || ''}
-                              onChange={(e) => updateCompanySettings(company.id, 'api_key', e.target.value)}
-                              placeholder="xxxxxxxx"
-                              className="mt-1 h-8 text-sm font-mono"
-                              dir="ltr"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs">API Secret</Label>
-                            <Input
-                              type="password"
-                              value={setting.api_secret || ''}
-                              onChange={(e) => updateCompanySettings(company.id, 'api_secret', e.target.value)}
-                              placeholder="xxxxxxxx"
-                              className="mt-1 h-8 text-sm font-mono"
-                              dir="ltr"
-                            />
-                          </div>
-                        </>
+                        <div className="text-xs text-muted-foreground border border-dashed rounded-md p-2" data-testid={`ship-keys-hub-note-${company.id}`}>
+                          {language === 'ar'
+                            ? '🔑 مفاتيح الربط تُدار مركزياً من '
+                            : '🔑 Clés gérées depuis le '}
+                          <a href="/integrations" className="text-emerald-700 underline">
+                            {language === 'ar' ? 'مركز التكاملات' : "Centre d'intégrations"}
+                          </a>
+                        </div>
                       )}
                       <div className="flex items-center justify-between pt-2">
                         {company.website && (

@@ -159,54 +159,27 @@ export default function WooCommercePage() {
               </CardContent>
             </Card>
 
-            {/* API Settings */}
+            {/* API Settings — p292: المفاتيح تُدار من مركز التكاملات */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Key className="h-5 w-5" />
                   {language === 'ar' ? 'إعدادات API' : 'Paramètres API'}
                 </CardTitle>
-                <CardDescription>
-                  {language === 'ar' 
-                    ? 'احصل على المفاتيح من WooCommerce > الإعدادات > متقدم > REST API' 
-                    : 'Obtenez les clés depuis WooCommerce > Réglages > Avancé > REST API'}
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <Label>{language === 'ar' ? 'رابط المتجر' : 'URL du magasin'}</Label>
-                  <div className="flex gap-2 mt-1">
-                    <Globe className="h-5 w-5 text-muted-foreground mt-2" />
-                    <Input
-                      value={settings.store_url}
-                      onChange={(e) => setSettings(prev => ({ ...prev, store_url: e.target.value }))}
-                      placeholder="https://your-store.com"
-                      dir="ltr"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label>Consumer Key</Label>
-                    <Input
-                      value={settings.consumer_key}
-                      onChange={(e) => setSettings(prev => ({ ...prev, consumer_key: e.target.value }))}
-                      placeholder="ck_xxxxxxxx"
-                      dir="ltr"
-                      className="mt-1 font-mono text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label>Consumer Secret</Label>
-                    <Input
-                      type="password"
-                      value={settings.consumer_secret}
-                      onChange={(e) => setSettings(prev => ({ ...prev, consumer_secret: e.target.value }))}
-                      placeholder="cs_xxxxxxxx"
-                      dir="ltr"
-                      className="mt-1 font-mono text-sm"
-                    />
-                  </div>
+                <div className="text-sm border border-dashed rounded-md p-3 space-y-2" data-testid="wc-hub-note">
+                  <p className="text-muted-foreground">
+                    {language === 'ar'
+                      ? '🔑 رابط المتجر والمفاتيح (Consumer Key/Secret) تُدار مركزياً مع فحص اتصال حقيقي من '
+                      : '🔑 URL et clés gérés depuis le '}
+                    <a href="/integrations" className="text-emerald-700 underline font-medium">
+                      {language === 'ar' ? 'مركز التكاملات' : "Centre d'intégrations"}
+                    </a>
+                  </p>
+                  {settings.store_url && (
+                    <p className="text-xs" dir="ltr" data-testid="wc-store-url">🏪 {settings.store_url}</p>
+                  )}
                 </div>
 
                 {connectionStatus && (

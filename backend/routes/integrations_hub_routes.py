@@ -668,6 +668,17 @@ async def hub_connect(iid: str, body: dict, admin: dict = Depends(get_tenant_adm
         if str(fields.get("api_key") or "").strip():
             upd["api_key"] = _ef(str(fields["api_key"]).strip())
         await db.email_integration_settings.update_one({}, {"$set": upd}, upsert=True)
+        # p292: مرآة إلى مخزن إشعارات البريد القديم (system_settings/sendgrid_settings)
+        # حتى تعمل صفحة الإشعارات والتقارير بالمفتاح المركزي دون حقل مبعثر
+        sg_mirror = {"type": "sendgrid_settings", "enabled": True, "updated_at": _now()}
+        if upd.get("api_key"):
+            sg_mirror["api_key"] = upd["api_key"]
+        if upd.get("from_email"):
+            sg_mirror["sender_email"] = upd["from_email"]
+        if upd.get("from_name"):
+            sg_mirror["sender_name"] = upd["from_name"]
+        await db.system_settings.update_one(
+            {"type": "sendgrid_settings"}, {"$set": sg_mirror}, upsert=True)
         test_result = await _run_test(iid, entry, None)
         await db.email_integration_settings.update_one(
             {}, {"$set": {"enabled": bool(test_result["ok"]),
@@ -772,6 +783,8 @@ async def hub_disconnect(iid: str, admin: dict = Depends(get_tenant_admin)):
         await db.system_settings.update_one({"type": "email_settings"}, {"$set": {"enabled": False}})
     elif entry["adapter"] == "sendgrid":
         await db.email_integration_settings.update_one({}, {"$set": {"enabled": False}})
+        # p292: عكس الإلغاء على مرآة إشعارات البريد القديمة
+        await db.system_settings.update_one({"type": "sendgrid_settings"}, {"$set": {"enabled": False}})
     elif entry["adapter"] == "woocommerce":
         await db.woocommerce_settings.update_one({"id": "global"}, {"$set": {"enabled": False}})
     elif entry["adapter"] == "sms":

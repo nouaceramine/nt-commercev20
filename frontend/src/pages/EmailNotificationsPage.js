@@ -171,19 +171,19 @@ export default function EmailNotificationsPage() {
             {settings.enabled && (
               <div className="space-y-4 p-4 border rounded-lg">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>{language === 'ar' ? 'مفتاح SendGrid API' : 'SendGrid API Key'}</Label>
-                    <Input
-                      type="password"
-                      placeholder="SG.xxxxxx..."
-                      value={settings.api_key}
-                      onChange={(e) => setSettings(prev => ({ ...prev, api_key: e.target.value }))}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {language === 'ar' 
-                        ? 'احصل عليه من sendgrid.com → Settings → API Keys'
-                        : 'Get it from sendgrid.com → Settings → API Keys'}
-                    </p>
+                  <div className="space-y-2 md:col-span-2">
+                    <div className="text-xs text-muted-foreground border border-dashed rounded-md p-2" data-testid="sendgrid-hub-note">
+                      {language === 'ar' ? (
+                        <>🔑 مفتاح SendGrid API يُدار مركزياً من{' '}
+                          <a href="/integrations" className="text-emerald-700 underline">مركز التكاملات</a>
+                          {settings.api_key ? ' — المفتاح الحالي محفوظ ومشفّر ويعمل تلقائياً' : ' — اربط المفتاح هناك ثم عُد لهذه الصفحة'}
+                        </>
+                      ) : (
+                        <>🔑 SendGrid API key is managed centrally from the{' '}
+                          <a href="/integrations" className="text-emerald-700 underline">Integrations Hub</a>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label>{language === 'ar' ? 'بريد المرسل' : 'Sender Email'}</Label>

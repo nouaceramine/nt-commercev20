@@ -93,6 +93,7 @@ export default function DailySessionsPage() {
   const [openingCash, setOpeningCash] = useState(0);
   const [closingNotes, setClosingNotes] = useState('');
   const [actualCash, setActualCash] = useState(0);
+  const [transferToSafe, setTransferToSafe] = useState(true);  // p291: تحويل الحصيلة للخزنة تلقائياً
 
   useEffect(() => {
     fetchData();
@@ -205,7 +206,8 @@ export default function DailySessionsPage() {
         closing_cash: actualCash,
         closed_at: new Date().toISOString(),
         notes: closingNotes,
-        status: 'closed'
+        status: 'closed',
+        transfer_to_safe: transferToSafe  // p291
       };
       
       // Calculate comprehensive report before closing
@@ -240,6 +242,7 @@ export default function DailySessionsPage() {
         closedAt: new Date().toISOString(),
         openingCash: currentSession.opening_cash || 0,
         closingCash: actualCash,
+        transferToSafe: transferToSafe,  // p291
         expectedCash: expectedCash,
         cashDifference: cashDifference,
         salesCount: todaySales.length,
@@ -843,6 +846,21 @@ export default function DailySessionsPage() {
                 </div>
               )}
 
+              <label className="flex items-center gap-2 p-3 rounded-lg border bg-emerald-50/50 dark:bg-emerald-900/10 cursor-pointer" data-testid="transfer-to-safe-row">
+                <input
+                  type="checkbox"
+                  checked={transferToSafe}
+                  onChange={(e) => setTransferToSafe(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-600"
+                  data-testid="transfer-to-safe-checkbox"
+                />
+                <span className="text-sm">
+                  {language === 'ar'
+                    ? `تحويل المبلغ الفعلي (${actualCash.toFixed(2)} ${t.currency}) إلى الخزنة تلقائياً`
+                    : `Transférer le montant réel (${actualCash.toFixed(2)}) au coffre automatiquement`}
+                </span>
+              </label>
+
               <div>
                 <Label>{language === 'ar' ? 'ملاحظات (اختياري)' : 'Notes (optionnel)'}</Label>
                 <Textarea
@@ -1030,6 +1048,14 @@ export default function DailySessionsPage() {
                   {closingReport.cashDifference >= 0 ? '+' : ''}{formatCurrency(closingReport.cashDifference)} {t.currency}
                 </span>
               </div>
+
+              {/* p291: تأكيد التحويل إلى الخزنة */}
+              {closingReport.transferToSafe && (
+                <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 flex items-center justify-between" data-testid="safe-transfer-note">
+                  <span className="font-medium">{language === 'ar' ? 'حُوِّلت الحصيلة الفعلية إلى الخزنة' : 'Recette transférée au coffre'}</span>
+                  <span className="text-lg font-bold text-emerald-700">{formatCurrency(closingReport.closingCash)} {t.currency}</span>
+                </div>
+              )}
             </div>
 
             {/* Sales Summary */}

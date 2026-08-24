@@ -4749,3 +4749,31 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 **الاختبارات (NT-0001، TEST-P290):** منتج رابح (3 مسلَّمة: net +531.82 = 4500−1500−1200−150−(300 مباشر+818.18 نسبي)) ومنتج خاسر (1 مسلَّم/3 مُرجَعة: خسارة إرجاع 2400 = 3×(400 شحن+350 رسم+50 تغليف)، net −2831.82) — الأرقام طابقت الحساب اليدوي بدقة ✓؛ winners/losers ✓؛ ad_attributed=300 من 1300 ✓؛ product-history: 4 طلبات بحصص صحيحة + إعلانات المنتج ✓؛ key فارغ 400 ✓؛ إنشاء مصروف بـ product_id عبر API يُخزَّن ✓؛ E2E: بطاقتا الرابح/الخاسر بالقيم الصحيحة، أعمدة مُسلَّم/مُرجَع، حوار السجل (4 صفوف + كتلة إعلانات)، قائمة المنتجات في تبويب الإعلانات، صفر أخطاء صفحات ✓. **بقايا = 0** (7 طلبات + منتجان + تكامل + 3 مصاريف حُذفت).
 
 **النشر:** release 20260824_191743، main.6f703cad.js.
+
+## p291 — غلق الحصة: تحويل تلقائي للمبلغ الفعلي من الصندوق إلى الخزنة (2026-08-24)
+
+**طلب المالك:** عند غلق الحصة، المبلغ الفعلي المعدود في الصندوق يُحوَّل ويُضاف تلقائياً إلى الخزنة.
+
+**Backend:** `routes/daily_sessions_routes.py` — DailySessionClose: +transfer_to_safe (افتراضي True)؛ DailySessionResponse: +cash_transferred_to_safe؛ عند الغلق مع transfer_to_safe وclosing_cash>0: upsert صندوقي cash/safe ($setOnInsert)، خصم من cash وإضافة إلى safe ($inc)، قيدا يومية متطابقان (مصروف من الصندوق + دخل للخزنة، reference_type="session_close")، تخزين cash_transferred_to_safe في الحصة — **idempotent**: لا تحويل مزدوج عند إعادة الغلق.
+
+**Frontend:** `pages/DailySessionsPage.js` — مربع اختيار «تحويل المبلغ الفعلي (...) إلى الخزنة تلقائياً» (transfer-to-safe-checkbox، مفعّل افتراضياً، يعرض المبلغ حياً) + ملاحظة في تقرير الغلق (safe-transfer-note): «حُوِّلت الحصيلة الفعلية إلى الخزنة — المبلغ».
+
+**الاختبارات (NT-0001):** API: غلق بـ transfer_to_safe=false → لا حركة مال ✓؛ غلق بالافتراضي → cash −840→−8340، safe 0→7500، قيدان reference_type=session_close ✓؛ idempotency ✓. E2E: فتح حصة 500 → حوار الغلق يعرض المربع مفعّلاً → تأكيد → ملاحظة التحويل «500,00 دج» في التقرير ✓. **بقايا = 0** (الأرصدة أُعيدت لـ −840/0، القيود والحصة حُذفت).
+
+**تدقيق تكامل الصناديق:** 17 موضع تعديل أرصدة — كلها بقيود يومية متطابقة؛ استثناءان موثّقان حميدان (families_permissions = ضبط مصنع، recharge_service:324 = قيد تعويض تراجع saga).
+
+## p292 — توحيد حقول المفاتيح المبعثرة تحت مركز التكاملات (2026-08-24)
+
+**طلب المالك:** التحقق من حقول المفاتيح المبعثرة في الصفحات ومن العناوين المبعثرة.
+
+**Backend:** `routes/integrations_hub_routes.py` — ربط sendgrid في المركز يكتب مرآة إلى المخزن القديم system_settings/sendgrid_settings (api_key مشفّر بنفس crypto_fields، sender_email/name، enabled) حتى تعمل صفحة إشعارات البريد والتقارير بالمفتاح المركزي؛ الفصل يعكس enabled=False على المخزنين.
+
+**Frontend:** 
+- `pages/ShippingPage.js` — حقول api_key/api_secret الميتة (shipping_settings بلا مستهلك backend) → ملاحظة «مفاتيح الربط تُدار مركزياً من مركز التكاملات» (ship-keys-hub-note-{id}).
+- `pages/WooCommercePage.js` — حقول store_url/consumer_key/consumer_secret → ملاحظة المركز (wc-hub-note) مع الإبقاء على التفعيل/اختبار الاتصال/الحفظ (نفس المخزن woocommerce_settings/global، توافق تشفير مؤكد: utils/crypto في الاثنين).
+- `pages/EmailNotificationsPage.js` — حقل SendGrid API → ملاحظة المركز (sendgrid-hub-note)؛ المفتاح المقنّع يُحفَظ كما هو عند PUT (الخادم يحافظ على المشفّر).
+
+**الاختبارات (NT-0001، TEST-P292):** ربط sendgrid بمفتاح وهمي عبر المركز → 401 متوقع من SendGrid لكن المرآة كُتبت (مفتاح v1. مشفّر + مرسل + enabled) ✓؛ الفصل عكس enabled=False على المخزنين ✓؛ E2E: ملاحظات المركز ظاهرة في صفحات الشحن (شركات) وWooCommerce وإشعارات البريد ✓. **بقايا = 0**.
+
+**النشر (p291+p292):** release 20260824_195930، main.4af13762.js؛ backend أُعيد تشغيله (health 200).
+
