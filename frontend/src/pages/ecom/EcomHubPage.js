@@ -8,12 +8,13 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff, BarChart3 } from 'lucide-react';
+import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff, BarChart3, Truck, MessageCircle, Printer } from 'lucide-react';  // p289: +Truck/MessageCircle/Printer
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
 import { EcomManualOrderDialog } from './EcomManualOrderDialog';
 import { EcomOrderDetailDialog } from './EcomOrderDetailDialog';
+import { EcomOrderProcessDialog } from './EcomOrderProcessDialog';  // p289
 import { ResponsiveTable } from '../../components/ResponsiveTable';
 import { useEcomOrderNotifications, requestNotificationPermission, playNewOrderChime } from '../../hooks/useEcomOrderNotifications';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
@@ -30,6 +31,10 @@ export default function EcomHubPage() {
   const [search, setSearch] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [linkedCouriers, setLinkedCouriers] = useState([]);  // p289
+  const [processOrder, setProcessOrder] = useState(null);    // p289: order being dispatched
+  const [remindOrder, setRemindOrder] = useState(null);      // p289: order being reminded
+  const [remindBusy, setRemindBusy] = useState('');          // p289: 'sms' | 'whatsapp' | ''
   // p139: sound works regardless of desktop-notification permission — default ON
   const [notifEnabled, setNotifEnabled] = useState(
     typeof window === 'undefined' ? true : localStorage.getItem('ecom_notif_enabled') !== '0',
@@ -99,6 +104,10 @@ export default function EcomHubPage() {
       setTotal(ordersRes.data.total || 0);
       setSummary(summaryRes.data);
       setIntegrations(integrationsRes.data.items || []);
+      // p289: شركات الشحن المربوطة فقط (لحوار المعالجة)
+      apiClient.get('/ecom/dispatch/couriers')
+        .then(r => setLinkedCouriers(r.data?.items || []))
+        .catch(() => setLinkedCouriers([]));
     } catch (err) {
       if (err?.response?.status === 403) {
         toast.error('مركز التجارة الإلكترونية غير مُفعّل لهذا الحساب');
@@ -198,6 +207,34 @@ export default function EcomHubPage() {
       loadAll();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'فشل تحديث نوع التوصيل');
+    }
+  };
+
+  // p289: تذكير الزبون عبر SMS/WhatsApp
+  const sendReminder = async (ch) => {
+    if (!remindOrder) return;
+    setRemindBusy(ch);
+    try {
+      const res = await apiClient.post(`/ecom/orders/${remindOrder.id}/remind`, { channel: ch });
+      toast.success(res.data?.message || 'أُرسل التذكير');
+      setRemindOrder(null);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'فشل إرسال التذكير');
+    } finally {
+      setRemindBusy('');
+    }
+  };
+
+  // p289: طباعة بوليصة موجودة
+  const printLabel = async (o) => {
+    if (!o.shipping_label_id) return;
+    try {
+      const res = await apiClient.get(`/ecom/shipping/labels/${o.shipping_label_id}`);
+      const url = res.data?.label_url;
+      if (url && !url.startsWith('mock://')) window.open(url, '_blank');
+      else toast.info('البوليصة داخلية (وضع التتبع) — لا رابط طباعة خارجي');
+    } catch {
+      toast.error('تعذّر جلب البوليصة');
     }
   };
 
@@ -555,11 +592,48 @@ export default function EcomHubPage() {
                       </div>
                     )}
                   </>); } },
+                  // p289: حالة الشحن لدى الناقل — تُحدَّث تلقائياً عبر Webhooks/المزامنة
+                  { header: 'الشحن', render: (o) => {
+                    const cour = o.fulfillment?.courier || o.courier;
+                    if (!cour) return <span className="text-xs text-muted-foreground">—</span>;
+                    return (<div data-testid={`ship-cell-${o.id}`}>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <Badge variant="outline" className="text-xs gap-1">🚚 {cour}</Badge>
+                        {o.fulfillment?.mode && (
+                          <Badge className={o.fulfillment.mode === 'auto' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'} data-testid={`shipmode-${o.id}`}>
+                            {o.fulfillment.mode === 'auto' ? '⚡ تلقائي' : '✋ يدوي'}
+                          </Badge>
+                        )}
+                        {o.fulfillment?.mode === 'manual' && (
+                          <Badge className={o.fulfillment.registered_with_courier ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'} data-testid={`shipreg-${o.id}`}>
+                            {o.fulfillment.registered_with_courier ? 'مسجَّل بالشركة' : 'غير مسجَّل'}
+                          </Badge>
+                        )}
+                      </div>
+                      {o.tracking_number && <div className="text-[10px] font-mono text-muted-foreground mt-0.5" dir="ltr">{o.tracking_number}</div>}
+                      {o.courier_last_status && (
+                        <div className="text-[10px] text-blue-700 mt-0.5" data-testid={`courier-status-${o.id}`}>📦 {o.courier_last_status}</div>
+                      )}
+                    </div>);
+                  } },
                   { header: 'التاريخ', className: 'p-2 text-xs text-muted-foreground whitespace-nowrap', render: (o) => new Date(o.created_at).toLocaleDateString('ar-DZ') },
                   { header: '', cardFull: true, render: (o) => (
-                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedOrder(o); }} data-testid={`view-order-${o.id}`}>
-                      <Eye className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                      <Button size="sm" variant="ghost" title="معالجة الطلب (شحن)" onClick={() => setProcessOrder(o)} data-testid={`process-order-${o.id}`}>
+                        <Truck className="w-4 h-4 text-blue-600" />
+                      </Button>
+                      <Button size="sm" variant="ghost" title="تذكير الزبون (SMS/WhatsApp)" onClick={() => setRemindOrder(o)} data-testid={`remind-order-${o.id}`}>
+                        <MessageCircle className="w-4 h-4 text-emerald-600" />
+                      </Button>
+                      {o.shipping_label_id && (
+                        <Button size="sm" variant="ghost" title="طباعة البوليصة" onClick={() => printLabel(o)} data-testid={`print-label-${o.id}`}>
+                          <Printer className="w-4 h-4" />
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => setSelectedOrder(o)} data-testid={`view-order-${o.id}`}>
+                        <Eye className="w-4 h-4" />
+                      </Button>
+                    </div>
                   ) },
                 ]}
               />
@@ -586,6 +660,36 @@ export default function EcomHubPage() {
         onCreated={() => loadAll()}
         integrations={integrations}
       />
+      {/* p289: معالجة الطلب (يدوي/تلقائي + شركة الشحن + البوليصة) */}
+      <EcomOrderProcessDialog
+        order={processOrder}
+        open={!!processOrder}
+        onOpenChange={(v) => !v && setProcessOrder(null)}
+        couriers={linkedCouriers}
+        onDone={loadAll}
+      />
+      {/* p289: تذكير الزبون */}
+      <Dialog open={!!remindOrder} onOpenChange={(v) => !v && setRemindOrder(null)}>
+        <DialogContent className="max-w-sm" dir="rtl" data-testid="remind-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-emerald-600" /> تذكير الزبون — {remindOrder?.order_code}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            يُرسل تذكير بالطلب {remindOrder?.tracking_number ? 'ورقم التتبع ' : ''}إلى {remindOrder?.customer?.phone || 'الزبون'}.
+            التذكير الآلي بحالات الطرد مفعّل من إعدادات SMS، وهذا تذكير يدوي إضافي.
+          </p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button onClick={() => sendReminder('sms')} disabled={!!remindBusy} className="gap-1" data-testid="remind-sms-btn">
+              {remindBusy === 'sms' ? '...' : '📩 SMS'}
+            </Button>
+            <Button onClick={() => sendReminder('whatsapp')} disabled={!!remindBusy} variant="outline" className="gap-1 border-emerald-300 text-emerald-700" data-testid="remind-wa-btn">
+              {remindBusy === 'whatsapp' ? '...' : '💬 واتساب'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <EcomOrderDetailDialog
         open={!!selectedOrder}
         onOpenChange={(v) => !v && setSelectedOrder(null)}
