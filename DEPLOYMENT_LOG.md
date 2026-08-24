@@ -4640,3 +4640,13 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 **Tests (NT-0001, TEST-P284):** yalidine webhook {Livrée} → shipped order auto-delivered ✓; repeat → idempotent ✓; CRC challenge → acknowledged ✓; wrong token → 404 ✓; Maystro double-base64 wrapped + bare-string bodies → refunded/delivered ✓ (fixed initial decoder bug); transit status recorded without state change ✓; notification posted ✓; public HTTPS route reachable end-to-end ✓; UI E2E (dialog/url/instructions/rotate/unsupported note, zero overflow, zero JS errors) ✓. Residue 0 (orders/customers/sales/logs/notifications/outbox all cleaned).
 
 **Deploy:** release 20260824_132239. Real tenant untouched.
+
+## p285 — Dashboard crash fix: Promise.all destructuring misalignment (2026-08-24)
+
+**Report (owner screenshot):** /dashboard crashed with the error boundary — `TypeError: Cannot read properties of undefined (reading 'total')`.
+
+**Diagnosis (source-map + React fiber + JSON.parse probe):** crash at DashboardPage.js:258 `salesStats.today.total`. A forensic log shipped in the first fix build caught the real culprit: `setSalesStats` was receiving the **`/stats` payload** ({total_products, total_customers...}) — the p273 edit inserted `apiClient.get('/stats/stock-summary')` as the 2nd element of the Promise.all array **without shifting the destructured variable names**, so every variable from index 1 onward was off by one (statsRes←stock-summary, salesStatsRes←stats, profitRes←sales-stats, walletRes←profit-stats, dailyRes←wallet, recCostRes←daily-full, stockRes←estimated-cost). Dashboard had been silently cross-wired since p273; `salesStats.today` undefined was the visible crash.
+
+**Fix:** destructuring realigned to `[productsRes, stockRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes]` + render hardening (optional chaining with numeric fallbacks on all salesStats reads) + shape validation at the setter with a forensic console log (`p285: unexpected sales-stats shape`) if the API ever returns an unexpected shape.
+
+**Verification:** after deploy the forensic log is EMPTY (correct shape flows), / and /dashboard render at 1440px + 375px with zero JS errors; screenshot confirms correct figures (capital, monthly profit, counts). Releases: 20260824_135913 (hardening) → 20260824_141126 (alignment fix).

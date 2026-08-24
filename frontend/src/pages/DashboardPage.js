@@ -69,7 +69,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes, stockRes] = await Promise.all([
+        const [productsRes, stockRes, statsRes, salesStatsRes, profitRes, walletRes, dailyRes, recCostRes] = await Promise.all([  // p285: realigned — p273 inserted stock-summary without shifting names (every var was off by one)
           apiClient.get(`/products/paginated?page=1&page_size=6`),  // p273: was full /products (7k+ docs)
           apiClient.get(`/stats/stock-summary`).catch(() => ({ data: {} })),  // p273
           apiClient.get(`/stats`).catch(() => ({ data: {} })),
@@ -99,8 +99,12 @@ export default function DashboardPage() {
           }));
         }
         
-        if (salesStatsRes.data) {
+        // p285: never trust the wire shape — a malformed payload here used to
+        // blank the whole dashboard (TypeError: today of undefined)
+        if (salesStatsRes.data && salesStatsRes.data.today && salesStatsRes.data.month && salesStatsRes.data.year) {
           setSalesStats(salesStatsRes.data);
+        } else if (salesStatsRes.data) {
+          console.error('p285: unexpected sales-stats shape', salesStatsRes.data);
         }
         
         if (profitRes.data) {
@@ -255,17 +259,17 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <p className="text-3xl font-bold text-emerald-700">
-                    {salesStats.today.total.toFixed(2)}
+                    {(salesStats.today?.total ?? 0).toFixed(2)}
                   </p>
                   <p className="text-sm text-emerald-600">{t.currency}</p>
                   <Badge className="mt-2 bg-emerald-500">
-                    {salesStats.today.count} {language === 'ar' ? 'عملية' : 'ventes'}
+                    {salesStats.today?.count ?? 0} {language === 'ar' ? 'عملية' : 'ventes'}
                   </Badge>
                   {salesStats.store?.today?.count > 0 && (
                     <p className="text-xs text-emerald-600 mt-1" data-testid="store-share-today">
                       {language === 'ar'
-                        ? `منها المتجر: ${salesStats.store.today.total.toFixed(2)} ${t.currency} (${salesStats.store.today.count})`
-                        : `dont boutique : ${salesStats.store.today.total.toFixed(2)} ${t.currency} (${salesStats.store.today.count})`}
+                        ? `منها المتجر: ${(salesStats.store?.today?.total ?? 0).toFixed(2)} ${t.currency} (${(salesStats.store?.today?.count ?? 0)})`
+                        : `dont boutique : ${(salesStats.store?.today?.total ?? 0).toFixed(2)} ${t.currency} (${(salesStats.store?.today?.count ?? 0)})`}
                     </p>
                   )}
                 </div>
@@ -279,17 +283,17 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <p className="text-3xl font-bold text-blue-700">
-                    {salesStats.month.total.toFixed(2)}
+                    {(salesStats.month?.total ?? 0).toFixed(2)}
                   </p>
                   <p className="text-sm text-blue-600">{t.currency}</p>
                   <Badge className="mt-2 bg-blue-500">
-                    {salesStats.month.count} {language === 'ar' ? 'عملية' : 'ventes'}
+                    {salesStats.month?.count ?? 0} {language === 'ar' ? 'عملية' : 'ventes'}
                   </Badge>
                   {salesStats.store?.month?.count > 0 && (
                     <p className="text-xs text-blue-600 mt-1" data-testid="store-share-month">
                       {language === 'ar'
-                        ? `منها المتجر: ${salesStats.store.month.total.toFixed(2)} ${t.currency} (${salesStats.store.month.count})`
-                        : `dont boutique : ${salesStats.store.month.total.toFixed(2)} ${t.currency} (${salesStats.store.month.count})`}
+                        ? `منها المتجر: ${(salesStats.store?.month?.total ?? 0).toFixed(2)} ${t.currency} (${(salesStats.store?.month?.count ?? 0)})`
+                        : `dont boutique : ${(salesStats.store?.month?.total ?? 0).toFixed(2)} ${t.currency} (${(salesStats.store?.month?.count ?? 0)})`}
                     </p>
                   )}
                 </div>
@@ -303,17 +307,17 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <p className="text-3xl font-bold text-purple-700">
-                    {salesStats.year.total.toFixed(2)}
+                    {(salesStats.year?.total ?? 0).toFixed(2)}
                   </p>
                   <p className="text-sm text-purple-600">{t.currency}</p>
                   <Badge className="mt-2 bg-purple-500">
-                    {salesStats.year.count} {language === 'ar' ? 'عملية' : 'ventes'}
+                    {salesStats.year?.count ?? 0} {language === 'ar' ? 'عملية' : 'ventes'}
                   </Badge>
                   {salesStats.store?.year?.count > 0 && (
                     <p className="text-xs text-purple-600 mt-1" data-testid="store-share-year">
                       {language === 'ar'
-                        ? `منها المتجر: ${salesStats.store.year.total.toFixed(2)} ${t.currency} (${salesStats.store.year.count})`
-                        : `dont boutique : ${salesStats.store.year.total.toFixed(2)} ${t.currency} (${salesStats.store.year.count})`}
+                        ? `منها المتجر: ${(salesStats.store?.year?.total ?? 0).toFixed(2)} ${t.currency} (${(salesStats.store?.year?.count ?? 0)})`
+                        : `dont boutique : ${(salesStats.store?.year?.total ?? 0).toFixed(2)} ${t.currency} (${(salesStats.store?.year?.count ?? 0)})`}
                     </p>
                   )}
                 </div>
@@ -342,7 +346,7 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <p className="text-2xl font-bold text-emerald-700">
-                  {(profitStats.monthly_revenue || salesStats.month.total || 0).toFixed(2)}
+                  {(profitStats.monthly_revenue || salesStats.month?.total || 0).toFixed(2)}
                 </p>
                 <p className="text-xs text-emerald-600">{t.currency}</p>
               </div>
@@ -404,8 +408,8 @@ export default function DashboardPage() {
             <div className="mt-4 p-3 bg-muted/50 rounded-lg">
               <p className="text-xs text-muted-foreground text-center">
                 {language === 'ar' 
-                  ? `صافي الربح = المبيعات (${(profitStats.monthly_revenue || salesStats.month.total || 0).toFixed(2)}) - تكلفة الشراء (${(profitStats.monthly_purchase_cost || 0).toFixed(2)}) - التكاليف (${(profitStats.monthly_expenses || 0).toFixed(2)}) = ${(profitStats.monthly_profit || 0).toFixed(2)} ${t.currency}`
-                  : `Bénéfice net = Ventes (${(profitStats.monthly_revenue || salesStats.month.total || 0).toFixed(2)}) - Coût d'achat (${(profitStats.monthly_purchase_cost || 0).toFixed(2)}) - Dépenses (${(profitStats.monthly_expenses || 0).toFixed(2)}) = ${(profitStats.monthly_profit || 0).toFixed(2)} ${t.currency}`
+                  ? `صافي الربح = المبيعات (${(profitStats.monthly_revenue || salesStats.month?.total || 0).toFixed(2)}) - تكلفة الشراء (${(profitStats.monthly_purchase_cost || 0).toFixed(2)}) - التكاليف (${(profitStats.monthly_expenses || 0).toFixed(2)}) = ${(profitStats.monthly_profit || 0).toFixed(2)} ${t.currency}`
+                  : `Bénéfice net = Ventes (${(profitStats.monthly_revenue || salesStats.month?.total || 0).toFixed(2)}) - Coût d'achat (${(profitStats.monthly_purchase_cost || 0).toFixed(2)}) - Dépenses (${(profitStats.monthly_expenses || 0).toFixed(2)}) = ${(profitStats.monthly_profit || 0).toFixed(2)} ${t.currency}`
                 }
               </p>
             </div>
