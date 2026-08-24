@@ -138,6 +138,29 @@ async def usage_summary(month: Optional[str] = None, admin: dict = Depends(get_s
     return {"month": month, "config": cfg, "tenants": items}
 
 
+
+
+async def _record_ai_commission(tid, month, cost_usd, cfg, amount_dzd):
+    """p295: platform margin on a billed AI invoice = markup over upstream cost.
+    Idempotent per (ai_invoice, tenant:month) via the engine's unique reference."""
+    try:
+        if amount_dzd <= 0:
+            return
+        from services.commission_engine import record_platform_commission
+        gross_dzd = round(float(cost_usd) * float(cfg["usd_dzd_rate"]), 2)
+        await record_platform_commission(
+            main_db,
+            service_type="ai", tenant_id=tid,
+            reference_type="ai_invoice", reference_id=f"{tid}:{month}",
+            gross_amount=gross_dzd,
+            tenant_commission_pct=0.0,
+            platform_commission_pct=float(cfg["margin_pct"]),
+            operator="openai",
+            meta={"month": month, "cost_usd": round(float(cost_usd), 4)},
+        )
+    except Exception:
+        logger.exception("p295: ai commission record failed (%s/%s)", tid, month)
+
 @router.post("/saas/ai-billing/run")
 async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
     if not MONTH_RE.match(data.month):
@@ -154,6 +177,8 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
             {"tenant_id": tid, "month": data.month, "status": "billed"}, {"_id": 0})
         if existing:
             results["skipped"].append({"tenant_id": tid, "reason": "invoiced"})
+            # p295: backfill commission for invoices billed before the hook existed
+            await _record_ai_commission(tid, data.month, r["cost_usd"], cfg, amount_dzd)
             continue
         count = await main_db.ai_invoices.count_documents({})
         inv = {
@@ -194,6 +219,8 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
             inv["status"] = "billed"
             inv["billed_at"] = now
             inv["wallet_txn_id"] = txn_id
+            # p295: platform margin ledger
+            await _record_ai_commission(tid, data.month, r["cost_usd"], cfg, amount_dzd)
         except Exception as exc:
             inv["status"] = "failed"
             inv["error"] = str(getattr(exc, "detail", exc))[:300]

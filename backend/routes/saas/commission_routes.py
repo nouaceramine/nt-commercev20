@@ -18,7 +18,7 @@ import uuid
 import math
 import logging
 
-from config.database import db
+from config.database import db, main_db
 from .helpers import get_super_admin, get_current_agent
 
 logger = logging.getLogger(__name__)
@@ -454,3 +454,53 @@ async def platform_commission_history(
     q = {"service_type": service_type} if service_type else {}
     rows = await db.platform_commissions.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
     return {"items": rows, "count": len(rows)}
+
+# ── p295: per-service platform commission config (IPTV / SMS / AI) ──────────
+
+@router.get("/saas/service-commission-config")
+async def get_service_commission_config(admin: dict = Depends(get_super_admin)):
+    """Platform margin config for every mediated service.
+    iptv/digital: margin % on the wholesale cost (platform_service_config).
+    sms: credit price vs platform cost per credit (platform_config).
+    ai: markup % lives in ai_billing_config.margin_pct (read-only here)."""
+    svc_docs = {
+        d["id"]: d async for d in main_db.platform_service_config.find({}, {"_id": 0})
+    }
+    pc = await main_db.platform_config.find_one({"id": "global"}, {"_id": 0}) or {}
+    from services.ai.usage_meter import get_billing_config
+    ai_cfg = await get_billing_config(main_db)
+    sms_price = float(pc.get("sms_credit_price") or 0)
+    sms_cost = float(pc.get("sms_platform_cost") or 0)
+    sms_margin_pct = round((sms_price - sms_cost) / sms_price * 100, 2) if sms_price > 0 else 0.0
+    return {
+        "services": {
+            "iptv": {"platform_margin_pct": float((svc_docs.get("iptv") or {}).get("platform_margin_pct") or 0)},
+            "sms": {"credit_price": sms_price, "platform_cost": sms_cost, "margin_pct": sms_margin_pct},
+            "ai": {"margin_pct": float(ai_cfg.get("margin_pct") or 0)},
+        }
+    }
+
+
+@router.put("/saas/service-commission-config/{service}")
+async def put_service_commission_config(service: str, body: dict, admin: dict = Depends(get_super_admin)):
+    """Set the platform margin for a mediated service.
+    sms takes platform_cost (per credit, DZD); other services take platform_margin_pct."""
+    now = datetime.now(timezone.utc).isoformat()
+    if service == "sms":
+        cost = float(body.get("platform_cost") or 0)
+        if cost < 0 or cost > 1000:
+            raise HTTPException(status_code=400, detail="تكلفة غير صالحة")
+        await main_db.platform_config.update_one(
+            {"id": "global"}, {"$set": {"sms_platform_cost": cost}}, upsert=True)
+        return {"ok": True, "service": "sms", "platform_cost": cost}
+    if service == "ai":
+        raise HTTPException(status_code=400, detail="هامش الذكاء الاصطناعي يُضبط من /saas/ai-billing/config")
+    pct = float(body.get("platform_margin_pct") or 0)
+    if pct < 0 or pct > 100:
+        raise HTTPException(status_code=400, detail="النسبة يجب أن تكون بين 0 و 100")
+    await main_db.platform_service_config.update_one(
+        {"id": service},
+        {"$set": {"id": service, "platform_margin_pct": pct,
+                  "updated_at": now, "updated_by": admin.get("email", "")}},
+        upsert=True)
+    return {"ok": True, "service": service, "platform_margin_pct": pct}

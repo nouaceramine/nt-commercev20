@@ -4799,3 +4799,21 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 
 **النشر:** release 20260824_205108، main.d9a0a7e6.js.
 
+## p295 — محرك عمولات المنصة يغطي IPTV + الذكاء الاصطناعي + SMS (2026-08-24)
+
+**طلب المالك:** ربط IPTV والـ AI بمحرك عمولات المنصة (كان يعمل لشحن الجوال فقط) + عمولات SMS.
+
+**Backend:**
+- `routes/saas/commission_routes.py` (+main_db): مساران جديدان (super admin) —
+  `GET /saas/service-commission-config` (عرض هوامش كل الخدمات: iptv من main_db.platform_service_config، sms = سعر البيع/كلفة المنصة/النسبة المحسوبة، ai = margin_pct من ai_billing_config) و`PUT /saas/service-commission-config/{service}` (iptv: platform_margin_pct 0–100؛ sms: platform_cost لكل رسالة؛ ai: ممنوع — يُضبط من /saas/ai-billing/config).
+- `routes/digital_panel_routes.py` — خطاف IPTV: بعد نجاح بيع الاشتراك المموَّل من محفظة المنصة (cost_source=wallet وcost>0) يُسجَّل قيد عمولة service_type=category (iptv افتراضياً)، gross=سعر الجملة، platform% من platform_service_config، tenant%=0 — مغلَّف try/except لا يكسر البيع.
+- `routes/saas/ai_billing_routes.py` — `_record_ai_commission`: عند فوترة الاستهلاك الشهرية (status=billed) يُسجَّل service_type=ai، reference مستقر `tenant:month`، gross=كلفة USD×سعر الصرف، platform%=margin_pct → الهامش = فرق المفوتر عن الكلفة بدقة. فرع skipped (فاتورة سابقة) يستدعيه أيضاً = ملء رجعي idempotent.
+- `routes/ecom/status_sms_routes.py` — خطاف منح أرصدة SMS: الهامش = (سعر البيع sms_credit_price − كلفة المنصة sms_platform_cost) × عدد الرصيدات؛ يُسجَّل فقط إذا كان الهامش موجباً، reference = كود PF للقيد.
+- كل الخطافات تمر عبر commission_engine الحالي (idempotent بالفهرس الفريد على reference).
+
+**Frontend (`PlatformCommissionsCard.js`):** بطاقة «إعداد هوامش المنصة لكل خدمة» (testid svc-commission-config): حقل نسبة IPTV + حفظ، حقل كلفة SMS + حفظ (يعرض سعر البيع والهامش المحسوب)، بطاقة AI للعرض؛ تسميات عربية جديدة iptv/sms/other في جدول التفصيل.
+
+**الاختبارات (NT-0001 + main_db):** إعداد iptv=20% + sms price=10/cost=3 (نسبة 70%)؛ منح 100 رصيد → PCOM بقيمة 700 = (10−3)×100 ✓؛ بيع اشتراك IPTV بجملة 1000 → PCOM 200 ✓؛ فوترة AI لشهر 2026-07 (استهلاك 10$): فاتورة 1755 دج = 1350×1.3 وقيد PCOM 405 = 1350×30% ✓ مطابقة دقيقة للفاتورة؛ إعادة تشغيل الفوترة → skipped بدون تكرار (صف واحد)؛ الملخص يجمع حسب الخدمة (1305 دج إجمالي)؛ E2E: تبويب عمولات المنصة يعرض البطاقة والقيم والصفوف الثلاثة، وحفظ IPTV 20→25 من الواجهة يُثبت. **بقايا = 0** (عمولات + استهلاك + فاتورة + قيود محفظة + اشتراك + بيع مرآة + قيد صندوق + استعادة رصيد المحفظة 0 والصندوق −840 وحذف إعدادات الاختبار).
+
+**النشر:** release 20260824_214341، main.6c701c7f.js.
+

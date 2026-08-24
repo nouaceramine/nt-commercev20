@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
 import { Badge } from "../../../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
 import apiClient from "../../../lib/apiClient";
@@ -17,11 +18,18 @@ const SERVICE_AR = {
   recharge: "الشحن (فرق السعر)",
   ai: "الذكاء الاصطناعي",
   wallet: "المحافظ",
+  iptv: "اشتراكات IPTV",
+  sms: "رسائل SMS",
+  other: "خدمات رقمية أخرى",
 };
 
 export function PlatformCommissionsCard() {
   const [days, setDays] = useState(30);
   const [summary, setSummary] = useState(null);
+  const [svcCfg, setSvcCfg] = useState(null);
+  const [iptvPct, setIptvPct] = useState("");
+  const [smsCost, setSmsCost] = useState("");
+  const [saving, setSaving] = useState("");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -34,6 +42,12 @@ export function PlatformCommissionsCard() {
       ]);
       setSummary(s.data);
       setItems(h.data.items || []);
+      try {
+        const c = await apiClient.get("/saas/service-commission-config");
+        setSvcCfg(c.data?.services || null);
+        setIptvPct(String(c.data?.services?.iptv?.platform_margin_pct ?? ""));
+        setSmsCost(String(c.data?.services?.sms?.platform_cost ?? ""));
+      } catch { /* config card stays empty */ }
     } catch {
       setSummary(null);
       setItems([]);
@@ -43,6 +57,21 @@ export function PlatformCommissionsCard() {
   }, [days]);
 
   useEffect(() => { load(); }, [load]);
+
+  const saveIptv = async () => {
+    setSaving("iptv");
+    try {
+      await apiClient.put("/saas/service-commission-config/iptv", { platform_margin_pct: parseFloat(iptvPct) || 0 });
+      load();
+    } finally { setSaving(""); }
+  };
+  const saveSms = async () => {
+    setSaving("sms");
+    try {
+      await apiClient.put("/saas/service-commission-config/sms", { platform_cost: parseFloat(smsCost) || 0 });
+      load();
+    } finally { setSaving(""); }
+  };
 
   const fmtDzd = (n) => `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(n ?? 0)} دج`;
 
@@ -78,6 +107,44 @@ export function PlatformCommissionsCard() {
           </CardContent>
         </Card>
       </div>
+
+
+      {/* p295: هوامش المنصة لكل خدمة — IPTV/SMS قابلة للضبط، AI من إعدادات فوترة AI */}
+      <Card data-testid="svc-commission-config">
+        <CardHeader><CardTitle className="text-base">إعداد هوامش المنصة لكل خدمة</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="border rounded-lg p-3 space-y-2" data-testid="svc-cfg-iptv">
+            <div className="font-medium text-sm">📺 اشتراكات IPTV / الخدمات الرقمية</div>
+            <p className="text-xs text-muted-foreground">نسبة هامش المنصة من سعر الجملة الذي يدفعه المشترك</p>
+            <div className="flex items-center gap-2">
+              <Input type="number" min="0" max="100" step="0.5" className="w-24" dir="ltr"
+                     value={iptvPct} onChange={(e) => setIptvPct(e.target.value)} data-testid="svc-cfg-iptv-input" />
+              <span className="text-sm">%</span>
+              <Button size="sm" disabled={saving === "iptv"} onClick={() => saveIptv()} data-testid="svc-cfg-iptv-save">حفظ</Button>
+            </div>
+          </div>
+          <div className="border rounded-lg p-3 space-y-2" data-testid="svc-cfg-sms">
+            <div className="font-medium text-sm">💬 رسائل SMS</div>
+            <p className="text-xs text-muted-foreground">
+              سعر البيع للمشترك: {svcCfg?.sms?.credit_price ?? 0} دج/رسالة — تكلفة المنصة الحالية: {svcCfg?.sms?.platform_cost ?? 0} دج
+              (هامش {svcCfg?.sms?.margin_pct ?? 0}%)
+            </p>
+            <div className="flex items-center gap-2">
+              <Input type="number" min="0" step="0.5" className="w-24" dir="ltr" placeholder="تكلفة الرسالة"
+                     value={smsCost} onChange={(e) => setSmsCost(e.target.value)} data-testid="svc-cfg-sms-input" />
+              <span className="text-sm">دج</span>
+              <Button size="sm" disabled={saving === "sms"} onClick={() => saveSms()} data-testid="svc-cfg-sms-save">حفظ</Button>
+            </div>
+          </div>
+          <div className="border rounded-lg p-3 space-y-2" data-testid="svc-cfg-ai">
+            <div className="font-medium text-sm">🤖 الذكاء الاصطناعي</div>
+            <p className="text-xs text-muted-foreground">
+              الهامش الحالي {svcCfg?.ai?.margin_pct ?? 0}% — يُسجَّل تلقائياً عند فوترة الاستهلاك الشهرية،
+              ويُضبط من إعدادات فوترة AI.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Controls + per-service breakdown */}
       <Card>

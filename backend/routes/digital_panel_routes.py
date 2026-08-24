@@ -492,6 +492,29 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         except Exception:
             logger.exception("p165: failed to journal subscription sale %s (subscription itself is saved)", sub_id)
 
+                # p295: platform commission on wallet-sourced digital sales (IPTV & co.).
+        # The tenant drew the wholesale cost from the platform wallet → the
+        # platform earns its configured margin on that wholesale price.
+        if wallet_debited and cost > 0:
+            try:
+                svc_key = (doc.get("category") or "iptv")
+                cfg = await main_db.platform_service_config.find_one({"id": svc_key}, {"_id": 0})
+                margin_pct = float((cfg or {}).get("platform_margin_pct") or 0)
+                if margin_pct > 0:
+                    from services.commission_engine import record_platform_commission
+                    await record_platform_commission(
+                        main_db,
+                        service_type=svc_key, tenant_id=entity_id,
+                        reference_type="digital_subscription", reference_id=sub_id,
+                        gross_amount=cost,
+                        tenant_commission_pct=0.0,
+                        platform_commission_pct=margin_pct,
+                        operator=svc_key,
+                        meta={"service_name": doc.get("service_name") or "", "code": doc.get("code") or ""},
+                    )
+            except Exception:
+                logger.exception("p295: platform commission record failed for subscription %s", sub_id)
+
         doc.pop("_id", None)
         doc["status"] = _sub_status(doc.get("end_date"))
         return doc

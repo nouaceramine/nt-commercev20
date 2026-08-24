@@ -203,6 +203,27 @@ async def grant_sms_credits(body: GrantIn, _admin: dict = Depends(get_super_admi
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": _admin.get("id"),
     })
+
+    # p295: platform margin on sold SMS credits = (price - platform cost) x credits.
+    try:
+        pc = await main_db.platform_config.find_one({"id": "global"}, {"_id": 0}) or {}
+        price = float(pc.get("sms_credit_price") or 0)
+        pcost = float(pc.get("sms_platform_cost") or 0)
+        if price > 0 and price > pcost:
+            margin_pct = round((price - pcost) / price * 100, 2)
+            from services.commission_engine import record_platform_commission
+            await record_platform_commission(
+                main_db,
+                service_type="sms", tenant_id=body.tenant_id,
+                reference_type="sms_credits_grant", reference_id=code,
+                gross_amount=round(body.credits * price, 2),
+                tenant_commission_pct=0.0,
+                platform_commission_pct=margin_pct,
+                operator="sms",
+                meta={"credits": body.credits, "credit_price": price, "platform_cost": pcost},
+            )
+    except Exception:
+        logger.exception("p295: sms commission record failed (%s)", body.tenant_id)
     return {"ok": True, "tenant_id": body.tenant_id, "sms_credits": int(w.get("sms_credits") or 0), "code": code}
 
 
