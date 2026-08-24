@@ -4607,3 +4607,19 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 
 **Deploy:** release 20260824_120259. Backend restarted.
 **Cleanup (residue 0):** TEST-P282 device deleted (db count 0), test containers p282-mtx/p282-ff removed, temporary ufw rules 8889/tcp + 8189/udp deleted (firewall back to Cloudflare-only), docker images kept (harmless). Real tenant untouched.
+
+## p283 — MP00001×2 Resolution + Unique sales.code Index (2026-08-24)
+
+**Context (owner decision: "no preference" → recommended option executed):** the two `sales.code = MP00001` duplicates on the real tenant (NT-0004) turned out to be test residue from phases p238/p239 (customer "TEST-P238/239 زبون", product "TEST-P238/239 منتج", fake product ids, ecom_store, 1200 DZD each, 2026-08-21) — marketplace-order test cleanup had removed the orders but missed the two mirrored sales docs.
+
+**Investigation (read-only first):** full residue scan of the real tenant DB (all collections, TEST-P238/239 patterns) → only the 2 sales docs; main_db → 3 outbox rows (marketplace.order_placed, order_code MP00001); no stock impact (items reference fake product ids, no real product touched); no customer/payment/session links. Duplicate scan across ALL tenant DBs → MP00001×2 was the only duplicate anywhere.
+
+**Backup before deletion:** /opt/ntcommerce/backups/p283/ (main.py, DEPLOYMENT_LOG, PROJECT_STATE, sales_MP00001_backup.json full docs, outbox_MP00001_backup.json).
+
+**Actions:**
+1. Deleted the 2 test sales by exact _id; deleted the 3 outbox test rows; residue scan → 0.
+2. `main.py` p257 block: `("sales", "code")` moved into `_CODE_INDEXES` (unique + partialFilterExpression); plain `p257_sales_code` lookup index kept as fallback (harmless, different name).
+3. Backend restart → `p257_unique_code` (unique: true, partial: true) confirmed on the real tenant and **all 27 tenant DBs**.
+4. Sanity: TEST-P283 sale created via API then deleted on NT-0001 — path intact, residue 0.
+
+**Result:** sales.code now has the same unique safety net as all other entity codes; the atomic counter engine (p257) + unique index (p283) = duplicates impossible. Future TEST-P2xx cleanup checklists must include mirrored sales docs for marketplace/ecom order tests.
