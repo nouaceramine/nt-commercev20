@@ -60,19 +60,36 @@ class ProfitRobot:
             })
             self.stats["recommendations"] += 1
 
-        # Store report
+        # Store report — p297: one row per (tenant, report_type, day); repeated
+        # cycles within a day OVERWRITE the same row (idempotent), and rows
+        # older than 90 days are swept. Stops the unbounded pile-up.
         try:
             dbs = await self.client.list_database_names()
             tenant_dbs = [d for d in dbs if d.startswith("tenant_")]
+            now = datetime.now(timezone.utc)
+            day = now.strftime("%Y-%m-%d")
+            cutoff = (now - timedelta(days=90)).isoformat()
             for tdb_name in tenant_dbs:
                 tdb = self.client[tdb_name]
-                await tdb.auto_reports.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "report_type": "profit_analysis",
-                    "robot_name": self.name,
-                    "data": results,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                await tdb.auto_reports.create_index(
+                    [("report_type", 1), ("day", 1)],
+                    unique=True,
+                    partialFilterExpression={"day": {"$type": "string"}},
+                    name="uniq_report_day",
+                )
+                await tdb.auto_reports.update_one(
+                    {"report_type": "profit_analysis", "day": day},
+                    {"$set": {
+                        "id": f"profit-{day}",
+                        "report_type": "profit_analysis",
+                        "robot_name": self.name,
+                        "day": day,
+                        "data": results,
+                        "created_at": now.isoformat(),
+                    }},
+                    upsert=True,
+                )
+                await tdb.auto_reports.delete_many({"created_at": {"$lt": cutoff}})
         except Exception as e:
             logger.error(f"Error storing profit report: {e}")
 

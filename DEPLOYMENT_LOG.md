@@ -1,3 +1,21 @@
+## 2026-08-25 — p297: كبح تراكم التقارير الآلية (auto_reports)
+
+### المشكلة
+- prediction/profit robots: insert_one بلا مفتاح طبيعي → كل عامل (4 workers) × كل دورة ينسخ سطراً جديداً؛ وصل بعض المستأجرين إلى 1343 سطراً
+- report_robot (daily/weekly/monthly في main_db): نفس المشكلة + نافذة دقيقتين في الجدولة تضاعف الإشعارات/الإيميلات (حتى 8 نسخ/يوم)
+- بلا سياسة احتفاظ (retention) إطلاقاً
+
+### التغييرات
+- backend/robots/prediction_robot.py + profit_robot.py: upsert بمفتاح {report_type, day=YYYY-MM-DD} مع id ثابت + فهرس فريد uniq_report_day (partial: day string) + حذف ما أقدم من 90 يوماً
+- backend/robots/report_robot.py: upsert بمفاتيح طبيعية (daily: tenant+date، weekly: tenant+start_date، monthly: tenant+month) مع id ثابت + 3 فهارس فريدة + الإشعار/الإيميل/PDF يُرسل فقط من العامل الذي أنشأ السطر (upserted_id) + احتفاظ: daily 90ي، weekly 180ي، monthly 730ي
+- تنظيف تاريخي: tenant DBs ‏11497→204 سطراً (حُذف 11293)؛ main_db.auto_reports ‏452→56 (حُذف 396)
+
+### الاختبارات
+- POST /api/robots/run/prediction و /run/profit ×4 (يدوي + 4 عمال) → سطر واحد بالضبط لكل نوع/يوم في كل قاعدة مستأجر ✓
+- GET /api/auto-reports يعرض تقارير المستأجر ✓
+- Playwright: صفحتا /robots و /auto-reports بلا أخطاء ✓
+- تنظيف بقايا قديمة من جلسات سابقة (p258/p289): 6 مبيعات + 3 زبائن TEST-P في NT-0001 → صفر ✓
+
 
 ## 2026-08-11 — وحدة الخدمات الرقمية (Digital Services)
 

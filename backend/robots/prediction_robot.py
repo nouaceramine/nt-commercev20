@@ -57,18 +57,35 @@ class PredictionRobot:
         }
         self.stats["predictions_made"] += 1
 
-        # Store predictions
+        # Store predictions — p297: one row per (tenant, report_type, day);
+        # repeated cycles within a day OVERWRITE the same row (idempotent), and
+        # rows older than 90 days are swept. Stops the unbounded pile-up.
         try:
             dbs = await self.client.list_database_names()
+            now = datetime.now(timezone.utc)
+            day = now.strftime("%Y-%m-%d")
+            cutoff = (now - timedelta(days=90)).isoformat()
             for db_name in [d for d in dbs if d.startswith("tenant_")]:
                 tdb = self.client[db_name]
-                await tdb.auto_reports.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "report_type": "prediction",
-                    "robot_name": self.name,
-                    "data": results,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                await tdb.auto_reports.create_index(
+                    [("report_type", 1), ("day", 1)],
+                    unique=True,
+                    partialFilterExpression={"day": {"$type": "string"}},
+                    name="uniq_report_day",
+                )
+                await tdb.auto_reports.update_one(
+                    {"report_type": "prediction", "day": day},
+                    {"$set": {
+                        "id": f"prediction-{day}",
+                        "report_type": "prediction",
+                        "robot_name": self.name,
+                        "day": day,
+                        "data": results,
+                        "created_at": now.isoformat(),
+                    }},
+                    upsert=True,
+                )
+                await tdb.auto_reports.delete_many({"created_at": {"$lt": cutoff}})
         except Exception:
             pass
 

@@ -37,6 +37,24 @@ class ReportRobot:
     async def start(self) -> dict:
         self.is_running = True
         logger.info("Report Robot started")
+        # p297: one report row per (tenant, type, period) — concurrent workers
+        # upsert the same row instead of piling up duplicates.
+        try:
+            await self.db.auto_reports.create_index(
+                [("type", 1), ("tenant_id", 1), ("date", 1)],
+                unique=True, partialFilterExpression={"type": "daily", "date": {"$type": "string"}},
+                name="uniq_daily")
+            await self.db.auto_reports.create_index(
+                [("type", 1), ("tenant_id", 1), ("start_date", 1)],
+                unique=True, partialFilterExpression={"type": "weekly", "start_date": {"$type": "string"}},
+                name="uniq_weekly")
+            await self.db.auto_reports.create_index(
+                [("type", 1), ("tenant_id", 1), ("month", 1)],
+                unique=True, partialFilterExpression={"type": "monthly", "month": {"$type": "string"}},
+                name="uniq_monthly")
+        except Exception as e:
+            logger.error(f"Report index creation failed: {e}")
+        await self._sweep_old_reports()
         while self.is_running:
             try:
                 now = datetime.now(timezone.utc)
@@ -113,6 +131,16 @@ class ReportRobot:
         results = await tdb.sales.aggregate(pipeline).to_list(50)
         return [{k: v for k, v in r.items() if k != "_id"} for r in results]
 
+    async def _sweep_old_reports(self):
+        """p297: retention — daily 90d, weekly 180d, monthly 730d."""
+        try:
+            now = datetime.now(timezone.utc)
+            for rtype, days in (("daily", 90), ("weekly", 180), ("monthly", 730)):
+                cutoff = (now - timedelta(days=days)).isoformat()
+                await self.db.auto_reports.delete_many({"type": rtype, "created_at": {"$lt": cutoff}})
+        except Exception as e:
+            logger.error(f"Report sweep failed: {e}")
+
     # ───────── Daily ─────────
     async def generate_daily(self) -> dict:
         self.stats["checks"] += 1
@@ -126,29 +154,37 @@ class ReportRobot:
                 tdb = self.client[f"tenant_{tid}"]
                 stats = await self._get_tenant_stats(tdb, start, end)
                 top_prods = await self._top_products(tdb, start, end)
+                day_key = yesterday.strftime("%Y-%m-%d")
                 report = {
-                    "id": str(uuid.uuid4()),
+                    "id": f"daily-{tenant['id']}-{day_key}",
                     "tenant_id": tenant["id"],
                     "type": "daily",
-                    "date": yesterday.strftime("%Y-%m-%d"),
+                    "date": day_key,
                     "stats": stats,
                     "top_products": top_prods,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
-                await self.db.auto_reports.insert_one(report)
+                # p297: upsert by natural key; only the worker that CREATES the
+                # row sends notification/email — no duplicate side-effects.
+                res = await self.db.auto_reports.update_one(
+                    {"type": "daily", "tenant_id": tenant["id"], "date": day_key},
+                    {"$set": report}, upsert=True)
+                if res.upserted_id is None:
+                    continue
                 self.stats["reports_generated"] += 1
                 await self.notification.send_to_admins(
                     tenant["id"],
-                    f"التقرير اليومي - {yesterday.strftime('%Y-%m-%d')}",
+                    f"التقرير اليومي - {day_key}",
                     f"المبيعات: {stats['sales_total']:,.0f} دج | الربح: {stats['net_profit']:,.0f} دج",
                     category="reports",
                 )
                 html = self._daily_html(report)
                 email = tenant.get("email")
                 if email:
-                    await self.email.send_email(email, f"التقرير اليومي - {yesterday.strftime('%Y-%m-%d')}", html)
+                    await self.email.send_email(email, f"التقرير اليومي - {day_key}", html)
             except Exception as e:
                 logger.error(f"Daily report failed for {tenant.get('id')}: {e}")
+        await self._sweep_old_reports()
 
     # ───────── Weekly ─────────
     async def generate_weekly(self) -> dict:
@@ -166,11 +202,12 @@ class ReportRobot:
                 top_custs = await self._top_customers(tdb, start, end)
                 top_prods = await self._top_products(tdb, start, end)
                 employees = await self._employee_performance(tdb, start, end)
+                week_key = start_dt.strftime("%Y-%m-%d")
                 report = {
-                    "id": str(uuid.uuid4()),
+                    "id": f"weekly-{tenant['id']}-{week_key}",
                     "tenant_id": tenant["id"],
                     "type": "weekly",
-                    "start_date": start_dt.strftime("%Y-%m-%d"),
+                    "start_date": week_key,
                     "end_date": end_dt.strftime("%Y-%m-%d"),
                     "stats": stats,
                     "top_products": top_prods,
@@ -178,12 +215,16 @@ class ReportRobot:
                     "employee_performance": employees,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
-                await self.db.auto_reports.insert_one(report)
+                res = await self.db.auto_reports.update_one(
+                    {"type": "weekly", "tenant_id": tenant["id"], "start_date": week_key},
+                    {"$set": report}, upsert=True)
+                if res.upserted_id is None:
+                    continue
                 self.stats["reports_generated"] += 1
                 html = self._weekly_html(report)
                 email = tenant.get("email")
                 if email:
-                    await self.email.send_email(email, f"التقرير الاسبوعي - {start_dt.strftime('%Y-%m-%d')}", html)
+                    await self.email.send_email(email, f"التقرير الاسبوعي - {week_key}", html)
             except Exception as e:
                 logger.error(f"Weekly report failed for {tenant.get('id')}: {e}")
 
@@ -207,17 +248,22 @@ class ReportRobot:
                 ]).to_list(1)
                 debts = debt_agg[0] if debt_agg else {"total": 0, "count": 0}
                 cash_boxes = await tdb.cash_boxes.find({}, {"_id": 0}).to_list(10)
+                month_key = start_dt.strftime("%Y-%m")
                 report = {
-                    "id": str(uuid.uuid4()),
+                    "id": f"monthly-{tenant['id']}-{month_key}",
                     "tenant_id": tenant["id"],
                     "type": "monthly",
-                    "month": start_dt.strftime("%Y-%m"),
+                    "month": month_key,
                     "stats": stats,
                     "debts": {"total": round(debts.get("total", 0), 2), "count": debts.get("count", 0)},
                     "cash_boxes": cash_boxes,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
-                await self.db.auto_reports.insert_one(report)
+                res = await self.db.auto_reports.update_one(
+                    {"type": "monthly", "tenant_id": tenant["id"], "month": month_key},
+                    {"$set": report}, upsert=True)
+                if res.upserted_id is None:
+                    continue
                 self.stats["reports_generated"] += 1
                 await self.notification.send_to_admins(
                     tenant["id"],
