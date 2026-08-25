@@ -1,3 +1,15 @@
+## 2026-08-25 — p299: توحيد البريد — إزالة كتابات os.environ من مسار Resend
+
+### التغييرات (backend/routes/sendgrid_email_routes.py)
+- PUT /email/settings: أُزيلت كتابات os.environ[RESEND_API_KEY]/[SENDER_EMAIL] و resend.api_key — كانت تصل عاملاً واحداً من 4 وتضيع عند إعادة التشغيل؛ قاعدة البيانات (system_settings، مشفّرة منذ p272) هي المصدر الوحيد و .env احتياطي إقلاعي فقط
+- POST /email/send-session-report: كان يقرأ المفتاح من os.environ (فارغ في 3 من 4 عمال!) → يقرأ الآن من DB مع فك التشفير
+- POST /smart-reports/send-now: كان يمرّر المفتاح **المشفّر** كما هو لـ Resend (خطأ صامت) → يفك التشفير أولاً
+- الواجهة: EmailTab حُوّل لملاحظة مركز التكاملات في p288 — لا تغيير مطلوب
+
+### الاختبارات
+- GET /email/settings → افتراضيات ✓ ; PUT بالقناع → نجاح ولا كتابة env ✓
+- صفر أسطر os.environ[ متبقية في الملف ✓ ; health 200 بعد الإقلاع ✓ ; بقايا=0
+
 ## 2026-08-25 — p298: توحيد WhatsApp وتشفير مفاتيحه
 
 ### التغييرات

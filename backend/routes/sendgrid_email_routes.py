@@ -255,7 +255,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         if settings.resend_api_key and ("..." in settings.resend_api_key or settings.resend_api_key == "***configured***"):
             if existing and existing.get("resend_api_key"):
                 settings_dict["resend_api_key"] = existing["resend_api_key"]
-        _db_dict = dict(settings_dict)  # p272: encrypt at rest, keep env var plaintext
+        _db_dict = dict(settings_dict)  # p272+p299: encrypt at rest; DB is the only store
         if _db_dict.get("resend_api_key") and "..." not in _db_dict["resend_api_key"]:
             from services.crypto_fields import encrypt_field as _ef2
             _db_dict["resend_api_key"] = _ef2(_db_dict["resend_api_key"])
@@ -264,12 +264,9 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
             {"$set": {**_db_dict, "type": "email_settings", "updated_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True
         )
-        if settings_dict.get("resend_api_key") and "..." not in settings_dict["resend_api_key"]:
-            os.environ['RESEND_API_KEY'] = settings_dict["resend_api_key"]
-            if RESEND_AVAILABLE:
-                resend.api_key = settings_dict["resend_api_key"]
-        if settings_dict.get("sender_email"):
-            os.environ['SENDER_EMAIL'] = settings_dict["sender_email"]
+        # p299: no os.environ/resend.api_key writes here — they only ever reached
+        # ONE of the 4 uvicorn workers and were lost on restart. All readers use
+        # the DB (decrypted on use), with .env as startup fallback only.
         return {"success": True, "message": "تم حفظ إعدادات البريد بنجاح"}
 
     @router.post("/email/test")
@@ -295,10 +292,14 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
     async def send_session_report_email(report_email: SessionReportEmail, user: dict = Depends(require_tenant)):
         if not RESEND_AVAILABLE:
             raise HTTPException(status_code=500, detail="خدمة البريد الإلكتروني غير متوفرة")
-        api_key = os.environ.get('RESEND_API_KEY')
+        # p299: DB is the source of truth; .env is a startup fallback
+        _es = await db.system_settings.find_one({"type": "email_settings"})
+        from services.crypto_fields import decrypt_field as _df4
+        api_key = _df4((_es or {}).get("resend_api_key")) or os.environ.get("RESEND_API_KEY", "")
         if not api_key:
             raise HTTPException(status_code=500, detail="مفتاح API للبريد غير موجود")
-        sender_email = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+        resend.api_key = api_key
+        sender_email = (_es or {}).get("sender_email") or os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
         html_content = generate_session_report_html(report_email.report_data)
         params = {"from": sender_email, "to": [report_email.recipient_email], "subject": f"تقرير غلق الحصة - {datetime.now().strftime('%Y-%m-%d %H:%M')}", "html": html_content}
         try:
@@ -375,7 +376,8 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
             raise HTTPException(status_code=400, detail="لا يوجد مستلمين محددين")
         preview = await preview_smart_report(user)
         html_content = f'<div dir="rtl" style="font-family:Arial;max-width:600px;margin:0 auto;padding:20px;"><h1 style="color:#3b82f6;">التقرير اليومي الذكي</h1><p style="color:#666;">{datetime.now().strftime("%Y-%m-%d")}</p><div style="background:#f0fdf4;padding:15px;border-radius:8px;margin:15px 0;"><h3 style="color:#166534;">ملخص المبيعات</h3><p>إجمالي اليوم: <strong>{preview["sales"]["today_total"]:.2f} دج</strong></p><p>عدد المبيعات: <strong>{preview["sales"]["today_count"]}</strong></p></div><div style="background:#f3e8ff;padding:15px;border-radius:8px;margin:15px 0;"><h3 style="color:#7e22ce;">نصائح ذكية</h3><p>{preview["ai_tips"]}</p></div></div>'
-        resend.api_key = email_settings.get("resend_api_key")
+        from services.crypto_fields import decrypt_field as _df5  # p299: value is encrypted at rest
+        resend.api_key = _df5(email_settings.get("resend_api_key")) or ""
         try:
             params = {"from": email_settings.get("sender_email", "onboarding@resend.dev"), "to": [r.strip() for r in recipients.split(",")], "subject": f"التقرير اليومي الذكي - {datetime.now().strftime('%Y-%m-%d')}", "html": html_content}
             await asyncio.to_thread(resend.Emails.send, params)
