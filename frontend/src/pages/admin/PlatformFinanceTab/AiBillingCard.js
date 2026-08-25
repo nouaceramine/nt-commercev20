@@ -24,6 +24,11 @@ export function AiBillingCard() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [capEdits, setCapEdits] = useState({});
+  const [aiSet, setAiSet] = useState(null);
+  const [aiForm, setAiForm] = useState({ api_key: "", base_url: "", model: "" });
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,6 +39,11 @@ export function AiBillingCard() {
         apiClient.get(`/saas/ai-billing/invoices?month=${month}`),
       ]);
       setConfig(c.data);
+      try {
+        const st = await apiClient.get("/saas/ai-settings");
+        setAiSet(st.data);
+        setAiForm({ api_key: "", base_url: st.data.base_url || "", model: st.data.model || "" });
+      } catch { /* ai settings card stays on defaults */ }
       setCfgForm({ margin_pct: String(c.data.margin_pct), usd_dzd_rate: String(c.data.usd_dzd_rate) });
       setSummary(s.data);
       setInvoices(inv.data.invoices || []);
@@ -45,6 +55,38 @@ export function AiBillingCard() {
   }, [month]);
 
   useEffect(() => { load(); }, [load]);
+
+  const saveAiSettings = async () => {
+    setAiSaving(true);
+    try {
+      const r = await apiClient.put("/saas/ai-settings", aiForm);
+      setAiSet(r.data);
+      setAiForm((f) => ({ ...f, api_key: "" }));
+      toast.success("تم حفظ إعدادات الذكاء الاصطناعي");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "فشل الحفظ");
+    } finally { setAiSaving(false); }
+  };
+
+  const testAiSettings = async () => {
+    setAiTesting(true); setAiTestResult(null);
+    try {
+      const r = await apiClient.post("/saas/ai-settings/test", {});
+      setAiTestResult(r.data);
+    } catch (e) {
+      setAiTestResult({ ok: false, error: e.response?.data?.detail || "فشل الاختبار" });
+    } finally { setAiTesting(false); }
+  };
+
+  const clearAiKey = async () => {
+    try {
+      const r = await apiClient.put("/saas/ai-settings", { clear_key: true });
+      setAiSet(r.data);
+      toast.success("تم حذف مفتاح الواجهة — المنصة تستخدم مفتاح السيرفر الآن");
+    } catch (e) {
+      toast.error("فشل الحذف");
+    }
+  };
 
   const saveConfig = async () => {
     try {
@@ -92,6 +134,57 @@ export function AiBillingCard() {
 
   return (
     <div className="space-y-4" data-testid="ai-billing-tab">
+      {/* p296: platform AI key card - stored encrypted, overrides server env */}
+      <Card data-testid="ai-settings-card">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            مفتاح الذكاء الاصطناعي للمنصة
+            {aiSet && (
+              <Badge variant={aiSet.api_key_set ? "default" : "destructive"} data-testid="ai-key-status">
+                {aiSet.api_key_set
+                  ? "مضبوط — المصدر: " + (aiSet.api_key_source === "db" ? "هذه الواجهة" : "السيرفر")
+                  : "غير مضبوط"}
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="w-72">
+            <label className="text-sm text-muted-foreground">مفتاح API</label>
+            <Input data-testid="ai-set-key" type="password" dir="ltr"
+                   placeholder={aiSet?.api_key_masked || "sk-..."}
+                   value={aiForm.api_key} onChange={(e) => setAiForm({ ...aiForm, api_key: e.target.value })} />
+          </div>
+          <div className="w-72">
+            <label className="text-sm text-muted-foreground">نقطة النهاية (اختياري)</label>
+            <Input data-testid="ai-set-base" dir="ltr" placeholder="https://api.openai.com/v1"
+                   value={aiForm.base_url} onChange={(e) => setAiForm({ ...aiForm, base_url: e.target.value })} />
+          </div>
+          <div className="w-44">
+            <label className="text-sm text-muted-foreground">النموذج</label>
+            <Input data-testid="ai-set-model" dir="ltr" placeholder="gpt-4o-mini"
+                   value={aiForm.model} onChange={(e) => setAiForm({ ...aiForm, model: e.target.value })} />
+          </div>
+          <Button onClick={saveAiSettings} disabled={aiSaving} className="gap-2" data-testid="ai-set-save">
+            <Save className="w-4 h-4" /> حفظ
+          </Button>
+          <Button variant="secondary" onClick={testAiSettings} disabled={aiTesting} className="gap-2" data-testid="ai-set-test">
+            {aiTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} اختبار الاتصال
+          </Button>
+          {aiSet?.api_key_source === "db" && (
+            <Button variant="outline" onClick={clearAiKey} data-testid="ai-set-clear">حذف مفتاح الواجهة (عودة للسيرفر)</Button>
+          )}
+          {aiTestResult && (
+            <div className={"w-full text-sm rounded-md p-2 " + (aiTestResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}
+                 data-testid="ai-test-result">
+              {aiTestResult.ok
+                ? "✅ الاتصال ناجح — النموذج: " + aiTestResult.model + " — الرد: " + aiTestResult.reply
+                : "❌ فشل الاتصال: " + aiTestResult.error}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Config */}
       <Card>
         <CardHeader><CardTitle className="text-base">إعدادات الفوترة</CardTitle></CardHeader>

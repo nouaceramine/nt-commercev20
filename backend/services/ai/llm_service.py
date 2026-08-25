@@ -40,18 +40,16 @@ def _get_openai_client():
     Returns None if the integration is not configured or the package is missing,
     so the backend never crashes on import when the blueprint isn't set up yet.
     """
-    base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
-    if not base_url:
+    from services.ai.platform_ai_settings import current  # p296: DB first, env fallback
+    cfg = current()
+    if not cfg["base_url"]:
         return None
     try:
         from openai import AsyncOpenAI
     except ImportError:
         logger.error("openai package not installed — install the OpenAI integration")
         return None
-    return AsyncOpenAI(
-        api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY") or "dummy",
-        base_url=base_url,
-    )
+    return AsyncOpenAI(api_key=cfg["api_key"] or "dummy", base_url=cfg["base_url"])
 
 
 class _ChatAdapter:
@@ -63,13 +61,17 @@ class _ChatAdapter:
     async def send_message(self, message) -> str:
         text = message.text if hasattr(message, "text") else str(message)
         # 1. Prefer Replit AI integration if configured (back-compat)
+        from config.database import main_db as _mdb0  # p296
+        from services.ai.platform_ai_settings import refresh_effective  # p296
+        await refresh_effective(_mdb0)
         client = _get_openai_client()
         if client is not None:
             from config.database import main_db as _mdb  # p224
             from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
             await check_ai_cap(_mdb)  # p224: monthly cap enforcement
+            from services.ai.platform_ai_settings import current as _ai_cur  # p296
             response = await client.chat.completions.create(
-                model=AI_MODEL,
+                model=_ai_cur()["model"],
                 messages=[
                     {"role": "system", "content": self.system_message},
                     {"role": "user", "content": text},

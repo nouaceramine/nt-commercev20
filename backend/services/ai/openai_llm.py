@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_api_key() -> Optional[str]:
-    return os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY") or None
+    from services.ai.platform_ai_settings import current  # p296: DB first, env fallback
+    return current()["api_key"]
 
 
 def llm_configured() -> bool:
@@ -26,12 +27,14 @@ def llm_configured() -> bool:
 
 def _client():
     from openai import AsyncOpenAI
-    base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL") or None
-    return AsyncOpenAI(api_key=get_api_key(), base_url=base_url)
+    from services.ai.platform_ai_settings import current  # p296
+    cfg = current()
+    return AsyncOpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
 
 
 def _model() -> str:
-    return os.environ.get("AI_INTEGRATIONS_OPENAI_MODEL") or "gpt-4o-mini"
+    from services.ai.platform_ai_settings import current  # p296
+    return current()["model"]
 
 
 async def llm_chat(system_message: str, user_prompt: str, max_tokens: int = 2000) -> Optional[str]:
@@ -40,6 +43,8 @@ async def llm_chat(system_message: str, user_prompt: str, max_tokens: int = 2000
         return None
     from config.database import main_db as _mdb  # p224
     from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
+    from services.ai.platform_ai_settings import refresh_effective  # p296
+    await refresh_effective(_mdb)
     await check_ai_cap(_mdb)  # p224
     resp = await _client().chat.completions.create(
         model=_model(),
@@ -65,6 +70,8 @@ async def llm_vision(system_message: str, user_prompt: str, image_base64: str, m
         return None
     from config.database import main_db as _mdb  # p224
     from services.ai.usage_meter import check_ai_cap, record_ai_usage  # p224
+    from services.ai.platform_ai_settings import refresh_effective  # p296
+    await refresh_effective(_mdb)
     await check_ai_cap(_mdb)  # p224
     resp = await _client().chat.completions.create(
         model=_model(),

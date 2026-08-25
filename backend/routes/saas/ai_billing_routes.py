@@ -249,3 +249,91 @@ async def list_invoices(
         i["tenant_name"] = t.get("name", "")
         i["short_id"] = t.get("short_id", "")
     return {"total": len(invoices), "invoices": invoices}
+
+# ── p296: platform AI key settings (super admin UI → DB, env fallback) ──────
+
+def _mask_key(k: str) -> str:
+    return (k[:6] + "..." + k[-4:]) if k and len(k) > 12 else ("***" if k else "")
+
+
+@router.get("/saas/ai-settings")
+async def get_ai_settings(admin: dict = Depends(get_super_admin)):
+    """Effective AI configuration + source (db/env) without exposing the key."""
+    from services.ai.platform_ai_settings import refresh_effective
+    doc = await main_db.ai_platform_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    eff = await refresh_effective(main_db, force=True)
+    has_db_key = bool(doc.get("api_key"))
+    masked = ""
+    if has_db_key:
+        from services.crypto_fields import decrypt_field
+        try:
+            masked = _mask_key(decrypt_field(doc["api_key"]))
+        except Exception:
+            masked = "***"
+    return {
+        "api_key_set": bool(eff["api_key"]),
+        "api_key_masked": masked,
+        "api_key_source": "db" if has_db_key else ("env" if eff["api_key"] else "none"),
+        "base_url": eff["base_url"] or "",
+        "model": eff["model"],
+        "base_url_source": "db" if doc.get("base_url") else "env",
+        "updated_at": doc.get("updated_at"),
+        "updated_by": doc.get("updated_by"),
+    }
+
+
+@router.put("/saas/ai-settings")
+async def put_ai_settings(data: dict, admin: dict = Depends(get_super_admin)):
+    """Save AI key/base_url/model to the DB (encrypted). A masked key echo
+    (contains ...) keeps the stored key; clear_key=true removes the DB key so
+    the platform falls back to the server env var."""
+    from services.ai.platform_ai_settings import invalidate_cache
+    now = datetime.now(timezone.utc).isoformat()
+    upd = {"updated_at": now, "updated_by": admin.get("email", "")}
+    unset = {}
+    if data.get("clear_key"):
+        unset["api_key"] = ""
+    else:
+        key = (data.get("api_key") or "").strip()
+        if key and "..." not in key:
+            from services.crypto_fields import encrypt_field
+            upd["api_key"] = encrypt_field(key)
+    for f in ("base_url", "model"):
+        if f in data:
+            v = (data.get(f) or "").strip()
+            if v:
+                upd[f] = v
+            else:
+                unset[f] = ""
+    update = {}
+    if upd: update["$set"] = {"id": "global", **upd}
+    if unset: update["$unset"] = unset
+    if update:
+        await main_db.ai_platform_settings.update_one({"id": "global"}, update, upsert=True)
+    invalidate_cache()
+    return await get_ai_settings(admin)
+
+
+@router.post("/saas/ai-settings/test")
+async def test_ai_settings(admin: dict = Depends(get_super_admin)):
+    """Live-check the effective AI config with a minimal completion call."""
+    from services.ai.platform_ai_settings import refresh_effective, current
+    await refresh_effective(main_db, force=True)
+    eff = current()
+    if not eff["api_key"]:
+        return {"ok": False, "error": "لا يوجد مفتاح مضبوط (لا في الواجهة ولا في السيرفر)"}
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=eff["api_key"], base_url=eff["base_url"])
+        msgs = [{"role": "user", "content": "Reply with one word: works"}]
+        try:
+            resp = await client.chat.completions.create(model=eff["model"], messages=msgs, max_tokens=10)
+        except Exception as e1:
+            if "max_tokens" in str(e1):  # gpt-5 family requires max_completion_tokens
+                resp = await client.chat.completions.create(model=eff["model"], messages=msgs, max_completion_tokens=16)
+            else:
+                raise
+        return {"ok": True, "model": eff["model"],
+                "reply": (resp.choices[0].message.content or "").strip()[:60]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
