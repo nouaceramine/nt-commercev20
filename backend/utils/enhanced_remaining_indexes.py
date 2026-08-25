@@ -98,11 +98,10 @@ async def create_enhanced_remaining_indexes(db):
     await db.loyalty_programs.create_index("tenant_id")
     await db.loyalty_rewards.create_index("id", unique=True)
     await db.loyalty_rewards.create_index("tenant_id")
-    await db.loyalty_members.create_index([("tenant_id", 1), ("customer_id", 1)], unique=True)
     await db.points_transactions.create_index("id", unique=True)
     await db.points_transactions.create_index([("tenant_id", 1), ("customer_id", 1)])
     await db.reward_redemptions.create_index("id", unique=True)
-    indexes_created.append("loyalty: loyalty_programs, loyalty_rewards, loyalty_members, points_transactions, reward_redemptions")
+    indexes_created.append("loyalty: loyalty_programs, loyalty_rewards, points_transactions, reward_redemptions")
 
     # Section 24: Search (uses existing product/customer indexes)
     await db.search_history.create_index([("tenant_id", 1), ("user_id", 1), ("created_at", -1)])
@@ -115,11 +114,10 @@ async def create_enhanced_remaining_indexes(db):
     await db.audit_logs_v2.create_index([("tenant_id", 1), ("user_id", 1)])
     indexes_created.append("audit: audit_logs_v2")
 
-    # Section 26: Integrations
-    await db.integrations.create_index("id", unique=True)
-    await db.integrations.create_index([("tenant_id", 1), ("provider", 1)], unique=True)
+    # Section 26: Integrations (p300: dropped dead `integrations` index defs —
+    # collection unused; live hub stores are ecom_integrations / *_integration_settings)
     await db.integration_logs.create_index([("tenant_id", 1), ("integration_id", 1), ("created_at", -1)])
-    indexes_created.append("integrations: integrations, integration_logs")
+    indexes_created.append("integrations: integration_logs")
 
     # Section 27: Workflow
     await db.workflows.create_index("id", unique=True)

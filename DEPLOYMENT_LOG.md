@@ -1,3 +1,19 @@
+## 2026-08-25 — p300: حذف الكود الميت
+
+### الحذف
+- مجموعات MongoDB الميتة (0 مستندات في كل القواعد الـ29): loyalty_members + integrations + integration_configs — حُذفت من كل القواعد
+- backend/utils/enhanced_remaining_indexes.py: إزالة تعريفي فهارس loyalty_members و integrations
+- backend/utils/enhanced_financial_indexes.py: إزالة تعريفات فهارس integration_configs
+- frontend: حذف pages/TenantDashboardPage.js (دمجت في DashboardPage منذ p160) و components/AdvancedDashboard.js — لا مستورد لأيهما (مراجع تعليقات فقط)
+
+### أُبقي عمداً
+- routes/sms_marketing_routes.py ومجموعة sms_settings: يقرأها robots/debt_robot.py (تذكيرات الديون) و sms_gateway/status_sms — حية وليست ميتة
+
+### الاختبارات
+- ast.parse للملفين المعدّلين ✓ ; لا استيرادات مكسورة ✓ ; health 200 ✓
+- الحزمة لم تتغير (الملفان المحذوفان لم يكونا مضمّنين أصلاً) → لا نشر مطلوب
+- Playwright: / و /settings و /integrations بلا أخطاء ✓
+
 ## 2026-08-25 — p299: توحيد البريد — إزالة كتابات os.environ من مسار Resend
 
 ### التغييرات (backend/routes/sendgrid_email_routes.py)

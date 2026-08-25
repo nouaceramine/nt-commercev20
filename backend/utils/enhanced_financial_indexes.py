@@ -1,7 +1,7 @@
 """
 Section 12: Financial Enhancement Indexes
 Collections: payment_methods, financial_transactions, refunds, invoices,
-family_capital, profitability_settings, commissions, payouts, integration_configs
+family_capital, profitability_settings, commissions, payouts
 """
 
 async def create_financial_indexes(db):
@@ -75,10 +75,5 @@ async def create_financial_indexes(db):
     await db.payouts.create_index("status")
     await db.payouts.create_index("created_at")
     indexes_created.append("payouts: id(u), tenant_id, agent_id, status, created_at")
-
-    # ── integration_configs ──
-    await db.integration_configs.create_index("id", unique=True)
-    await db.integration_configs.create_index(["tenant_id", "integration"], unique=True)
-    indexes_created.append("integration_configs: id(u), tenant_id+integration(u)")
 
     return indexes_created
