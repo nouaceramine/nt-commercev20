@@ -1,3 +1,25 @@
+## 2026-08-25 — p302: جاهزية النسخ السحابي — الحزمة المشفرة تشمل كل ملفات الاسترجاع + دليل تفعيل المالك
+
+### المشكلة
+- offsite_backup.sh (p128) كان يشفّر ويرفع mongo.archive.gz فقط — بدون backend.env / frontend.env / docker-compose.yml، فالنسخة السحابية وحدها لا تكفي لاسترجاع كامل للنظام عند كارثة
+- لا دليل مالك لتفعيل الـ remote السحابي (البند الأمني الأعلى المعلّق منذ p128)
+- مفتاح التشفير .backup_key موجود على الخادم فقط ولم يُحفظ خارجه — نقطة فشل مفردة خفية
+
+### التغييرات
+- scripts/offsite_backup.sh: الحزمة المشفرة الآن = دليل النسخة اليومية كاملاً (mongo.archive.gz + backend.env + frontend.env + docker-compose.yml + yalidine_proxy.py) بصيغة ntbackup_<stamp>.tar.gz.gpg؛ احتفاظ التدريج المحلي على النمط الجديد (7 حزم) مع إبقاء ملفات mongo_*.gpg القديمة دون مساس؛ التنبيهات والجدولة (04:30) والاحتفاظ السحابي (30ي) كما هي
+- docs/OFFSITE_BACKUP_ACTIVATION.md (جديد): دليل المالك خطوة بخطوة — إنشاء Backblaze B2 (10GB مجاني، استهلاكنا ≈0.3GB/شهر)، rclone config باسم offsite حرفياً، التحقق، إجراءات الاسترجاع الكامل، وتأكيد حفظ مفتاح التشفير خارج الخادم
+
+### الاختبارات
+- remote rclone محلي مؤقت باسم offsite → تشغيل السكربت → الحزمة ntbackup_2026-08-25_0400.tar.gz.gpg (7.9M) رُفعت ✓
+- احتفاظ سحابي: ملف بعمر 40 يوماً حُذف تلقائياً والحديث بقي ✓
+- فك تشفير النسخة المرفوعة بالمفتاح → tar يحوي mongo.archive.gz + backend.env + frontend.env + docker-compose.yml ✓ و gzip -t لأرشيف mongo سليم ✓
+- الوضع بلا remote: WARN نظيف + تدريج محلي (سلوك لم يتغير) ✓
+- بقايا=0: الـ remote المؤقت حُذف و rclone.conf أُزيل وعادت /root/.config/rclone فارغة كما كانت؛ ملفات /tmp المؤقتة حُذفت
+- لا تغيير في backend/frontend → لا إقلاع ولا نشر؛ health 200 ✓
+
+### المتبقي على المالك (10 دقائق — الدليل في docs/OFFSITE_BACKUP_ACTIVATION.md)
+إنشاء حساب B2 + rclone config باسم offsite + حفظ مفتاح .backup_key خارج الخادم
+
 ## 2026-08-25 — p301: دمج yalidine_settings في ecom_integrations
 
 ### التغييرات (backend/routes/yalidine_integration_routes.py)
