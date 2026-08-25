@@ -93,9 +93,12 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
             await db.whatsapp_config.insert_one(config)
             config.pop("_id", None)
 
-        # Mask access token
+        # Mask access token (p298: stored AES-256-GCM encrypted — decrypt to mask;
+        # decrypt_field passes legacy plaintext through unchanged)
         if config.get("access_token"):
-            config["access_token"] = config["access_token"][:8] + "..." 
+            from services.crypto_fields import decrypt_field as _df
+            plain = _df(config["access_token"]) or ""
+            config["access_token"] = (plain[:8] + "...") if plain else ""
         return config
 
     @router.put("/config")
@@ -110,6 +113,18 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         update_data = config_data.model_dump()
         update_data["tenant_id"] = tenant_id
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        # p298: encrypt access_token at rest; never persist the masked echo
+        # ("EAA12345...") that GET returns — keep the stored value instead.
+        tok = update_data.get("access_token") or ""
+        if tok.endswith("..."):
+            existing = await db.whatsapp_config.find_one(
+                {"tenant_id": tenant_id}, {"_id": 0, "access_token": 1}
+            )
+            update_data["access_token"] = (existing or {}).get("access_token", "")
+        elif tok:
+            from services.crypto_fields import encrypt_field as _ef
+            update_data["access_token"] = _ef(tok)
 
         await db.whatsapp_config.update_one(
             {"tenant_id": tenant_id}, {"$set": update_data}, upsert=True

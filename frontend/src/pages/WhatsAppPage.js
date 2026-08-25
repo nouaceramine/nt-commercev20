@@ -235,13 +235,11 @@ export default function WhatsAppPage() {
               <DialogTitle>إعدادات WhatsApp Business</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div>
-                <Label>Phone Number ID</Label>
-                <Input value={configForm.phone_number_id} onChange={e => setConfigForm(p => ({...p, phone_number_id: e.target.value}))} placeholder="أدخل Phone Number ID من Meta" />
-              </div>
-              <div>
-                <Label>Access Token</Label>
-                <Input type="password" value={configForm.access_token} onChange={e => setConfigForm(p => ({...p, access_token: e.target.value}))} placeholder="أدخل Access Token" />
+              {/* p298: مفاتيح الربط تُدار من مركز التكاملات فقط */}
+              <div className="rounded-md border border-dashed p-3 text-sm" data-testid="wa-page-hub-note">
+                🔑 مفاتيح الربط (Phone Number ID و Access Token) تُدار من{' '}
+                <a href="/integrations" className="text-emerald-700 underline font-medium" data-testid="wa-page-hub-link">مركز التكاملات</a>
+                {' '}— أدخلها هناك واضغط «حفظ واختبار» فتُفعَّل الخدمة تلقائياً، مع شرح خطوة بخطوة لجلب المفاتيح من Meta.
               </div>
               <div>
                 <Label>Verify Token</Label>
