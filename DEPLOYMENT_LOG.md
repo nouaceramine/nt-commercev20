@@ -1,3 +1,18 @@
+## 2026-08-25 — p301: دمج yalidine_settings في ecom_integrations
+
+### التغييرات (backend/routes/yalidine_integration_routes.py)
+- _get_config: يقرأ من ecom_integrations (channel="yalidine") — نفس المستند الذي يديره مركز التكاملات — مع فك تشفير الاعتمادات عند الاستخدام؛ احتياطي env فقط عند غياب المستند
+- PUT /settings: كتابة مرآة إلى ecom_integrations بمخطط المركز نفسه (kind=shipping, mode=live/mock, credentials مشفّرة)؛ الحقول المُغفلة تُحفظ (التحديث الجزئي لا يمسح المفاتيح)
+- مجموعة yalidine_settings أُحيلت للتقاعد (كانت فارغة في كل القواعد الـ29 — لا ترحيل لازم، لا حذف لازم)
+- كل النقاط القديمة (/status /wilayas /communes /delivery-fees /parcels) تعمل كما هي عبر المخزن الموحّد — EcomShippingTab لا يحتاج تغييراً
+
+### الاختبارات
+- PUT بمفاتيح TEST-P301 → مستند ecom_integrations مشفّر (v1.) mode=live ✓
+- GET /status → configured/enabled من المخزن الجديد ✓
+- مركز التكاملات يرى ياليدين configured+live مع إخفاء المفاتيح ✓
+- PUT جزئي (بدون مفاتيح) → المفاتيح المشفرة محفوظة، wilaya/enabled تحدّثا ✓
+- تنظيف كامل: residue=0 ✓ ; health 200 ✓ ; Playwright: /ecom-hub/shipping/yalidine و /integrations بلا أخطاء ✓
+
 ## 2026-08-25 — p300: حذف الكود الميت
 
 ### الحذف

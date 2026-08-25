@@ -44,17 +44,26 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
         tracking_id: str
 
     async def _get_config(tenant_id: str = None) -> dict:
-        config = await db.yalidine_settings.find_one(
-            {"tenant_id": tenant_id} if tenant_id else {}, {"_id": 0}
-        )
-        if not config:
-            config = {
-                "api_id": os.environ.get("YALIDINE_API_ID", ""),
-                "api_token": os.environ.get("YALIDINE_API_TOKEN", ""),
-                "default_sender_wilaya": "16",
-                "enabled": bool(os.environ.get("YALIDINE_API_ID")),
+        # p301: single store — ecom_integrations (channel="yalidine"), the same
+        # doc the integrations hub manages; credentials decrypted on use.
+        # The legacy yalidine_settings collection is retired (empty in all DBs).
+        doc = await db.ecom_integrations.find_one({"channel": "yalidine"}, {"_id": 0})
+        if doc:
+            from services.crypto_fields import decrypt_credentials as _dc
+            creds = _dc(doc.get("credentials") or {})
+            extra = doc.get("settings") or {}
+            return {
+                "api_id": creds.get("api_id", ""),
+                "api_token": creds.get("api_token", ""),
+                "default_sender_wilaya": extra.get("default_sender_wilaya", "16"),
+                "enabled": bool(doc.get("is_active", True)),
             }
-        return config
+        return {
+            "api_id": os.environ.get("YALIDINE_API_ID", ""),
+            "api_token": os.environ.get("YALIDINE_API_TOKEN", ""),
+            "default_sender_wilaya": "16",
+            "enabled": bool(os.environ.get("YALIDINE_API_ID")),
+        }
 
     def _headers(config) -> dict:
         return {
@@ -76,19 +85,40 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
     @router.put("/settings")
     async def update_settings(settings: YalidineSettingsUpdate, admin: dict = Depends(get_tenant_admin)):
         tenant_id = admin.get("tenant_id")
-        update = {
-            "tenant_id": tenant_id,
-            "default_sender_wilaya": settings.default_sender_wilaya,
-            "enabled": settings.enabled,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
+        # p301: mirror into ecom_integrations (channel="yalidine") — one store,
+        # encrypted at rest, same schema the hub / dispatch flow uses.
+        from services.crypto_fields import encrypt_credentials as _ec, decrypt_credentials as _dc
+        existing = await db.ecom_integrations.find_one({"channel": "yalidine"}, {"_id": 0})
+        creds = _dc((existing or {}).get("credentials") or {})
         if settings.api_id:
-            update["api_id"] = settings.api_id
+            creds["api_id"] = settings.api_id
         if settings.api_token:
-            update["api_token"] = settings.api_token
-        await db.yalidine_settings.update_one(
-            {"tenant_id": tenant_id}, {"$set": update}, upsert=True
-        )
+            creds["api_token"] = settings.api_token
+        now = datetime.now(timezone.utc).isoformat()
+        has_real_creds = any(bool(str(v).strip()) for v in creds.values())
+        doc = {
+            "channel": "yalidine",
+            "kind": "shipping",
+            "name": "ياليدين",
+            "credentials": _ec(creds),
+            "is_active": bool(settings.enabled),
+            "mode": "live" if has_real_creds else "mock",
+            "settings": {"default_sender_wilaya": settings.default_sender_wilaya or "16"},
+            "updated_at": now,
+        }
+        if existing:
+            doc["id"] = existing.get("id")
+        else:
+            doc.update({
+                "id": str(uuid.uuid4()),
+                "return_fee": 0,
+                "last_sync_at": None,
+                "last_error": None,
+                "stats": {"orders": 0, "leads": 0, "shipments": 0},
+                "created_at": now,
+                "created_by": admin.get("id"),
+            })
+        await db.ecom_integrations.update_one({"channel": "yalidine"}, {"$set": doc}, upsert=True)
         return {"success": True, "message": "تم تحديث إعدادات Yalidine"}
 
     @router.get("/wilayas")
