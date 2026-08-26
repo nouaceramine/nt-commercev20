@@ -288,6 +288,14 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         except Exception:
             resolved_cash_box = s.payment_method
 
+    # p310b: a client-supplied code that already exists (split-bill parts reuse
+    # the prefetched code) is replaced by a fresh atomic one before insert
+    if s.code:
+        _dup = await db.sales.find_one({"code": s.code}, {"_id": 1}, session=_tx)
+        if _dup:
+            from services.code_generator import next_code as _next_code
+            s.code = await _next_code(db, "sales", "BV", 4, True)
+
     sale_doc = {
         "id": sale_id, "invoice_number": invoice_number,
         "code": s.code or "",

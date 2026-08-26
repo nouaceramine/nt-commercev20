@@ -18,7 +18,7 @@ import {
   List, FolderTree, FileText, ArrowDownToLine,
   ArrowUpFromLine, BarChart3, ScrollText, CalendarDays,
   Tag, Printer, PackagePlus, History, CreditCard, PauseCircle, Undo2 as UndoIcon,
-  UtensilsCrossed, ChefHat,
+  UtensilsCrossed, ChefHat, Scissors,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -132,6 +132,11 @@ export default function POSPage() {
   const restaurantOn = isFeatureEnabled('restaurant');
   const [restTables, setRestTables] = useState([]);
   const [selectedTable, setSelectedTable] = useState(null);
+  const [showSplitDialog, setShowSplitDialog] = useState(false);  // p310
+  const [splitParts, setSplitParts] = useState(2);
+  const [splitMode, setSplitMode] = useState('equal');
+  const [splitAssign, setSplitAssign] = useState({});
+  const [splitting, setSplitting] = useState(false);
   const [showTableDialog, setShowTableDialog] = useState(false);
   const [newTableName, setNewTableName] = useState('');
   const [newTableSeats, setNewTableSeats] = useState('4');
@@ -573,6 +578,82 @@ export default function POSPage() {
     } catch (e) { toast.error(errText(e)); }
   };
 
+  // p310: تقسيم الفاتورة — N فواتير منفصلة (متساوية بالكميات الكسرية أو حسب توزيع الأسطر)
+  // كل حصة = عملية بيع مستقلة مدفوعة نقدًا بالكامل؛ المخزون يُستهلك مرة واحدة بالمجموع
+  const doSplit = async () => {
+    if (!session.hasOpenSession) { toast.error(language === 'ar' ? 'يجب فتح حصة' : 'Ouvrez une session'); return; }
+    const lines = cart.cart;
+    if (lines.length === 0) { toast.error(language === 'ar' ? 'السلة فارغة' : 'Panier vide'); return; }
+    const N = splitParts;
+    const parts = Array.from({ length: N }, () => []);
+    if (splitMode === 'lines') {
+      lines.forEach((ln, i) => { parts[(splitAssign[i] || 1) - 1].push({ ...ln }); });
+      if (parts.some(pp => pp.length === 0)) { toast.error(language === 'ar' ? 'كل حصة يجب أن تحوي سطرًا واحدًا على الأقل' : 'Chaque part doit avoir une ligne'); return; }
+    } else {
+      lines.forEach(ln => {
+        const per = Math.floor((ln.quantity / N) * 1000) / 1000;
+        for (let k = 0; k < N; k++) {
+          const q = k === N - 1 ? Math.round((ln.quantity - per * (N - 1)) * 1000) / 1000 : per;
+          if (q !== 0) parts[k].push({ ...ln, quantity: q, total: Math.round(q * ln.unit_price * 100) / 100 });
+        }
+      });
+    }
+    setSplitting(true);
+    try {
+      const totalDiscount = (cart.discount || 0) + redeemAmount;
+      const grandSub = cart.subtotal || 1;
+      let firstSaleId = null;
+      let done = 0;
+      for (let k = 0; k < N; k++) {
+        const sub = Math.round(parts[k].reduce((s2, ln) => s2 + ln.total, 0) * 100) / 100;
+        if (sub <= 0) continue;
+        const disc = Math.round(totalDiscount * (sub / grandSub) * 100) / 100;
+        // p310b: each part needs its OWN invoice code (saleCode is single-use)
+        let partCode = saleCode;
+        if (k > 0) {
+          try { partCode = (await apiClient.get('/sales/generate-code')).data.code; }
+          catch (e2) { partCode = saleCode + '-S' + (k + 1) + '-' + (Date.now() % 10000); }
+        }
+        const payload = {
+          code: partCode,
+          customer_id: selectedCustomer,
+          warehouse_id: selectedWarehouse || null,
+          items: parts[k].map(item => ({
+            product_id: item.is_custom ? null : item.product_id,
+            product_name: item.product_name,
+            barcode: item.barcode || '',
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            discount: 0,
+            total: item.total,
+            note: ((language === 'ar' ? 'حصة ' : 'Part ') + (k + 1) + '/' + N + (item.note ? ' — ' + item.note : '')),
+            variant: item.variant || null,
+            modifiers: item.modifiers || null,
+            serial_number: item.serial_number || null,
+          })),
+          subtotal: sub,
+          discount: disc,
+          total: Math.round((sub - disc) * 100) / 100,
+          paid_amount: Math.round((sub - disc) * 100) / 100,
+          payment_method: 'cash',
+          payment_type: 'cash',
+          notes: (language === 'ar' ? 'فاتورة مقسّمة — حصة ' : 'Partage — part ') + (k + 1) + '/' + N + (cart.saleNote ? ' — ' + cart.saleNote : ''),
+        };
+        const r = await apiClient.post('/sales', payload);
+        if (!firstSaleId) firstSaleId = r.data.id;
+        done++;
+      }
+      if (restaurantOn && selectedTable) {
+        apiClient.post('/restaurant/tables/' + selectedTable.id + '/checkout', { sale_id: firstSaleId }).catch(() => {});
+        setSelectedTable(null);
+      }
+      toast.success((language === 'ar' ? 'تم التقسيم إلى ' : 'Divise en ') + done + (language === 'ar' ? ' فواتير' : ' factures'));
+      setShowSplitDialog(false);
+      cart.clear();
+    } catch (e) { toast.error(errText(e)); }
+    finally { setSplitting(false); }
+  };
+
   // === Filtered Products ===
   const filteredProducts = products.filter(p => {
     const matchesSearch = !searchQuery ||
@@ -725,6 +806,7 @@ export default function POSPage() {
     'history': () => setInlineTask('history'),  // p179: R.Lynx periods — sidebar fetches per period
     'table': () => { fetchTables(); setShowTableDialog(true); },  // p186
     'kitchen': () => sendToKitchen(),  // p186
+    'split': () => { setSplitAssign({}); setSplitParts(2); setSplitMode('equal'); setShowSplitDialog(true); },  // p310
   };
 
   const handleTaskClick = (taskId) => {
@@ -748,6 +830,7 @@ export default function POSPage() {
     ...(restaurantOn ? [  // p186
       { id: 'table', icon: UtensilsCrossed, label: (language === 'ar' ? 'طاولة' : 'Table') + (selectedTable ? ': ' + selectedTable.name : ''), shortcut: '', highlight: !!selectedTable },
       { id: 'kitchen', icon: ChefHat, label: language === 'ar' ? 'إرسال للمطبخ' : 'Cuisine', shortcut: '' },
+      { id: 'split', icon: Scissors, label: language === 'ar' ? 'تقسيم الفاتورة' : 'Diviser', shortcut: '' },  // p310
     ] : []),
     { id: 'reports', icon: BarChart3, label: language === 'ar' ? 'تقارير الحصة' : 'Rapports session', shortcut: 'R' },
     { id: 'history', icon: ScrollText, label: language === 'ar' ? 'السجل' : 'Historique', shortcut: 'H' },
@@ -1097,6 +1180,46 @@ export default function POSPage() {
                   <span className="text-xs text-muted-foreground">{language === 'ar' ? 'المخزون' : 'Stock'}: {v.quantity}</span>
                 </Button>
               ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p310: split bill dialog */}
+        <Dialog open={showSplitDialog} onOpenChange={setShowSplitDialog}>
+          <DialogContent className="max-w-md" data-testid="split-dialog">
+            <DialogHeader><DialogTitle>{language === 'ar' ? 'تقسيم الفاتورة' : 'Diviser la facture'}</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="flex gap-2 items-center flex-wrap">
+                <Label>{language === 'ar' ? 'عدد الحصص' : 'Parts'}</Label>
+                <div className="flex gap-1">
+                  {[2, 3, 4, 5, 6].map(n => (
+                    <Button key={n} size="sm" variant={splitParts === n ? 'default' : 'outline'} onClick={() => setSplitParts(n)} data-testid={`split-parts-${n}`}>{n}</Button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant={splitMode === 'equal' ? 'default' : 'outline'} onClick={() => setSplitMode('equal')} data-testid="split-mode-equal">{language === 'ar' ? 'تقسيم متساوٍ' : 'Parts egales'}</Button>
+                <Button size="sm" variant={splitMode === 'lines' ? 'default' : 'outline'} onClick={() => setSplitMode('lines')} data-testid="split-mode-lines">{language === 'ar' ? 'حسب الأسطر' : 'Par lignes'}</Button>
+              </div>
+              {splitMode === 'lines' && (
+                <div className="space-y-2 max-h-60 overflow-y-auto border rounded p-2">
+                  {cart.cart.map((ln, i) => (
+                    <div key={ln.cart_item_id} className="flex items-center gap-2 text-sm">
+                      <span className="flex-1 truncate">{ln.product_name} ×{ln.quantity}</span>
+                      <div className="flex gap-1">
+                        {Array.from({ length: splitParts }, (_, k) => k + 1).map(pn => (
+                          <Button key={pn} size="sm" variant={(splitAssign[i] || 1) === pn ? 'default' : 'outline'} className="h-7 w-7 p-0"
+                            data-testid={`split-line-${i}-payer-${pn}`}
+                            onClick={() => setSplitAssign(prev => ({ ...prev, [i]: pn }))}>{pn}</Button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button className="w-full min-h-[44px]" onClick={doSplit} disabled={splitting} data-testid="split-confirm-btn">
+                {language === 'ar' ? 'تنفيذ التقسيم' : 'Executer'}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
