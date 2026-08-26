@@ -402,4 +402,23 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish("kitchen_order.created", doc, pseudo)
         return _order_out(doc)
 
+    @router.get("/public/board/{tenant_id}")
+    async def public_order_board(tenant_id: str):
+        """p314: لوحة أرقام الطلبات للعرض العام (تلفاز المحل) — أكواد وحالات فقط،
+        بلا أسعار ولا أسماء. طلبات اليوم غير الملغاة."""
+        from config.database import get_tenant_db
+        await _qr_tenant(tenant_id)
+        tdb = get_tenant_db(tenant_id)
+        day = _now().strftime("%Y%m%d")
+        orders = await tdb.kitchen_orders.find(
+            {"code": {"$regex": f"^KCH-{day}-"}, "status": {"$ne": "cancelled"}},
+            {"_id": 0, "code": 1, "status": 1, "updated_at": 1},
+        ).to_list(300)
+        board = {"pending": [], "preparing": [], "served": []}
+        for o in orders:
+            st = o.get("status")
+            if st in board:
+                board[st].append(o.get("code"))
+        return {"day": day, "board": board}
+
     return {"router": router}

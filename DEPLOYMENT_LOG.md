@@ -1,3 +1,18 @@
+## 2026-08-26 — p314: شاشة العميل — لوحة أرقام الطلبات العمومية (الخطة ج، المرحلة 4)
+
+### التغييرات
+- backend/routes/restaurant_routes.py — `GET /restaurant/public/board/{tenant_id}`: لوحة عمومية (بلا دخول) لطلبات اليوم غير الملغاة — أكواد وحالات فقط (بلا أسعار/أسماء)، مقيدة بميزة restaurant وحالة المستأجر (404 لغير المفعلين)
+- frontend/src/pages/OrderBoardPage.js (جديد) — صفحة عمومية /board/:tenantId للتلفاز: 3 أعمدة كبيرة (قيد الاستلام/قيد التحضير/جاهز) بأرقام الطلبات، تحديث تلقائي كل 10 ث
+- App.js — مسار عمومي /board/:tenantId
+
+### الاختبار (NT-0001، وسم TEST-P314، نظّف حتى residue=0)
+- API: إنشاء طلب → ظهر في pending؛ PUT served → انتقل إلى served ✓؛ مستأجر بلا ميزة restaurant → 404 ✓
+- Playwright @1440px بلا تسجيل دخول: الأعمدة الثلاثة + الطلب 0001 في عمود «جاهز» ✓ (لقطة p314_board.png)
+- التنظيف: الطلب + الطاولة + outbox/processed_events + ستريم Redis + features_override={} — residue=0 ✓
+
+### النشر
+- Release 20260826_141109 — chunk 8676.b04ed21f (board-page مؤكدة)؛ Backend restart + health 200
+
 ## 2026-08-26 — p313: تنبؤ الطلب وقائمة المشتريات المقترحة (الخطة ج، المرحلة 3)
 
 ### التغييرات
