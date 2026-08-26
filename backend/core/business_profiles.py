@@ -185,7 +185,7 @@ BUSINESS_PROFILES = [
         "icon": "Pizza",
         "desc_ar": "بيع سريع عبر العداد، منتجات غير مخزنة",
         "features_off": ["recharge", "iptv", "maintenance", "barcode", "credit_sales"],
-        "features_on": ["restaurant"],  # p186: tables + kitchen orders
+        "features_on": ["restaurant", "production"],  # p186: tables + kitchen orders; p307: +production (وصفات الأطباق + تكلفة الطعام + الهالك)
         "families": ["بيتزا", "ساندويتشات", "مشروبات", "حلويات", "وجبات", "مقبلات"],
     },
     {

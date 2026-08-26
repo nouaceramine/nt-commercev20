@@ -1,3 +1,14 @@
+## 2026-08-26 — p307: ملف نشاط «المطعم» يفعّل أدوات التكلفة + تطبيقه على NT-0025
+
+### التغييرات
+- backend/core/business_profiles.py — ملف `restaurant` (بيتزيريا/فاست فود/مطاعم): features_on أصبح ["restaurant", "production"] — وصفات الأطباق وتقرير Food Cost والهالك (الخطة أ، p303-p305) كانت تحت ميزة production فلا تظهر لمستأجري المطاعم؛ الآن تُفعَّل تلقائيًا لكل مشترك جديد بنشاط مطعم
+- تطبيق الملف رسميًا على المستأجر NT-0025 (عرض بيتزيريا فاست فود ومطاعم) عبر POST /saas/tenants/{id}/business-profile → features_override = {restaurant:true, production:true, recharge/iptv/maintenance/barcode/credit_sales:false}
+
+### الاختبار
+- GET /saas/business-profiles/audit (بصلاحية super admin): NT-0025 status=ok بدون drift؛ كل المستأجرين الـ27 ok
+- Backend: restart + health 200
+- لا حاجة لبناء فرونتند (تغيير خادم فقط) ولا بيانات اختبار (residue=0)
+
 ## 2026-08-26 — p306: شاشة مطبخ حية KDS عبر SSE (الخطة ب للمطاعم، المرحلة 1)
 
 ### التغييرات
