@@ -643,4 +643,77 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 board[st].append(o.get("code"))
         return {"day": day, "board": board}
 
+    @router.get("/public/menu-board/{tenant_id}")
+    async def public_menu_board(tenant_id: str):
+        """p320: شاشة تلفاز المنتجات — قائمة عمومية بتوفر حي مربوط بالمخزون:
+        طبق له وصفة → متاح إن كانت مكوّناته تكفي لدفعة واحدة على الأقل (والباقي = عدد الدفعات)
+        منتج غير مخزوني بلا وصفة → متاح دائماً
+        منتج مخزوني بلا وصفة → متاح إن كانت الكمية > 0 (والباقي = الكمية)
+        أسماء/أسعار/توفر فقط — بلا تكاليف ولا بيانات حساسة."""
+        from config.database import get_tenant_db
+        t = await _qr_tenant(tenant_id)
+        tdb = get_tenant_db(tenant_id)
+        fams = {
+            f["id"]: (f.get("name_ar") or f.get("name") or "")
+            for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)
+        }
+        prods = await tdb.products.find(
+            {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}, "is_blocked": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
+             "family_id": 1, "image_url": 1, "is_non_stockable": 1, "quantity": 1},
+        ).to_list(1000)
+        recipes = {
+            r["product_id"]: r
+            for r in await tdb.recipes.find(
+                {}, {"_id": 0, "product_id": 1, "components": 1, "output_qty": 1}
+            ).to_list(500)
+        }
+        comp_ids = {
+            c["product_id"]
+            for r in recipes.values()
+            for c in (r.get("components") or [])
+        }
+        stock = {}
+        if comp_ids:
+            async for cp in tdb.products.find(
+                {"id": {"$in": list(comp_ids)}}, {"_id": 0, "id": 1, "quantity": 1}
+            ):
+                stock[cp["id"]] = float(cp.get("quantity") or 0)
+        items = []
+        for p in prods:
+            r = recipes.get(p["id"])
+            if r:
+                batches = None
+                for c in (r.get("components") or []):
+                    q = float(c.get("quantity") or 0)
+                    if q <= 0:
+                        continue
+                    b = int(stock.get(c["product_id"], 0) // q)
+                    batches = b if batches is None else min(batches, b)
+                if batches is None:
+                    batches = 0
+                per_batch = float(r.get("output_qty") or 1)
+                available = batches >= 1
+                remaining = int(batches * per_batch)
+            elif p.get("is_non_stockable"):
+                available, remaining = True, None
+            else:
+                qty = int(p.get("quantity") or 0)
+                available, remaining = qty > 0, qty
+            items.append({
+                "id": p["id"],
+                "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                "price": p.get("retail_price") or 0,
+                "family": fams.get(p.get("family_id")) or "",
+                "image_url": p.get("image_url") or "",
+                "available": available,
+                "remaining": remaining,
+            })
+        items.sort(key=lambda x: (x["family"], x["name"] or ""))
+        return {
+            "restaurant_name": t.get("company_name") or t.get("name") or "",
+            "items": items,
+            "generated_at": _now().isoformat(),
+        }
+
     return {"router": router}
