@@ -1,13 +1,17 @@
-// p320: شاشة تلفاز المنتجات — توفر حي مربوط بالمخزون/الوصفات، تحديث كل 10 ث
-import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+// p320+p321: شاشة تلفاز المنتجات — توفر حي مربوط بالمخزون/الوصفات، تحديث كل 10 ث
+// الوضع الافتراضي: شبكة بطاقات. ?mode=slider : شرائح صور بملء الشاشة تدور كل 8 ث
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { ChefHat, Ban, WifiOff } from 'lucide-react';
 
 export default function TvMenuPage() {
   const { tenantId } = useParams();
+  const [searchParams] = useSearchParams();
+  const sliderMode = searchParams.get('mode') === 'slider';
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
   const [clock, setClock] = useState(new Date());
+  const [slideIdx, setSlideIdx] = useState(0);
 
   const fetchMenu = useCallback(async () => {
     try {
@@ -26,6 +30,77 @@ export default function TvMenuPage() {
   }, [fetchMenu]);
 
   const items = data?.items || [];
+
+  // p321: شرائح الصور — المنتجات المتوفرة ذات الصور فقط، صورة لكل عنصر من المعرض
+  const slides = useMemo(() => {
+    const out = [];
+    for (const p of items) {
+      if (!p.available) continue;
+      const imgs = (p.images && p.images.length ? p.images : (p.image_url ? [p.image_url] : [])).filter(Boolean);
+      for (const src of imgs) out.push({ src, name: p.name, price: p.price, family: p.family, remaining: p.remaining });
+    }
+    return out;
+  }, [items]);
+
+  useEffect(() => {
+    if (!sliderMode || slides.length < 2) return;
+    const t = setInterval(() => setSlideIdx(i => (i + 1) % slides.length), 8000);
+    return () => clearInterval(t);
+  }, [sliderMode, slides.length]);
+
+  useEffect(() => { setSlideIdx(0); }, [slides.length]);
+
+  // ---------- وضع الشرائح (إعلانات ملء الشاشة) ----------
+  if (sliderMode && slides.length > 0 && !err) {
+    const s = slides[slideIdx % slides.length];
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-black relative" dir="rtl" data-testid="tvmenu-slider">
+        {slides.map((sl, i) => (
+          <img
+            key={sl.src + i}
+            src={sl.src}
+            alt={sl.name}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === slideIdx % slides.length ? 'opacity-100' : 'opacity-0'}`}
+          />
+        ))}
+        {/* تدرّج سفلي للقراءة */}
+        <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black via-black/70 to-transparent" />
+        {/* شريط علوي: اسم المطعم + ساعة */}
+        <div className="absolute top-0 inset-x-0 flex items-center justify-between p-6 bg-gradient-to-b from-black/80 to-transparent">
+          <div className="flex items-center gap-3">
+            <ChefHat className="h-9 w-9 text-amber-400" />
+            <span className="text-2xl font-bold text-white">{data?.restaurant_name || ''}</span>
+          </div>
+          <span className="text-2xl font-mono font-bold text-amber-400" dir="ltr">
+            {clock.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+        {/* معلومات الطبق */}
+        <div className="absolute bottom-0 inset-x-0 p-10 flex items-end justify-between">
+          <div>
+            {s.family && <div className="text-amber-400 text-xl mb-2">{s.family}</div>}
+            <h1 className="text-6xl font-black text-white drop-shadow-lg">{s.name}</h1>
+            {s.remaining != null && s.remaining <= 10 && (
+              <div className="mt-3 inline-block bg-amber-500 text-black text-xl font-bold rounded-xl px-4 py-1" data-testid="tvmenu-slide-low">بقي {s.remaining} فقط</div>
+            )}
+          </div>
+          <div className="text-left">
+            <div className="text-7xl font-black text-emerald-400 drop-shadow-lg">{s.price} <span className="text-3xl">دج</span></div>
+          </div>
+        </div>
+        {/* مؤشر الشرائح */}
+        {slides.length > 1 && (
+          <div className="absolute bottom-4 inset-x-0 flex justify-center gap-2">
+            {slides.map((_, i) => (
+              <span key={i} className={`h-2 rounded-full transition-all ${i === slideIdx % slides.length ? 'w-8 bg-amber-400' : 'w-2 bg-white/40'}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ---------- الوضع الشبكي (افتراضي) ----------
   const available = items.filter(i => i.available);
   const soldOut = items.filter(i => !i.available);
 

@@ -660,7 +660,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}, "is_blocked": {"$ne": True}},
             {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
-             "family_id": 1, "image_url": 1, "is_non_stockable": 1, "quantity": 1},
+             "family_id": 1, "image_url": 1, "images": 1, "is_non_stockable": 1, "quantity": 1},
         ).to_list(1000)
         recipes = {
             r["product_id"]: r
@@ -706,6 +706,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "price": p.get("retail_price") or 0,
                 "family": fams.get(p.get("family_id")) or "",
                 "image_url": p.get("image_url") or "",
+                "images": [i for i in (p.get("images") or []) if i][:5],  # p321: معرض الصور لشرائح التلفاز
                 "available": available,
                 "remaining": remaining,
             })
