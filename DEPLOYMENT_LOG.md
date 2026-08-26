@@ -1,3 +1,21 @@
+## 2026-08-26 — p315: إشعار واتساب عند جاهزية الطلب (الخطة ج)
+
+### التغييرات
+- backend/routes/restaurant_routes.py:
+  - `_clean_phone()` — تطبيع أرقام جزائرية: 00213→213، 0xxx→213xxx، أرقام فقط 8-15 خانة وإلا None
+  - `customer_phone` (اختياري) على KitchenOrderCreate وQrOrderCreate، يُخزَّن مطبَّعًا في وثيقة الطلب
+  - عند تحويل الحالة إلى served مع وجود رقم: إرسال «طلبك {code} جاهز» عبر WhatsAppService + تعليم الطلب `ready_notified: {at, sent}` — مغلّف بـ try/except فلا يفشل تحديث الحالة إن تعذّر الإرسال (الخدمة غير مهيأة حاليًا → sent:false، بند مالك: مفاتيح WhatsApp)
+- frontend/src/pages/QrMenuPage.js — حقل هاتف اختياري في سلة QR «لإشعارك عند الجاهزية» (data-testid=qr-phone-input)
+
+### الاختبار (NT-0001، وسم TEST-P315، نظّف حتى residue=0)
+- طلب كاشير بهاتف «0555 12 34 56» → خُزّن «213555123456» ✓؛ served → 200 + ready_notified{sent:false} ✓
+- طلب QR عمومي بهاتف «00213 660 11 22 33» → «213660112233» ✓؛ served → ready_notified ✓ (مصدر qr)
+- Playwright (390px): صفحة /r/:tenant/:table تعرض حقل الهاتف في السلة ✓
+- التنظيف: طلبان+طاولة+منتج+خنق QR+outbox(4)+processed(4)+5 أحداث ستريم = 0، features_override أُعيد {} ✓
+
+### النشر
+- build موجود مسبقًا من الجلسة المقطوعة ومنشور فعليًا: main.ae391587.js + chunk 4008.cfefa729 (علامة qr-phone-input مؤكدة)؛ الباكند أُعيد تشغيله بعد الرقعة وhealth=200
+
 ## 2026-08-26 — p314: شاشة العميل — لوحة أرقام الطلبات العمومية (الخطة ج، المرحلة 4)
 
 ### التغييرات

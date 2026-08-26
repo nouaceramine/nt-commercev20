@@ -32,6 +32,7 @@ class KitchenOrderCreate(BaseModel):
     table_id: Optional[str] = None
     items: List[KitchenItem]
     notes: Optional[str] = None
+    customer_phone: Optional[str] = None  # p315: إشعار واتساب عند الجاهزية
 
 
 class StatusUpdate(BaseModel):
@@ -62,6 +63,19 @@ class ModifierGroupsBody(BaseModel):
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+def _clean_phone(raw):
+    # p315: تطبيع رقم جزائري — أرقام فقط بصيغة دولية، وإلا None
+    if not raw:
+        return None
+    import re
+    d = re.sub(r"\D", "", str(raw))
+    if d.startswith("00213"):
+        d = d[2:]
+    elif d.startswith("0"):
+        d = "213" + d[1:]
+    return d if 8 <= len(d) <= 15 else None
 
 
 def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
@@ -223,6 +237,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "table_name": table.get("name") if table else None,
             "items": items,
             "notes": data.notes,
+            "customer_phone": _clean_phone(data.customer_phone),  # p315
             "status": "pending",
             "sale_id": None,
             "created_by": user.get("username") or user.get("email"),
@@ -247,6 +262,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             await _tables().update_one({"id": o["table_id"]}, {"$set": {"status": "free", "active_order_id": None}})
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
+        if data.status == "served" and updated.get("customer_phone"):
+            # p315: إشعار واتساب عند الجاهزية — لا يفشل تحديث الحالة إن تعذر الإرسال
+            try:
+                from services.whatsapp_service import WhatsAppService
+                res = await WhatsAppService().send_message(
+                    updated["customer_phone"],
+                    f"طلبك {updated.get('code')} جاهز للاستلام. شكرًا لزيارتكم!",
+                )
+                await _orders().update_one(
+                    {"id": order_id},
+                    {"$set": {"ready_notified": {"at": _now(), "sent": bool(res.get("sent"))}}},
+                )
+            except Exception:
+                pass
         return _order_out(updated)
 
     @router.post("/tables/{table_id}/checkout")
@@ -277,6 +306,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     class QrOrderCreate(BaseModel):
         items: List[QrOrderItem]
         notes: Optional[str] = None
+        customer_phone: Optional[str] = None  # p315
 
     async def _qr_tenant(tenant_id: str):
         from config.database import main_db as _mdb
@@ -387,6 +417,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "table_name": table.get("name"),
             "items": items,
             "notes": data.notes,
+            "customer_phone": _clean_phone(data.customer_phone),  # p315
             "status": "pending",
             "sale_id": None,
             "source": "qr",

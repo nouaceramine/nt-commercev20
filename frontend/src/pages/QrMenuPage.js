@@ -16,6 +16,7 @@ export default function QrMenuPage() {
   const [modSel, setModSel] = useState({});
   const [sending, setSending] = useState(false);
   const [done, setDone] = useState(null);
+  const [phone, setPhone] = useState('');  // p315: اختياري — إشعار واتساب عند الجاهزية
   const [showCart, setShowCart] = useState(false);
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export default function QrMenuPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: cart.map((c) => ({ product_id: c.id, quantity: c.qty, modifiers: c.mods.length ? c.mods : null })),
+          customer_phone: phone.trim() || null,  // p315
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -189,6 +191,12 @@ export default function QrMenuPage() {
             ))}
             <div className="flex justify-between font-bold text-lg pt-1"><span>المجموع</span><span>{fmt(total)} دج</span></div>
             <p className="text-xs text-muted-foreground text-center">الدفع عند الكاشير</p>
+            <input
+              type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+              placeholder="رقم الهاتف (اختياري) — لإشعارك عند الجاهزية"
+              className="w-full border rounded-lg p-3 text-sm bg-background"
+              data-testid="qr-phone-input"
+            />
             <Button className="w-full min-h-[48px] text-lg" onClick={submit} disabled={sending} data-testid="qr-submit-btn">
               {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : 'إرسال الطلب للمطبخ'}
             </Button>
