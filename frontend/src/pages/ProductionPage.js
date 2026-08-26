@@ -41,6 +41,8 @@ const ProductionPage = () => {
 
   // p305: food cost report + waste
   const [fcDays, setFcDays] = useState(30);
+  const [fcstDays, setFcstDays] = useState(30);
+  const [forecast, setForecast] = useState(null);
   const [fcReport, setFcReport] = useState(null);
   const [wasteList, setWasteList] = useState([]);
   const [showWasteDialog, setShowWasteDialog] = useState(false);
@@ -97,6 +99,14 @@ const ProductionPage = () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { fetchFc(fcDays); }, [fetchFc, fcDays]);
+
+  const fetchFcst = useCallback(async (d) => {
+    try {
+      const r = await apiClient.get(`/production/demand-forecast?days=${d}&cover=7`);
+      setForecast(r.data || null);
+    } catch (e) { /* silent */ }
+  }, []);
+  useEffect(() => { fetchFcst(fcstDays); }, [fetchFcst, fcstDays]);
 
   // p308: modifier groups editor (إضافات/بدائل الطبق — مثل جبن إضافي أو حجم أكبر)
   const openMods = async (r) => {
@@ -224,6 +234,7 @@ const ProductionPage = () => {
             <TabsTrigger value="recipes">{isAr ? 'الوصفات' : 'Recettes'}</TabsTrigger>
             <TabsTrigger value="orders">{isAr ? 'أوامر الإنتاج' : 'Ordres'}</TabsTrigger>
             <TabsTrigger value="foodcost" data-testid="foodcost-tab-trigger">{isAr ? 'تكلفة الطعام' : 'Food Cost'}</TabsTrigger>
+            <TabsTrigger value="forecast" data-testid="forecast-tab-trigger">{isAr ? 'توقع الطلب' : 'Prevision'}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="recipes" className="space-y-2 mt-3">
@@ -338,6 +349,38 @@ const ProductionPage = () => {
                     </CardContent>
                   </Card>
                 )}
+              </>
+            )}
+          </TabsContent>
+          <TabsContent value="forecast" className="space-y-3 mt-3" data-testid="forecast-tab">
+            <div className="flex gap-2 flex-wrap">
+              {[14, 30, 60].map(d => (
+                <Button key={d} size="sm" variant={fcstDays === d ? 'default' : 'outline'} onClick={() => setFcstDays(d)} data-testid={`fcst-days-${d}`}>{d}{isAr ? ' يوم' : 'j'}</Button>
+              ))}
+            </div>
+            {forecast && (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <Card><CardContent className="p-3 text-center"><div className="text-lg font-bold" data-testid="fcst-ingredients">{forecast.summary.ingredients}</div><div className="text-xs text-muted-foreground">{isAr ? 'مكوّن مستهلك' : 'Ingredients'}</div></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><div className={`text-lg font-bold ${forecast.summary.urgent > 0 ? 'text-destructive' : ''}`} data-testid="fcst-urgent">{forecast.summary.urgent}</div><div className="text-xs text-muted-foreground">{isAr ? 'يحتاج شراء عاجل' : 'Urgent'}</div></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><div className="text-lg font-bold" data-testid="fcst-cost">{forecast.summary.est_purchase_cost}</div><div className="text-xs text-muted-foreground">{isAr ? 'تكلفة شراء تقديرية' : 'Cout estime'}</div></CardContent></Card>
+                </div>
+                <Card>
+                  <CardContent className="p-3 space-y-2">
+                    <h3 className="font-semibold text-sm">{isAr ? 'قائمة المشتريات المقترحة (تغطية 7 أيام)' : 'Achats suggeres (7j)'}</h3>
+                    {forecast.items.length === 0 && <p className="text-xs text-muted-foreground">{isAr ? 'لا استهلاك وصفات في الفترة' : 'Aucune consommation'}</p>}
+                    {forecast.items.map(i => (
+                      <div key={i.product_id} className={`flex items-center justify-between text-sm border-b pb-1 ${i.urgent ? 'text-destructive' : ''}`} data-testid={`fcst-item-${i.product_id}`}>
+                        <span>{i.product_name}</span>
+                        <span className="text-xs">
+                          {isAr ? 'يوميًا' : '/j'} {i.avg_daily} · {isAr ? 'مخزون' : 'stock'} {i.stock_now}
+                          {i.days_remaining != null && <> · {isAr ? 'يكفي' : 'reste'} {i.days_remaining}{isAr ? ' يوم' : 'j'}</>}
+                          {i.suggested_qty > 0 && <b> · {isAr ? 'اقتراح' : 'sugg.'} {i.suggested_qty}</b>}
+                        </span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
               </>
             )}
           </TabsContent>

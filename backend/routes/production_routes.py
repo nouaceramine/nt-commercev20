@@ -386,4 +386,57 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             "waste": waste_items,
         }
 
+    @router.get("/demand-forecast")
+    async def demand_forecast(days: int = 30, cover: int = 7, user: dict = Depends(get_current_user)):
+        """p313: تنبؤ طلب المكوّنات من الاستهلاك الفعلي للوصفات (أسطر البيع المكلفة)
+        + اقتراح كميات شراء لتغطية `cover` يومًا. قراءة فقط — لا ينشئ مشتريات."""
+        days = max(1, min(days, 365))
+        cover = max(1, min(cover, 90))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        consumed = {}
+        async for sale in db.sales.find(
+            {"created_at": {"$gte": since}, "status": {"$ne": "returned"}},
+            {"_id": 0, "items": 1},
+        ):
+            for it in (sale.get("items") or []):
+                for cons in (it.get("recipe_consumption") or []):
+                    cpid = cons.get("product_id")
+                    if not cpid:
+                        continue
+                    consumed[cpid] = consumed.get(cpid, 0.0) + abs(cons.get("quantity") or 0)
+        items = []
+        for cpid, qty in consumed.items():
+            p = await _product(cpid)
+            if not p:
+                continue
+            avg_daily = qty / days
+            stock = p.get("quantity")
+            stock = float(stock) if stock is not None else 0.0
+            price = float(p.get("purchase_price") or 0)
+            days_left = (stock / avg_daily) if avg_daily > 0 else None
+            suggested = max(0.0, avg_daily * cover - stock)
+            items.append({
+                "product_id": cpid,
+                "product_name": p.get("name_ar") or p.get("name_en") or cpid,
+                "consumed_qty": round(qty, 3),
+                "avg_daily": round(avg_daily, 3),
+                "stock_now": round(stock, 3),
+                "days_remaining": round(days_left, 1) if days_left is not None else None,
+                "suggested_qty": round(suggested, 3),
+                "est_cost": round(suggested * price, 2),
+                "urgent": bool(days_left is not None and days_left < cover),
+            })
+        items.sort(key=lambda x: (x["days_remaining"] is None, x["days_remaining"] if x["days_remaining"] is not None else 0))
+        return {
+            "days": days,
+            "cover": cover,
+            "since": since[:10],
+            "summary": {
+                "ingredients": len(items),
+                "urgent": sum(1 for i in items if i["urgent"]),
+                "est_purchase_cost": round(sum(i["est_cost"] for i in items), 2),
+            },
+            "items": items,
+        }
+
     return {"router": router}
