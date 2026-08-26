@@ -20,9 +20,16 @@ export default function QrMenuPage() {
   const [showCart, setShowCart] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/restaurant/public/table-menu/${tenantId}/${tableId}/${token || ''}`)  // p323
+    // p324: رابط قديم بلا رمز (من نسخة ما قبل p323) أو رابط غير صالح — رسالة عربية واضحة بدل "Not Found"
+    const EXPIRED = 'انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي';
+    if (!token) { setError(EXPIRED); return; }
+    fetch(`/api/restaurant/public/table-menu/${tenantId}/${tableId}/${token}`)
       .then(async (r) => {
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'تعذر تحميل القائمة');
+        if (!r.ok) {
+          const d = (await r.json().catch(() => ({}))).detail || '';
+          if (r.status === 410 || r.status === 404 || d === 'Not Found') throw new Error(EXPIRED);
+          throw new Error(d || 'تعذر تحميل القائمة');
+        }
         return r.json();
       })
       .then(setMenu)
