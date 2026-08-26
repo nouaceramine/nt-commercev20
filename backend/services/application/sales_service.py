@@ -167,9 +167,64 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     debt_amount = remaining if (s.payment_type in ["credit", "partial", "installment"] or (s.customer_id and remaining > 0)) else 0
     status = "paid" if remaining <= 0 else ("partial" if s.paid_amount > 0 else "unpaid")
 
-    enriched_items = []
+    # p303: recipe-linked items (restaurant dishes) — consume raw ingredients
+    # from stock and cost the line by its recipe, so COGS (600) is real.
+    # Deduction never blocks the sale (kitchen reality: ingredients may go
+    # negative until a purchase lands); returns/deletes restore exactly the
+    # stored signed consumption.
+    _recipe_map = {}
     for item in s.items:
+        if not item.product_id or item.product_id in _recipe_map:
+            continue
+        recipe = await db.recipes.find_one({"product_id": item.product_id}, {"_id": 0})
+        if not recipe:
+            continue
+        out_qty = recipe.get("output_qty") or 1
+        unit_cost = 0.0
+        components = []
+        for c in (recipe.get("components") or []):
+            cp = await db.products.find_one({"id": c["product_id"]}, {"_id": 0, "purchase_price": 1})
+            ccost = (cp.get("purchase_price") if cp else None)
+            if ccost is None:
+                ccost = c.get("unit_cost", 0) or 0
+            per_unit = (c.get("quantity") or 0) / out_qty
+            unit_cost += per_unit * (ccost or 0)
+            components.append({"product_id": c["product_id"], "per_unit": per_unit})
+        _recipe_map[item.product_id] = {
+            "recipe_id": recipe.get("id"),
+            "unit_cost": round(unit_cost, 2),
+            "components": components,
+        }
+    _consumption_by_idx = {}
+    for _idx, item in enumerate(s.items):
+        _rc = _recipe_map.get(item.product_id) if item.product_id else None
+        if not _rc or not item.quantity:
+            continue
+        consumption = []
+        for comp in _rc["components"]:
+            cons_qty = round(comp["per_unit"] * item.quantity, 4)
+            if not cons_qty:
+                continue
+            await db.products.update_one(
+                {"id": comp["product_id"]},
+                {"$inc": {"quantity": -cons_qty}},
+                session=_tx,
+            )
+            consumption.append({"product_id": comp["product_id"], "quantity": cons_qty})
+        if consumption:
+            _consumption_by_idx[_idx] = consumption
+
+    enriched_items = []
+    for _idx, item in enumerate(s.items):
         item_dict = item.model_dump()
+        _rc = _recipe_map.get(item.product_id) if item.product_id else None
+        if _rc:
+            # p303: dish lines are costed by their recipe (authoritative)
+            item_dict["purchase_price"] = _rc["unit_cost"]
+            item_dict["recipe_id"] = _rc["recipe_id"]
+            _cons = _consumption_by_idx.get(_idx)
+            if _cons:
+                item_dict["recipe_consumption"] = _cons
         if "purchase_price" not in item_dict or item_dict.get("purchase_price") is None:
             product = await db.products.find_one({"id": item.product_id}, {"_id": 0, "purchase_price": 1})
             item_dict["purchase_price"] = product.get("purchase_price", 0) if product else 0
@@ -337,6 +392,9 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
     now = datetime.now(timezone.utc).isoformat()
     for item in sale.get("items", []):
         await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
+        for _cons in (item.get("recipe_consumption") or []):  # p303: restore consumed ingredients
+            if _cons.get("product_id") and _cons.get("quantity"):
+                await db.products.update_one({"id": _cons["product_id"]}, {"$inc": {"quantity": _cons["quantity"]}}, session=_tx)
         _v = item.get("variant") or {}  # p184
         if _v.get("color") or _v.get("size"):
             await db.products.update_one(
@@ -433,6 +491,9 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
 
     for item in sale["items"]:
         await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
+        for _cons in (item.get("recipe_consumption") or []):  # p303: restore consumed ingredients
+            if _cons.get("product_id") and _cons.get("quantity"):
+                await db.products.update_one({"id": _cons["product_id"]}, {"$inc": {"quantity": _cons["quantity"]}}, session=_tx)
         _v = item.get("variant") or {}  # p184
         if _v.get("color") or _v.get("size"):
             await db.products.update_one(
