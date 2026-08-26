@@ -50,7 +50,7 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
         return d
 
     async def _product(pid):
-        return await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "purchase_price": 1, "is_non_stockable": 1})
+        return await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "purchase_price": 1, "retail_price": 1, "is_non_stockable": 1})
 
     async def _validate_recipe(product_id: str, components: List[Component], output_qty: float):
         out_p = await _product(product_id)
@@ -92,6 +92,23 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             p = await _product(r["product_id"])
             r["product_name"] = (p.get("name_ar") or p.get("name_en")) if p else None
             r["output_stock"] = p.get("quantity") if p else None
+            # p304: live food cost & margin from CURRENT component purchase prices
+            # (purchases keep product.purchase_price fresh; stored unit_cost is
+            # only a fallback when a component product was deleted)
+            live = 0.0
+            for c in (r.get("components") or []):
+                cp = await _product(c["product_id"])
+                cc = (cp.get("purchase_price") if cp else None)
+                if cc is None:
+                    cc = c.get("unit_cost", 0) or 0
+                live += (c.get("quantity") or 0) * (cc or 0)
+            live_unit = round(live / (r.get("output_qty") or 1), 2)
+            r["live_unit_cost"] = live_unit
+            price = (p.get("retail_price") or 0) if p else 0
+            r["dish_price"] = price
+            r["margin"] = round(price - live_unit, 2)
+            r["margin_pct"] = round((price - live_unit) / price * 100, 1) if price > 0 else None
+            r["food_cost_pct"] = round(live_unit / price * 100, 1) if price > 0 else None
             out.append(r)
         return out
 

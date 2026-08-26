@@ -147,7 +147,12 @@ const ProductionPage = () => {
                       {r.components.map(c => `${c.product_name} (${c.quantity})`).join(' + ')}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground whitespace-nowrap">{isAr ? 'التكلفة' : 'Cout'}: <span className="font-bold text-foreground">{r.unit_cost} {isAr ? 'دج' : 'DA'}</span></div>
+                  <div className="text-xs text-muted-foreground whitespace-nowrap">
+                    <div>{isAr ? 'التكلفة الحية' : 'Cout live'}: <span className="font-bold text-foreground" data-testid={`live-cost-${r.id}`}>{r.live_unit_cost ?? r.unit_cost} {isAr ? 'دج' : 'DA'}</span></div>
+                    {(r.dish_price > 0) && (
+                      <div className="mt-1" data-testid={`margin-${r.id}`}>{isAr ? 'سعر البيع' : 'Prix'}: {r.dish_price} · {isAr ? 'الهامش' : 'Marge'}: <span className={(r.margin ?? 0) >= 0 ? 'font-bold text-emerald-600' : 'font-bold text-destructive'}>{r.margin_pct}%</span> · FC: {r.food_cost_pct}%</div>
+                    )}
+                  </div>
                   <div className="flex gap-1">
                     <Button size="sm" className="gap-1" data-testid={`run-btn-${r.id}`} onClick={() => openRun(r)}><Play className="h-3 w-3" />{isAr ? 'إنتاج' : 'Produire'}</Button>
                     <Button size="sm" variant="outline" onClick={() => openEdit(r)}><Pencil className="h-3 w-3" /></Button>
