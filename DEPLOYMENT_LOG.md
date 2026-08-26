@@ -1,3 +1,30 @@
+## 2026-08-26 — p311: طلب QR من الطاولة (الخطة ج، المرحلة 1)
+
+### التغييرات
+- backend/routes/restaurant_routes.py:
+  - KitchenItem أضيفت product_id + unit_price + modifiers (لقطة سعر خادمية + إعادة تحميل الطلب للسلة)
+  - `GET /restaurant/public/menu/{tenant_id}` — قائمة عمومية بدون دخول: اسم المطعم + الأصناف (أسعار من DB فقط) + مجموعات الإضافات، مقيدة بميزة restaurant وبحالة المستأجر (404 لغير المفعلين)
+  - `POST /restaurant/public/order/{tenant_id}/{table_id}` — إنشاء/إلحاق طلب مطبخ من الزبون: تحقق خادمي كامل (المنتج موجود، الكمية 1-20، ≤20 سطرًا، الإضافات تُطابق modifier_groups والسعر من DB لا من العميل)، خانع 10 ث لكل طاولة مدعوم بـ MongoDB (يعمل عبر عمال uvicorn الأربعة)، نشر أحداث KDS عبر outbox، source=qr
+- frontend/src/pages/QrMenuPage.js (جديد) — صفحة عمومية /r/:tenantId/:tableId (موبايل أولاً): قائمة مجمعة بالعائلات، حوار إضافات، سلة سفلية، إرسال → شاشة نجاح برقم الطلب، «الدفع عند الكاشير»
+- frontend/src/pages/POSPage.js — sendToKitchen يرسل product_id+unit_price؛ زر «تحميل الطلب للسلة» لكل طاولة مشغولة في منتقي الطاولات (يحوّل طلب QR/المطبخ إلى سلة بنفس الأسعار والإضافات) → إكمال البيع يحرّر الطاولة تلقائيًا (p310)
+- frontend/src/pages/TablesMapPage.js — حوار الطاولة يعرض رمز QR (qrcode.react) + رابط الطلب + زر نسخ
+- App.js — مسار عمومي /r/:tenantId/:tableId بدون حماية
+
+### إصلاحات أثناء التطوير
+- projection ناقص id في qr_public_order → KeyError (500) قبل أي استجابة
+- خانع in-memory غير فعال مع 4 عمال uvicorn → نُقل إلى MongoDB (_qr_throttle)
+- ابتلاع $set في heredoc → ValueError؛ أُصلح
+
+### الاختبار (NT-0001، وسم TEST-P311، residue=0)
+- API: قائمة عمومية ✓ (404 لمستأجر مجهول)، طلب QR ✓ (سعر 450 من DB)، خانع 429 ✓، منتج مجهول 400 ✓، إلحاق بطلب نشط ✓
+- Playwright موبايل 390px: قائمة → سلة → إرسال → شاشة نجاح KCH ✓
+- Playwright POS @1440px: تحميل طلب الطاولة للسلة ✓ → تأكيد البيع (نقدي) → BV0049/26 بقيمة 3600 (8×450) ✓ → المخزون 50→42 عند الدفع فقط ✓ → الطاولة تحررت والطلب served ومرتبط بالبيع ✓
+- التنظيف: حذف البيع عبر API (استعادة المخزون 42→50) + حذف الطلب/الطاولة/الخانع/المنتج + قيود اليومية المتوازنة + مرايا outbox/processed_events/nt:events + استعادة features_override={} ✓
+
+### النشر
+- Release 20260826_125920 — main.99e1fe04.js + chunk 4008.906bf4de (علامة qr-menu-page مؤكدة)
+- Backend: restart ×3 + health 200
+
 ## 2026-08-26 — p310: خريطة الطاولات البصرية + تقسيم الفاتورة (الخطة ب، المرحلة 4 — اكتملت الخطة ب)
 
 ### التغييرات

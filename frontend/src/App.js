@@ -92,6 +92,7 @@ const RentalsPage = lazy(() => import("./pages/RentalsPage"));  // p273
 const ProductionPage = lazy(() => import("./pages/ProductionPage"));  // p273  // p188
 const KitchenDisplayPage = lazy(() => import("./pages/KitchenDisplayPage"));  // p306
 const TablesMapPage = lazy(() => import("./pages/TablesMapPage"));  // p310
+const QrMenuPage = lazy(() => import("./pages/QrMenuPage"));  // p311
 const AccountingPage = lazy(() => import("./pages/AccountingPage"));  // p273  // p196
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));  // p273
 const AdvancedSalesReportPage = lazy(() => import("./pages/AdvancedSalesReportPage"));  // p273
@@ -377,6 +378,7 @@ function AppRoutes() {
       <Route path="/shop/:slug/lp/:productId" element={<StoreLandingPage />} />
       <Route path="/shop/:slug/track/:orderId" element={<OrderTrackingPage />} />
       <Route path="/track" element={<GlobalTrackingPage />} />
+      <Route path="/r/:tenantId/:tableId" element={<QrMenuPage />} />  {/* p311: QR table ordering (public) */}
       <Route path="/driver/:token" element={<DriverPage />} />
       
       {/* Unified Login - Single Entry Point for ALL users */}

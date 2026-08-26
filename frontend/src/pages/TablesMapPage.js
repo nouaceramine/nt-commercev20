@@ -11,7 +11,9 @@ import { Badge } from '../components/ui/badge';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
-import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw } from 'lucide-react';
+import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { startRealtime, onEvent, stopRealtime } from '../lib/realtime';
 
@@ -23,6 +25,7 @@ const elapsedMin = (iso) => {
 export default function TablesMapPage() {
   const { language } = useLanguage();
   const isAr = language === 'ar';
+  const { user } = useAuth();
   const [tables, setTables] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -176,6 +179,16 @@ export default function TablesMapPage() {
                   ) : (
                     <p className="text-sm text-muted-foreground">{isAr ? 'الطاولة فارغة — أنشئ طلبًا من نقطة البيع' : 'Table libre — commande via le POS'}</p>
                   )}
+                  {/* p311: رمز QR للطلب من الطاولة */}
+                  <div className="border rounded p-3 flex flex-col items-center gap-2" data-testid={`table-qr-${selTable.id}`}>
+                    <QRCodeCanvas value={`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`} size={140} />
+                    <p className="text-[11px] text-muted-foreground text-center break-all" dir="ltr">{`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`}</p>
+                    <Button variant="outline" size="sm" className="w-full"
+                      data-testid={`table-qr-copy-${selTable.id}`}
+                      onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (e) {} }}>
+                      <Copy className="h-4 w-4 ml-1" />{isAr ? 'نسخ رابط الطلب' : 'Copier le lien'}
+                    </Button>
+                  </div>
                   <Button variant="outline" className="w-full text-destructive" onClick={() => deleteTable(selTable)} data-testid={`table-delete-${selTable.id}`}>
                     <Trash2 className="h-4 w-4 ml-1" />{isAr ? 'حذف الطاولة' : 'Supprimer'}
                   </Button>

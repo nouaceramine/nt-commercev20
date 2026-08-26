@@ -23,6 +23,9 @@ class KitchenItem(BaseModel):
     quantity: float = 1
     note: Optional[str] = None
     variant: Optional[dict] = None  # p184
+    product_id: Optional[str] = None  # p311: enables loading a table order back into the POS cart
+    unit_price: Optional[float] = None  # p311: server-side price snapshot (QR orders)
+    modifiers: Optional[List[dict]] = None  # p311: structured modifier choices
 
 
 class KitchenOrderCreate(BaseModel):
@@ -260,5 +263,143 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             )
         await _tables().update_one({"id": table_id}, {"$set": {"status": "free", "active_order_id": None}})
         return {"ok": True}
+
+    # ---------- p311: QR table ordering (public — no auth) ----------
+    # Security notes: tenant must have the restaurant feature ON; prices and
+    # modifier deltas are ALWAYS taken from the DB (client sends ids/names
+    # only); one order per 10s per table (in-memory throttle).
+    class QrOrderItem(BaseModel):
+        product_id: str
+        quantity: float = 1
+        note: Optional[str] = None
+        modifiers: Optional[List[dict]] = None
+
+    class QrOrderCreate(BaseModel):
+        items: List[QrOrderItem]
+        notes: Optional[str] = None
+
+    async def _qr_tenant(tenant_id: str):
+        from config.database import main_db as _mdb
+        t = await _mdb.saas_tenants.find_one(
+            {"id": tenant_id},
+            {"_id": 0, "name": 1, "company_name": 1, "features_override": 1, "is_active": 1},
+        )
+        if not t or t.get("is_active") is False:
+            raise HTTPException(status_code=404, detail="غير موجود")
+        if not (t.get("features_override") or {}).get("restaurant"):
+            raise HTTPException(status_code=404, detail="غير موجود")
+        return t
+
+    @router.get("/public/menu/{tenant_id}")
+    async def qr_public_menu(tenant_id: str):
+        from config.database import get_tenant_db
+        t = await _qr_tenant(tenant_id)
+        tdb = get_tenant_db(tenant_id)
+        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+        prods = await tdb.products.find(
+            {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "image_url": 1},
+        ).to_list(1000)
+        items = [{
+            "id": p["id"],
+            "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+            "price": p.get("retail_price") or 0,
+            "family": fams.get(p.get("family_id")) or "",
+            "modifier_groups": p.get("modifier_groups") or [],
+            "image_url": p.get("image_url"),
+        } for p in prods]
+        return {"restaurant_name": t.get("company_name") or t.get("name") or "", "items": items}
+
+    @router.post("/public/order/{tenant_id}/{table_id}")
+    async def qr_public_order(tenant_id: str, table_id: str, data: QrOrderCreate):
+        import time as _time
+        from config.database import get_tenant_db
+        await _qr_tenant(tenant_id)
+        if not data.items or len(data.items) > 20:
+            raise HTTPException(status_code=400, detail="طلب غير صالح")
+        now_ts = _time.time()
+        tdb = get_tenant_db(tenant_id)
+        # DB-backed throttle (works across the 4 uvicorn workers, unlike RAM)
+        _last = await tdb["_qr_throttle"].find_one({"_id": table_id})
+        if _last and now_ts - float(_last.get("last") or 0) < 10:
+            raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
+        await tdb["_qr_throttle"].update_one({"_id": table_id}, {"$set": {"last": now_ts}}, upsert=True)
+        table = await tdb.restaurant_tables.find_one({"id": table_id})
+        if not table:
+            raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+        items = []
+        for it in data.items:
+            if not (0 < float(it.quantity or 0) <= 20):
+                raise HTTPException(status_code=400, detail="كمية غير صالحة")
+            p = await tdb.products.find_one(
+                {"id": it.product_id},
+                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "modifier_groups": 1},
+            )
+            if not p:
+                raise HTTPException(status_code=400, detail="منتج غير موجود")
+            mods = []
+            extra = 0.0
+            groups = p.get("modifier_groups") or []
+            for m in (it.modifiers or []):
+                hit = None
+                for g in groups:
+                    for opt in (g.get("options") or []):
+                        if opt.get("name") == (m.get("option") or ""):
+                            hit = (g, opt)
+                            break
+                    if hit:
+                        break
+                if not hit:
+                    raise HTTPException(status_code=400, detail="خيار غير صالح")
+                g, opt = hit
+                delta = float(opt.get("price_delta") or 0)
+                mods.append({"group": g.get("name"), "option": opt.get("name"),
+                             "price_delta": delta, "product_id": opt.get("product_id"),
+                             "qty": opt.get("qty") or 1})
+                extra += delta
+            items.append({
+                "product_id": p["id"],
+                "product_name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                "quantity": float(it.quantity),
+                "unit_price": (p.get("retail_price") or 0) + extra,
+                "note": it.note,
+                "modifiers": mods or None,
+            })
+        pseudo = {"tenant_id": tenant_id, "email": "qr@table", "username": "QR"}
+        active_id = table.get("active_order_id")
+        if active_id:
+            existing = await tdb.kitchen_orders.find_one(
+                {"id": active_id, "status": {"$in": ["pending", "preparing"]}})
+            if existing:
+                await tdb.kitchen_orders.update_one(
+                    {"id": active_id},
+                    {"$push": {"items": {"$each": items}}, "$set": {"updated_at": _now(), "status": "pending"}},
+                )
+                updated = await tdb.kitchen_orders.find_one({"id": active_id})
+                await _publish("kitchen_order.updated", updated, pseudo)
+                return _order_out(updated)
+        day = _now().strftime("%Y%m%d")
+        count = await tdb.kitchen_orders.count_documents({"code": {"$regex": f"^KCH-{day}-"}})
+        doc = {
+            "id": f"kch_{uuid.uuid4().hex[:12]}",
+            "code": f"KCH-{day}-{count + 1:04d}",
+            "table_id": table["id"],
+            "table_name": table.get("name"),
+            "items": items,
+            "notes": data.notes,
+            "status": "pending",
+            "sale_id": None,
+            "source": "qr",
+            "created_by": "QR",
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        await tdb.kitchen_orders.insert_one(doc)
+        await tdb.restaurant_tables.update_one(
+            {"id": table["id"]},
+            {"$set": {"status": "occupied", "active_order_id": doc["id"]}},
+        )
+        await _publish("kitchen_order.created", doc, pseudo)
+        return _order_out(doc)
 
     return {"router": router}

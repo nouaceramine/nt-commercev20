@@ -569,12 +569,40 @@ export default function POSPage() {
     try {
       const payload = {
         table_id: selectedTable ? selectedTable.id : null,
-        items: cart.cart.map(i => ({ product_name: i.product_name, quantity: i.quantity, note: [i.note, (i.modifiers || []).map(m => m.option).join(' + ')].filter(Boolean).join(' — ') || null, variant: i.variant || null })),  // p308: modifiers ride the kitchen note
+        items: cart.cart.map(i => ({ product_id: i.is_custom ? null : i.product_id, unit_price: i.unit_price, modifiers: (i.modifiers || []).length ? i.modifiers : null, product_name: i.product_name, quantity: i.quantity, note: [i.note, (i.modifiers || []).map(m => m.option).join(' + ')].filter(Boolean).join(' — ') || null, variant: i.variant || null })),  // p308: modifiers ride the kitchen note; p311: ids+prices for order→cart reload
       };
       const r = await apiClient.post('/restaurant/kitchen-orders', payload);
       toast.success(language === 'ar' ? 'أُرسل الطلب للمطبخ ' + r.data.code : 'Envoye en cuisine ' + r.data.code);
       printKitchenTicket(r.data);
       fetchTables();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
+  // p311: تحميل طلب طاولة نشط (QR أو مطبخ) إلى السلة للدفع — الأسعار من لقطة الطلب
+  const loadTableOrder = async (t) => {
+    if (!t?.active_order_id) { toast.error(language === 'ar' ? 'لا طلب نشط على هذه الطاولة' : 'Aucune commande'); return; }
+    try {
+      const r = await apiClient.get('/restaurant/kitchen-orders');
+      const ord = (r.data || []).find(o => o.id === t.active_order_id);
+      if (!ord || !(ord.items || []).length) { toast.error(language === 'ar' ? 'الطلب فارغ' : 'Commande vide'); return; }
+      let loaded = 0;
+      for (const it of ord.items) {
+        if (!it.product_id) continue;
+        const prod = products.find(p => p.id === it.product_id);
+        if (!prod) continue;
+        const mods = (it.modifiers || []).map(m => ({ group: m.group, option: m.option, price_delta: Number(m.price_delta) || 0, product_id: m.product_id || null, qty: m.qty || 1 }));
+        const delta = mods.reduce((a, m) => a + m.price_delta, 0);
+        cart.addItem(prod, {
+          overrideQty: it.quantity,
+          overridePrice: it.unit_price != null ? Math.round((it.unit_price - delta) * 100) / 100 : undefined,
+          modifiers: mods.length ? mods : undefined,
+        });
+        loaded++;
+      }
+      if (!loaded) { toast.error(language === 'ar' ? 'لا أسطر قابلة للتحميل' : 'Aucune ligne'); return; }
+      setSelectedTable(t);
+      setShowTableDialog(false);
+      toast.success((language === 'ar' ? 'حُمّل طلب ' : 'Commande chargee ') + (ord.code || '') + ' — ' + loaded + (language === 'ar' ? ' سطرًا' : ' lignes'));
     } catch (e) { toast.error(errText(e)); }
   };
 
@@ -1142,14 +1170,23 @@ export default function POSPage() {
                 <span className="font-bold">{language === 'ar' ? 'بدون طاولة' : 'Sans table'}</span>
               </Button>
               {restTables.map((t, i) => (
-                <Button key={t.id} variant={selectedTable && selectedTable.id === t.id ? 'default' : 'outline'} className="h-auto flex-col py-2"
-                  data-testid={'table-option-' + i}
-                  onClick={() => { setSelectedTable(t); setShowTableDialog(false); }}>
-                  <span className="font-bold text-sm">{t.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t.seats} {language === 'ar' ? 'مقاعد' : 'places'}{t.status === 'occupied' ? ' • ' + (language === 'ar' ? 'مشغولة' : 'occupee') : ''}
-                  </span>
-                </Button>
+                <div key={t.id} className="flex flex-col gap-1">
+                  <Button variant={selectedTable && selectedTable.id === t.id ? 'default' : 'outline'} className="h-auto flex-col py-2"
+                    data-testid={'table-option-' + i}
+                    onClick={() => { setSelectedTable(t); setShowTableDialog(false); }}>
+                    <span className="font-bold text-sm">{t.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t.seats} {language === 'ar' ? 'مقاعد' : 'places'}{t.status === 'occupied' ? ' • ' + (language === 'ar' ? 'مشغولة' : 'occupee') : ''}
+                    </span>
+                  </Button>
+                  {t.status === 'occupied' && t.active_order_id && (
+                    <Button size="sm" variant="secondary" className="text-xs min-h-[36px]"
+                      data-testid={'table-load-' + i}
+                      onClick={() => loadTableOrder(t)}>
+                      {language === 'ar' ? 'تحميل الطلب للسلة' : 'Charger la commande'}
+                    </Button>
+                  )}
+                </div>
               ))}
             </div>
             {isAdminUser && (
