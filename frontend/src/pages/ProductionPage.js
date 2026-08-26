@@ -39,6 +39,15 @@ const ProductionPage = () => {
   const [runBatches, setRunBatches] = useState('1');
   const [runMax, setRunMax] = useState(null);
 
+  // p305: food cost report + waste
+  const [fcDays, setFcDays] = useState(30);
+  const [fcReport, setFcReport] = useState(null);
+  const [wasteList, setWasteList] = useState([]);
+  const [showWasteDialog, setShowWasteDialog] = useState(false);
+  const [wProductId, setWProductId] = useState('');
+  const [wQty, setWQty] = useState('1');
+  const [wReason, setWReason] = useState('');
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -54,7 +63,28 @@ const ProductionPage = () => {
     finally { setLoading(false); }
   }, []);
 
+  const fetchFc = useCallback(async (d) => {
+    try {
+      const [rep, ws] = await Promise.all([
+        apiClient.get(`/production/food-cost-report?days=${d}`),
+        apiClient.get(`/production/waste?days=${d}`),
+      ]);
+      setFcReport(rep.data || null);
+      setWasteList(Array.isArray(ws.data) ? ws.data : []);
+    } catch (e) { /* silent */ }
+  }, []);
+
+  const doWaste = async () => {
+    try {
+      await apiClient.post('/production/waste', { product_id: wProductId, quantity: Number(wQty) || 0, reason: wReason.trim() });
+      toast.success(isAr ? 'سُجّل الهالك' : 'Dechet enregistre');
+      setShowWasteDialog(false); setWReason(''); setWQty('1');
+      fetchFc(fcDays);
+    } catch (e) { toast.error(errText(e)); }
+  };
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchFc(fcDays); }, [fetchFc, fcDays]);
 
   const openCreate = () => {
     setEditingRecipe(null); setRName(''); setRProductId(''); setROutputQty('1');
@@ -129,6 +159,7 @@ const ProductionPage = () => {
           <TabsList>
             <TabsTrigger value="recipes">{isAr ? 'الوصفات' : 'Recettes'}</TabsTrigger>
             <TabsTrigger value="orders">{isAr ? 'أوامر الإنتاج' : 'Ordres'}</TabsTrigger>
+            <TabsTrigger value="foodcost" data-testid="foodcost-tab-trigger">{isAr ? 'تكلفة الطعام' : 'Food Cost'}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="recipes" className="space-y-2 mt-3">
@@ -184,7 +215,95 @@ const ProductionPage = () => {
               </Card>
             ))}
           </TabsContent>
+          <TabsContent value="foodcost" className="space-y-2 mt-3" data-testid="foodcost-tab">
+            <div className="flex gap-1">
+              {[7, 30, 90].map(d => (
+                <Button key={d} size="sm" variant={fcDays === d ? 'default' : 'outline'} onClick={() => setFcDays(d)} data-testid={`fc-days-${d}`}>{d}{isAr ? ' يوم' : 'j'}</Button>
+              ))}
+              <Button size="sm" variant="outline" className="mr-auto gap-1" onClick={() => setShowWasteDialog(true)} data-testid="waste-add-btn"><Plus className="h-3 w-3" />{isAr ? 'تسجيل هالك' : 'Dechet'}</Button>
+            </div>
+            {fcReport && (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <Card><CardContent className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? 'إيراد الأطباق' : 'Revenus'}</div><div className="font-bold" data-testid="fc-revenue">{fcReport.summary.revenue}</div></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? 'تكلفة الطعام' : 'Cout'}</div><div className="font-bold" data-testid="fc-cost">{fcReport.summary.cost}</div></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><div className="text-xs text-muted-foreground">Food Cost %</div><div className="font-bold" data-testid="fc-pct">{fcReport.summary.food_cost_pct ?? '—'}%</div></CardContent></Card>
+                  <Card><CardContent className="p-3 text-center"><div className="text-xs text-muted-foreground">{isAr ? 'الهالك' : 'Dechets'}</div><div className="font-bold" data-testid="fc-waste">{fcReport.summary.waste_total}</div></CardContent></Card>
+                </div>
+                {fcReport.dishes.length === 0 && (
+                  <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">{isAr ? 'لا مبيعات أطباق في الفترة — بيانات التكلفة تُجمع من المبيعات المربوطة بالوصفات' : 'Aucune vente sur la periode'}</CardContent></Card>
+                )}
+                {fcReport.dishes.map(d => (
+                  <Card key={d.product_id} data-testid={`fc-dish-${d.product_id}`}>
+                    <CardContent className="p-3 flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm">{d.product_name} <span className="text-muted-foreground">×{d.qty}</span></div>
+                        <div className="text-xs text-muted-foreground mt-1">{isAr ? 'إيراد' : 'Rev'}: {d.revenue} · {isAr ? 'تكلفة' : 'Cout'}: {d.cost}</div>
+                      </div>
+                      <div className="text-xs whitespace-nowrap">
+                        <span className="font-bold">FC: {d.food_cost_pct ?? '—'}%</span>
+                        <span className={d.margin >= 0 ? 'text-emerald-600 font-bold' : 'text-destructive font-bold'}> · {d.margin} {isAr ? 'دج' : 'DA'}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                {fcReport.ingredients.length > 0 && (
+                  <Card>
+                    <CardContent className="p-3">
+                      <div className="font-semibold text-sm mb-2">{isAr ? 'الاستهلاك النظري للمكونات' : 'Consommation theorique'}</div>
+                      {fcReport.ingredients.map(ing => (
+                        <div key={ing.product_id} className="flex justify-between text-xs py-1 border-b last:border-0">
+                          <span>{ing.product_name}</span>
+                          <span className="text-muted-foreground">{ing.qty} · {ing.cost} {isAr ? 'دج' : 'DA'} · {isAr ? 'المخزون' : 'Stock'}: {ing.stock_now ?? '—'}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+                {wasteList.length > 0 && (
+                  <Card>
+                    <CardContent className="p-3">
+                      <div className="font-semibold text-sm mb-2">{isAr ? 'سجل الهالك' : 'Dechets recents'}</div>
+                      {wasteList.slice(0, 10).map(w => (
+                        <div key={w.id} className="flex justify-between text-xs py-1 border-b last:border-0">
+                          <span>{w.product_name}{w.reason ? ` — ${w.reason}` : ''}</span>
+                          <span className="text-muted-foreground">{w.quantity} · {w.total_cost} {isAr ? 'دج' : 'DA'}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
+          </TabsContent>
         </Tabs>
+
+        {/* p305: waste dialog */}
+        <Dialog open={showWasteDialog} onOpenChange={setShowWasteDialog}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>{isAr ? 'تسجيل هالك' : 'Enregistrer un dechet'}</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label>{isAr ? 'المكوّن' : 'Composant'}</Label>
+                <Select value={wProductId} onValueChange={setWProductId}>
+                  <SelectTrigger data-testid="waste-product-select"><SelectValue placeholder={isAr ? 'اختر المنتج' : 'Choisir'} /></SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {products.filter(p => !p.is_non_stockable).map(p => <SelectItem key={p.id} value={p.id}>{p.name_ar || p.name_en || p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>{isAr ? 'الكمية' : 'Quantite'}</Label>
+                <Input type="number" min="0.01" step="0.01" dir="ltr" value={wQty} onChange={e => setWQty(e.target.value)} data-testid="waste-qty-input" />
+              </div>
+              <div>
+                <Label>{isAr ? 'السبب' : 'Raison'}</Label>
+                <Input value={wReason} onChange={e => setWReason(e.target.value)} placeholder={isAr ? 'تالف / مسكوب / منتهي الصلاحية' : 'Perime / renverse'} data-testid="waste-reason-input" />
+              </div>
+              <Button onClick={doWaste} className="w-full" data-testid="waste-confirm-btn">{isAr ? 'تسجيل' : 'Enregistrer'}</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Recipe create/edit dialog */}
         <Dialog open={showRecipeDialog} onOpenChange={setShowRecipeDialog}>

@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import math
 import uuid
 
@@ -28,6 +28,12 @@ class RecipeUpdate(BaseModel):
 class RunCreate(BaseModel):
     recipe_id: str
     batches: float = 1
+
+
+class WasteCreate(BaseModel):
+    product_id: str
+    quantity: float
+    reason: Optional[str] = ""
 
 
 def _now():
@@ -247,5 +253,137 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _orders().insert_one(doc)
         await _recipes().update_one({"id": r["id"]}, {"$set": {"unit_cost": unit_cost, "updated_at": _now()}})
         return _out(doc)
+
+    # ---------- p305: waste log + food cost report ----------
+    @router.post("/waste")
+    async def add_waste(data: WasteCreate, admin: dict = Depends(get_tenant_admin)):
+        """Record ingredient waste/spoilage: deduct stock, log cost, post JE
+        (Dr 610 مصاريف / Cr 380 مخزون — idempotent via auto_entry_unique)."""
+        if data.quantity <= 0:
+            raise HTTPException(status_code=400, detail="الكمية يجب أن تكون موجبة")
+        p = await _product(data.product_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        now = datetime.now(timezone.utc).isoformat()
+        unit_cost = p.get("purchase_price", 0) or 0
+        total_cost = round(unit_cost * data.quantity, 2)
+        wid = "wst_" + uuid.uuid4().hex[:12]
+        await db.products.update_one(
+            {"id": data.product_id},
+            {"$inc": {"quantity": -data.quantity}, "$set": {"updated_at": now}},
+        )
+        doc = {
+            "id": wid,
+            "product_id": data.product_id,
+            "product_name": p.get("name_ar") or p.get("name_en"),
+            "quantity": data.quantity,
+            "unit_cost": unit_cost,
+            "total_cost": total_cost,
+            "reason": (data.reason or "").strip(),
+            "created_by": admin.get("name") or admin.get("email"),
+            "created_at": now,
+        }
+        await db.waste_log.insert_one(doc)
+        try:
+            from services.accounting_auto import ensure_accounts, _insert_entry, _line, already_posted
+            if total_cost > 0 and not await already_posted(db, wid, "production_waste"):
+                accounts = await ensure_accounts(db)
+                await _insert_entry(
+                    db, reference="هالك-" + wid, reference_id=wid,
+                    source_tag="production_waste",
+                    description="هالك مخزون: " + str(doc["product_name"]),
+                    lines=[_line(accounts["610"], debit=total_cost),
+                           _line(accounts["380"], credit=total_cost)],
+                )
+        except Exception:
+            pass  # فشل القيد لا يمنع تسجيل الهالك (يُراجع يدوياً)
+        out = dict(doc)
+        out.pop("_id", None)
+        return out
+
+    @router.get("/waste")
+    async def list_waste(days: int = 30, user: dict = Depends(get_current_user)):
+        since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()
+        return await db.waste_log.find({"created_at": {"$gte": since}}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    @router.get("/food-cost-report")
+    async def food_cost_report(days: int = 30, user: dict = Depends(get_current_user)):
+        """Restaurant P&L core: per-dish food cost & margin (from sale lines costed
+        by recipe since p303) + theoretical ingredient consumption + waste."""
+        since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()
+        rmap = {}
+        async for r in _recipes().find({}, {"_id": 0, "product_id": 1}):
+            rmap[r["product_id"]] = True
+        dishes = {}
+        ingredients = {}
+        revenue_total = 0.0
+        cost_total = 0.0
+        async for sale in db.sales.find(
+            {"created_at": {"$gte": since}, "status": {"$ne": "returned"}},
+            {"_id": 0, "items": 1},
+        ):
+            for it in (sale.get("items") or []):
+                pid = it.get("product_id")
+                if not pid or (not it.get("recipe_id") and pid not in rmap):
+                    continue
+                qty = abs(it.get("quantity") or 0)
+                rev = abs(it.get("total") or 0)
+                cost = (it.get("purchase_price") or 0) * qty
+                d = dishes.setdefault(pid, {
+                    "product_id": pid,
+                    "product_name": it.get("product_name") or "",
+                    "qty": 0.0, "revenue": 0.0, "cost": 0.0,
+                })
+                d["qty"] += qty
+                d["revenue"] += rev
+                d["cost"] += cost
+                revenue_total += rev
+                cost_total += cost
+                for cons in (it.get("recipe_consumption") or []):
+                    cpid = cons.get("product_id")
+                    if not cpid:
+                        continue
+                    ing = ingredients.setdefault(cpid, {"product_id": cpid, "qty": 0.0})
+                    ing["qty"] += abs(cons.get("quantity") or 0)
+        dish_list = []
+        for d in dishes.values():
+            d["qty"] = round(d["qty"], 3)
+            d["revenue"] = round(d["revenue"], 2)
+            d["cost"] = round(d["cost"], 2)
+            d["margin"] = round(d["revenue"] - d["cost"], 2)
+            d["food_cost_pct"] = round(d["cost"] / d["revenue"] * 100, 1) if d["revenue"] > 0 else None
+            dish_list.append(d)
+        dish_list.sort(key=lambda x: -x["revenue"])
+        ing_list = []
+        for ing in ingredients.values():
+            p = await _product(ing["product_id"])
+            ing["product_name"] = (p.get("name_ar") or p.get("name_en")) if p else "؟"
+            price = (p.get("purchase_price") or 0) if p else 0
+            ing["qty"] = round(ing["qty"], 4)
+            ing["cost"] = round(ing["qty"] * price, 2)
+            ing["stock_now"] = p.get("quantity") if p else None
+            ing_list.append(ing)
+        ing_list.sort(key=lambda x: -x["cost"])
+        waste_items = []
+        waste_total = 0.0
+        async for w in db.waste_log.find({"created_at": {"$gte": since}}, {"_id": 0}).sort("created_at", -1).limit(200):
+            waste_items.append(w)
+            waste_total += w.get("total_cost", 0) or 0
+        return {
+            "days": days,
+            "since": since[:10],
+            "summary": {
+                "revenue": round(revenue_total, 2),
+                "cost": round(cost_total, 2),
+                "margin": round(revenue_total - cost_total, 2),
+                "food_cost_pct": round(cost_total / revenue_total * 100, 1) if revenue_total > 0 else None,
+                "waste_total": round(waste_total, 2),
+                "waste_pct_of_revenue": round(waste_total / revenue_total * 100, 1) if revenue_total > 0 else None,
+                "dishes_sold": round(sum(d["qty"] for d in dish_list), 3),
+            },
+            "dishes": dish_list,
+            "ingredients": ing_list,
+            "waste": waste_items,
+        }
 
     return {"router": router}
