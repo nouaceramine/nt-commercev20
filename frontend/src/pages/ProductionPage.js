@@ -53,6 +53,13 @@ const ProductionPage = () => {
   const [modGroups, setModGroups] = useState([]);
   const [modSaving, setModSaving] = useState(false);
 
+  // p309: combo meal wizard state
+  const [showComboDialog, setShowComboDialog] = useState(false);
+  const [cName, setCName] = useState('');
+  const [cPrice, setCPrice] = useState('');
+  const [cItems, setCItems] = useState([{ product_id: '', quantity: '1' }, { product_id: '', quantity: '1' }]);
+  const [cSaving, setCSaving] = useState(false);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -113,6 +120,33 @@ const ProductionPage = () => {
       setModRecipe(null);
     } catch (e) { toast.error(errText(e)); }
     finally { setModSaving(false); }
+  };
+
+  // p309: combo = منتج حزمة قابل للبيع + وصفة مكوّناتها منتجات قابلة للبيع
+  // البيع يستهلك المكونات تلقائيًا ويكلّف السطر بتكلفتها الحقيقية (p303)
+  const saveCombo = async () => {
+    const comps = cItems.filter(c => c.product_id && Number(c.quantity) > 0)
+      .map(c => ({ product_id: c.product_id, quantity: Number(c.quantity) }));
+    if (!cName.trim() || !(Number(cPrice) > 0) || comps.length < 2) {
+      toast.error(isAr ? 'الاسم + السعر + مكوّنان على الأقل' : 'Nom + prix + 2 composants min'); return;
+    }
+    setCSaving(true);
+    try {
+      const pr = await apiClient.post('/products', {
+        name_en: cName.trim(), name_ar: cName.trim(),
+        retail_price: Number(cPrice), purchase_price: 0,
+        quantity: 0, is_non_stockable: true,
+      });
+      await apiClient.post('/production/recipes', {
+        product_id: pr.data.id, name: cName.trim(), output_qty: 1, components: comps,
+      });
+      toast.success(isAr ? 'أُنشئت وجبة Combo' : 'Combo cree');
+      setShowComboDialog(false);
+      setCName(''); setCPrice('');
+      setCItems([{ product_id: '', quantity: '1' }, { product_id: '', quantity: '1' }]);
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+    finally { setCSaving(false); }
   };
 
   const openCreate = () => {
@@ -182,6 +216,7 @@ const ProductionPage = () => {
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold flex items-center gap-2"><Factory className="h-5 w-5" />{isAr ? 'الإنتاج' : 'Production'}</h1>
           <Button onClick={openCreate} className="gap-1" data-testid="recipe-create-btn"><Plus className="h-4 w-4" />{isAr ? 'وصفة جديدة' : 'Nouvelle recette'}</Button>
+          <Button onClick={() => setShowComboDialog(true)} variant="outline" className="gap-1" data-testid="combo-create-btn"><Plus className="h-4 w-4" />{isAr ? 'وجبة Combo' : 'Combo'}</Button>
         </div>
 
         <Tabs defaultValue="recipes">
@@ -425,6 +460,55 @@ const ProductionPage = () => {
                 </Button>
               </div>
               <Button onClick={saveRecipe} className="w-full" data-testid="recipe-save-btn">{isAr ? 'حفظ الوصفة' : 'Enregistrer'}</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p309: combo meal wizard */}
+        <Dialog open={showComboDialog} onOpenChange={setShowComboDialog}>
+          <DialogContent className="max-w-md" data-testid="combo-dialog">
+            <DialogHeader><DialogTitle>{isAr ? 'وجبة Combo جديدة' : 'Nouveau combo'}</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label>{isAr ? 'اسم الوجبة' : 'Nom du combo'}</Label>
+                <Input value={cName} onChange={e => setCName(e.target.value)} placeholder={isAr ? 'مثال: وجبة بيتزا + مشروب' : 'Ex: Menu pizza + boisson'} data-testid="combo-name-input" />
+              </div>
+              <div>
+                <Label>{isAr ? 'سعر الوجبة (دج)' : 'Prix du combo'}</Label>
+                <Input type="number" min="0" step="0.01" value={cPrice} onChange={e => setCPrice(e.target.value)} dir="ltr" data-testid="combo-price-input" />
+              </div>
+              <div className="space-y-2">
+                <Label>{isAr ? 'مكوّنات الوجبة' : 'Composants'}</Label>
+                {cItems.map((c, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <Select value={c.product_id} onValueChange={v => setCItems(prev => prev.map((x, j) => j === i ? { ...x, product_id: v } : x))}>
+                      <SelectTrigger className="flex-1" data-testid={`combo-comp-${i}`}><SelectValue placeholder={isAr ? 'المنتج' : 'Produit'} /></SelectTrigger>
+                      <SelectContent className="max-h-60">
+                        {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name_ar || p.name_en || p.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" min="0.01" step="0.01" className="w-20" dir="ltr" value={c.quantity}
+                      onChange={e => setCItems(prev => prev.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
+                      data-testid={`combo-qty-${i}`} />
+                    <Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={cItems.length <= 2}
+                      onClick={() => setCItems(prev => prev.filter((_, j) => j !== i))}><Trash2 className="h-3 w-3" /></Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" className="gap-1" data-testid="combo-add-item"
+                  onClick={() => setCItems(prev => [...prev, { product_id: '', quantity: '1' }])}>
+                  <Plus className="h-3 w-3" />{isAr ? 'إضافة مكوّن' : 'Ajouter'}
+                </Button>
+                {Number(cPrice) > 0 && (
+                  <p className="text-xs text-muted-foreground" data-testid="combo-cost-preview">
+                    {isAr ? 'التكلفة الحالية للمكونات' : 'Cout actuel'}: {' '}
+                    {cItems.reduce((sum, c) => {
+                      const pr = products.find(p => p.id === c.product_id);
+                      return sum + (pr ? (pr.purchase_price || 0) * (Number(c.quantity) || 0) : 0);
+                    }, 0).toFixed(2)} {isAr ? 'دج' : 'DA'}
+                  </p>
+                )}
+              </div>
+              <Button onClick={saveCombo} className="w-full" disabled={cSaving} data-testid="combo-save-btn">{isAr ? 'إنشاء الوجبة' : 'Creer le combo'}</Button>
             </div>
           </DialogContent>
         </Dialog>
