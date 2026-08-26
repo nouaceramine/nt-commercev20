@@ -532,6 +532,7 @@ export const Layout = ({ children }) => {
       items: [
         { path: '/kitchen', icon: UtensilsCrossed, label: language === 'ar' ? 'شاشة المطبخ' : 'Cuisine' },
         { path: '/tables', icon: UtensilsCrossed, label: language === 'ar' ? 'خريطة الطاولات' : 'Tables' },
+        { path: '/waiter', icon: ChefHat, label: language === 'ar' ? 'واجهة النادل' : 'Serveur' },
       ]
     },
     {

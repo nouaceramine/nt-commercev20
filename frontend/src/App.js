@@ -93,6 +93,7 @@ const ProductionPage = lazy(() => import("./pages/ProductionPage"));  // p273  /
 const KitchenDisplayPage = lazy(() => import("./pages/KitchenDisplayPage"));  // p306
 const TablesMapPage = lazy(() => import("./pages/TablesMapPage"));  // p310
 const QrMenuPage = lazy(() => import("./pages/QrMenuPage"));  // p311
+const WaiterPage = lazy(() => import("./pages/WaiterPage"));  // p312
 const AccountingPage = lazy(() => import("./pages/AccountingPage"));  // p273  // p196
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));  // p273
 const AdvancedSalesReportPage = lazy(() => import("./pages/AdvancedSalesReportPage"));  // p273
@@ -1198,6 +1199,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="restaurant">
             <TablesMapPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/waiter"
+        element={
+          <ProtectedRoute featureKey="restaurant">
+            <WaiterPage />
           </ProtectedRoute>
         }
       />
