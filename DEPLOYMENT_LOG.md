@@ -1,3 +1,20 @@
+## 2026-08-27 — p322: إدارة شاشات التلفاز مركزيًا (إقران بكود + تحكم من الواجهة)
+
+### التغييرات
+- backend/routes/display_routes.py (جديد، مسجل في main.py) — إقران بنمط YouTube TV: POST /restaurant/public/screens/pair (كود 6 أرقام، 15 د، display_pairings في قاعدة المنصة) ← POST /restaurant/screens/claim (ينشئ الشاشة بتوكن TVS- دائم في قاعدة المستأجر) ← GET /restaurant/public/screens/{token} (وضع العرض + تحديث last_seen؛ مسح مستأجري restaurant فقط)؛ إدارة: GET/PUT/DELETE /restaurant/screens (التوكن لا يُكشف في القوائم)
+- إصلاح أثناء الاختبار: تواريخ pymongo الساذجة ← مُطبَّعة بـ_aware قبل المقارنة
+- frontend/src/pages/TvHubPage.js (جديد، /tv عمومي) — بلا توكن: كود إقران ضخم + تعليمات؛ مقترن: يعرض المحتوى حسب الوضع المركزي ويستعلم كل 10 ث؛ حذف الشاشة يعيدها لوضع الإقران
+- frontend/src/pages/ScreensPage.js (جديد، /screens داخل Layout) — إقران + بطاقات الشاشات (نقطة اتصال حية، تسمية، قائمة محتوى، فك ارتباط) + تحديث كل 10 ث
+- TvMenuPage/OrderBoardPage — قبول tenantIdProp/forceSlider للتضمين في المركز (الروابط المباشرة p314/p320 تبقى تعمل)
+- App.js (+/tv، +/screens محمي بميزة restaurant) + Layout.js (عنصر «شاشات العرض» في قسم المطعم)
+
+### التحقق (E2E كامل)
+- curl: كود ← poll (غير مقترن) ← claim 201 ← poll (مقترن + توكن) ← config (menu) ← تبديل slider ← config محدث ← القائمة (online، التوكن مخفي) ← كود خاطئ 404 ✓
+- Playwright @1920px: /tv مقترن ← شرائح مباشرة ✓؛ تبديل مركزي لـorders ← التلفاز انقلب للوحة الطلبات تلقائيًا ✓؛ /tv جديد ← شاشة الكود ✓؛ /screens ببطاقة «تلفاز الواجهة» + نقطة الاتصال ✓
+- نشر: release 20260826_201743 — main.9e69324e.js ✓؛ الشاشة التجريبية أُعيدت لوضع الشرائح
+
+---
+
 ## 2026-08-27 — p321: صور الأطباق على شاشات التلفاز + وضع الشرائح الإعلاني
 
 ### التغييرات

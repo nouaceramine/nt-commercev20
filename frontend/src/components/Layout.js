@@ -534,6 +534,7 @@ export const Layout = ({ children }) => {
         { path: '/tables', icon: UtensilsCrossed, label: language === 'ar' ? 'خريطة الطاولات' : 'Tables' },
         { path: '/waiter', icon: ChefHat, label: language === 'ar' ? 'واجهة النادل' : 'Serveur' },
         { path: '/delivery', icon: Bike, label: language === 'ar' ? 'طلبات التوصيل' : 'Livraisons' },
+        { path: '/screens', icon: Tv, label: language === 'ar' ? 'شاشات العرض' : 'Ecrans TV' },  // p322
       ]
     },
     {

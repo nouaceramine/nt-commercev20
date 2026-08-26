@@ -95,6 +95,8 @@ const TablesMapPage = lazy(() => import("./pages/TablesMapPage"));  // p310
 const QrMenuPage = lazy(() => import("./pages/QrMenuPage"));  // p311
 const OrderBoardPage = lazy(() => import("./pages/OrderBoardPage"));  // p314
 const TvMenuPage = lazy(() => import("./pages/TvMenuPage"));  // p320
+const TvHubPage = lazy(() => import("./pages/TvHubPage"));  // p322
+const ScreensPage = lazy(() => import("./pages/ScreensPage"));  // p322
 const WaiterPage = lazy(() => import("./pages/WaiterPage"));  // p312
 const DeliveryPage = lazy(() => import("./pages/DeliveryPage"));  // p316
 const AccountingPage = lazy(() => import("./pages/AccountingPage"));  // p273  // p196
@@ -385,6 +387,7 @@ function AppRoutes() {
       <Route path="/r/:tenantId/:tableId" element={<QrMenuPage />} />  {/* p311: QR table ordering (public) */}
       <Route path="/board/:tenantId" element={<OrderBoardPage />} />  {/* p314: public order status board */}
       <Route path="/tv/menu/:tenantId" element={<TvMenuPage />} />  {/* p320: public TV menu board (live stock) */}
+      <Route path="/tv" element={<TvHubPage />} />  {/* p322: TV hub — pair once, controlled centrally */}
       <Route path="/driver/:token" element={<DriverPage />} />
       
       {/* Unified Login - Single Entry Point for ALL users */}
@@ -1196,6 +1199,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="restaurant">
             <KitchenDisplayPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/screens"
+        element={
+          <ProtectedRoute featureKey="restaurant">
+            <ScreensPage />
           </ProtectedRoute>
         }
       />

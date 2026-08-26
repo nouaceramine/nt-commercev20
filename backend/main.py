@@ -1321,6 +1321,7 @@ _AUTO_REG_MODULES = [
     'routes.saas.account_control_routes',  # p269: agent impersonation + password resets
     'routes.rental_routes',  # p185: rental module (cars & properties)
     'routes.restaurant_routes',  # p186: restaurant mode (tables + kitchen orders)
+    'routes.display_routes',  # p322: TV display screens (pairing + central control)
     'routes.serials_routes',  # p187: IMEI/serial tracking
     'routes.production_routes',  # p188: BOM / production recipes
     'routes.events_routes',  # p191: SSE realtime channel

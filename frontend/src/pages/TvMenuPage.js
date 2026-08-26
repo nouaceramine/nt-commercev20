@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ChefHat, Ban, WifiOff } from 'lucide-react';
 
-export default function TvMenuPage() {
-  const { tenantId } = useParams();
+export default function TvMenuPage({ tenantIdProp, forceSlider } = {}) {  // p322: props for TvHub embedding
+  const { tenantId: paramTenantId } = useParams();
+  const tenantId = tenantIdProp || paramTenantId;
   const [searchParams] = useSearchParams();
-  const sliderMode = searchParams.get('mode') === 'slider';
+  const sliderMode = forceSlider || searchParams.get('mode') === 'slider';
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
   const [clock, setClock] = useState(new Date());

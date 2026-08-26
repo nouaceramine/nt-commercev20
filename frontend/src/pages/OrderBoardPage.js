@@ -3,8 +3,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { CheckCircle2, Timer, ClipboardList } from 'lucide-react';
 
-export default function OrderBoardPage() {
-  const { tenantId } = useParams();
+export default function OrderBoardPage({ tenantIdProp } = {}) {  // p322: prop for TvHub embedding
+  const { tenantId: paramTenantId } = useParams();
+  const tenantId = tenantIdProp || paramTenantId;
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
 
