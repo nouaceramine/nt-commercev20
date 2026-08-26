@@ -213,6 +213,31 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
             consumption.append({"product_id": comp["product_id"], "quantity": cons_qty})
         if consumption:
             _consumption_by_idx[_idx] = consumption
+    # p308: modifier options linked to stock products are consumed per dish unit
+    # (merged into recipe_consumption so return/delete restore them automatically)
+    for _idx, item in enumerate(s.items):
+        if not item.quantity:
+            continue
+        for _m in (getattr(item, "modifiers", None) or []):
+            if not isinstance(_m, dict):
+                continue
+            _mp = _m.get("product_id")
+            if not _mp:
+                continue
+            try:
+                _mq = round(float(_m.get("qty") or 1) * item.quantity, 4)
+            except (TypeError, ValueError):
+                continue
+            if not _mq:
+                continue
+            await db.products.update_one(
+                {"id": _mp},
+                {"$inc": {"quantity": -_mq}},
+                session=_tx,
+            )
+            _consumption_by_idx.setdefault(_idx, []).append(
+                {"product_id": _mp, "quantity": _mq}
+            )
 
     enriched_items = []
     for _idx, item in enumerate(s.items):
@@ -222,9 +247,10 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
             # p303: dish lines are costed by their recipe (authoritative)
             item_dict["purchase_price"] = _rc["unit_cost"]
             item_dict["recipe_id"] = _rc["recipe_id"]
-            _cons = _consumption_by_idx.get(_idx)
-            if _cons:
-                item_dict["recipe_consumption"] = _cons
+        # p308: consumption record applies to modifier-only lines too (no recipe)
+        _cons = _consumption_by_idx.get(_idx)
+        if _cons:
+            item_dict["recipe_consumption"] = _cons
         if "purchase_price" not in item_dict or item_dict.get("purchase_price") is None:
             product = await db.products.find_one({"id": item.product_id}, {"_id": 0, "purchase_price": 1})
             item_dict["purchase_price"] = product.get("purchase_price", 0) if product else 0

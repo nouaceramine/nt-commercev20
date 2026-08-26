@@ -15,6 +15,7 @@ class SaleItem(BaseModel):
     note: Optional[str] = ""
     variant: Optional[dict] = None  # p184: {"color": ..., "size": ...} for variant products
     serial_number: Optional[str] = None  # p187: IMEI/serial tracking
+    modifiers: Optional[List[dict]] = None  # p308: إضافات/بدائل الطبق [{group, option, price_delta, product_id?, qty?}]
 
 class DeliveryInfo(BaseModel):
     enabled: bool = False

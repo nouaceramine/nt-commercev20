@@ -120,6 +120,8 @@ export default function POSPage() {
   const [scaleCfg, setScaleCfg] = useState(null);
   const [weightProduct, setWeightProduct] = useState(null);
   const [variantProduct, setVariantProduct] = useState(null);  // p184: variant picker
+  const [modProduct, setModProduct] = useState(null);  // p308: modifier options picker
+  const [modSel, setModSel] = useState({});  // p308: {groupName: [optionName, ...]}
   const [weightValue, setWeightValue] = useState('');
   useEffect(() => {
     apiClient.get('/pos/scale-config').then(r => setScaleCfg(r.data)).catch(() => {});
@@ -392,6 +394,10 @@ export default function POSPage() {
     if (product.has_variants && (product.variants || []).length > 0 && !opts.variant) {
       setVariantProduct(product); return;
     }
+    // p308: dishes with modifier groups open the options dialog first
+    if (!opts.modifiers && !cart.returnMode && Array.isArray(product.modifier_groups) && product.modifier_groups.length > 0) {
+      setModSel({}); setModProduct(product); return;
+    }
     // p187: serial-tracked products ask for the IMEI/serial first (one unit per line)
     if (product.serial_number_tracking && !opts.serialNumber && !cart.returnMode) {
       setSerialProduct(product); setEntrySerial(''); return;
@@ -558,7 +564,7 @@ export default function POSPage() {
     try {
       const payload = {
         table_id: selectedTable ? selectedTable.id : null,
-        items: cart.cart.map(i => ({ product_name: i.product_name, quantity: i.quantity, note: i.note || null, variant: i.variant || null })),
+        items: cart.cart.map(i => ({ product_name: i.product_name, quantity: i.quantity, note: [i.note, (i.modifiers || []).map(m => m.option).join(' + ')].filter(Boolean).join(' — ') || null, variant: i.variant || null })),  // p308: modifiers ride the kitchen note
       };
       const r = await apiClient.post('/restaurant/kitchen-orders', payload);
       toast.success(language === 'ar' ? 'أُرسل الطلب للمطبخ ' + r.data.code : 'Envoye en cuisine ' + r.data.code);
@@ -625,6 +631,7 @@ export default function POSPage() {
           total: item.total,
           note: item.note || '',
           variant: item.variant || null,  // p184
+          modifiers: item.modifiers || null,  // p308
           serial_number: item.serial_number || null,  // p187
         })),
         subtotal: cart.subtotal,
@@ -1091,6 +1098,68 @@ export default function POSPage() {
                 </Button>
               ))}
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p308: modifier options picker (إضافات/بدائل الطبق) */}
+        <Dialog open={!!modProduct} onOpenChange={(o) => { if (!o) setModProduct(null); }}>
+          <DialogContent className="max-w-md" data-testid="modifier-dialog">
+            <DialogHeader>
+              <DialogTitle>{modProduct?.name || modProduct?.name_ar}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {(modProduct?.modifier_groups || []).map((g, gi) => (
+                <div key={gi}>
+                  <p className="text-sm font-semibold mb-2">
+                    {g.name} {g.required ? <span className="text-destructive">*</span> : null}
+                    {(g.max_select || 1) > 1 ? <span className="text-xs text-muted-foreground"> (≤{g.max_select})</span> : null}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(g.options || []).map((op, oi) => {
+                      const sel = (modSel[g.name] || []).includes(op.name);
+                      return (
+                        <Button key={oi} type="button" variant={sel ? 'default' : 'outline'} size="sm"
+                          className="min-h-[40px]"
+                          data-testid={`mod-option-${gi}-${oi}`}
+                          onClick={() => {
+                            setModSel(prev => {
+                              const cur = prev[g.name] || [];
+                              if (cur.includes(op.name)) return { ...prev, [g.name]: cur.filter(n2 => n2 !== op.name) };
+                              const maxS = g.max_select || 1;
+                              const next = maxS <= 1 ? [op.name] : [...cur, op.name].slice(0, maxS);
+                              return { ...prev, [g.name]: next };
+                            });
+                          }}>
+                          {op.name}{op.price_delta ? ` (+${op.price_delta})` : ''}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Button className="w-full min-h-[44px]" data-testid="mod-confirm-btn"
+              onClick={() => {
+                const groups = modProduct?.modifier_groups || [];
+                for (const g of groups) {
+                  if (g.required && !(modSel[g.name] || []).length) {
+                    toast.error((language === 'ar' ? 'اختر من: ' : 'Choisissez: ') + g.name);
+                    return;
+                  }
+                }
+                const mods = [];
+                for (const g of groups) {
+                  for (const opName of (modSel[g.name] || [])) {
+                    const op = (g.options || []).find(o2 => o2.name === opName);
+                    if (op) mods.push({ group: g.name, option: op.name, price_delta: Number(op.price_delta) || 0, product_id: op.product_id || null, qty: op.qty || 1 });
+                  }
+                }
+                cart.addItem(modProduct, { modifiers: mods });
+                checkFefoLot(modProduct);
+                setModProduct(null);
+              }}>
+              {language === 'ar' ? 'إضافة للسلة' : 'Ajouter au panier'}
+            </Button>
           </DialogContent>
         </Dialog>
 

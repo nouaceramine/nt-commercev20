@@ -320,6 +320,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "is_blocked": 1, "fixed_price": 1,
             "force_qty_entry": 1, "force_price_entry": 1,
             "serial_number_tracking": 1, "tax_rate": 1,
+            "modifier_groups": 1,  # p308: POS يحتاج مجموعات الإضافات عند اختيار الطبق
         }
 
         limit = max(1, min(limit, 50000))  # p175: no practical cap — return every match

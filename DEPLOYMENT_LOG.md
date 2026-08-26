@@ -1,3 +1,24 @@
+## 2026-08-26 — p308: إضافات/بدائل الأطباق (Modifiers) مع خصم مخزون المكونات
+
+### التغييرات
+- backend/models/schemas/trading.py — `SaleItem.modifiers: [{group, option, price_delta, product_id?, qty?}]`
+- backend/services/application/sales_service.py — خيارات الإضافات المرتبطة بمكوّن مخزون تُخصم مع البيع (كمية = qty × وحدات الطبق، بدون حاجز مخزون مثل الوصفات) وتندمج في recipe_consumption فتستعيدها المرتجعات/الحذف تلقائيًا؛ **إصلاح:** سجل الاستهلاك يُحفظ أيضًا للأسطر بلا وصفة (modifier-only)
+- backend/routes/restaurant_routes.py — `GET/PUT /restaurant/products/{id}/modifier-groups` (مجموعات: اسم/إجباري/أقصى اختيار/خيارات مع فرق سعر ومكوّن اختياري)
+- backend/routes/products_routes.py — إسقاط البحث في POS يشمل modifier_groups
+- frontend/src/hooks/usePOSCart.js — سطر سلة مستقل لكل تركيبة إضافات (مفتاح _mkey)، السعر = الأساس + Σ فروق الأسعار، اسم السطر يلحق «+خيار»
+- frontend/src/pages/POSPage.js — حوار اختيار الإضافات يفتح تلقائيًا عند اختيار طبق له مجموعات (تحقق إجباري/أقصى اختيار)، الإضافات في حمولة البيع، وتُلحق بملاحظة طلب المطبخ
+- frontend/src/pages/ProductionPage.js — زر «الإضافات» على كل بطاقة وصفة: محرر مجموعات كامل (إضافة/حذف مجموعات وخيارات، فرق سعر، ربط بمكوّن مخزون)
+
+### الاختبار (NT-0001، وسم TEST-P308، residue=0)
+- API: PUT/GET modifier-groups ✓؛ بيع 2 بيتزا + جبن إضافي → مخزون الجبن 10→8 والإضافات محفوظة بسطر البيع ✓؛ بعد إصلاح التسجيل: بيع ثانٍ 8→7 مع consumption موثق، والإرجاع يستعيد 7→8 ✓
+- Playwright: POS بحث + Enter → حوار الإضافات يفتح → اختيار «جبن إضافي» → سطر السلة «بيتزا تست +جبن إضافي» بسعر 1000 ✓؛ محرر الإضافات في الإنتاج: تحميل مجموعة موجودة + إضافة مجموعة «الحجم/كبير +150» وحفظها ✓
+- التنظيف: sales/journal_entries/transactions/recipes/products/outbox/Redis = 0، الصندوق عاد إلى -840، features_override استُعيد {}
+- ملاحظة تشغيلية: البيع الأول سبق إصلاح التسجيل فلم يوثّق استهلاك جبنه — عولج يدويًا بحذف منتجات الاختبار
+
+### النشر
+- Release 20260826_094928 — main.560db834.js + chunks 5242.684b0a8b (POS) و6267.09b2073f (الإنتاج)
+- Backend: restart + health 200
+
 ## 2026-08-26 — p307: ملف نشاط «المطعم» يفعّل أدوات التكلفة + تطبيقه على NT-0025
 
 ### التغييرات

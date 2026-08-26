@@ -69,11 +69,14 @@ export function usePOSCart({ language, toast }) {
   }, []);
 
   const addItem = useCallback((product, options = {}) => {
-    const { overrideQty, overridePrice, serialNumber, priceType, variant } = options;
+    const { overrideQty, overridePrice, serialNumber, priceType, variant, modifiers } = options;
     // p184: variant lines are distinct cart lines (same product, different color/size)
     const vKey = variant ? `${variant.color || ''}|${variant.size || ''}` : '';
-    const existingItem = cart.find(item => item.product_id === product.id && (item._vkey || '') === vKey);
-    const basePrice = overridePrice != null ? overridePrice : getTierPrice(product, priceType);
+    // p308: modifier selections make a distinct cart line and adjust the price
+    const mKey = modifiers && modifiers.length ? modifiers.map(m => `${m.group}:${m.option}`).join('|') : '';
+    const existingItem = cart.find(item => item.product_id === product.id && (item._vkey || '') === vKey && (item._mkey || '') === mKey);
+    const modDelta = modifiers && modifiers.length ? modifiers.reduce((acc, m) => acc + (Number(m.price_delta) || 0), 0) : 0;
+    const basePrice = (overridePrice != null ? overridePrice : getTierPrice(product, priceType)) + modDelta;
     const qty = overrideQty != null ? overrideQty : (returnMode ? -1 : 1);
     const bypassExisting = (serialNumber && serialNumber.length > 0) || overridePrice != null;
 
@@ -87,12 +90,15 @@ export function usePOSCart({ language, toast }) {
       ));
     } else {
       const vLabel = vKey ? [variant.color, variant.size].filter(Boolean).join(' / ') : '';
+      const mLabel = mKey ? ' +' + modifiers.map(m => m.option).join(' +') : '';
       setCart(prev => [...prev, {
         cart_item_id: Date.now().toString(36) + Math.random().toString(36).slice(2),
         product_id: product.id,
-        product_name: product.name + (vLabel ? ` - ${vLabel}` : ''),
+        product_name: product.name + (vLabel ? ` - ${vLabel}` : '') + mLabel,
         variant: variant ? { color: variant.color || '', size: variant.size || '' } : null,
+        modifiers: modifiers || null,  // p308
         _vkey: vKey,
+        _mkey: mKey,
         barcode: product.barcode,
         article_code: product.article_code,
         quantity: qty,

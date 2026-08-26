@@ -48,6 +48,11 @@ const ProductionPage = () => {
   const [wQty, setWQty] = useState('1');
   const [wReason, setWReason] = useState('');
 
+  // p308: modifier groups editor state
+  const [modRecipe, setModRecipe] = useState(null);
+  const [modGroups, setModGroups] = useState([]);
+  const [modSaving, setModSaving] = useState(false);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -85,6 +90,30 @@ const ProductionPage = () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { fetchFc(fcDays); }, [fetchFc, fcDays]);
+
+  // p308: modifier groups editor (إضافات/بدائل الطبق — مثل جبن إضافي أو حجم أكبر)
+  const openMods = async (r) => {
+    setModRecipe(r);
+    try {
+      const res = await apiClient.get(`/restaurant/products/${r.product_id}/modifier-groups`);
+      setModGroups(res.data.groups || []);
+    } catch { setModGroups([]); }
+  };
+  const saveMods = async () => {
+    for (const g of modGroups) {
+      if (!(g.name || '').trim()) { toast.error(isAr ? 'اسم المجموعة مطلوب' : 'Nom du groupe requis'); return; }
+      for (const op of (g.options || [])) {
+        if (!(op.name || '').trim()) { toast.error(isAr ? 'اسم الخيار مطلوب' : 'Nom requis'); return; }
+      }
+    }
+    setModSaving(true);
+    try {
+      await apiClient.put(`/restaurant/products/${modRecipe.product_id}/modifier-groups`, { groups: modGroups });
+      toast.success(isAr ? 'حُفظت الإضافات' : 'Options enregistrees');
+      setModRecipe(null);
+    } catch (e) { toast.error(errText(e)); }
+    finally { setModSaving(false); }
+  };
 
   const openCreate = () => {
     setEditingRecipe(null); setRName(''); setRProductId(''); setROutputQty('1');
@@ -186,6 +215,7 @@ const ProductionPage = () => {
                   </div>
                   <div className="flex gap-1">
                     <Button size="sm" className="gap-1" data-testid={`run-btn-${r.id}`} onClick={() => openRun(r)}><Play className="h-3 w-3" />{isAr ? 'إنتاج' : 'Produire'}</Button>
+                    <Button size="sm" variant="outline" data-testid={`mods-btn-${r.id}`} onClick={() => openMods(r)}>{isAr ? 'الإضافات' : 'Options'}</Button>
                     <Button size="sm" variant="outline" onClick={() => openEdit(r)}><Pencil className="h-3 w-3" /></Button>
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteRecipe(r)}><Trash2 className="h-3 w-3" /></Button>
                   </div>
@@ -301,6 +331,49 @@ const ProductionPage = () => {
                 <Input value={wReason} onChange={e => setWReason(e.target.value)} placeholder={isAr ? 'تالف / مسكوب / منتهي الصلاحية' : 'Perime / renverse'} data-testid="waste-reason-input" />
               </div>
               <Button onClick={doWaste} className="w-full" data-testid="waste-confirm-btn">{isAr ? 'تسجيل' : 'Enregistrer'}</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p308: modifier groups editor */}
+        <Dialog open={!!modRecipe} onOpenChange={(o) => { if (!o) setModRecipe(null); }}>
+          <DialogContent className="max-w-lg" data-testid="mods-dialog">
+            <DialogHeader><DialogTitle>{isAr ? 'إضافات وبدائل' : 'Options'} — {modRecipe?.product_name}</DialogTitle></DialogHeader>
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+              {modGroups.map((g, gi) => (
+                <div key={gi} className="border rounded p-2 space-y-2" data-testid={`mods-group-${gi}`}>
+                  <div className="flex gap-2 items-center">
+                    <Input value={g.name} placeholder={isAr ? 'اسم المجموعة (إضافات / الحجم)' : 'Nom du groupe'} onChange={e => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))} data-testid={`mods-group-name-${gi}`} />
+                    <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                      <input type="checkbox" checked={!!g.required} onChange={e => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, required: e.target.checked } : x))} data-testid={`mods-group-required-${gi}`} />
+                      {isAr ? 'إجباري' : 'Requis'}
+                    </label>
+                    <Input type="number" min="1" className="w-20" value={g.max_select} title={isAr ? 'أقصى اختيار' : 'Max'} onChange={e => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, max_select: Math.max(1, parseInt(e.target.value) || 1) } : x))} data-testid={`mods-group-max-${gi}`} />
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setModGroups(prev => prev.filter((_, i) => i !== gi))}><Trash2 className="h-3 w-3" /></Button>
+                  </div>
+                  {(g.options || []).map((op, oi) => (
+                    <div key={oi} className="flex gap-2 items-center pr-3">
+                      <Input value={op.name} placeholder={isAr ? 'الخيار (جبن إضافي)' : 'Option'} onChange={e => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, options: x.options.map((o2, j) => j === oi ? { ...o2, name: e.target.value } : o2) } : x))} data-testid={`mods-option-name-${gi}-${oi}`} />
+                      <Input type="number" className="w-24" value={op.price_delta} title={isAr ? 'فرق السعر' : 'Delta prix'} onChange={e => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, options: x.options.map((o2, j) => j === oi ? { ...o2, price_delta: parseFloat(e.target.value) || 0 } : o2) } : x))} data-testid={`mods-option-price-${gi}-${oi}`} />
+                      <Select value={op.product_id || 'none'} onValueChange={v => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, options: x.options.map((o2, j) => j === oi ? { ...o2, product_id: v === 'none' ? null : v } : o2) } : x))}>
+                        <SelectTrigger className="w-40" data-testid={`mods-option-product-${gi}-${oi}`}><SelectValue placeholder={isAr ? 'مكوّن؟' : 'Ingredient?'} /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{isAr ? 'بدون خصم مخزون' : 'Sans stock'}</SelectItem>
+                          {products.map(p => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, options: x.options.filter((_, j) => j !== oi) } : x))}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  ))}
+                  <Button size="sm" variant="outline" onClick={() => setModGroups(prev => prev.map((x, i) => i === gi ? { ...x, options: [...(x.options || []), { name: '', price_delta: 0, product_id: null, qty: 1 }] } : x))} data-testid={`mods-add-option-${gi}`}>
+                    <Plus className="h-3 w-3 ml-1" />{isAr ? 'خيار' : 'Option'}
+                  </Button>
+                </div>
+              ))}
+              <Button size="sm" variant="outline" className="w-full" onClick={() => setModGroups(prev => [...prev, { name: '', required: false, max_select: 1, options: [] }])} data-testid="mods-add-group">
+                <Plus className="h-3 w-3 ml-1" />{isAr ? 'مجموعة إضافات جديدة' : 'Nouveau groupe'}
+              </Button>
+              <Button className="w-full" onClick={saveMods} disabled={modSaving} data-testid="mods-save-btn">{isAr ? 'حفظ الإضافات' : 'Enregistrer'}</Button>
             </div>
           </DialogContent>
         </Dialog>

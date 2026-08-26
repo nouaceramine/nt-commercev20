@@ -39,6 +39,24 @@ class CheckoutBody(BaseModel):
     sale_id: Optional[str] = None
 
 
+class ModifierOption(BaseModel):
+    name: str
+    price_delta: float = 0
+    product_id: Optional[str] = None  # p308: مكوّن مخزون مرتبط يُخصم عند البيع (مثلاً جبن إضافي)
+    qty: float = 1  # كمية المكوّن لكل وحدة طبق
+
+
+class ModifierGroup(BaseModel):
+    name: str
+    required: bool = False
+    max_select: int = 1
+    options: List[ModifierOption] = []
+
+
+class ModifierGroupsBody(BaseModel):
+    groups: List[ModifierGroup]
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -85,6 +103,32 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         day = _now().strftime("%Y%m%d")
         count = await _orders().count_documents({"code": {"$regex": f"^KCH-{day}-"}})
         return f"KCH-{day}-{count + 1:04d}"
+
+    # ---------- p308: Modifier groups (إضافات/بدائل الأطباق) ----------
+    @router.get("/products/{product_id}/modifier-groups")
+    async def get_modifier_groups(product_id: str, user: dict = Depends(get_current_user)):
+        p = await db.products.find_one(
+            {"id": product_id}, {"_id": 0, "modifier_groups": 1, "name": 1}
+        )
+        if not p:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        return {
+            "product_id": product_id,
+            "product_name": p.get("name"),
+            "groups": p.get("modifier_groups") or [],
+        }
+
+    @router.put("/products/{product_id}/modifier-groups")
+    async def set_modifier_groups(
+        product_id: str, body: ModifierGroupsBody, admin: dict = Depends(get_tenant_admin)
+    ):
+        res = await db.products.update_one(
+            {"id": product_id},
+            {"$set": {"modifier_groups": [g.model_dump() for g in body.groups]}},
+        )
+        if not res.matched_count:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        return {"ok": True, "groups": len(body.groups)}
 
     # ---------- Tables ----------
     @router.get("/tables")
