@@ -1,3 +1,23 @@
+## 2026-08-26 — p306: شاشة مطبخ حية KDS عبر SSE (الخطة ب للمطاعم، المرحلة 1)
+
+### التغييرات
+- backend/routes/restaurant_routes.py:
+  - `_publish()` — نشر أحداث طلبات المطبخ عبر outbox (الالتزام الذري + ترحيل 2 ث إلى Redis nt:events) مع try/except لا يمنع عملية المطبخ عند فشل النشر
+  - `kitchen_order.created` عند إنشاء طلب جديد، و`kitchen_order.updated` عند الإلحاق بطلب طاولة نشط وعند كل تغيير حالة — الحمولة: order_id/code/table_name/status/item_count
+- frontend/src/pages/KitchenDisplayPage.js (جديد) — شاشة KDS بملء الشاشة: 3 أعمدة (جديد/قيد التحضير/جاهز)، مؤقّت دقائق لكل طلب (أحمر ≥15 د)، أزرار لمسية ≥44px (بدء التحضير/جاهز/إلغاء)، تحديث لحظي عبر startRealtime/onEvent + استطلاع احتياطي كل 15 ث + نبض 30 ث للمؤقتات
+- frontend/src/App.js — route `/kitchen` (lazy، ProtectedRoute featureKey="restaurant")
+- frontend/src/components/Layout.js — قسم قائمة «المطعم» (featureKey restaurant) مع عنصر «شاشة المطبخ» (أيقونات ChefHat/UtensilsCrossed)
+
+### الاختبار (NT-0001، وسم TEST-P306، نظّف حتى residue=0)
+- API: إنشاء طاولة + طلب مطبخ → حدث `kitchen_order.created` في Redis ✓؛ PUT status=preparing → `kitchen_order.updated` ✓
+- Playwright @1440px: /kitchen يعرض 3 أعمدة + الطلب في عموده الصحيح؛ زر «جاهز» نقله preparing→served عبر الواجهة ✓ (لقطات p306_kds.png/p306_kds2.png)
+- ملاحظة تشغيلية: قاعدة البيانات الرئيسية الفعلية هي `ntcommerce` (وليست main_db حرفيًا) — صُحّح مسار features_override
+- التنظيف: kitchen_orders/restaurant_tables/outbox/processed_events = 0، حذف أحداث الاختبار من nt:events بـ XDEL، استعادة features_override={} ✓
+
+### النشر
+- Release 20260826_021943 — main.f298a0c8.js + chunk 2138.6203b1c2 (علامة kds-page مؤكدة في الحزمة المنشورة)
+- Backend: restart + health 200
+
 ## 2026-08-26 — p305: تقرير Food Cost + الهالك (الخطة أ للمطاعم، المرحلة 3 — اكتملت الخطة أ)
 
 ### التغييرات

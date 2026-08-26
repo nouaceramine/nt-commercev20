@@ -80,7 +80,7 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory, Percent, LifeBuoy, Cctv
+  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -522,6 +522,15 @@ export const Layout = ({ children }) => {
       icon: Factory,
       items: [
         { path: '/production', icon: Factory, label: language === 'ar' ? 'الإنتاج' : 'Production' },
+      ]
+    },
+    {
+      id: 'restaurant',
+      featureKey: 'restaurant',
+      title: language === 'ar' ? 'المطعم' : 'Restaurant',
+      icon: ChefHat,
+      items: [
+        { path: '/kitchen', icon: UtensilsCrossed, label: language === 'ar' ? 'شاشة المطبخ' : 'Cuisine' },
       ]
     },
     {

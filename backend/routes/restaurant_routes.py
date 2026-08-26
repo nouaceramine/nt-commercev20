@@ -58,6 +58,24 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         t.pop("_id", None)
         return t
 
+    async def _publish(event_type, o, user):
+        # p306: kitchen order events feed the live KDS screen via SSE
+        try:
+            from services.outbox import outbox_write
+            from config.database import main_db as _main_db
+            await outbox_write(
+                _main_db, event_type,
+                {
+                    "order_id": o.get("id"), "code": o.get("code"),
+                    "table_name": o.get("table_name"), "status": o.get("status"),
+                    "item_count": len(o.get("items") or []),
+                },
+                tenant_id=user.get("tenant_id") or "platform",
+                source="restaurant",
+            )
+        except Exception:
+            pass  # فشل النشر لا يمنع عملية المطبخ
+
     def _order_out(o):
         o = dict(o)
         o.pop("_id", None)
@@ -148,7 +166,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                         {"id": active_id},
                         {"$push": {"items": {"$each": items}}, "$set": {"updated_at": _now(), "status": "pending"}},
                     )
-                    return _order_out(await _orders().find_one({"id": active_id}))
+                    updated = await _orders().find_one({"id": active_id})
+                    await _publish("kitchen_order.updated", updated, user)
+                    return _order_out(updated)
         doc = {
             "id": f"kch_{uuid.uuid4().hex[:12]}",
             "code": await _order_code(),
@@ -165,6 +185,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _orders().insert_one(doc)
         if table:
             await _tables().update_one({"id": table["id"]}, {"$set": {"status": "occupied", "active_order_id": doc["id"]}})
+        await _publish("kitchen_order.created", doc, user)
         return _order_out(doc)
 
     @router.put("/kitchen-orders/{order_id}/status")
@@ -177,7 +198,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _orders().update_one({"id": order_id}, {"$set": {"status": data.status, "updated_at": _now()}})
         if data.status in ("served", "cancelled") and o.get("table_id"):
             await _tables().update_one({"id": o["table_id"]}, {"$set": {"status": "free", "active_order_id": None}})
-        return _order_out(await _orders().find_one({"id": order_id}))
+        updated = await _orders().find_one({"id": order_id})
+        await _publish("kitchen_order.updated", updated, user)
+        return _order_out(updated)
 
     @router.post("/tables/{table_id}/checkout")
     async def checkout_table(table_id: str, data: CheckoutBody, user: dict = Depends(get_current_user)):
