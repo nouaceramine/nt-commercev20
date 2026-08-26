@@ -49,6 +49,9 @@ SUPPORTED_FEATURES = {
     "wallet", "commission", "reports", "backup", "ai_bots", "barcode",
     "thermal_print", "credit_sales", "loyalty_points",
     "ecommerce_hub",
+    # p318: opt-in activity modules — without these, saving the flags dialog
+    # silently WIPED them from features_override (NT-0025 lost restaurant mode)
+    "restaurant", "production", "rental",
 }
 
 

@@ -71,6 +71,10 @@ const ALL_FEATURES = [
   { key: 'credit_sales',    labelAr: 'البيع بالدين' },
   { key: 'loyalty_points',  labelAr: 'نقاط الولاء' },
   { key: 'ecommerce_hub',   labelAr: '🛍️ مركز التجارة الإلكترونية الموحّد', optIn: true },
+  // p318: opt-in activity modules — must stay editable or saving wipes them
+  { key: 'restaurant',      labelAr: '🍕 وضع المطعم (طاولات + مطبخ + توصيل)', optIn: true },
+  { key: 'production',      labelAr: '🏭 الإنتاج (وصفات + تكلفة الطعام)', optIn: true },
+  { key: 'rental',          labelAr: '🔑 الكراء', optIn: true },
 ];
 
 // Pragmatic email validator — mirrors the backend regex in routes/saas/schemas.py.
