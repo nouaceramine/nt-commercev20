@@ -384,7 +384,8 @@ function AppRoutes() {
       <Route path="/shop/:slug/lp/:productId" element={<StoreLandingPage />} />
       <Route path="/shop/:slug/track/:orderId" element={<OrderTrackingPage />} />
       <Route path="/track" element={<GlobalTrackingPage />} />
-      <Route path="/r/:tenantId/:tableId" element={<QrMenuPage />} />  {/* p311: QR table ordering (public) */}
+      <Route path="/r/:tenantId/:tableId/:token" element={<QrMenuPage />} />  {/* p323: QR table ordering — temporary tokenized link */}
+      <Route path="/r/:tenantId/:tableId" element={<QrMenuPage />} />  {/* p311 legacy: يعرض «انتهت الصلاحية» */}
       <Route path="/board/:tenantId" element={<OrderBoardPage />} />  {/* p314: public order status board */}
       <Route path="/tv/menu/:tenantId" element={<TvMenuPage />} />  {/* p320: public TV menu board (live stock) */}
       <Route path="/tv" element={<TvHubPage />} />  {/* p322: TV hub — pair once, controlled centrally */}

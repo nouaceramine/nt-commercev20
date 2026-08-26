@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import uuid
+import secrets  # p323: rotating QR table tokens
 
 
 class TableCreate(BaseModel):
@@ -195,7 +196,13 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     @router.get("/tables")
     async def list_tables(user: dict = Depends(get_current_user)):
         cursor = _tables().find({}).sort("name", 1)
-        return [_table_out(t) async for t in cursor]
+        out = []
+        async for t in cursor:
+            if not t.get("qr_token"):  # p323: backfill للطاولات القديمة
+                t["qr_token"] = secrets.token_hex(5)
+                await _tables().update_one({"id": t["id"]}, {"$set": {"qr_token": t["qr_token"]}})
+            out.append(_table_out(t))
+        return out
 
     @router.post("/tables")
     async def create_table(data: TableCreate, admin: dict = Depends(get_tenant_admin)):
@@ -209,6 +216,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "zone": (data.zone or "").strip() or None,
             "status": "free",
             "active_order_id": None,
+            "qr_token": secrets.token_hex(5),  # p323: رابط QR مؤقت يدور عند تحرير الطاولة
             "created_at": _now(),
         }
         await _tables().insert_one(doc)
@@ -303,7 +311,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         await _orders().update_one({"id": order_id}, {"$set": {"status": data.status, "updated_at": _now()}})
         if data.status in ("served", "cancelled") and o.get("table_id"):
-            await _tables().update_one({"id": o["table_id"]}, {"$set": {"status": "free", "active_order_id": None}})
+            # p323: تحرير الطاولة يقتل رابط QR الحالي — رابط مؤقت لكل زيارة
+            await _tables().update_one({"id": o["table_id"]}, {"$set": {
+                "status": "free", "active_order_id": None, "qr_token": secrets.token_hex(5)}})
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         if data.status == "served" and updated.get("customer_phone"):
@@ -334,8 +344,19 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 {"id": active_id},
                 {"$set": {"status": "served", "sale_id": data.sale_id, "updated_at": _now()}},
             )
-        await _tables().update_one({"id": table_id}, {"$set": {"status": "free", "active_order_id": None}})
+        await _tables().update_one({"id": table_id}, {"$set": {
+            "status": "free", "active_order_id": None, "qr_token": secrets.token_hex(5)}})  # p323
         return {"ok": True}
+
+    @router.post("/tables/{table_id}/rotate-qr")
+    async def rotate_table_qr(table_id: str, admin: dict = Depends(get_tenant_admin)):
+        """p323: تجديد رابط QR للطاولة يدوياً — يقتل الرابط السابق فوراً"""
+        t = await _tables().find_one({"id": table_id})
+        if not t:
+            raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+        tok = secrets.token_hex(5)
+        await _tables().update_one({"id": table_id}, {"$set": {"qr_token": tok}})
+        return {"ok": True, "qr_token": tok}
 
     # ---------- p316: Delivery orders (طلبات التوصيل) ----------
     _DLV_STATUSES = ("pending", "ready", "out_for_delivery", "delivered", "cancelled")
@@ -498,6 +519,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         items: List[QrOrderItem]
         notes: Optional[str] = None
         customer_phone: Optional[str] = None  # p315
+        token: Optional[str] = None  # p323: رابط الطاولة المؤقت — إلزامي فعلياً
 
     async def _qr_tenant(tenant_id: str):
         from config.database import main_db as _mdb
@@ -531,6 +553,36 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         } for p in prods]
         return {"restaurant_name": t.get("company_name") or t.get("name") or "", "items": items}
 
+    @router.get("/public/table-menu/{tenant_id}/{table_id}/{token}")
+    async def qr_table_menu(tenant_id: str, table_id: str, token: str):
+        """p323: قائمة الطاولة برابط مؤقت — 410 إن دُوّر الرابط (انتهت الزيارة) أو زُوّر"""
+        from config.database import get_tenant_db
+        t = await _qr_tenant(tenant_id)
+        tdb = get_tenant_db(tenant_id)
+        table = await tdb.restaurant_tables.find_one({"id": table_id})
+        if not table:
+            raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+        if not table.get("qr_token") or table["qr_token"] != token:
+            raise HTTPException(status_code=410, detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي")
+        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+        prods = await tdb.products.find(
+            {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "image_url": 1},
+        ).to_list(1000)
+        items = [{
+            "id": p["id"],
+            "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+            "price": p.get("retail_price") or 0,
+            "family": fams.get(p.get("family_id")) or "",
+            "modifier_groups": p.get("modifier_groups") or [],
+            "image_url": p.get("image_url"),
+        } for p in prods]
+        return {
+            "restaurant_name": t.get("company_name") or t.get("name") or "",
+            "table_name": table.get("name"),
+            "items": items,
+        }
+
     @router.post("/public/order/{tenant_id}/{table_id}")
     async def qr_public_order(tenant_id: str, table_id: str, data: QrOrderCreate):
         import time as _time
@@ -548,6 +600,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         table = await tdb.restaurant_tables.find_one({"id": table_id})
         if not table:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+        # p323: الرابط المؤقت — طلب بلا توكن أو بتوكن مُدوَّر يُرفض
+        if not table.get("qr_token") or table["qr_token"] != (data.token or ""):
+            raise HTTPException(status_code=410, detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي")
         items = []
         for it in data.items:
             if not (0 < float(it.quantity or 0) <= 20):

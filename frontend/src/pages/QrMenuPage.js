@@ -8,7 +8,7 @@ import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2 } from 'lucide
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
 
 export default function QrMenuPage() {
-  const { tenantId, tableId } = useParams();
+  const { tenantId, tableId, token } = useParams();  // p323: token = الرابط المؤقت للطاولة
   const [menu, setMenu] = useState(null);
   const [error, setError] = useState(null);
   const [cart, setCart] = useState([]); // {id,name,price,qty,mods:[]}
@@ -20,14 +20,14 @@ export default function QrMenuPage() {
   const [showCart, setShowCart] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/restaurant/public/menu/${tenantId}`)
+    fetch(`/api/restaurant/public/table-menu/${tenantId}/${tableId}/${token || ''}`)  // p323
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'تعذر تحميل القائمة');
         return r.json();
       })
       .then(setMenu)
       .catch((e) => setError(e.message));
-  }, [tenantId]);
+  }, [tenantId, tableId, token]);  // p323
 
   const families = useMemo(() => {
     const m = {};
@@ -73,6 +73,7 @@ export default function QrMenuPage() {
         body: JSON.stringify({
           items: cart.map((c) => ({ product_id: c.id, quantity: c.qty, modifiers: c.mods.length ? c.mods : null })),
           customer_phone: phone.trim() || null,  // p315
+          token: token || null,  // p323
         }),
       });
       const d = await r.json().catch(() => ({}));
