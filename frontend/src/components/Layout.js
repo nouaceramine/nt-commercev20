@@ -80,7 +80,7 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed
+  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -533,6 +533,7 @@ export const Layout = ({ children }) => {
         { path: '/kitchen', icon: UtensilsCrossed, label: language === 'ar' ? 'شاشة المطبخ' : 'Cuisine' },
         { path: '/tables', icon: UtensilsCrossed, label: language === 'ar' ? 'خريطة الطاولات' : 'Tables' },
         { path: '/waiter', icon: ChefHat, label: language === 'ar' ? 'واجهة النادل' : 'Serveur' },
+        { path: '/delivery', icon: Bike, label: language === 'ar' ? 'طلبات التوصيل' : 'Livraisons' },
       ]
     },
     {

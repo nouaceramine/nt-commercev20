@@ -1,3 +1,25 @@
+## 2026-08-26 — p316: طلبات التوصيل للمطاعم (الخطة ج — اكتملت المنظومة)
+
+### التغييرات
+- backend/routes/restaurant_routes.py (+5 مسارات):
+  - `POST /restaurant/delivery-orders` — طلب توصيل (زبون/هاتف مطبَّع/عنوان/عناصر/رسوم) يولّد طلب مطبخ مرافقًا (source=delivery، بلا طاولة) فيظهر فورًا في شاشة KDS، بكود DLV-YYYYMMDD-NNNN
+  - `GET /restaurant/delivery-orders?status=&days=` + `GET /delivery-orders-summary` (عدّ بالحالة + إيراد ورسوم المسلَّم)
+  - `PUT /delivery-orders/{id}/status` — pending→ready→out_for_delivery (يتطلب سائقًا)→delivered / cancelled (يلغي طلب المطبخ المرافق تلقائيًا)
+  - `POST /delivery-orders/{id}/collect` — ربط فاتورة POS بعد التحصيل: payment_collected + delivered + إنهاء طلب المطبخ بالفاتورة
+  - أحداث delivery_order.created/updated عبر outbox
+- frontend/src/pages/DeliveryPage.js (جديد، /delivery) — 4 بطاقات ملخص + بطاقات طلبات بالحالة + حوار إنشاء (منتقي منتجات + كميات + رسوم + إجمالي حي) + حوارا تعيين سائق وتحصيل + تحديث لحظي SSE + استطلاع 20 ث
+- App.js route /delivery (featureKey restaurant) + عنصر «طلبات التوصيل» (أيقونة Bike) في قسم المطعم
+
+### الاختبار (NT-0001، وسم TEST-P316، نظّف حتى residue=0)
+- إنشاء: هاتف «0661 22 33 44»→«213661223344»، إجمالي 1800+200=2000 ✓، طلب مطبخ مرافق KCH ✓
+- الانطلاق بلا سائق → 400 ✓؛ ready→انطلاق بسائق ✓؛ collect → delivered+payment_collected+sale_id وطلب المطبخ served بنفس الفاتورة ✓
+- إلغاء → cancel_reason + طلب المطبخ cancelled ✓؛ الملخص: delivered=1/إيراد 2000/رسوم 200 ✓
+- Playwright @1440px: الصفحة + 4 بطاقات + بطاقة طلب + حوار الإنشاء ✓
+- التنظيف: dlv(2)+kch(2)+outbox(14)+processed(8)+أحداث ستريم = 0، features_override={} ✓
+
+### النشر
+- Release 20260826_151434 — main.fb257d07.js + chunk 4404.48bffe3b (علامة dlv-new-btn مؤكدة)؛ Backend health=200
+
 ## 2026-08-26 — p315: إشعار واتساب عند جاهزية الطلب (الخطة ج)
 
 ### التغييرات

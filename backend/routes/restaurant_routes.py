@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 
@@ -33,6 +33,37 @@ class KitchenOrderCreate(BaseModel):
     items: List[KitchenItem]
     notes: Optional[str] = None
     customer_phone: Optional[str] = None  # p315: إشعار واتساب عند الجاهزية
+
+
+class DeliveryItem(BaseModel):
+    # p316: عنصر طلب توصيل — الكاشير مصدر موثوق (مثل مسار طلب المطبخ)
+    product_id: Optional[str] = None
+    product_name: str
+    quantity: float = 1
+    unit_price: float = 0
+    note: Optional[str] = None
+    modifiers: Optional[List[dict]] = None
+
+
+class DeliveryOrderCreate(BaseModel):
+    # p316: طلب توصيل مطعم — يولّد طلب مطبخ مرافقًا (source=delivery)
+    customer_name: str
+    customer_phone: Optional[str] = None
+    address: Optional[str] = None
+    items: List[DeliveryItem]
+    delivery_fee: float = 0
+    driver_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class DeliveryStatusUpdate(BaseModel):
+    status: str  # pending | ready | out_for_delivery | delivered | cancelled
+    driver_name: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class DeliveryCollect(BaseModel):
+    sale_id: str
 
 
 class StatusUpdate(BaseModel):
@@ -87,6 +118,19 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     def _orders():
         return db.kitchen_orders
+
+    def _delivery():
+        return db.delivery_orders
+
+    def _delivery_out(o):
+        o = dict(o)
+        o.pop("_id", None)
+        return o
+
+    async def _delivery_code() -> str:
+        day = _now().strftime("%Y%m%d")
+        count = await _delivery().count_documents({"code": {"$regex": f"^DLV-{day}-"}})
+        return f"DLV-{day}-{count + 1:04d}"
 
     def _table_out(t):
         t = dict(t)
@@ -292,6 +336,153 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             )
         await _tables().update_one({"id": table_id}, {"$set": {"status": "free", "active_order_id": None}})
         return {"ok": True}
+
+    # ---------- p316: Delivery orders (طلبات التوصيل) ----------
+    _DLV_STATUSES = ("pending", "ready", "out_for_delivery", "delivered", "cancelled")
+
+    @router.get("/delivery-orders")
+    async def list_delivery_orders(
+        status: Optional[str] = None, days: int = 30,
+        user: dict = Depends(get_current_user),
+    ):
+        q = {}
+        if status:
+            q["status"] = status
+        if days and days > 0:
+            since = _now() - timedelta(days=min(days, 365))
+            q["created_at"] = {"$gte": since}
+        cursor = _delivery().find(q).sort("created_at", -1).limit(300)
+        return [_delivery_out(o) async for o in cursor]
+
+    @router.get("/delivery-orders-summary")
+    async def delivery_summary(days: int = 30, user: dict = Depends(get_current_user)):
+        since = _now() - timedelta(days=min(max(days, 1), 365))
+        by_status = {}
+        revenue = 0.0
+        fees = 0.0
+        async for o in _delivery().find({"created_at": {"$gte": since}}):
+            by_status[o.get("status")] = by_status.get(o.get("status"), 0) + 1
+            if o.get("status") == "delivered":
+                revenue += float(o.get("total") or 0)
+                fees += float(o.get("delivery_fee") or 0)
+        return {
+            "days": days,
+            "by_status": by_status,
+            "delivered_revenue": round(revenue, 2),
+            "delivered_fees": round(fees, 2),
+        }
+
+    @router.post("/delivery-orders")
+    async def create_delivery_order(data: DeliveryOrderCreate, user: dict = Depends(get_current_user)):
+        if not data.items:
+            raise HTTPException(status_code=400, detail="لا توجد عناصر في الطلب")
+        if not (data.customer_name or "").strip():
+            raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+        items = []
+        subtotal = 0.0
+        for it in data.items:
+            if not (0 < float(it.quantity or 0) <= 100):
+                raise HTTPException(status_code=400, detail="كمية غير صالحة")
+            d = it.model_dump()
+            mod_extra = sum(float(m.get("price_delta") or 0) for m in (d.get("modifiers") or []))
+            d["unit_price"] = round(float(d.get("unit_price") or 0) + mod_extra, 2)
+            subtotal += d["unit_price"] * float(it.quantity)
+            items.append(d)
+        fee = max(0.0, float(data.delivery_fee or 0))
+        # طلب مطبخ مرافق حتى يظهر في شاشة KDS — بلا طاولة
+        kdoc = {
+            "id": f"kch_{uuid.uuid4().hex[:12]}",
+            "code": await _order_code(),
+            "table_id": None,
+            "table_name": f"توصيل — {data.customer_name.strip()}",
+            "items": items,
+            "notes": data.notes,
+            "customer_phone": _clean_phone(data.customer_phone),
+            "status": "pending",
+            "sale_id": None,
+            "source": "delivery",
+            "created_by": user.get("username") or user.get("email"),
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        await _orders().insert_one(kdoc)
+        await _publish("kitchen_order.created", kdoc, user)
+        doc = {
+            "id": f"dlv_{uuid.uuid4().hex[:12]}",
+            "code": await _delivery_code(),
+            "customer_name": data.customer_name.strip(),
+            "customer_phone": _clean_phone(data.customer_phone),
+            "address": (data.address or "").strip() or None,
+            "items": items,
+            "subtotal": round(subtotal, 2),
+            "delivery_fee": round(fee, 2),
+            "total": round(subtotal + fee, 2),
+            "driver_name": (data.driver_name or "").strip() or None,
+            "notes": data.notes,
+            "status": "pending",
+            "kitchen_order_id": kdoc["id"],
+            "kitchen_code": kdoc["code"],
+            "sale_id": None,
+            "payment_collected": False,
+            "created_by": user.get("username") or user.get("email"),
+            "created_at": _now(),
+            "updated_at": _now(),
+            "delivered_at": None,
+        }
+        await _delivery().insert_one(doc)
+        await _publish("delivery_order.created", doc, user)
+        return _delivery_out(doc)
+
+    @router.put("/delivery-orders/{order_id}/status")
+    async def update_delivery_status(order_id: str, data: DeliveryStatusUpdate, user: dict = Depends(get_current_user)):
+        if data.status not in _DLV_STATUSES:
+            raise HTTPException(status_code=400, detail="حالة غير صالحة")
+        o = await _delivery().find_one({"id": order_id})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        if o.get("status") in ("delivered", "cancelled"):
+            raise HTTPException(status_code=400, detail="الطلب مُنهى")
+        driver = (data.driver_name or "").strip() or o.get("driver_name")
+        if data.status == "out_for_delivery" and not driver:
+            raise HTTPException(status_code=400, detail="عيّن السائق قبل الانطلاق")
+        upd = {"status": data.status, "updated_at": _now()}
+        if driver:
+            upd["driver_name"] = driver
+        if data.status == "delivered":
+            upd["delivered_at"] = _now()
+        if data.status == "cancelled":
+            upd["cancel_reason"] = (data.reason or "").strip() or None
+            # ألغِ طلب المطبخ المرافق إن لم يُقدَّم بعد
+            await _orders().update_one(
+                {"id": o.get("kitchen_order_id"), "status": {"$in": ["pending", "preparing"]}},
+                {"$set": {"status": "cancelled", "updated_at": _now()}},
+            )
+        await _delivery().update_one({"id": order_id}, {"$set": upd})
+        updated = await _delivery().find_one({"id": order_id})
+        await _publish("delivery_order.updated", updated, user)
+        return _delivery_out(updated)
+
+    @router.post("/delivery-orders/{order_id}/collect")
+    async def collect_delivery_order(order_id: str, data: DeliveryCollect, user: dict = Depends(get_current_user)):
+        """بعد تسجيل البيع في POS: ربط الفاتورة وإنهاء الطلب (مثل checkout الطاولة)."""
+        o = await _delivery().find_one({"id": order_id})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        if o.get("status") == "cancelled":
+            raise HTTPException(status_code=400, detail="الطلب ملغى")
+        await _delivery().update_one(
+            {"id": order_id},
+            {"$set": {"sale_id": data.sale_id, "payment_collected": True,
+                      "status": "delivered", "delivered_at": _now(), "updated_at": _now()}},
+        )
+        if o.get("kitchen_order_id"):
+            await _orders().update_one(
+                {"id": o["kitchen_order_id"]},
+                {"$set": {"status": "served", "sale_id": data.sale_id, "updated_at": _now()}},
+            )
+        updated = await _delivery().find_one({"id": order_id})
+        await _publish("delivery_order.updated", updated, user)
+        return _delivery_out(updated)
 
     # ---------- p311: QR table ordering (public — no auth) ----------
     # Security notes: tenant must have the restaurant feature ON; prices and
