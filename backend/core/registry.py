@@ -30,6 +30,9 @@ class ModuleSpec:
     name_fr: str
     prefixes: list[str]
     collections: list[str] = field(default_factory=list)
+    gate: Optional[str] = None          # p340: per-tenant feature gate key (None = always on)
+    category: str = "general"           # p340: UI grouping category
+    probe: Optional[dict] = None        # p340: health probe {"type": "http"|"collection", ...}
     logger: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:

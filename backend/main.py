@@ -1270,6 +1270,7 @@ _AUTO_REG_MODULES = [
     'routes.partners_routes',  # p182: partners & profit distribution
     'routes.saas.business_profiles_routes',  # p183: business activity profiles
     'routes.saas.id_audit_routes',  # p266: ID-system audit for super admin
+    'routes.saas.module_registry_routes',  # p340: full module registry (gates + coverage audit)
     'routes.saas.data_browser_routes',  # p268: cross-tenant data browser (read-only)
     'routes.saas.account_control_routes',  # p269: agent impersonation + password resets
     'routes.rental_routes',  # p185: rental module (cars & properties)
