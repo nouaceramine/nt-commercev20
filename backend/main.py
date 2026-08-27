@@ -97,7 +97,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # Structured logging
 from utils.logging_setup import setup_logging
 setup_logging(
@@ -137,7 +136,6 @@ app.add_exception_handler(Exception, general_exception_handler)
 # must become 422 with the Arabic validator messages — not a masked 500.
 from fastapi.responses import JSONResponse as _JSONResponse
 from pydantic import ValidationError as _PydanticValidationError
-
 
 @app.exception_handler(_PydanticValidationError)
 async def pydantic_validation_exception_handler(request, exc):
@@ -892,33 +890,11 @@ try:
 except ImportError:
     pass
 
-try:
-    from routes.audit_routes import router as audit_router
-    app.include_router(audit_router, prefix="/api", tags=["Audit"])
-except ImportError:
-    pass
-
-try:
-    from routes.twofa_routes import router as twofa_router
-    app.include_router(twofa_router, prefix="/api", tags=["2FA"])
-except ImportError:
-    pass
-
-try:
-    from routes.search_routes import router as search_router
-    app.include_router(search_router, prefix="/api", tags=["Search"])
-except ImportError:
-    pass
+app.include_router(audit_router, prefix="/api", tags=["Audit"])  # p331: كان يعيد الاستيراد دون داعٍ (موجود في أعلى الملف)
 
 try:
     from routes.export_routes import router as export_router
     app.include_router(export_router, prefix="/api", tags=["Export"])
-except ImportError:
-    pass
-
-try:
-    from routes.backup_routes import router as backup_router
-    app.include_router(backup_router, prefix="/api", tags=["Backup"])
 except ImportError:
     pass
 
@@ -940,20 +916,7 @@ try:
 except ImportError:
     pass
 
-try:
-    from routes.activity_routes import router as activity_router
-    app.include_router(activity_router, prefix="/api", tags=["Activity"])
-except ImportError:
-    pass
-
 # Fixes for missing routes
-try:
-    from routes.backup_routes import router as backup_router
-    app.include_router(backup_router, prefix="/api/backups", tags=["Backup"])
-    print("[INIT] Backup routes registered at /api/backups")
-except ImportError:
-    pass
-
 try:
     from fastapi import APIRouter
     config_router = APIRouter(prefix="/config", tags=["Config"])
@@ -992,7 +955,6 @@ except Exception as e:
 
 # recharge_fallback removed: it shadowed the real auto-registered GET /recharge list
 
-
 try:
     from fastapi import APIRouter
     gateways_router = APIRouter(prefix="/payments/gateways", tags=["Payments"])
@@ -1011,13 +973,6 @@ try:
     print("[INIT] Payment gateways registered")
 except Exception as e:
     print(f"[INIT] Payment gateways error: {e}")
-
-try:
-    from routes.search_routes import router as search_router
-    app.include_router(search_router, prefix="/api", tags=["Search"])
-    print("[INIT] Search routes registered")
-except ImportError:
-    pass
 
 print("[INIT] All fixes applied successfully")
 
@@ -1121,7 +1076,6 @@ async def get_public_features() -> dict:
     enabled_keys = await mgr.get_enabled_keys()
     return {"enabled": enabled_keys}
 
-
 # ============ LEGACY ROUTES — round 2 (dashboard & wallet & POS settings) ============
 try:
     from routes.pos_settings_routes import create_pos_settings_routes
@@ -1177,7 +1131,6 @@ try:
     print("[INIT] AI (Gemini) routes registered at /api/ai")
 except Exception as _e:
     print(f"[INIT] AI routes: {_e}")
-
 
 # init_default_data restored from git history (removed in Section-11 refactor)
 # Needed by routes.auth_users_routes factory.
@@ -1394,7 +1347,6 @@ for _mod_path in _AUTO_REG_MODULES:
     except Exception as _e:
         print(f'[INIT] AUTO-SKIP {_mod_path}: {_e}')
 
-
 # ============ ROUND 4: RESTORED & MISSING ENDPOINTS ============
 if "block_cashier" not in globals():
     block_cashier = create_cashier_block(get_current_user)
@@ -1455,7 +1407,6 @@ try:
     print("✅ Smart features router loaded")
 except Exception as _smart_err:
     print(f"⚠️ smart router not loaded: {_smart_err}")
-
 
 # ── Advanced Dashboard endpoints ──
 @app.get("/api/dashboard/advanced-stats")
@@ -1536,7 +1487,6 @@ async def dashboard_alerts(user: dict = Depends(get_current_user)):
         alerts.append({"id": "debts", "type": "debt", "message": f"{overdue} ديون غير مسددة", "priority": "medium"})
     return alerts
 
-
 # ── Defective products aliases (frontend uses /defective-products) ──
 @app.get("/api/defective-products")
 async def defective_products_list(user: dict = Depends(get_current_user)):
@@ -1586,7 +1536,6 @@ async def defective_products_delete(item_id: str, user: dict = Depends(get_curre
         raise HTTPException(status_code=404, detail="العنصر غير موجود")
     return {"message": "تم الحذف"}
 
-
 # ── Misc aliases ──
 @app.get("/api/cash/accounts")
 async def cash_accounts_alias(user: dict = Depends(get_current_user)):
@@ -1626,7 +1575,6 @@ async def repair_update_alias(repair_id: str, data: dict, user: dict = Depends(g
     return await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
 
 # ============ END ROUND 4 ============
-
 
 # Serve uploaded files (product/purchase images) — StaticFiles was imported but never
 # mounted, so every /api/static/uploads/* URL returned 404 (audit P1 fix)
