@@ -1,3 +1,15 @@
+## 2026-08-27 — p326: تفعيل البريد عبر Resend (بدل Brevo الميت)
+
+### التغييرات
+- لا كود — البنية كانت جاهزة (email_service متعدد المزودين، resend أولوية أولى، SDK 2.21.0 مثبت)
+- حفظ RESEND_API_KEY (مشفرًا AES-256-GCM) + provider_preference=resend + sender=noreply@nt-commerce.net عبر PUT /saas/email-settings
+- النطاق nt-commerce.net موثق مسبقًا في Resend (status=verified, eu-west-1)
+
+### التحقق
+- POST /saas/email-settings/test → بريد حقيقي إلى بريد المالك
+- Resend API: last_event=delivered، from=NT Commerce <noreply@nt-commerce.net> ✓
+- نسخة احتياطية من الإعدادات السابقة: backups/p326/email_settings_before.json
+
 ## 2026-08-27 — p325: رمز QR دائم للطاولة + جلسة طلب مؤقتة عند كل مسح
 
 ### التغييرات
