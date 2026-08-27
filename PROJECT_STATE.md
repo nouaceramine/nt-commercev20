@@ -109,7 +109,7 @@
 - فجوة تراجع البيع الآجل في saga الشحن: **أُصلحت في p232** (علم sale_credit_inserted + عكس مجاميع الجلسة اليومية للمسارين).
 
 ### المسار 2: أعمال تحتاج المالك (لا تُخمَّن — تُسأل)
-- رمز بوت Telegram (BotFather) | نسخ احتياطي خارجي rclone — **البنية جاهزة بالكامل (p302)**: الحزمة المشفرة تضم mongo+env+compose، والدليل docs/OFFSITE_BACKUP_ACTIVATION.md؛ **بقي على المالك فقط**: حساب B2 (10 دقائق) + `rclone config` باسم `offsite` + حفظ `.backup_key` خارج الخادم | رمز Cloudflare API (أتمتة النطاقات الفرعية) | مفتاح Brevo جديد (الحالي ميت — البريد معطّل)
+- رمز بوت Telegram (BotFather) | نسخ احتياطي خارجي rclone — **البنية جاهزة بالكامل (p302)**: الحزمة المشفرة تضم mongo+env+compose، والدليل docs/OFFSITE_BACKUP_ACTIVATION.md؛ **بقي على المالك فقط**: حساب B2 (10 دقائق) + `rclone config` باسم `offsite` + حفظ `.backup_key` خارج الخادم | رمز Cloudflare API (أتمتة النطاقات الفرعية) | **البريد: قرار المالك 2026-08-27 = Resend** (بدل Brevo الميت) — البنية جاهزة: email_service متعدد المزودين وأولوية resend أولى + SDK مثبت + واجهة /saas-admin/email-settings؛ ينقص فقط: RESEND_API_KEY + توثيق نطاق nt-commerce.net في Resend (DKIM)
 
 ### المسار 3: تحصينات تقنية
 - ~~مراقبة/تنبيه DLQ~~ (p210 — تحقق p234: أول replay ناجح) | ~~أرشفة دورية للـ outbox~~ (p211 — حلقة الأرشفة تعمل، عتبة 30 يوماً) | ~~توحيد تقارير SmartReporterAgent~~ (p212) — **المسار 3 مكتمل بالكامل**
