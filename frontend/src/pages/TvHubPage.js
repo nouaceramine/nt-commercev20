@@ -1,9 +1,10 @@
 // p322: مركز التلفاز /tv — إقران بكود ثم عرض حسب ما يحدده المدير مركزيًا
 // التلفاز يفتح هذه الصفحة مرة واحدة؛ التوكن يُحفظ محليًا فيبقى مرتبطًا بعد إطفاء الجهاز
 import { useState, useEffect, useCallback } from 'react';
-import { ChefHat, Link2, WifiOff } from 'lucide-react';
+import { Tv, Link2, WifiOff } from 'lucide-react';  // p329: أيقونة عامة لكل الأنشطة
 import OrderBoardPage from './OrderBoardPage';
 import TvMenuPage from './TvMenuPage';
+import TvCatalogPage from './TvCatalogPage';  // p329
 
 const LS_KEY = 'tv_screen_token';
 
@@ -77,8 +78,8 @@ export default function TvHubPage() {
   if (!token) {
     return (
       <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center gap-8 p-8" dir="rtl" data-testid="tvhub-pair">
-        <ChefHat className="h-20 w-20 text-amber-400" />
-        <h1 className="text-4xl font-black">ربط هذه الشاشة بنظام المطعم</h1>
+        <Tv className="h-20 w-20 text-amber-400" />
+        <h1 className="text-4xl font-black">ربط هذه الشاشة بحسابك</h1>  {/* p329 */}
         {err && <p className="text-red-400 text-xl flex items-center gap-2"><WifiOff className="h-6 w-6" />{err}</p>}
         {code ? (
           <>
@@ -87,7 +88,7 @@ export default function TvHubPage() {
             </div>
             <div className="text-center space-y-2 text-neutral-300 text-xl max-w-xl">
               <p className="flex items-center justify-center gap-2"><Link2 className="h-6 w-6" /> من لوحة التحكم افتح:</p>
-              <p className="font-bold text-white text-2xl">المطعم ← شاشات العرض ← «إقران شاشة جديدة»</p>
+              <p className="font-bold text-white text-2xl">الإعدادات ← شاشات العرض ← «إقران شاشة جديدة»</p>  {/* p329 */}
               <p>وأدخل هذا الكود خلال 15 دقيقة — لن تحتاجه مجددًا بعد الربط</p>
             </div>
           </>
@@ -106,7 +107,13 @@ export default function TvHubPage() {
       </div>
     );
   }
+  // p329: catalog/slider عامان لكل الأنشطة؛ orders/menu للمطاعم
   if (config.mode === 'orders') return <OrderBoardPage tenantIdProp={config.tenant_id} />;
-  if (config.mode === 'slider') return <TvMenuPage tenantIdProp={config.tenant_id} forceSlider />;
-  return <TvMenuPage tenantIdProp={config.tenant_id} />;
+  if (config.mode === 'menu') return <TvMenuPage tenantIdProp={config.tenant_id} />;
+  if (config.mode === 'slider') {
+    return config.has_restaurant
+      ? <TvMenuPage tenantIdProp={config.tenant_id} forceSlider />
+      : <TvCatalogPage tenantIdProp={config.tenant_id} forceSlider />;
+  }
+  return <TvCatalogPage tenantIdProp={config.tenant_id} />;
 }

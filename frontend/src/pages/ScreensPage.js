@@ -5,20 +5,26 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';  // p329
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
 import { toast } from 'sonner';
 import { MonitorPlay, Link2, Trash2, Tv } from 'lucide-react';
 
-const MODES = [
-  { value: 'orders', labelAr: 'أرقام الطلبات', labelFr: 'Commandes' },
-  { value: 'menu', labelAr: 'قائمة المنتجات (شبكة)', labelFr: 'Menu (grille)' },
-  { value: 'slider', labelAr: 'شرائح إعلانية بالصور', labelFr: 'Diaporama' },
-];
-
 export default function ScreensPage() {
   const { language } = useLanguage();
   const isAr = language === 'ar';
+  const { isFeatureEnabled } = useAuth();  // p329
+  const hasRest = isFeatureEnabled ? isFeatureEnabled('restaurant') : false;
+  // p329: الكتالوج والشرائح لكل الأنشطة؛ أوضاع المطعم تظهر لمستأجري المطاعم فقط
+  const MODES = [
+    { value: 'catalog', labelAr: 'كتالوج المنتجات (شبكة)', labelFr: 'Catalogue (grille)' },
+    { value: 'slider', labelAr: 'شرائح إعلانية بالصور', labelFr: 'Diaporama' },
+    ...(hasRest ? [
+      { value: 'menu', labelAr: 'قائمة المطعم (بالوصفات)', labelFr: 'Menu restaurant' },
+      { value: 'orders', labelAr: 'أرقام الطلبات الجاهزة', labelFr: 'Commandes pretes' },
+    ] : []),
+  ];
   const [screens, setScreens] = useState([]);
   const [code, setCode] = useState('');
   const [claiming, setClaiming] = useState(false);

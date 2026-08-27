@@ -17,7 +17,7 @@ import uuid
 
 PAIR_TTL_SECONDS = 15 * 60
 ONLINE_SECONDS = 45
-MODES = ("orders", "menu", "slider")
+MODES = ("catalog", "slider", "orders", "menu")  # p329: catalog/slider لكل الأنشطة — orders/menu للمطاعم
 
 
 def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tenant_admin) -> dict:
@@ -57,9 +57,10 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
     async def _find_screen_by_token(token: str):
         """-> (tenant, screen). التوكن سرّي فترتيب المسح لا يهم. يقتصر المسح
         على مستأجري وضع المطعم النشطين."""
+        # p329: كل المستأجرين النشطين — الشاشات صارت لكل الأنشطة
         tenants = await main_db.saas_tenants.find(
-            {"is_active": {"$ne": False}, "features_override.restaurant": True},
-            {"_id": 0, "id": 1, "name": 1, "company_name": 1},
+            {"is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "company_name": 1, "features_override": 1},
         ).to_list(500)
         for t in tenants:
             s = await get_tenant_db(t["id"]).display_screens.find_one({"token": token})
@@ -92,7 +93,7 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
             "id": f"scr_{uuid.uuid4().hex[:12]}",
             "token": "TVS-" + secrets.token_hex(12),
             "name": "شاشة عرض",
-            "mode": "menu",
+            "mode": "catalog",  # p329: الافتراضي كتالوج عام
             "last_seen": None,
             "created_at": _now(),
             "created_by": admin.get("email") or admin.get("username"),
@@ -168,11 +169,60 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
         await get_tenant_db(t["id"]).display_screens.update_one(
             {"token": token}, {"$set": {"last_seen": _now()}}
         )
+        _biz = t.get("company_name") or t.get("name") or ""
         return {
             "name": s.get("name") or "شاشة عرض",
-            "mode": s.get("mode") or "menu",
+            "mode": s.get("mode") or "catalog",
             "tenant_id": t["id"],
-            "restaurant_name": t.get("company_name") or t.get("name") or "",
+            "restaurant_name": _biz,   # توافق p322
+            "business_name": _biz,     # p329
+            "has_restaurant": bool((t.get("features_override") or {}).get("restaurant")),  # p329
+        }
+
+    # ---------- p329: لوحة كتالوج عامة لأي نشاط ----------
+    @router.get("/public/catalog-board/{tenant_id}")
+    async def public_catalog_board(tenant_id: str):
+        """منتجات أي مستأجر نشط بأسعارها + توفر حي من المخزون — لشاشات العرض العامة."""
+        t = await main_db.saas_tenants.find_one(
+            {"id": tenant_id, "is_active": {"$ne": False}},
+            {"_id": 0, "name": 1, "company_name": 1},
+        )
+        if not t:
+            raise HTTPException(status_code=404, detail="غير موجود")
+        tdb = get_tenant_db(tenant_id)
+        fams = {
+            f["id"]: (f.get("name_ar") or f.get("name") or "")
+            for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)
+        }
+        prods = await tdb.products.find(
+            {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}, "is_blocked": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
+             "family_id": 1, "image_url": 1, "images": 1, "stock_quantity": 1, "quantity": 1,
+             "is_stockable": 1},
+        ).to_list(1000)
+        items = []
+        for p_ in prods:
+            stockable = p_.get("is_stockable") is not False
+            qty = p_.get("stock_quantity", p_.get("quantity")) or 0
+            try:
+                qty = float(qty)
+            except (TypeError, ValueError):
+                qty = 0
+            items.append({
+                "id": p_["id"],
+                "name": p_.get("name_ar") or p_.get("name") or p_.get("name_en"),
+                "price": p_.get("retail_price") or 0,
+                "family": fams.get(p_.get("family_id")) or "",
+                "image_url": p_.get("image_url"),
+                "images": [i for i in (p_.get("images") or []) if i][:5],
+                "available": (not stockable) or qty > 0,
+                "remaining": int(qty) if stockable else None,
+            })
+        items.sort(key=lambda x: (x["family"], x["name"] or ""))
+        return {
+            "business_name": t.get("company_name") or t.get("name") or "",
+            "items": items,
+            "generated_at": _now().isoformat(),
         }
 
     return {"router": router}

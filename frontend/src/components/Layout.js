@@ -534,8 +534,7 @@ export const Layout = ({ children }) => {
         { path: '/tables', icon: UtensilsCrossed, label: language === 'ar' ? 'خريطة الطاولات' : 'Tables' },
         { path: '/waiter', icon: ChefHat, label: language === 'ar' ? 'واجهة النادل' : 'Serveur' },
         { path: '/delivery', icon: Bike, label: language === 'ar' ? 'طلبات التوصيل' : 'Livraisons' },
-        { path: '/screens', icon: Tv, label: language === 'ar' ? 'شاشات العرض' : 'Ecrans TV' },  // p322
-      ]
+      ]  // p329: شاشات العرض انتقلت للإعدادات — صارت لكل الأنشطة
     },
     {
       id: 'expenses',
@@ -668,6 +667,7 @@ export const Layout = ({ children }) => {
           { path: '/settings/printing/template-editor', icon: FileText, label: language === 'ar' ? 'قوالب الطباعة' : 'Modèles impression' },
           { path: '/features', icon: Key, label: language === 'ar' ? 'إدارة الميزات' : 'Gestion fonctionnalités' },  // p270
           { path: '/integrations', icon: KeyRound, label: language === 'ar' ? 'مركز التكاملات' : 'Intégrations' },  // p287
+          { path: '/screens', icon: Tv, label: language === 'ar' ? 'شاشات العرض' : 'Ecrans TV' },  // p329: لكل الأنشطة
           { path: '/screen-recording', icon: Cctv, label: language === 'ar' ? 'تسجيل الشاشة (DVR)' : 'Enregistrement écran' },  // p281
         ] : []),
         ...(isEffectiveSuperAdmin ? [

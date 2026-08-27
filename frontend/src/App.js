@@ -97,6 +97,7 @@ const OrderBoardPage = lazy(() => import("./pages/OrderBoardPage"));  // p314
 const TvMenuPage = lazy(() => import("./pages/TvMenuPage"));  // p320
 const TvHubPage = lazy(() => import("./pages/TvHubPage"));  // p322
 const ScreensPage = lazy(() => import("./pages/ScreensPage"));  // p322
+const TvCatalogPage = lazy(() => import("./pages/TvCatalogPage"));  // p329
 const WaiterPage = lazy(() => import("./pages/WaiterPage"));  // p312
 const DeliveryPage = lazy(() => import("./pages/DeliveryPage"));  // p316
 const AccountingPage = lazy(() => import("./pages/AccountingPage"));  // p273  // p196
@@ -388,6 +389,7 @@ function AppRoutes() {
       <Route path="/r/:tenantId/:tableId" element={<QrMenuPage />} />  {/* p311 legacy: يعرض «انتهت الصلاحية» */}
       <Route path="/board/:tenantId" element={<OrderBoardPage />} />  {/* p314: public order status board */}
       <Route path="/tv/menu/:tenantId" element={<TvMenuPage />} />  {/* p320: public TV menu board (live stock) */}
+      <Route path="/tv/catalog/:tenantId" element={<TvCatalogPage />} />  {/* p329: public catalog board — أي نشاط */}
       <Route path="/tv" element={<TvHubPage />} />  {/* p322: TV hub — pair once, controlled centrally */}
       <Route path="/driver/:token" element={<DriverPage />} />
       
@@ -1206,7 +1208,7 @@ function AppRoutes() {
       <Route
         path="/screens"
         element={
-          <ProtectedRoute featureKey="restaurant">
+          <ProtectedRoute>
             <ScreensPage />
           </ProtectedRoute>
         }

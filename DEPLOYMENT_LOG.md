@@ -1,3 +1,22 @@
+## 2026-08-28 — p329: تعميم شاشات العرض (TV) على كل الأنشطة — نظام واحد لكل المشتركين
+
+### التغييرات
+- **backend/routes/display_routes.py**: الأوضاع صارت `catalog/slider/orders/menu`؛ الإقران الافتراضي `catalog`؛ `_find_screen_by_token` يفحص **كل المستأجرين النشطين** (أُسقط شرط restaurant)؛ إعداد الشاشة يرجع `mode/tenant_id/business_name/has_restaurant` (مع restaurant_name للتوافق)؛ **نهاية جديدة** GET `/restaurant/public/catalog-board/{tenant_id}` — منتجات أي مستأجر نشط بأسعارها + توفر حي من المخزون (متاح/بقي N/نفد) لشاشات العرض العامة
+- **frontend/src/pages/TvCatalogPage.js (جديد)**: لوحة كتالوج عامة (شبكة + شرائح بتلاشٍ متبادل 8 ثوانٍ) مستنسخة عن TvMenuPage — نفس التصميم، لون مميز سماوي وأيقونة Store؛ testids: tvcat-*
+- **TvHubPage.js**: توجيه حسب الوضع — orders→OrderBoard، menu→TvMenu، slider→TvMenu(bforceSlider) للمطاعم وإلا TvCatalog، catalog→TvCatalog؛ نصوص الإقران صارت عامة («ربط هذه الشاشة بحسابك»)
+- **ScreensPage.js**: قائمة الأوضاع ديناميكية — catalog+slider للجميع، menu+orders فقط عند تفعيل ميزة restaurant
+- **Layout.js**: «شاشات العرض» انتقلت من قسم المطاعم إلى **الإعدادات** — متاحة لكل الأنشطة
+- **App.js**: مسار عام جديد `/tv/catalog/:tenantId`؛ /screens لم يعد مقيدًا بميزة restaurant
+
+### التحقق
+- ast.parse + esbuild على 5 ملفات ✓؛ إعادة تشغيل الباكند + health ✓؛ بناء الواجهة (main.608e250f.js) ونشرها (release 20260827_164157) — الحزمة الحية تخدم tvcat-page ✓
+- catalog-board: مستأجر مطعم (بيتزيريا — Chicken Pizza 1500 دج) ومستأجر غير مطعم (bida — cable hoco ew45 بسعر 950 دج، بقي 6) ✓؛ 404 لمستأجر غير موجود ✓
+- E2E إقران على مستأجر بلا ميزة restaurant (bida، عبر انتحال super-admin): شاشة جديدة بوضع catalog افتراضيًا → TV على /tv يعرض الكتالوج بمنتج حقيقي + اسم النشاط (Playwright) ✓
+- صفحة /screens الإدارية تعمل بلا ميزة restaurant: «شاشات العرض» في الشريط الجانبي، أوضاع المطعم مخفية ✓
+- التبديل المركزي للوضع (→slider) ينعكس فورًا في إعداد الشاشة (has_restaurant=false) ✓
+- **انحدار المطاعم**: شاشة البيتزيريا (mode=orders) ترجع config صحيحًا مع has_restaurant=true ✓ (فشل سابق كان ملف token قديمًا في /tmp وليس انحدار كود)
+- التنظيف: حذف شاشة الاختبار scr_8ba8847e3cda + كل أكواد الإقران المنتهية (8) — residue=0؛ NT-0004 (Nouacer Telecom) لم تُمَس بياناته
+
 ## 2026-08-27 — p328: أتمتة DNS عبر Cloudflare — نطاق فرعي لكل متجر تلقائيًا
 
 ### التغييرات
