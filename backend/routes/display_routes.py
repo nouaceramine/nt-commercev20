@@ -10,7 +10,7 @@
 #      التحكم ينعكس على التلفاز تلقائياً، ويبقى بعد إطفائه وإعادة تشغيله
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import secrets
 import uuid
@@ -53,6 +53,8 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
     class ScreenUpdate(BaseModel):
         name: Optional[str] = None
         mode: Optional[str] = None
+        product_ids: Optional[List[str]] = None   # p333: تحديد منتجات الشاشة (فارغ = الكل)
+        grid_layout: Optional[int] = None         # p333: 1/4/6/8 خانات — 0/None = تلقائي
 
     async def _find_screen_by_token(token: str):
         """-> (tenant, screen). التوكن سرّي فترتيب المسح لا يهم. يقتصر المسح
@@ -119,6 +121,19 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
             if body.mode not in MODES:
                 raise HTTPException(status_code=400, detail="وضع غير صالح")
             upd["mode"] = body.mode
+        if body.grid_layout is not None:  # p333
+            if body.grid_layout not in (0, 1, 4, 6, 8):
+                raise HTTPException(status_code=400, detail="تقسيم غير صالح — القيم المسموحة: 1، 4، 6، 8")
+            upd["grid_layout"] = body.grid_layout
+        if body.product_ids is not None:  # p333
+            ids = []
+            for pid in body.product_ids:
+                pid = str(pid).strip()
+                if pid and pid not in ids:
+                    ids.append(pid)
+            if len(ids) > 200:
+                raise HTTPException(status_code=400, detail="200 منتج كحد أقصى لكل شاشة")
+            upd["product_ids"] = ids
         if upd:
             await _screens().update_one({"id": screen_id}, {"$set": upd})
         return _screen_out(await _screens().find_one({"id": screen_id}))
@@ -177,11 +192,13 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
             "restaurant_name": _biz,   # توافق p322
             "business_name": _biz,     # p329
             "has_restaurant": bool((t.get("features_override") or {}).get("restaurant")),  # p329
+            "product_ids": s.get("product_ids") or [],   # p333
+            "grid_layout": s.get("grid_layout") or 0,    # p333
         }
 
     # ---------- p329: لوحة كتالوج عامة لأي نشاط ----------
     @router.get("/public/catalog-board/{tenant_id}")
-    async def public_catalog_board(tenant_id: str):
+    async def public_catalog_board(tenant_id: str, screen: Optional[str] = None):  # p333: توكن شاشة اختياري للتقييد بمنتجاتها
         """منتجات أي مستأجر نشط بأسعارها + توفر حي من المخزون — لشاشات العرض العامة."""
         t = await main_db.saas_tenants.find_one(
             {"id": tenant_id, "is_active": {"$ne": False}},
@@ -189,6 +206,17 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
         )
         if not t:
             raise HTTPException(status_code=404, detail="غير موجود")
+        # p333: لو مُرّر توكن شاشة صالح لنفس المستأجر → قيّد بمنتجاتها وأرجع تقسيمها
+        wanted = None
+        grid_layout = 0
+        if screen:
+            t2, s2 = await _find_screen_by_token(screen)
+            if s2 and t2 and t2["id"] == tenant_id:
+                wanted = set(s2.get("product_ids") or []) or None
+                try:
+                    grid_layout = int(s2.get("grid_layout") or 0)
+                except (TypeError, ValueError):
+                    grid_layout = 0
         tdb = get_tenant_db(tenant_id)
         fams = {
             f["id"]: (f.get("name_ar") or f.get("name") or "")
@@ -218,10 +246,13 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
                 "available": (not stockable) or qty > 0,
                 "remaining": int(qty) if stockable else None,
             })
+        if wanted is not None:  # p333
+            items = [i for i in items if i["id"] in wanted]
         items.sort(key=lambda x: (x["family"], x["name"] or ""))
         return {
             "business_name": t.get("company_name") or t.get("name") or "",
             "items": items,
+            "grid_layout": grid_layout,  # p333
             "generated_at": _now().isoformat(),
         }
 

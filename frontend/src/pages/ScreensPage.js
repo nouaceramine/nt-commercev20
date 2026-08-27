@@ -29,6 +29,15 @@ export default function ScreensPage() {
   const [code, setCode] = useState('');
   const [claiming, setClaiming] = useState(false);
   const [renaming, setRenaming] = useState({});
+  const [products, setProducts] = useState([]);   // p333: قائمة منتجات المستأجر لمنتقي الشاشة
+  const [picker, setPicker] = useState({});       // p333: screenId -> {open, search, ids}
+
+  useEffect(() => {  // p333
+    apiClient.get('/products', { params: { limit: 1000 } }).then(r => {
+      const arr = Array.isArray(r.data) ? r.data : (r.data?.items || r.data?.products || []);
+      setProducts(arr);
+    }).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -62,6 +71,35 @@ export default function ScreensPage() {
     try {
       await apiClient.put(`/restaurant/screens/${id}`, { mode });
       toast.success(isAr ? 'تم تغيير المحتوى — سيظهر على التلفاز خلال ثوانٍ' : 'Mode change');
+      load();
+    } catch { toast.error(isAr ? 'فشل الحفظ' : 'Echec'); }
+  };
+
+  // p333: حفظ تقسيم الشاشة (0 = تلقائي)
+  const setLayout = async (id, layout) => {
+    try {
+      await apiClient.put(`/restaurant/screens/${id}`, { grid_layout: Number(layout) });
+      toast.success(isAr ? 'تم حفظ التقسيم — سيظهر على التلفاز خلال ثوانٍ' : 'Disposition enregistree');
+      load();
+    } catch { toast.error(isAr ? 'فشل الحفظ' : 'Echec'); }
+  };
+
+  // p333: فتح/غلق منتقي منتجات الشاشة
+  const togglePicker = (s) => {
+    setPicker(prev => {
+      const cur = prev[s.id];
+      if (cur?.open) { const n = { ...prev }; delete n[s.id]; return n; }
+      return { ...prev, [s.id]: { open: true, search: '', ids: [...(s.product_ids || [])] } };
+    });
+  };
+
+  // p333: حفظ منتجات الشاشة (فارغ = كل المنتجات)
+  const saveProducts = async (id) => {
+    const ids = picker[id]?.ids || [];
+    try {
+      await apiClient.put(`/restaurant/screens/${id}`, { product_ids: ids });
+      toast.success(isAr ? (ids.length ? `تم تحديد ${ids.length} منتجًا لهذه الشاشة` : 'الشاشة تعرض كل المنتجات الآن') : 'Produits enregistres');
+      setPicker(prev => { const n = { ...prev }; delete n[id]; return n; });
       load();
     } catch { toast.error(isAr ? 'فشل الحفظ' : 'Echec'); }
   };
@@ -145,6 +183,67 @@ export default function ScreensPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {/* p333: تقسيم الشاشة + تحديد منتجاتها (لوضعَي الكتالوج والشرائح) */}
+              {(s.mode === 'catalog' || s.mode === 'slider') && (
+                <div className="space-y-2 border-t pt-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">{isAr ? 'تقسيم الشاشة' : 'Disposition'}</label>
+                    <Select value={String(s.grid_layout || 0)} onValueChange={v => setLayout(s.id, v)}>
+                      <SelectTrigger data-testid={`screen-layout-${s.id}`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">{isAr ? 'تلقائي (حسب عدد المنتجات)' : 'Auto'}</SelectItem>
+                        <SelectItem value="1">{isAr ? 'منتج واحد بملء الشاشة' : '1 produit plein ecran'}</SelectItem>
+                        <SelectItem value="4">{isAr ? '4 خانات (2×2)' : '4 zones (2x2)'}</SelectItem>
+                        <SelectItem value="6">{isAr ? '6 خانات (3×2)' : '6 zones (3x2)'}</SelectItem>
+                        <SelectItem value="8">{isAr ? '8 خانات (4×2)' : '8 zones (4x2)'}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button size="sm" variant="outline" className="w-full" onClick={() => togglePicker(s)} data-testid={`screen-products-${s.id}`}>
+                    {isAr
+                      ? `تحديد المنتجات ${(s.product_ids || []).length ? `(${(s.product_ids || []).length} محدد)` : '(الكل حاليًا)'}`
+                      : 'Choisir les produits'}
+                  </Button>
+                  {picker[s.id]?.open && (
+                    <div className="border rounded-lg p-2 space-y-2" data-testid={`screen-picker-${s.id}`}>
+                      <Input
+                        value={picker[s.id].search}
+                        onChange={e => setPicker(prev => ({ ...prev, [s.id]: { ...prev[s.id], search: e.target.value } }))}
+                        placeholder={isAr ? 'ابحث عن منتج…' : 'Rechercher…'}
+                        className="h-8 text-sm"
+                        data-testid={`screen-picker-search-${s.id}`}
+                      />
+                      <div className="max-h-48 overflow-y-auto space-y-1">
+                        {products
+                          .filter(p => !picker[s.id].search || (p.name_ar || p.name || '').toLowerCase().includes(picker[s.id].search.toLowerCase()))
+                          .slice(0, 100)
+                          .map(p => {
+                            const checked = picker[s.id].ids.includes(p.id);
+                            return (
+                              <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted rounded px-1 py-0.5" data-testid={`screen-pick-${s.id}-${p.id}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => setPicker(prev => {
+                                    const cur = prev[s.id];
+                                    const ids = checked ? cur.ids.filter(x => x !== p.id) : [...cur.ids, p.id];
+                                    return { ...prev, [s.id]: { ...cur, ids } };
+                                  })}
+                                />
+                                <span className="truncate">{p.name_ar || p.name}</span>
+                                <span className="text-xs text-muted-foreground ms-auto" dir="ltr">{p.retail_price}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" className="flex-1" onClick={() => saveProducts(s.id)} data-testid={`screen-pick-save-${s.id}`}>{isAr ? 'حفظ التحديد' : 'Enregistrer'}</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setPicker(prev => ({ ...prev, [s.id]: { ...prev[s.id], ids: [] } }))}>{isAr ? 'الكل' : 'Tous'}</Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2">
                 <Input
                   value={renaming[s.id] ?? ''}

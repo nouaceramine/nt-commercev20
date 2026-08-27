@@ -113,7 +113,7 @@ export default function TvHubPage() {
   if (config.mode === 'slider') {
     return config.has_restaurant
       ? <TvMenuPage tenantIdProp={config.tenant_id} forceSlider />
-      : <TvCatalogPage tenantIdProp={config.tenant_id} forceSlider />;
+      : <TvCatalogPage tenantIdProp={config.tenant_id} forceSlider screenToken={token} gridLayout={config.grid_layout} />;  // p333
   }
-  return <TvCatalogPage tenantIdProp={config.tenant_id} />;
+  return <TvCatalogPage tenantIdProp={config.tenant_id} screenToken={token} gridLayout={config.grid_layout} />;  // p333
 }
