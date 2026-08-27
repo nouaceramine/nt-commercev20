@@ -52,6 +52,9 @@ SUPPORTED_FEATURES = {
     # p318: opt-in activity modules — without these, saving the flags dialog
     # silently WIPED them from features_override (NT-0025 lost restaurant mode)
     "restaurant", "production", "rental",
+    # p341: full module-registry gates — every module is toggleable per tenant
+    "accounting", "digital_services", "employees", "expenses", "partners",
+    "promotions", "purchases", "screen_recording", "sms", "whatsapp",
 }
 
 
@@ -449,7 +452,7 @@ async def get_tenant_features(tenant_id: str, admin: dict = Depends(get_super_ad
 
     # Normalise plan features to flat booleans — plans may store nested {enabled, subFeatures}
     # `ecommerce_hub` is opt-in (default disabled): super admin must explicitly toggle it on per tenant.
-    OPT_IN_FEATURES = {"ecommerce_hub"}
+    OPT_IN_FEATURES = {"ecommerce_hub", "rental", "restaurant", "production"}  # p341: aligned with main.py
     plan_defaults: dict = {}
     for key in SUPPORTED_FEATURES:
         val = plan_features_raw.get(key)
@@ -476,7 +479,39 @@ async def update_tenant_features(tenant_id: str, body: dict, admin: dict = Depen
     # Accept only known feature keys; unknown keys are silently dropped
     clean = {k: bool(v) for k, v in body.items() if k in SUPPORTED_FEATURES}
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"features_override": clean}})
+    from core.business_profiles import invalidate_features_cache  # p341
+    await invalidate_features_cache(tenant_id)
     return {"features_override": clean}
+
+
+@router.put("/saas/features/bulk")
+async def bulk_update_features(body: dict, admin: dict = Depends(get_super_admin)):
+    """p341: apply or clear one feature gate for many tenants at once.
+
+    body: {"tenant_ids": [...], "gate": "<key>", "value": true|false|null}
+    value=null clears the tenant override (falls back to the plan default)."""
+    gate = body.get("gate")
+    tenant_ids = body.get("tenant_ids") or []
+    value = body.get("value")
+    if gate not in SUPPORTED_FEATURES:
+        raise HTTPException(status_code=400, detail="Unknown feature key")
+    if not isinstance(tenant_ids, list) or not tenant_ids:
+        raise HTTPException(status_code=400, detail="tenant_ids must be a non-empty list")
+
+    if value is None:
+        await db.saas_tenants.update_many(
+            {"id": {"$in": tenant_ids}},
+            {"$unset": {f"features_override.{gate}": ""}},
+        )
+    else:
+        await db.saas_tenants.update_many(
+            {"id": {"$in": tenant_ids}},
+            {"$set": {f"features_override.{gate}": bool(value)}},
+        )
+    from core.business_profiles import invalidate_features_cache
+    for tid in tenant_ids:
+        await invalidate_features_cache(tid)
+    return {"updated": len(tenant_ids), "gate": gate, "value": value}
 
 
 # Collections that must NEVER be bulk-cleaned by tenant_id during cascade delete

@@ -1,10 +1,11 @@
-"""p340: Module Registry API for super-admin.
+"""p340/p341: Module Registry API for super-admin.
 
 Exposes the motherboard registry (core/registry.py + core/modules_map.py):
 
 - GET /api/saas/modules          → every component with gate, category, health
                                    (metrics, circuit breaker, last error)
-- GET /api/saas/modules/gates    → feature-gate catalog (gate → owned modules)
+- GET /api/saas/modules/gates    → feature-gate catalog with Arabic labels,
+                                   categories, module names, opt-in flags
 - GET /api/saas/modules/coverage → audit: every live API path must be owned by
                                    exactly one component (longest-prefix rule)
 """
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, Request
 
 from core import registry
 from core import modules_map
+from core.business_profiles import OPT_IN_GATES
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["Module Registry"])
@@ -35,6 +37,34 @@ CATEGORY_LABELS = {
     "ai": "الذكاء الاصطناعي",
     "platform": "المنصة",
     "general": "عام",
+}
+
+# p341: Arabic labels per feature gate (used by the feature-management UI)
+GATE_LABELS = {
+    "pos": "نقطة البيع والمبيعات",
+    "inventory": "المخزون والمخازن",
+    "customers": "الزبائن",
+    "credit_sales": "الديون والأقساط",
+    "loyalty_points": "نقاط الولاء",
+    "purchases": "المشتريات والموردون",
+    "accounting": "المحاسبة والبنوك",
+    "expenses": "المصاريف",
+    "wallet": "المحفظة المالية",
+    "reports": "التقارير والتحليلات",
+    "promotions": "العروض والكوبونات",
+    "employees": "الموظفون والمهام",
+    "partners": "الشركاء",
+    "recharge": "التعبئة والشرائح",
+    "digital_services": "الخدمات الرقمية",
+    "ecommerce_hub": "التجارة الإلكترونية",
+    "restaurant": "المطعم",
+    "production": "الإنتاج",
+    "rental": "الكراء",
+    "maintenance": "الصيانة والإصلاح",
+    "screen_recording": "تسجيل شاشة الكاشير",
+    "sms": "الرسائل القصيرة",
+    "whatsapp": "واتساب",
+    "ai_bots": "الذكاء الاصطناعي",
 }
 
 
@@ -78,7 +108,20 @@ async def list_modules(admin=Depends(get_super_admin)):
 
 @router.get("/saas/modules/gates")
 async def list_gates(admin=Depends(get_super_admin)):
-    return {"gates": modules_map.gates_catalog()}
+    comps = {c.key: c for c in modules_map.all_components()}
+    out = []
+    for g in modules_map.gates_catalog():
+        gate = g["gate"]
+        modules = g["modules"]
+        out.append({
+            "gate": gate,
+            "label_ar": GATE_LABELS.get(gate, gate),
+            "modules": modules,
+            "module_names_ar": [comps[m].name_ar for m in modules if m in comps],
+            "categories": sorted({comps[m].category for m in modules if m in comps}),
+            "opt_in": gate in OPT_IN_GATES,
+        })
+    return {"gates": out}
 
 
 @router.get("/saas/modules/coverage")

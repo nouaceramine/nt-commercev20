@@ -54,6 +54,16 @@ async function loadProfiles() {
 }
 import { EntityCode } from '../components/EntityCode';
 
+// p341: Arabic labels + display order for gate categories in the flags dialog
+const CATEGORY_LABELS_AR = {
+  sales: 'المبيعات', inventory: 'المخزون', customers: 'الزبائن', suppliers: 'المشتريات والموردون',
+  finance: 'المالية', marketing: 'التسويق', hr: 'الموارد البشرية', commerce: 'التجارة',
+  restaurant: 'المطعم', telecom: 'الاتصالات', ecommerce: 'التجارة الإلكترونية',
+  communication: 'التواصل', ai: 'الذكاء الاصطناعي', maintenance: 'الصيانة',
+  core: 'أساسي', platform: 'المنصة',
+};
+const CATEGORY_ORDER = ['sales', 'inventory', 'customers', 'suppliers', 'finance', 'marketing', 'hr', 'commerce', 'restaurant', 'telecom', 'ecommerce', 'communication', 'ai', 'maintenance', 'core', 'platform'];
+
 const ALL_FEATURES = [
   { key: 'pos',             labelAr: 'نقطة البيع (POS)' },
   { key: 'inventory',       labelAr: 'المخزون والمنتجات' },
@@ -136,6 +146,7 @@ export default function SubscribersPage() {
   const [featureFlagsDialogOpen, setFeatureFlagsDialogOpen] = useState(false);
   const [selectedTenantForFlags, setSelectedTenantForFlags] = useState(null);
   const [tenantFeatureFlags, setTenantFeatureFlags] = useState({});
+  const [gateCatalog, setGateCatalog] = useState(null);  // p341: live gate catalog
   const [savingFlags, setSavingFlags] = useState(false);
 
   // — Bridge dialog
@@ -360,22 +371,33 @@ export default function SubscribersPage() {
   };
 
   // ─────────────────── Feature Flags ───────────────────
+  // ─────────────────── Feature Flags ───────────────────
   const openFeatureFlagsDialog = async (tenant) => {
     setSelectedTenantForFlags(tenant);
     setFeatureFlagsDialogOpen(true);
+    // p341: the dialog is fed by the live module-registry gate catalog so EVERY
+    // module is toggleable — no static list to drift out of sync.
+    let gates = [];
+    try {
+      const gres = await apiClient.get('/saas/modules/gates');
+      gates = gres.data?.gates || [];
+    } catch { gates = []; }
+    setGateCatalog(gates);
     try {
       const res = await apiClient.get(`/saas/tenants/${tenant.id}/features`);
       const resolved = res.data?.resolved || {};
       const init = {};
+      gates.forEach(g => {
+        init[g.gate] = resolved[g.gate] !== undefined ? Boolean(resolved[g.gate]) : (g.opt_in ? false : true);
+      });
       ALL_FEATURES.forEach(f => {
-        // Opt-in features (e.g. ecommerce_hub) default to false; others default to true.
-        const fallback = f.optIn ? false : true;
-        init[f.key] = resolved[f.key] !== undefined ? Boolean(resolved[f.key]) : fallback;
+        if (!(f.key in init)) init[f.key] = resolved[f.key] !== undefined ? Boolean(resolved[f.key]) : (f.optIn ? false : true);
       });
       setTenantFeatureFlags(init);
     } catch {
       const init = {};
-      ALL_FEATURES.forEach(f => { init[f.key] = f.optIn ? false : true; });
+      gates.forEach(g => { init[g.gate] = g.opt_in ? false : true; });
+      ALL_FEATURES.forEach(f => { if (!(f.key in init)) init[f.key] = f.optIn ? false : true; });
       setTenantFeatureFlags(init);
     }
   };
@@ -927,29 +949,61 @@ export default function SubscribersPage() {
                 <span className="text-xs">الميزات المعطلة تُخفى من القائمة الجانبية وتُحجب عند الطلب.</span>
               </DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-1 gap-2 py-2">
-              {ALL_FEATURES.map(feature => {
-                const isEnabled = tenantFeatureFlags[feature.key] !== false;
-                return (
-                  <div key={feature.key} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors ${isEnabled ? (feature.optIn ? 'bg-amber-50 border-amber-300' : 'bg-green-50 border-green-200') : 'bg-muted/40 border-muted'}`}>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm font-medium ${isEnabled ? (feature.optIn ? 'text-amber-800' : 'text-green-800') : 'text-muted-foreground'}`}>
-                        {feature.labelAr}
-                      </span>
-                      {feature.optIn && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 font-semibold">
-                          BETA
-                        </span>
-                      )}
+            <div className="grid grid-cols-1 gap-2 py-2" data-testid="feature-flags-list">
+              {(() => {
+                const catalog = gateCatalog || [];
+                const catalogKeys = new Set(catalog.map(g => g.gate));
+                const legacy = ALL_FEATURES.filter(f => !catalogKeys.has(f.key));
+                const groups = {};
+                catalog.forEach(g => {
+                  const c = (g.categories && g.categories[0]) || 'core';
+                  (groups[c] = groups[c] || []).push(g);
+                });
+                const orderedCats = CATEGORY_ORDER.filter(c => groups[c]).concat(Object.keys(groups).filter(c => !CATEGORY_ORDER.includes(c)));
+                const renderRow = (key, labelAr, optIn, modulesLine) => {
+                  const isEnabled = tenantFeatureFlags[key] !== false;
+                  return (
+                    <div key={key} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors ${isEnabled ? (optIn ? 'bg-amber-50 border-amber-300' : 'bg-green-50 border-green-200') : 'bg-muted/40 border-muted'}`}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="min-w-0">
+                          <span className={`text-sm font-medium ${isEnabled ? (optIn ? 'text-amber-800' : 'text-green-800') : 'text-muted-foreground'}`}>
+                            {labelAr}
+                          </span>
+                          {modulesLine && (
+                            <div className="text-[10px] text-muted-foreground truncate">{modulesLine}</div>
+                          )}
+                        </div>
+                        {optIn && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 font-semibold shrink-0">
+                            BETA
+                          </span>
+                        )}
+                      </div>
+                      <Switch
+                        checked={isEnabled}
+                        onCheckedChange={(checked) => setTenantFeatureFlags(prev => ({ ...prev, [key]: checked }))}
+                        data-testid={`flag-toggle-${key}`}
+                      />
                     </div>
-                    <Switch
-                      checked={isEnabled}
-                      onCheckedChange={(checked) => setTenantFeatureFlags(prev => ({ ...prev, [feature.key]: checked }))}
-                      data-testid={`flag-toggle-${feature.key}`}
-                    />
-                  </div>
+                  );
+                };
+                return (
+                  <>
+                    {orderedCats.map(cat => (
+                      <div key={cat} className="space-y-2" data-testid={`flag-group-${cat}`}>
+                        <div className="text-xs font-bold text-muted-foreground border-b pb-1 mt-1">{CATEGORY_LABELS_AR[cat] || cat}</div>
+                        {groups[cat].map(g => renderRow(g.gate, g.label_ar, g.opt_in, (g.module_names_ar || []).join(' · ')))}
+                      </div>
+                    ))}
+                    {legacy.length > 0 && (
+                      <div className="space-y-2" data-testid="flag-group-legacy">
+                        <div className="text-xs font-bold text-muted-foreground border-b pb-1 mt-1">ميزات إضافية</div>
+                        {legacy.map(f => renderRow(f.key, f.labelAr, f.optIn, null))}
+                      </div>
+                    )}
+                  </>
                 );
-              })}
+              })()}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setFeatureFlagsDialogOpen(false)}>إلغاء</Button>

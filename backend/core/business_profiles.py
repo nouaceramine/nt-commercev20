@@ -240,7 +240,67 @@ KNOWN_FEATURE_KEYS = [
     "ai_bots", "backup", "barcode", "credit_sales", "customers", "ecommerce_hub",
     "inventory", "iptv", "loyalty_points", "maintenance", "pos", "recharge",
     "reports", "wallet", "rental", "restaurant", "production",
+    # p341: full module-registry gates (see core/modules_map.py)
+    "accounting", "digital_services", "employees", "expenses", "partners",
+    "promotions", "purchases", "screen_recording", "sms", "whatsapp",
 ]
+
+# p341: opt-in modules are OFF unless plan or tenant explicitly enables them
+OPT_IN_GATES = ("ecommerce_hub", "rental", "restaurant", "production")
+
+
+# p341: shared effective-features resolver (plan + overrides) with a short TTL
+# cache — used by the feature-gate middleware on every gated request.
+# The cache lives in Redis so all 4 uvicorn workers see invalidations instantly;
+# if Redis is unreachable the NoopCache makes every call recompute (fail-safe).
+_FEATURES_CACHE_TTL = 60  # seconds
+_FEATURES_CACHE_PREFIX = "feat-eff:"
+
+
+async def get_effective_features(main_db, tenant_id: str) -> dict:
+    import json as _json
+    from utils.cache import cache as _cache
+    key = f"{_FEATURES_CACHE_PREFIX}{tenant_id}"
+    try:
+        raw = await _cache.get(key)
+        if raw:
+            return _json.loads(raw)
+    except Exception:
+        pass
+    tenant = await main_db.saas_tenants.find_one(
+        {"id": tenant_id}, {"_id": 0, "plan_id": 1, "features_override": 1}
+    )
+    if not tenant:
+        feats: dict = {}
+    else:
+        plan = await main_db.saas_plans.find_one(
+            {"id": tenant.get("plan_id")}, {"_id": 0, "features": 1}
+        ) or {}
+        feats = {**(plan.get("features") or {}), **(tenant.get("features_override") or {})}
+        for opt in OPT_IN_GATES:
+            if opt not in feats:
+                feats[opt] = False
+    try:
+        await _cache.set(key, _json.dumps(feats), ttl=_FEATURES_CACHE_TTL)
+    except Exception:
+        pass
+    return feats
+
+
+async def invalidate_features_cache(tenant_id: str | None = None) -> None:
+    from utils.cache import cache as _cache
+    try:
+        if tenant_id is None:
+            await _cache.invalidate_prefix(_FEATURES_CACHE_PREFIX)
+        else:
+            await _cache.delete(f"{_FEATURES_CACHE_PREFIX}{tenant_id}")
+    except Exception:
+        pass
+
+
+def gate_default(gate: str) -> bool:
+    """Default state when neither plan nor tenant mention the gate."""
+    return gate not in OPT_IN_GATES
 
 
 def get_profile(key: str) -> dict | None:

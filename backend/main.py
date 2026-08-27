@@ -84,6 +84,10 @@ app = FastAPI(title="NT API")
 from middleware.request_context import RequestContextMiddleware
 app.add_middleware(RequestContextMiddleware)
 
+# p341: per-tenant feature-gate enforcement (registry-based, fail-open)
+from middleware.feature_gate import FeatureGateMiddleware
+app.add_middleware(FeatureGateMiddleware)
+
 # p135: APM-lite middleware
 from middleware.apm import APMMiddleware
 app.add_middleware(APMMiddleware)
