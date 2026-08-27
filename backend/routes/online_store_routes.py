@@ -207,6 +207,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             existing = await main_db.store_slugs.find_one({"store_slug": settings.store_slug})
             if existing and existing.get("tenant_id") != tenant_id:
                 raise HTTPException(status_code=400, detail="هذا الرابط المختصر مستخدم من متجر آخر — اختر رابطاً مختلفاً")
+            _prev = await main_db.store_slugs.find_one({"tenant_id": tenant_id})  # p328
             await main_db.store_slugs.update_one(
                 {"tenant_id": tenant_id},
                 {"$set": {
@@ -218,6 +219,19 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 }},
                 upsert=True
             )
+            # p328: أتمتة DNS عبر Cloudflare — <slug>.nt-commerce.net يُنشأ/يُزال تلقائيًا
+            try:
+                import asyncio as _aio
+                from services.cloudflare_service import ensure_store_subdomain, remove_store_subdomain
+                _prev_slug = (_prev or {}).get("store_slug")
+                if _prev_slug and _prev_slug != settings.store_slug:
+                    _aio.create_task(remove_store_subdomain(_prev_slug))
+                if settings.enabled:
+                    _aio.create_task(ensure_store_subdomain(settings.store_slug))
+                else:
+                    _aio.create_task(remove_store_subdomain(settings.store_slug))
+            except Exception:
+                pass  # DNS automation must never block saving settings
         return {"message": "تم حفظ إعدادات المتجر"}
 
     @router.get("/store/products")
@@ -294,6 +308,14 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             h = _norm_domain(host)
         if not h or h in _PLATFORM_HOSTS:
             raise HTTPException(status_code=400, detail="دومين النظام — استخدم رابط المتجر العادي")
+        # p328: نطاق فرعي للمتجر — <slug>.nt-commerce.net يُحل مباشرة من store_slugs
+        if h.endswith(".nt-commerce.net"):
+            sub = h[: -len(".nt-commerce.net")]
+            if sub and sub != "www":
+                _m = await main_db.store_slugs.find_one({"store_slug": sub, "enabled": True}, {"_id": 0})
+                if not _m:
+                    raise HTTPException(status_code=404, detail="لا يوجد متجر بهذا النطاق الفرعي")
+                return {"store_slug": _m["store_slug"], "domain": h}
         doc = await main_db.custom_domains.find_one({"domain": h})
         if not doc and h.startswith("www."):
             doc = await main_db.custom_domains.find_one({"domain": h[4:]})

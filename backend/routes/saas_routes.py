@@ -17,6 +17,7 @@ from .saas.tenant_debts_routes import router as tenant_debts_router
 from .saas.platform_stats_routes import router as platform_stats_router
 from .saas.audit_timeline_routes import router as audit_timeline_router
 from .saas.email_settings_routes import router as email_settings_router
+from .saas.cloudflare_settings_routes import router as cloudflare_settings_router  # p328
 from .saas.helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Admin"])
@@ -34,3 +35,4 @@ router.include_router(tenant_debts_router)
 router.include_router(platform_stats_router)
 router.include_router(audit_timeline_router)
 router.include_router(email_settings_router)
+router.include_router(cloudflare_settings_router)  # p328

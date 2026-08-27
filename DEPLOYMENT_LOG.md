@@ -1,3 +1,18 @@
+## 2026-08-27 — p328: أتمتة DNS عبر Cloudflare — نطاق فرعي لكل متجر تلقائيًا
+
+### التغييرات
+- **services/cloudflare_service.py (جديد)**: الرمز + zone_id من platform_settings (مشفر AES-256-GCM)؛ ensure/remove_store_subdomain — CNAME قريب (proxied) `<slug>.nt-commerce.net → nt-commerce.net`، idempotent، أخطاؤه تُسجَّل ولا ترفع (حفظ الإعدادات لا يتعطل أبدًا)
+- **routes/saas/cloudflare_settings_routes.py (جديد، مسجل في saas_routes.py)**: GET/PUT /saas/cloudflare-settings (مقنّع/مشفر) + POST /test (تحقق حقيقي tokens/verify + اسم الـ zone)
+- **online_store_routes.py**: حفظ رابط المتجر ينشئ/يزيل سجل DNS تلقائيًا (يشمل إعادة التسمية)؛ by-domain يحل `<slug>.nt-commerce.net` مباشرة من store_slugs — الواجهة p152 (isCustomDomain→CustomDomainStore) تخدم النطاقات الفرعية بلا أي تعديل
+- **SSL للسحاب (custom hostnames) غير متاح** في الخطة الحالية (quota=0، يتطلب Enterprise) — نطاقات العملاء المخصصة تبقى بفحص DNS اليدوي
+- Backfill: bida + rahimplatre
+
+### التحقق (E2E كامل)
+- PUT/GET (مقنّع ••••0897) + test → ok, zone=nt-commerce.net
+- سجلات منشأة ومؤكدة عبر CF API (proxied)؛ حذف سجل اختبار cftest
+- https://bida.nt-commerce.net/api/shop/by-domain → store_slug=bida؛ الصفحة الكاملة تعرض المتجر (Playwright) ✓
+- Universal SSL يغطي النطاقات الفرعية من المستوى الأول — HTTPS يعمل فورًا بلا شهادات إضافية
+
 ## 2026-08-27 — p327: تفعيل النسخ الاحتياطي الخارجي (Backblaze B2 + rclone)
 
 ### التغييرات
