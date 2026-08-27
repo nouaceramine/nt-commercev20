@@ -181,16 +181,16 @@ export default function TablesMapPage() {
                   )}
                   {/* p311: رمز QR للطلب من الطاولة */}
                   <div className="border rounded p-3 flex flex-col items-center gap-2" data-testid={`table-qr-${selTable.id}`}>
-                    <QRCodeCanvas value={`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}/${selTable.qr_token || ''}`} size={140} />  {/* p323: رابط مؤقت */}
-                    <p className="text-[11px] text-muted-foreground text-center break-all" dir="ltr">{`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}/${selTable.qr_token || ''}`}</p>
+                    <QRCodeCanvas value={`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`} size={140} />  {/* p325: رمز مطبوع دائم — المسح ينشئ رابط طلب مؤقتًا */}
+                    <p className="text-[11px] text-muted-foreground text-center break-all" dir="ltr">{`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`}</p>
                     <Button variant="outline" size="sm" className="w-full"
                       data-testid={`table-qr-copy-${selTable.id}`}
-                      onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}/${selTable.qr_token || ''}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (e) {} }}>
+                      onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (e) {} }}>
                       <Copy className="h-4 w-4 ml-1" />{isAr ? 'نسخ رابط الطلب' : 'Copier le lien'}
                     </Button>
-                    {/* p323: الرابط مؤقت — يتجدد تلقائيًا عند تحرير الطاولة، أو يدويًا من هنا */}
+                    {/* p325: الرمز المطبوع دائم — روابط الطلب المؤقتة تموت عند تحرير الطاولة */}
                     <p className="text-[11px] text-amber-700 dark:text-amber-400 text-center">
-                      {isAr ? 'الرابط مؤقت: يموت تلقائيًا عند إنهاء طلب الطاولة، فلا يمكن لزبون قديم الطلب من بيته' : 'Lien temporaire'}
+                      {isAr ? 'هذا الرمز دائم — اطبعه مرة واحدة. كل مسح ينشئ رابط طلب مؤقتًا يموت تلقائيًا بعد الدفع، فلا يمكن لزبون قديم الطلب من بيته' : 'QR permanent — lien de commande temporaire'}
                     </p>
                     <Button variant="outline" size="sm" className="w-full"
                       data-testid={`table-qr-rotate-${selTable.id}`}

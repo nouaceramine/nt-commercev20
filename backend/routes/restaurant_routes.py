@@ -553,6 +553,22 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         } for p in prods]
         return {"restaurant_name": t.get("company_name") or t.get("name") or "", "items": items}
 
+    @router.get("/public/table-session/{tenant_id}/{table_id}")
+    async def qr_table_session(tenant_id: str, table_id: str):
+        """p325: رمز QR المطبوع على الطاولة دائم — كل مسح يسترجع (أو ينشئ كسلًا) رابط الطلب المؤقت الحالي.
+        الرابط المؤقت نفسه (qr_token) يدور عند تحرير الطاولة/الدفع كما في p323."""
+        from config.database import get_tenant_db
+        await _qr_tenant(tenant_id)
+        tdb = get_tenant_db(tenant_id)
+        table = await tdb.restaurant_tables.find_one({"id": table_id})
+        if not table:
+            raise HTTPException(status_code=404, detail="رمز الطاولة غير صالح")
+        tok = table.get("qr_token")
+        if not tok:  # طاولات قديمة بلا رمز — إنشاء كسول
+            tok = secrets.token_hex(5)
+            await tdb.restaurant_tables.update_one({"id": table_id}, {"$set": {"qr_token": tok}})
+        return {"token": tok, "table_name": table.get("name") or ""}
+
     @router.get("/public/table-menu/{tenant_id}/{table_id}/{token}")
     async def qr_table_menu(tenant_id: str, table_id: str, token: str):
         """p323: قائمة الطاولة برابط مؤقت — 410 إن دُوّر الرابط (انتهت الزيارة) أو زُوّر"""

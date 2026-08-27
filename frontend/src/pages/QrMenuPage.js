@@ -1,6 +1,6 @@
 // p311: صفحة طلب QR العمومية — الزبون يمسح رمز الطاولة ويطلب دون تسجيل دخول
 import { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';  // p325: navigate لاستبدال المسح بالرابط المؤقت
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2 } from 'lucide-react';
@@ -8,7 +8,8 @@ import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2 } from 'lucide
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
 
 export default function QrMenuPage() {
-  const { tenantId, tableId, token } = useParams();  // p323: token = الرابط المؤقت للطاولة
+  const { tenantId, tableId, token } = useParams();
+  const navigate = useNavigate();  // p325  // p323: token = الرابط المؤقت للطاولة
   const [menu, setMenu] = useState(null);
   const [error, setError] = useState(null);
   const [cart, setCart] = useState([]); // {id,name,price,qty,mods:[]}
@@ -20,9 +21,18 @@ export default function QrMenuPage() {
   const [showCart, setShowCart] = useState(false);
 
   useEffect(() => {
-    // p324: رابط قديم بلا رمز (من نسخة ما قبل p323) أو رابط غير صالح — رسالة عربية واضحة بدل "Not Found"
-    const EXPIRED = 'انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي';
-    if (!token) { setError(EXPIRED); return; }
+    const EXPIRED = 'انتهت صلاحية رابط الطلب — امسح رمز الطاولة من جديد';
+    if (!token) {
+      // p325: المسح من الرمز المطبوع الدائم — نسترجع رابط الطلب المؤقت الحالي ونستبدل العنوان به
+      fetch(`/api/restaurant/public/table-session/${tenantId}/${tableId}`)
+        .then(async (r) => {
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'رمز الطاولة غير صالح');
+          return r.json();
+        })
+        .then((d) => navigate(`/r/${tenantId}/${tableId}/${d.token}`, { replace: true }))
+        .catch((e) => setError(e.message));
+      return;
+    }
     fetch(`/api/restaurant/public/table-menu/${tenantId}/${tableId}/${token}`)
       .then(async (r) => {
         if (!r.ok) {
