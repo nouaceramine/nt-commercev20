@@ -96,6 +96,9 @@ const QrMenuPage = lazy(() => import("./pages/QrMenuPage"));  // p311
 const OrderBoardPage = lazy(() => import("./pages/OrderBoardPage"));  // p314
 const TvMenuPage = lazy(() => import("./pages/TvMenuPage"));  // p320
 const TvHubPage = lazy(() => import("./pages/TvHubPage"));  // p322
+const NeighborsPage = lazy(() => import("./pages/NeighborsPage"));  // p335
+const NeighborOrderPage = lazy(() => import("./pages/NeighborOrderPage"));  // p335
+const RestaurantPOSPage = lazy(() => import("./pages/RestaurantPOSPage"));  // p339
 const ScreensPage = lazy(() => import("./pages/ScreensPage"));  // p322
 const TvCatalogPage = lazy(() => import("./pages/TvCatalogPage"));  // p329
 const WaiterPage = lazy(() => import("./pages/WaiterPage"));  // p312
@@ -387,6 +390,7 @@ function AppRoutes() {
       <Route path="/track" element={<GlobalTrackingPage />} />
       <Route path="/r/:tenantId/:tableId/:token" element={<QrMenuPage />} />  {/* p323: QR table ordering — temporary tokenized link */}
       <Route path="/r/:tenantId/:tableId" element={<QrMenuPage />} />  {/* p311 legacy: يعرض «انتهت الصلاحية» */}
+      <Route path="/b2b/:tenantId/:token" element={<NeighborOrderPage />} />  {/* p335: طلبات الجيران B2B — رابط خاص بكل محل */}
       <Route path="/board/:tenantId" element={<OrderBoardPage />} />  {/* p314: public order status board */}
       <Route path="/tv/menu/:tenantId" element={<TvMenuPage />} />  {/* p320: public TV menu board (live stock) */}
       <Route path="/tv/catalog/:tenantId" element={<TvCatalogPage />} />  {/* p329: public catalog board — أي نشاط */}
@@ -1194,6 +1198,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute featureKey="production">
             <ProductionPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/restaurant-pos"
+        element={
+          <ProtectedRoute>
+            <RestaurantPOSPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/neighbors"
+        element={
+          <ProtectedRoute>
+            <NeighborsPage />
           </ProtectedRoute>
         }
       />

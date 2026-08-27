@@ -533,6 +533,8 @@ export const Layout = ({ children }) => {
         { path: '/kitchen', icon: UtensilsCrossed, label: language === 'ar' ? 'شاشة المطبخ' : 'Cuisine' },
         { path: '/tables', icon: UtensilsCrossed, label: language === 'ar' ? 'خريطة الطاولات' : 'Tables' },
         { path: '/waiter', icon: ChefHat, label: language === 'ar' ? 'واجهة النادل' : 'Serveur' },
+        { path: '/neighbors', icon: Store, label: language === 'ar' ? 'الجيران B2B' : 'Voisins B2B' },  // p335
+        { path: '/restaurant-pos', icon: UtensilsCrossed, label: language === 'ar' ? 'POS المطعم' : 'POS Resto' },  // p339
         { path: '/delivery', icon: Bike, label: language === 'ar' ? 'طلبات التوصيل' : 'Livraisons' },
       ]  // p329: شاشات العرض انتقلت للإعدادات — صارت لكل الأنشطة
     },
