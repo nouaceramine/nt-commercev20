@@ -1,3 +1,15 @@
+## 2026-08-27 — p327: تفعيل النسخ الاحتياطي الخارجي (Backblaze B2 + rclone)
+
+### التغييرات
+- لا كود — البنية كانت جاهزة منذ p128/p302؛ الناقص كان مفاتيح B2 فقط
+- B2 API: الـbucket ntcommerce-backups (allPrivate) كان موجودًا؛ أنشأنا مفتاحًا **محدود النطاق** (ntcommerce-backup-rclone: list/read/write/delete على الـbucket فقط) — المفتاح الرئيسي (Master) لم يُخزَّن على الخادم
+- rclone: remote باسم offsite: نوع b2 بالمفتاح المحدود (~/.config/rclone/rclone.conf — خارج المستودع)
+
+### التحقق
+- تشغيل فوري لـ offsite_backup.sh → OK -> offsite-remote؛ rclone ls يُظهر ntbackup_2026-08-27_0400.tar.gz.gpg (8.5MB)
+- **اختبار استرجاع حقيقي**: تنزيل من B2 ← فك تشفير GPG بـ .backup_key ← الحزمة كاملة (mongo.archive.gz + backend.env + frontend.env + docker-compose.yml + yalidine_proxy.py) ✓
+- الجدولة اليومية 04:30 ستعمل تلقائيًا من الآن (الاحتفاظ: 30 يومًا سحابيًا / 14 يومًا محليًا / 7 نسخ مرحّلة)
+
 ## 2026-08-27 — p326: تفعيل البريد عبر Resend (بدل Brevo الميت)
 
 ### التغييرات
