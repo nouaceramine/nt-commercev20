@@ -97,6 +97,7 @@ export default function SubscribersPage() {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activityFilter, setActivityFilter] = useState('all');  // p330: فلترة حسب النشاط
 
   // — Tenant form dialog (create / edit)
   const [tenantDialogOpen, setTenantDialogOpen] = useState(false);
@@ -163,15 +164,22 @@ export default function SubscribersPage() {
   useEffect(() => {
     apiClient.get('/saas/business-profiles').then(r => setBusinessProfiles(r.data.profiles || [])).catch(() => {}); fetchData(); }, []);
 
+  const activityCounts = useMemo(() => {  // p330: عدّاد المشتركين لكل نشاط
+    const m = {};
+    tenants.forEach(t => { const k = t.business_type || 'retail'; m[k] = (m[k] || 0) + 1; });
+    return m;
+  }, [tenants]);
+
   const filteredTenants = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return tenants.filter(t =>
-      t.name?.toLowerCase().includes(q) ||
+      (activityFilter === 'all' || (t.business_type || 'retail') === activityFilter) &&  // p330
+      (t.name?.toLowerCase().includes(q) ||
       t.email?.toLowerCase().includes(q) ||
       t.company_name?.toLowerCase().includes(q) ||
-      t.short_id?.toLowerCase().includes(q)
+      t.short_id?.toLowerCase().includes(q))
     );
-  }, [tenants, searchQuery]);
+  }, [tenants, searchQuery, activityFilter]);
 
   // ─────────────────── Tenant CRUD ───────────────────
   const openTenantDialog = (tenant = null) => {
@@ -441,15 +449,31 @@ export default function SubscribersPage() {
 
         <Card>
           <CardContent className="p-3">
-            <div className="relative w-full sm:w-80">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="ابحث بالاسم، البريد، أو الشركة…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pr-9"
-                data-testid="tenants-search-input"
-              />
+            <div className="flex flex-col sm:flex-row gap-2 w-full">
+              <div className="relative w-full sm:w-80">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="ابحث بالاسم، البريد، أو الشركة…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pr-9"
+                  data-testid="tenants-search-input"
+                />
+              </div>
+              {/* p330: فلتر النشاط التجاري — كل الأنشطة المعرفة في النظام + عدّاد */}
+              <Select value={activityFilter} onValueChange={setActivityFilter}>
+                <SelectTrigger className="w-full sm:w-72" data-testid="tenants-activity-filter">
+                  <SelectValue placeholder="كل الأنشطة" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" data-testid="tenants-activity-all">كل الأنشطة ({tenants.length})</SelectItem>
+                  {businessProfiles.map(p => (
+                    <SelectItem key={p.key} value={p.key} data-testid={`tenants-activity-${p.key}`}>
+                      {p.name_ar} ({activityCounts[p.key] || 0})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
