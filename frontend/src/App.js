@@ -186,6 +186,8 @@ const SaasDataBrowserPage = lazy(() => import("./pages/admin/saas/DataBrowserPag
 const SaasPlansPage = lazy(() => import("./pages/admin/saas/PlansPage"));  // p273
 const SaasTenantDebtsPage = lazy(() => import("./pages/admin/saas/TenantDebtsPage"));  // p273
 const SaasAuditTimelinePage = lazy(() => import("./pages/admin/saas/AuditTimelinePage"));  // p273
+const ModulesDashboardPage = lazy(() => import("./pages/admin/saas/ModulesDashboardPage"));  // p346
+const OrgTreePage = lazy(() => import("./pages/admin/saas/OrgTreePage"));  // p345
 const SaasSubscribersPage = lazy(() => import("./pages/admin/saas/SubscribersPage"));  // p273
 const SaasAgentsPage = lazy(() => import("./pages/admin/saas/AgentsPage"));  // p273
 const SaasEmailSettingsPage = lazy(() => import("./pages/admin/saas/EmailSettingsPage"));  // p273
@@ -668,6 +670,14 @@ function AppRoutes() {
       <Route
         path="/saas-admin/audit-timeline"
         element={<ProtectedRoute superAdminOnly><SaasAuditTimelinePage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/modules"
+        element={<ProtectedRoute superAdminOnly><ModulesDashboardPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/saas-admin/org-tree"
+        element={<ProtectedRoute superAdminOnly><OrgTreePage /></ProtectedRoute>}
       />
       <Route
         path="/saas-admin/feature-flags"

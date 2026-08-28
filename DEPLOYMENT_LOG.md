@@ -1,3 +1,47 @@
+## 2026-08-28 — p340–p346: حوكمة الوحدات الكاملة (سجل مركزي + إنفاذ + روبوتات + لوحتان)
+
+### p340 — سجل الوحدات المركزي (Module Registry)
+- **core/registry.py**: حقول جديدة في ModuleSpec: `gate` (بوابة لكل مشترك)، `category` (تصنيف)، `probe` (فحص صحة)، ولاحقاً `aliases` (p342) — بتوافق كامل مع المواصفات القديمة
+- **core/modules_map.py (إعادة كتابة)**: **44 وحدة** تغطي **كل** مسارات API الـ1073 (100%) بقاعدة أطول بادئة؛ شاشات العرض `display` منفصلة عن `restaurant` ببادئات أطول فتبقى متاحة لكل الأنشطة؛ 24 بوابة + 19 وحدة أساسية دائمة
+- **routes/saas/module_registry_routes.py (جديد)**: GET `/saas/modules` (الوحدات + الحالة الحية: مقاييس/قاطع دائرة/آخر خطأ)، `/saas/modules/gates` (كتالوج البوابات بتسميات عربية + opt_in)، `/saas/modules/coverage` (تدقيق الملكية: 1073/1073 = 100%)
+
+### p341 — إنفاذ الميزات الفعلي + إدارة كاملة
+- **middleware/feature_gate.py (جديد)**: أول إنفاذ خادمي حقيقي — كل طلب يُربط بوحدته عبر السجل؛ رمز مستأجر + بوابة معطلة ⇒ 403 `feature_disabled`؛ بلا رمز/وكيل/سوبر أدمن/وحدة بلا بوابة ⇒ يمر؛ fail-open عند أخطاء الحلّ
+- **core/business_profiles.py**: `get_effective_features` (خطة ⊕ تخصيص) بكاش **Redis مشترك** (4 عمال uvicorn — الكاش المحلي كان يعيد 403 بعد التفعيل، اكتُشف وأُصلح بالاختبار) + `invalidate_features_cache` + KNOWN_FEATURE_KEYS +10 = 27
+- **tenants_routes.py**: SUPPORTED_FEATURES تشمل كل البوابات الـ24 (+5 قديمة محفوظة)؛ توحيد OPT_IN (ecommerce_hub/rental/restaurant/production)؛ PUT features يُبطل الكاش؛ **PUT `/saas/features/bulk`** (تفعيل/تعطيل/مسح بوابة لمجموعة مشتركين)
+- **SubscribersPage.js**: حوار الميزات أصبح **ديناميكياً بالكامل** من `/saas/modules/gates` — 29 مبدّلاً (24 بوابة + 5 قديمة) في 16 مجموعة مصنفة مع أسماء الوحدات التابعة لكل بوابة
+
+### p342 — توحيد الوحدات المكررة
+- **whatsapp**: يملك `/api/whatsapp` + `/api/integrations/whatsapp` (تعطيل البوابة يحجب السطحين — مثبت)؛ **email**: `/api/email` + `/api/integrations/email` (sendgrid_email/sendgrid_integration)؛ **credit**: customer_debts+debts؛ **suppliers**: suppliers_core+supplier_tracking
+- `aliases` في ModuleSpec + GET `/saas/modules/unifications` (تقرير التوحيد)؛ التغطية بقيت 100%
+
+### p343 — روبوت حي لكل وحدة (Module Watchdog)
+- **services/module_watchdog.py (جديد)**: مجدول (120ث، بدء بعد 60ث) يفحص الـ44 وحدة بالتوازي (semaphore 8) — http (حالات متوقعة) أو collection (وصول Mongo فعلي: رئيسية أو أول مستأجر)
+- عند الفشل (انتقال ok→failing فقط، بلا إغراق): **ملف لوغ للوحدة** (logs/<key>.log) + **سجل أخطاء النظام** (system_errors، severity=critical، auto_fixable) + **AutoHeal** (emit_exception_finding فوري) + إشعار المالك (p344) + تغذية قاطع الدائرة في السجل
+- عند التعافي: حل سجل الأخطاء تلقائياً (`resolved_by=module_watchdog`) + إشعار «تم الإصلاح»
+- الحالة تُحفظ في `module_robot_status` (تنجو من إعادة التشغيل)؛ GET `/saas/modules/robots` + POST `/saas/modules/robots/run` (فحص فوري)
+- **مثبت E2E**: probe وحدة ai فشل (405) → لوغ ai.log + system_errors active + نتيجة AutoHeal realtime → إصلاح الـprobe → دورة جديدة حلّت الخطأ تلقائياً (44/44 سليمة)
+
+### p344 — إشعارات المالك
+- **services/owner_notifier.py (جديد)**: بريد عبر email_service (Resend) + تليغرام عبر Bot API؛ إعدادات في platform_settings/owner_notifications مع بديل env؛ مفاتيح on_error/on_fixed؛ سجل إرسال في owner_notifications_log؛ **لا يُسقط الروبوت أبداً** (fail-safe)
+- **routes/saas/owner_notifications_routes.py (جديد)**: GET/PUT `/saas/owner-notifications` (رمز البوت مقنّع في العرض) + POST `/saas/owner-notifications/test`
+- **بند المالك**: توفير TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (أو إدخالهما من الواجهة)
+
+### p345 — شجرة الوحدات (سوبر أدمن ← وكلاء ← مشتركين)
+- **routes/saas/org_tree_routes.py (جديد)**: GET `/saas/org-tree` — وكلاء (مستوى/أب/صلاحيات/عدد مشتركين) + مشتركون مع **البوابات الفعلية ومصدر كل قيمة** (خطة/تخصيص/افتراضي)؛ PUT `/saas/agent/my-tenants/{id}/features/{gate}` — تبديل مفوَّض للوكيل (يتطلب can_toggle_features + ملكية المشترك أو وكيل فرعي + سجل تدقيق + إبطال كاش)
+- **OrgTreePage.js (جديد، `/saas-admin/org-tree`)**: جذر سوبر أدمن ← بطاقات الوكلاء (مستوى، عداد، شارة التفويض) متداخلة بالهرمية ← مشتركون بقائمة منسدلة تعرض 24 رقاقة بوابة ملونة (أخضر/كهرمان للـopt-in/رمادي) مع شارة المصدر — **نقر الرقاقة يبدّل البوابة فوراً**
+
+### p346 — اللوحة الأم للوحدات
+- **ModulesDashboardPage.js (جديد، `/saas-admin/modules`)**: إحصاءات (44 وحدة/24 بوابة/تغطية 100%/فاشلة الآن) + زر فحص فوري + شبكة بطاقات مصنفة (نقطة حالة، بوابة، دمج، طلبات/أخطاء/معدل/فحوصات، آخر خطأ) + قسم الوحدات الموحّدة
+- عنصرا قائمة جديدان للسوبر أدمن: «اللوحة الأم للوحدات» + «شجرة الوحدات»
+
+### التحقق
+- ast + esbuild لكل الملفات ✓؛ إعادة تشغيل + health ✓ (45–55ث)
+- E2E في الحاوية: p341 (14/14 — تعطيل restaurant يحجب /restaurant/tables بـ403 وإعادته يفك الحظر عبر العمال الأربعة)؛ p342 (تعطيل whatsapp يحجب /api/whatsapp + /api/integrations/whatsapp معاً) ✓
+- التغطية 1073/1073 = 100% بلا يتيم ✓
+- Playwright (حي على النطاق): اللوحة الأم 7/7 + الشجرة (28 مشتركاً، 24 رقاقة) + حوار الميزات (29 مبدّلاً/16 مجموعة) — **17/17** ✓
+- البناء main.520d28dc.js + النشر release 20260828_014450 ✓
+- لم تُمسّ بيانات NT-0004؛ كل الاختبارات على مستأجر البيتزا التجريبي مع استعادة كاملة
 ## 2026-08-28 — p339: نقطة بيع مخصصة للمطاعم (Restaurant POS)
 
 ### التغييرات

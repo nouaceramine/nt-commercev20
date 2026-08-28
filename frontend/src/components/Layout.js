@@ -80,8 +80,7 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike
-} from 'lucide-react';
+  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike, Cpu, Network } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { defaultMenuSections } from '../config/sidebarMenu';
@@ -419,6 +418,8 @@ export const Layout = ({ children }) => {
         { path: '/saas-admin/databases',           icon: Database,      label: language === 'ar' ? 'قواعد البيانات' : 'Bases données' },
         { path: '/saas-admin/feature-flags',       icon: Shield,        label: language === 'ar' ? 'إدارة الميزات' : 'Feature Flags' },
         { path: '/saas-admin/event-bus',           icon: Zap,           label: language === 'ar' ? 'ناقل الأحداث' : 'Event Bus' },
+        { path: '/saas-admin/modules',           icon: Cpu,           label: language === 'ar' ? 'اللوحة الأم للوحدات' : 'Modules board' },  // p346
+        { path: '/saas-admin/org-tree',          icon: Network,       label: language === 'ar' ? 'شجرة الوحدات' : 'Arbre modules' },  // p345
         { path: '/saas-admin/email-settings',      icon: Mail,          label: language === 'ar' ? 'إعدادات البريد' : 'Email & Resend' },
         { path: '/saas-admin/data-browser',       icon: Database,      label: language === 'ar' ? 'متصفح البيانات' : 'Explorateur' },
         { path: '/security-dashboard',             icon: Shield,        label: language === 'ar' ? 'لوحة الأمان' : 'Sécurité' },
