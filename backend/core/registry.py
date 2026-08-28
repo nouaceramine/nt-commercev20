@@ -33,6 +33,7 @@ class ModuleSpec:
     gate: Optional[str] = None          # p340: per-tenant feature gate key (None = always on)
     category: str = "general"           # p340: UI grouping category
     probe: Optional[dict] = None        # p340: health probe {"type": "http"|"collection", ...}
+    aliases: list = field(default_factory=list)  # p342: legacy/duplicate names unified under this unit
     logger: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:

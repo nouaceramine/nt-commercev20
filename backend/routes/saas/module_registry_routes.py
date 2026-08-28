@@ -88,6 +88,7 @@ def _component_out(c) -> dict:
         "prefixes": c.prefixes,
         "collections": c.collections,
         "probe": c.probe,
+        "aliases": getattr(c, "aliases", []),
         "status": status,
         "metrics": metrics,
         "circuit": circuit,
@@ -122,6 +123,23 @@ async def list_gates(admin=Depends(get_super_admin)):
             "opt_in": gate in OPT_IN_GATES,
         })
     return {"gates": out}
+
+
+@router.get("/saas/modules/unifications")
+async def unifications_report(admin=Depends(get_super_admin)):
+    """p342: legacy/duplicate units merged under one canonical component."""
+    merged = [
+        {
+            "key": c.key,
+            "name_ar": c.name_ar,
+            "gate": c.gate,
+            "aliases": getattr(c, "aliases", []),
+            "prefixes": c.prefixes,
+        }
+        for c in modules_map.all_components()
+        if getattr(c, "aliases", [])
+    ]
+    return {"total": len(merged), "unified": merged}
 
 
 @router.get("/saas/modules/coverage")
