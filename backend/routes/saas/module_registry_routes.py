@@ -125,6 +125,35 @@ async def list_gates(admin=Depends(get_super_admin)):
     return {"gates": out}
 
 
+@router.get("/saas/modules/robots")
+async def robots_status(admin=Depends(get_super_admin)):
+    """p343: live watchdog state per module (persisted across restarts)."""
+    from config.database import main_db
+    docs = await main_db.module_robot_status.find({}, {"_id": 1, "status": 1, "last_check_at": 1,
+                                                       "last_ok_at": 1, "last_fail_at": 1, "last_error": 1,
+                                                       "fail_count": 1, "total_checks": 1, "total_failures": 1}).to_list(200)
+    by_key = {d.pop("_id"): d for d in docs}
+    out = []
+    for c in modules_map.all_components():
+        st = by_key.get(c.key, {})
+        out.append({
+            "key": c.key, "name_ar": c.name_ar, "gate": c.gate, "category": c.category,
+            "probe": c.probe, "status": st.get("status", "pending"), **st,
+        })
+    return {"total": len(out), "failing": len([r for r in out if r["status"] == "failing"]),
+            "robots": out}
+
+
+@router.post("/saas/modules/robots/run")
+async def robots_run_now(admin=Depends(get_super_admin)):
+    """p343: run one watchdog cycle immediately (on-demand check)."""
+    from services.module_watchdog import run_all_probes
+    results = await run_all_probes()
+    bad = [r for r in results if not r["ok"]]
+    return {"checked": len(results), "failing": len(bad),
+            "failures": [{"key": r["key"], "detail": r["detail"]} for r in bad]}
+
+
 @router.get("/saas/modules/unifications")
 async def unifications_report(admin=Depends(get_super_admin)):
     """p342: legacy/duplicate units merged under one canonical component."""

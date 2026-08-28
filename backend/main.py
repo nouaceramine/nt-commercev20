@@ -637,6 +637,12 @@ async def startup_event():
         logger.warning("AutoHeal scheduler: %s", e)
 
     try:
+        from services.module_watchdog import start_module_watchdog  # p343
+        start_module_watchdog()
+    except Exception as e:
+        logger.warning("Module watchdog: %s", e)
+
+    try:
         from core.feature_flags import FeatureFlagManager, PLATFORM_FEATURES
         from utils.super_admin_seed import ensure_super_admin
         await ensure_super_admin()
@@ -1275,6 +1281,7 @@ _AUTO_REG_MODULES = [
     'routes.saas.business_profiles_routes',  # p183: business activity profiles
     'routes.saas.id_audit_routes',  # p266: ID-system audit for super admin
     'routes.saas.module_registry_routes',  # p340: full module registry (gates + coverage audit)
+    'routes.saas.owner_notifications_routes',  # p344: owner email/telegram alerts
     'routes.saas.data_browser_routes',  # p268: cross-tenant data browser (read-only)
     'routes.saas.account_control_routes',  # p269: agent impersonation + password resets
     'routes.rental_routes',  # p185: rental module (cars & properties)

@@ -213,7 +213,7 @@ COMPONENTS: list[ModuleSpec] = [
     ModuleSpec("ai", "الذكاء الاصطناعي", "Intelligence Artificielle",
                ["/api/ai", "/api/ai-assistant", "/api/smart", "/api/ocr"],
                ["ai_insights", "chat_sessions"], gate="ai_bots", category="ai",
-               probe={"type": "http", "path": "/api/ocr/extract-models", "expect": [200, 401, 403, 404]}),
+               probe={"type": "http", "path": "/api/ocr/extract-models", "expect": [200, 401, 403, 404, 405]}),
 ]
 
 for _component in COMPONENTS:
