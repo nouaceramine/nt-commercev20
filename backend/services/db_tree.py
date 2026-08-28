@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timezone
 
 from config.database import client, main_db
+from core.db_naming import resolve_db_name  # p347
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def rebuild_tree() -> dict:
         {}, {"_id": 0, "id": 1, "name": 1, "email": 1, "short_id": 1,
              "is_active": 1, "is_demo": 1, "created_at": 1}
     ):
-        db_name = f"tenant_{t['id'].replace('-', '_')}"
+        db_name = resolve_db_name(t['id'])
         node = {
             "node_id": db_name,
             "db_name": db_name,

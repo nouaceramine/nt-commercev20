@@ -51,8 +51,8 @@ def get_tenant_db(tenant_id: str) -> AsyncIOMotorDatabase:
     """Get database for a specific tenant"""
     if not tenant_id:
         return main_db
-    db_name = f"tenant_{tenant_id.replace('-', '_')}"
-    return client[db_name]
+    from core.db_naming import resolve_db_name  # p347: activity-based names
+    return client[resolve_db_name(tenant_id)]
 
 
 def set_tenant_context(tenant_db: AsyncIOMotorDatabase) -> None:

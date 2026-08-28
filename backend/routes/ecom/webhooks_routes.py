@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
 
 from config.database import client as mongo_client, main_db
+from core.db_naming import resolve_db_name  # p347
 from services.ecom.shopify_service import (
     verify_shopify_hmac, parse_shopify_order, upsert_shopify_order,
 )
@@ -26,7 +27,7 @@ router = APIRouter(tags=["E-Commerce Webhooks"])
 def _tenant_db(tenant_id: str):
     """Resolve tenant DB by id without going through the request middleware
     (webhooks are unauthenticated — the tenant_id comes from the URL path)."""
-    return mongo_client[f"tenant_{tenant_id.replace('-', '_')}"]
+    return mongo_client[resolve_db_name(tenant_id)]
 
 
 @router.post("/ecom/webhooks/shopify/{tenant_id}/{integration_id}/orders")

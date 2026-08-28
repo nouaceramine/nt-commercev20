@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from config.database import client, main_db, get_tenant_db
+from core.db_naming import resolve_db_name  # p347
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +238,7 @@ async def copy_template_to_tenant(tenant_id: str) -> dict:
     try:
         from services.migrations_runner import migrate_database
         stats["migrations_applied"] = await migrate_database(
-            f"tenant_{tenant_id.replace('-', '_')}"
+            resolve_db_name(tenant_id)
         )
     except Exception as exc:
         stats["migrations_error"] = str(exc)

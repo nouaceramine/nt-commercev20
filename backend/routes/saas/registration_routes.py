@@ -11,6 +11,7 @@ from utils.auth import email_ci
 from utils.ids import new_id
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import create_access_token, next_tenant_short_id
+from core.db_naming import build_db_name, register_db_name  # p347
 
 # ── Sprint 1: Rate limiting on public endpoints (login, register) ─────────
 from middleware.rate_limit import rate_limit as _rate_limited  # noqa: E402
@@ -125,6 +126,8 @@ async def register_tenant(tenant: TenantCreate):
     trial_ends_at = now + timedelta(days=14)
 
     tenant_id = new_id()
+    _short_id = await next_tenant_short_id()  # p347
+    _db_name = build_db_name(_short_id, tenant.business_type if hasattr(tenant, 'business_type') else "retail")
     hashed_password = bcrypt.hashpw(tenant.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     tenant_doc = {
@@ -147,12 +150,14 @@ async def register_tenant(tenant: TenantCreate):
         "limits_override": {},
         "notes": "",
         "business_type": tenant.business_type if hasattr(tenant, 'business_type') else "retail",
-        "short_id": await next_tenant_short_id(),
+        "short_id": _short_id,
+        "db_name": _db_name,
         "database_initialized": False,
         "created_at": now.isoformat()
     }
 
     await db.saas_tenants.insert_one(tenant_doc)
+    register_db_name(tenant_id, _db_name)  # p347
     await register_identity(tenant.email, "owner", tenant_id, tenant_id=tenant_id, name=tenant.name)
     # Golden template provisioning (p31): full collections/indexes/seeds;
     # legacy seeding kept as fallback if the template is missing/broken

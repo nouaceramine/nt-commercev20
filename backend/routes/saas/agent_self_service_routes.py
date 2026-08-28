@@ -7,7 +7,8 @@ import bcrypt
 from config.database import db
 from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
-from .helpers import get_current_agent, create_access_token
+from .helpers import get_current_agent, create_access_token, next_tenant_short_id
+from core.db_naming import build_db_name, register_db_name  # p347
 from services.wallet_service import get_or_create_wallet, transfer_balance, DEFAULT_LOW_BALANCE, enrich_transfers
 from typing import Optional
 
@@ -116,6 +117,11 @@ async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_cu
     now = datetime.now(timezone.utc)
     trial_ends_at = now + timedelta(days=14)
     tenant_id = str(uuid.uuid4())
+    _sid = await next_tenant_short_id()  # p347: agent-created tenants get short_id + named DB
+    _btn = {"retailer": "retail", "wholesaler": "wholesale"}.get(
+        (tenant.business_type or "").strip() or "retail",
+        (tenant.business_type or "").strip() or "retail")
+    _dbn = build_db_name(_sid, _btn)
     hashed_password = bcrypt.hashpw(tenant.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     tenant_doc = {
@@ -134,14 +140,15 @@ async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_cu
         "subscription_starts_at": now.isoformat(),
         "features_override": {},
         "limits_override": {},
-        "business_type": {"retailer": "retail", "wholesaler": "wholesale"}.get(
-            (tenant.business_type or "").strip() or "retail",
-            (tenant.business_type or "").strip() or "retail"),  # p264: normalize legacy aliases
+        "business_type": _btn,  # p264/p347
+        "short_id": _sid,
+        "db_name": _dbn,
         "database_initialized": False,
         "created_at": now.isoformat()
     }
 
     await db.saas_tenants.insert_one(tenant_doc)
+    register_db_name(tenant_id, _dbn)  # p347
     await db.saas_agents.update_one(
         {"id": agent["id"]},
         {"$addToSet": {"assigned_tenant_ids": tenant_id}}

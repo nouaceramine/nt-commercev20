@@ -643,6 +643,14 @@ async def startup_event():
         logger.warning("Module watchdog: %s", e)
 
     try:
+        from core.db_naming import load_all_db_names  # p347
+        _n = await load_all_db_names(main_db)
+        if _n:
+            logger.info("Tenant DB names loaded: %s", _n)
+    except Exception as e:
+        logger.warning("db_naming loader: %s", e)
+
+    try:
         from core.feature_flags import FeatureFlagManager, PLATFORM_FEATURES
         from utils.super_admin_seed import ensure_super_admin
         await ensure_super_admin()

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
-from config.database import db, client, main_db
+from config.database import db, client, main_db, get_tenant_db
 from utils.cache import cached_json
 from .schemas import SubscriptionPaymentResponse
 from .helpers import get_super_admin
@@ -21,7 +21,7 @@ async def get_monitoring_data(admin: dict = Depends(get_super_admin)):
     alerts: List[dict] = []
 
     for tenant in tenants:
-        tenant_db = client[f"tenant_{tenant['id'].replace('-', '_')}"]
+        tenant_db = get_tenant_db(tenant['id'])
         products_count = await tenant_db.products.count_documents({})
         customers_count = await tenant_db.customers.count_documents({})
         sales_count = await tenant_db.sales.count_documents({})

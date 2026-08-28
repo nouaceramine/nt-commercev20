@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from config.database import db, client
+from config.database import db, client, get_tenant_db
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Data Browser"])
@@ -32,7 +32,7 @@ async def _tenant_or_404(tenant_id: str) -> dict:
 
 
 def _tdb(tenant_id: str):
-    return client[f"tenant_{tenant_id.replace('-', '_')}"]
+    return get_tenant_db(tenant_id)
 
 
 async def _log_access(admin: dict, tenant_id: str, action: str, query: str = ""):

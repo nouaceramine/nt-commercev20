@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
 from utils.enhanced_products_indexes import create_enhanced_products_indexes  # noqa: E402
+from core.db_naming import resolve_db_name  # noqa: E402  # p347
 from utils.enhanced_orders_indexes import create_enhanced_orders_indexes  # noqa: E402
 
 
@@ -44,7 +45,7 @@ async def run() -> None:
         tenant_ids = await main_db.saas_tenants.distinct("id")
         for tid in tenant_ids:
             if tid:
-                targets.append(client[f"tenant_{str(tid).replace('-', '_')}"])
+                targets.append(client[resolve_db_name(str(tid))])
     except Exception as exc:
         print(f"Warning: could not list tenants ({exc}) - main DB only")
 

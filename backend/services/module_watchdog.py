@@ -24,7 +24,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from config.database import client, main_db
+from config.database import client, main_db, get_tenant_db
 from core import registry, modules_map
 from core.logging_config import get_module_logger
 
@@ -62,7 +62,7 @@ async def _probe_collection(probe: dict) -> tuple[bool, str]:
             return True, f"main.{name} reachable"
         tenant = await main_db.saas_tenants.find_one({}, {"_id": 0, "id": 1})
         if tenant:
-            tdb = client[f"tenant_{tenant['id'].replace('-', '_')}"]
+            tdb = get_tenant_db(tenant['id'])
             await tdb[name].find_one({}, {"_id": 1})
             return True, f"tenant.{name} reachable"
         await main_db.command("ping")

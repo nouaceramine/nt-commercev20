@@ -13,6 +13,7 @@ import logging
 import json
 
 from config.database import db, main_db, client
+from core.db_naming import resolve_db_name  # p347
 from utils.auth import get_current_user, get_tenant_admin, get_super_admin
 from utils.auth import get_current_user as require_tenant
 
@@ -706,7 +707,7 @@ async def get_tenant_database_info(current_user: dict = Depends(require_tenant))
     tenant = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
 
     if tenant:
-        db_name = f"tenant_{tenant_id.replace('-', '_')}"
+        db_name = resolve_db_name(tenant_id)
         try:
             tenant_db = client[db_name]
             stats = await tenant_db.command("dbStats")
@@ -756,7 +757,7 @@ async def request_tenant_backup(current_user: dict = Depends(require_tenant)):
         "id": str(uuid.uuid4()),
         "operation": "backup_request",
         "database_id": tenant_id,
-        "database_name": f"tenant_{tenant_id.replace('-', '_')}",
+        "database_name": resolve_db_name(tenant_id),
         "executed_by": current_user.get("name"),
         "status": "pending",
         "details": "طلب نسخة احتياطية من المشترك",
@@ -776,7 +777,7 @@ async def export_tenant_data(current_user: dict = Depends(require_tenant)):
     if tenant and tenant.get("is_frozen"):
         raise HTTPException(status_code=403, detail="قاعدة البيانات مجمدة")
 
-    db_name = f"tenant_{tenant_id.replace('-', '_')}"
+    db_name = resolve_db_name(tenant_id)
 
     try:
         tenant_db = client[db_name]

@@ -6,7 +6,7 @@ are missing it, and whether any duplicate codes exist (must always be 0).
 """
 from fastapi import APIRouter, Depends
 
-from config.database import db, client
+from config.database import db, client, get_tenant_db
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["ID Audit"])
@@ -52,7 +52,7 @@ async def id_audit(_admin: dict = Depends(get_super_admin)):
 
     tenants = []
     async for t in db.saas_tenants.find({}, {"id": 1, "short_id": 1, "name": 1}):
-        tdb = client[f"tenant_{t['id'].replace('-', '_')}"]
+        tdb = get_tenant_db(t['id'])
         cols = {}
         for coll_name, field in _TENANT_SPECS:
             cols[coll_name] = await _coll_report(tdb[coll_name], field)

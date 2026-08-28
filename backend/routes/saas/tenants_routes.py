@@ -33,6 +33,7 @@ def _assert_safe_bridge_url(url: str) -> None:
         raise HTTPException(status_code=400, detail="رابط الجسر يشير إلى عنوان شبكة داخلية غير مسموح")
 
 from config.database import db, main_db, client, init_tenant_database, get_tenant_db
+from core.db_naming import resolve_db_name, build_db_name, register_db_name  # p347
 from services.tenant_template import copy_template_to_tenant
 from .schemas import TenantCreate, TenantUpdate, TenantResponse, SubscriptionPayment
 from .helpers import get_super_admin, create_access_token, next_tenant_short_id
@@ -70,7 +71,7 @@ async def get_tenants(admin: dict = Depends(get_super_admin)):
         agent_id = tenant.get("agent_id")
         tenant["agent_name"] = agents_map.get(agent_id, "") if agent_id else ""
 
-        tenant_db = client[f"tenant_{tenant['id'].replace('-', '_')}"]
+        tenant_db = get_tenant_db(tenant['id'])
         products_count = await tenant_db.products.count_documents({})
         users_count = await tenant_db.users.count_documents({})
         sales_count = await tenant_db.sales.count_documents({})
@@ -88,7 +89,7 @@ async def get_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
     plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0, "name_ar": 1})
     tenant["plan_name"] = plan.get("name_ar", "") if plan else ""
 
-    tenant_db = client[f"tenant_{tenant['id'].replace('-', '_')}"]
+    tenant_db = get_tenant_db(tenant['id'])
     products_count = await tenant_db.products.count_documents({})
     users_count = await tenant_db.users.count_documents({})
     sales_count = await tenant_db.sales.count_documents({})
@@ -206,7 +207,7 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
             "user_type": "tenant",
             "tenant_id": tenant_id,
             "company_name": tenant.get("company_name", ""),
-            "database_name": f"tenant_{tenant_id.replace('-', '_')}",
+            "database_name": resolve_db_name(tenant_id),
             "features": features,
             "limits": limits,
         },
@@ -307,6 +308,8 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
         _bt_create = "retail"
     _bt_create = _bt_create or _plan_bt or "retail"
 
+    _short_id = await next_tenant_short_id()
+    _db_name = build_db_name(_short_id, _bt_create)  # p347: readable activity-based DB name
     tenant_doc = {
         "id": tenant_id,
         "name": tenant.name,
@@ -326,7 +329,8 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
         "limits_override": {},
         "notes": "",
         "business_type": _bt_create,
-        "short_id": await next_tenant_short_id(),
+        "short_id": _short_id,
+        "db_name": _db_name,
         "database_initialized": False,
         "recharge_mode": "owner_bridge",
         "self_bridge_url": "",
@@ -335,6 +339,7 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
     }
 
     await db.saas_tenants.insert_one(tenant_doc)
+    register_db_name(tenant_id, _db_name)  # p347: publish BEFORE any DB touch
     try:
         await copy_template_to_tenant(tenant_id)
     except Exception as _tpl_err:
@@ -527,7 +532,7 @@ async def _cascade_delete_tenant(tenant: dict, admin: dict) -> dict:
 
     tenant_id = tenant["id"]
     email = (tenant.get("email") or "").strip()
-    db_name = f"tenant_{tenant_id.replace('-', '_')}"
+    db_name = resolve_db_name(tenant_id)
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%d_%H%M%S")
     steps = {}

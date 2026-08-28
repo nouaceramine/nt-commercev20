@@ -7,6 +7,7 @@ import io
 import json
 
 from config.database import db, client
+from core.db_naming import resolve_db_name  # p347
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Databases"])
@@ -18,7 +19,7 @@ async def get_databases(admin: dict = Depends(get_super_admin)):
     databases = []
 
     for tenant in tenants:
-        db_name = f"tenant_{tenant['id'].replace('-', '_')}"
+        db_name = resolve_db_name(tenant['id'])
         tenant_db = client[db_name]
         collections = await tenant_db.list_collection_names()
         total_docs = 0
@@ -49,7 +50,7 @@ async def get_databases_stats(admin: dict = Depends(get_super_admin)):
     total_documents = 0
 
     for tenant in tenants:
-        db_name = f"tenant_{tenant['id'].replace('-', '_')}"
+        db_name = resolve_db_name(tenant['id'])
         tenant_db = client[db_name]
         collections = await tenant_db.list_collection_names()
         total_collections += len(collections)
@@ -80,7 +81,7 @@ async def create_database_backup(db_id: str, admin: dict = Depends(get_super_adm
     if not tenant:
         raise HTTPException(status_code=404, detail="Database not found")
 
-    db_name = f"tenant_{db_id.replace('-', '_')}"
+    db_name = resolve_db_name(db_id)
     tenant_db = client[db_name]
     backup_data = {}
     collections = await tenant_db.list_collection_names()
@@ -116,7 +117,7 @@ async def delete_database(db_id: str, admin: dict = Depends(get_super_admin)):
     tenant = await db.saas_tenants.find_one({"id": db_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Database not found")
-    db_name = f"tenant_{db_id.replace('-', '_')}"
+    db_name = resolve_db_name(db_id)
     await client.drop_database(db_name)
     await db.saas_tenants.delete_one({"id": db_id})
     return {"message": "Database deleted successfully"}
@@ -128,7 +129,7 @@ async def export_database(db_id: str, admin: dict = Depends(get_super_admin)):
     if not tenant:
         raise HTTPException(status_code=404, detail="Database not found")
 
-    db_name = f"tenant_{db_id.replace('-', '_')}"
+    db_name = resolve_db_name(db_id)
     tenant_db = client[db_name]
     export_data = {"tenant_id": db_id, "database_name": db_name, "collections": {}}
     collections = await tenant_db.list_collection_names()
@@ -158,7 +159,7 @@ async def clear_database(db_id: str, admin: dict = Depends(get_super_admin)):
     tenant = await db.saas_tenants.find_one({"id": db_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Database not found")
-    db_name = f"tenant_{db_id.replace('-', '_')}"
+    db_name = resolve_db_name(db_id)
     tenant_db = client[db_name]
     collections = await tenant_db.list_collection_names()
     cleared = {}
@@ -180,7 +181,7 @@ async def restore_database(db_id: str, data: dict = Body(...), admin: dict = Dep
     backup = await db.database_backups.find_one({"id": backup_id, "tenant_id": db_id}, {"_id": 0})
     if not backup:
         raise HTTPException(status_code=404, detail="Backup not found")
-    db_name = f"tenant_{db_id.replace('-', '_')}"
+    db_name = resolve_db_name(db_id)
     tenant_db = client[db_name]
     restored = {}
     for coll, docs in (backup.get("data") or {}).items():

@@ -10,6 +10,7 @@ import uuid
 import os
 import logging
 import pyotp
+from core.db_naming import resolve_db_name  # p347
 import qrcode
 import io
 import base64
@@ -430,7 +431,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "plan_name": plan.get("name_ar", "") if plan else "",
                             "is_trial": tenant.get("is_trial", False),
                             "subscription_ends_at": tenant.get("subscription_ends_at"),
-                            "database_name": f"tenant_{tenant['id'].replace('-', '_')}",
+                            "database_name": resolve_db_name(tenant["id"]),
                             "is_first_login": not tenant.get("database_initialized", False),
                             "features": features,
                             "limits": limits

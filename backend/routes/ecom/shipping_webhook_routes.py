@@ -35,6 +35,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Depends
 
 from config.database import client as mongo_client, main_db
+from core.db_naming import resolve_db_name  # p347
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Shipping Webhooks"])
@@ -68,7 +69,7 @@ SUPPORTED_WEBHOOKS = {
 
 
 def _tenant_db(tenant_id: str):
-    return mongo_client[f"tenant_{tenant_id.replace('-', '_')}"]
+    return mongo_client[resolve_db_name(tenant_id)]
 
 
 def _now() -> str:

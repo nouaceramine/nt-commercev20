@@ -14,7 +14,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from config.database import db, client
+from config.database import db, client, get_tenant_db
 from utils.auth import create_access_token
 from .helpers import get_super_admin
 
@@ -107,7 +107,7 @@ async def reset_tenant_password(tenant_id: str, data: PasswordResetIn,
     hashed = bcrypt.hashpw(data.new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"password": hashed}})
     # keep the tenant-DB admin user in sync so the new password works at login
-    tdb = client[f"tenant_{tenant_id.replace('-', '_')}"]
+    tdb = get_tenant_db(tenant_id)
     await tdb.users.update_many({"email": tenant["email"]}, {"$set": {"hashed_password": hashed}})
     await _log_security_event(admin, "password_reset", "tenant", tenant_id, tenant.get("name", ""), request)
     return {"ok": True, "message": "تم تغيير كلمة مرور المشترك"}
