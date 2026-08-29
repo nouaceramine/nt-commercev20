@@ -10,6 +10,7 @@ import pkgutil
 from datetime import datetime, timezone
 
 from config.database import client
+from core.db_naming import is_tenant_db  # p348
 
 TEMPLATE_DB = "template_tenant"
 
@@ -26,7 +27,7 @@ def _discover() -> list:
 
 async def _targets() -> list:
     names = await client.list_database_names()
-    out = [n for n in names if n.startswith("tenant_") or n == TEMPLATE_DB]
+    out = [n for n in names if is_tenant_db(n) or n == TEMPLATE_DB]  # p348
     return sorted(out)
 
 

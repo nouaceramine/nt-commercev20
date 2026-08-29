@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from . import registry
+from .db_naming import is_tenant_db  # p348
 from .logging_config import get_log_file
 
 _START_TIME = datetime.now(timezone.utc)
@@ -154,7 +155,7 @@ def build_router(get_admin, main_db=None):
         )
         tenants = []
         for name in await client.list_database_names():
-            if not (name.startswith("tenant_") or name == "template_tenant"):
+            if not (is_tenant_db(name) or name == "template_tenant"):  # p348
                 continue
             try:
                 stats = await client[name].command("dbStats")

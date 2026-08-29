@@ -159,6 +159,10 @@ async def db_stamp(db) -> str:
     name = getattr(db, "name", "") or ""
     if name.startswith("tenant_"):
         return await tenant_stamp(name[len("tenant_"):].replace("_", "-"))
+    if name.startswith("nt_"):  # p348: activity-named DBs (p347)
+        from config.database import main_db as _mdb
+        t = await _mdb.saas_tenants.find_one({"db_name": name}, {"_id": 0, "short_id": 1})
+        return _short_id_to_stamp((t or {}).get("short_id") or "")
     return ""
 
 

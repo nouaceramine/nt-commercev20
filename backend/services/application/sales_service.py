@@ -25,9 +25,20 @@ async def create_sale_op(db, s, user: dict) -> dict:
     notifications, customer stats, cash box and the outbox event all commit
     atomically in one MongoDB transaction; any failure aborts everything."""
     from config.database import client
-    async with await client.start_session() as _tx_session:
-        async with _tx_session.start_transaction():
-            return await _create_sale_impl(db, s, user, _tx_session)
+    from pymongo.errors import DuplicateKeyError
+    for _attempt in range(2):
+        try:
+            async with await client.start_session() as _tx_session:
+                async with _tx_session.start_transaction():
+                    return await _create_sale_impl(db, s, user, _tx_session)
+        except DuplicateKeyError:
+            if _attempt == 1:
+                raise
+            # p348: كود مُدخل من العميل تسابق مع عامل آخر (فاتورة مجزأة) —
+            # المعاملة أُجهضت بالكامل؛ اسحب كوداً ذرياً جديداً وأعد العملية كلها
+            from services.code_generator import next_code as _next_sale_code
+            s.code = await _next_sale_code(db, "sales", "BV", 4, True)
+
 
 
 async def _create_sale_impl(db, s, user: dict, _tx) -> dict:

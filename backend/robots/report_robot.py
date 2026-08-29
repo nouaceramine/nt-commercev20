@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
+from core.db_naming import resolve_db_name  # p348
 import io
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,7 @@ class ReportRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348: كان يشتق الاسم القديم ويقرأ قاعدة فارغة
                 stats = await self._get_tenant_stats(tdb, start, end)
                 top_prods = await self._top_products(tdb, start, end)
                 day_key = yesterday.strftime("%Y-%m-%d")
@@ -197,7 +198,7 @@ class ReportRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348: كان يشتق الاسم القديم ويقرأ قاعدة فارغة
                 stats = await self._get_tenant_stats(tdb, start, end)
                 top_custs = await self._top_customers(tdb, start, end)
                 top_prods = await self._top_products(tdb, start, end)
@@ -240,7 +241,7 @@ class ReportRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348: كان يشتق الاسم القديم ويقرأ قاعدة فارغة
                 stats = await self._get_tenant_stats(tdb, start, end)
                 debt_agg = await tdb.sales.aggregate([
                     {"$match": {"remaining": {"$gt": 0}}},

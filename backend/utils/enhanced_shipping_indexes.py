@@ -60,7 +60,20 @@ async def create_enhanced_shipping_indexes(db):
                 err = str(e).lower()
                 if "already exists" in err or "duplicate" in err:
                     results["existing"] += 1
+                elif "same name" in err:
+                    # p348: فهرس قديم بنفس الاسم الآلي ومواصفات مختلفة (مثل
+                    # tracking_number_1 غير الفريد) — احذفه وأعد إنشاءه بالمواصفات الصحيحة
+                    try:
+                        auto_name = "_".join(f"{k}_{v}" for k, v in idx["keys"])
+                        await db[coll_name].drop_index(auto_name)
+                        await db[coll_name].create_index(idx["keys"], **idx["opts"])
+                        results["created"] += 1
+                        logger.info(f"Index reconciled on {coll_name}: {auto_name}")
+                    except Exception as e2:
+                        results["errors"] += 1
+                        logger.warning(f"Index reconcile failed on {coll_name}: {e2}")
                 else:
                     results["errors"] += 1
                     logger.warning(f"Index error on {coll_name}: {e}")
+
     return results

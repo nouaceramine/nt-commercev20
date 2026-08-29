@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
+from core.db_naming import is_tenant_db  # p348
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class NotificationRobot:
         notifications = []
         try:
             dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 customers = await tdb.customers.find(
                     {"balance": {"$lt": -1000}},
@@ -130,7 +131,7 @@ class NotificationRobot:
         try:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
             dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 tickets = await tdb.repair_tickets.find(
                     {"status": {"$in": ["received", "diagnosed"]}, "received_at": {"$lt": cutoff}},
@@ -154,7 +155,7 @@ class NotificationRobot:
         try:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
             dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 tasks = await tdb.tasks.find(
                     {"status": "pending", "created_at": {"$lt": cutoff}},

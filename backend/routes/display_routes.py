@@ -236,8 +236,12 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
                 qty = float(qty)
             except (TypeError, ValueError):
                 qty = 0
+            _pid = p_.get("id")  # p348: منتج قديم بلا حقل id كان يُسقط اللوحة كلها بـKeyError
+            if not _pid:
+                continue
             items.append({
-                "id": p_["id"],
+                "id": _pid,
+
                 "name": p_.get("name_ar") or p_.get("name") or p_.get("name_en"),
                 "price": p_.get("retail_price") or 0,
                 "family": fams.get(p_.get("family_id")) or "",

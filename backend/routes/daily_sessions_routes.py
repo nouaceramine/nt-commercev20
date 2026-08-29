@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import uuid
+from pymongo.errors import DuplicateKeyError
 
 
 def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -58,8 +59,14 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         if existing:
             raise HTTPException(status_code=400, detail="لديك حصة مفتوحة بالفعل")
         session_id = str(uuid.uuid4())
+        # p348: الكود يُضمن خادمياً — كود العميل الفارغ أو المكرر كان يصطدم بالفهرس الفريد p257
+        _code = (session.code or "").strip()
+        if not _code or await db.daily_sessions.find_one({"code": _code}, {"_id": 1}):
+            from services.code_generator import next_code as _next_session_code
+            _code = await _next_session_code(db, "daily_sessions", "S", 3, True)
         doc = {
-            "id": session_id, "code": session.code or "",
+            "id": session_id, "code": _code,
+
             "user_id": user["id"], "user_name": user.get("name", ""),
             "opening_cash": session.opening_cash, "closing_cash": None,
             "opened_at": session.opened_at, "closed_at": None,
@@ -67,8 +74,15 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
             "sales_count": 0, "status": "open", "notes": "",
             "created_by": user.get("name", "")
         }
-        await db.daily_sessions.insert_one(doc)
+        try:
+            await db.daily_sessions.insert_one(doc)
+        except DuplicateKeyError:
+            # p348: سباق عاملَي uvicorn على نفس الكود — اسحب كوداً ذرياً جديداً وأعد المحاولة
+            from services.code_generator import next_code as _next_session_code
+            doc["code"] = await _next_session_code(db, "daily_sessions", "S", 3, True)
+            await db.daily_sessions.insert_one(doc)
         doc.pop("_id", None)
+
         return DailySessionResponse(**doc)
 
     @router.get("")

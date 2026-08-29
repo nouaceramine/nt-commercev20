@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
+from core.db_naming import resolve_db_name  # p348
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class PricingRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348
                 await self._check_margins(tenant, tdb)
                 await self._find_slow_movers(tenant, tdb)
                 await self._price_recommendations(tenant, tdb)

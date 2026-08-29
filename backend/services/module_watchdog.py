@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 _INTERVAL = int(os.environ.get("MODULE_WATCHDOG_INTERVAL", "120"))
 _FIRST_DELAY = int(os.environ.get("MODULE_WATCHDOG_FIRST_DELAY", "60"))
-_HTTP_TIMEOUT = 8
+_HTTP_TIMEOUT = 25  # p348: 8s كان يرمي ReadTimeout زائفاً وقت ضغط النسخ الاحتياطي
 _BASE_URL = os.environ.get("MODULE_WATCHDOG_BASE_URL", "http://127.0.0.1:8001")
 _STATUS_COLL = "module_robot_status"
 

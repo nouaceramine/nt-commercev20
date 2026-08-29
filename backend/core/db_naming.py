@@ -71,6 +71,14 @@ def legacy_db_name(tenant_id: str) -> str:
     return f"tenant_{tenant_id.replace('-', '_')}"
 
 
+TENANT_DB_PREFIXES = ("nt_", "tenant_")  # p347 names + legacy
+
+
+def is_tenant_db(name: str) -> bool:
+    """p348: true for activity-named (nt_*) and legacy (tenant_*) tenant DBs."""
+    return bool(name) and name.startswith(TENANT_DB_PREFIXES)
+
+
 def build_db_name(short_id: str, business_type: str | None) -> str:
     """nt_<code>_<seq> — e.g. NT-0029 + restaurant -> nt_rs_0029."""
     try:

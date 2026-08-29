@@ -400,9 +400,13 @@ async def _upsert_lead(db, channel: str, integration_id: str, parsed: dict) -> N
         "converted_order_id": None,
         "created_at": now, "updated_at": now, "created_by": f"{channel}-webhook",
     }
+    if not doc["external_id"]:
+        # p348: الفهرس الفريد (channel, external_id) يرفض تكرار "" — معرّف داخلي فريد
+        doc["external_id"] = f"auto-{doc['id'][:12]}"
     # p240: duplicate detection (non-blocking — flag only)
     from services.ecom.duplicate_detector import annotate_lead as _annot_dup_lead
     await _annot_dup_lead(db, doc)
+
 
     await db.ecom_leads.insert_one(doc)
     await db.ecom_integrations.update_one(

@@ -17,7 +17,7 @@ async def fix() -> dict:
     # Fix all tenant dbs
     all_dbs = await client.list_database_names()
     for dbn in all_dbs:
-        if dbn.startswith("tenant_"):
+        if dbn.startswith(("tenant_", "nt_")):  # p348
             tdb = client[dbn]
             r = await tdb.users.update_many(
                 {"permissions": {"$type": "array"}},

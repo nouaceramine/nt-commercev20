@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 
 from config.database import client, main_db
-from core.db_naming import resolve_db_name  # p347
+from core.db_naming import resolve_db_name, is_tenant_db  # p347/p348
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ async def rebuild_tree() -> dict:
     # Orphan branches: tenant_* DBs with no saas_tenants record
     registered = {n["db_name"] for n in nodes}
     for name in sorted(db_names):
-        if name.startswith("tenant_") and name not in registered:
+        if is_tenant_db(name) and name not in registered:  # p348
             orphan = {"node_id": name, "db_name": name, "role": "orphan",
                       "parent": MOTHER_DB, "label": "قاعدة يتيمة (بلا سجل مستأجر)",
                       "exists": True, "updated_at": now}

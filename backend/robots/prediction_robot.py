@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
+from core.db_naming import is_tenant_db  # p348
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class PredictionRobot:
             now = datetime.now(timezone.utc)
             day = now.strftime("%Y-%m-%d")
             cutoff = (now - timedelta(days=90)).isoformat()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 await tdb.auto_reports.create_index(
                     [("report_type", 1), ("day", 1)],
@@ -95,7 +96,7 @@ class PredictionRobot:
         try:
             dbs = await self.client.list_database_names()
             total_predicted = 0
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 # Get last 30 days of sales data
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -115,7 +116,7 @@ class PredictionRobot:
         try:
             trends = {"direction": "stable", "growth_rate": 0}
             dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 this_month = datetime.now(timezone.utc).replace(day=1).isoformat()
                 last_month = (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()

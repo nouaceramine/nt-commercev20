@@ -17,6 +17,7 @@ import io
 import os
 import glob
 import logging
+from core.db_naming import is_tenant_db  # p348
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -320,7 +321,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
 
         all_db_names = await mongo_client.list_database_names()
-        tenant_db_names = [n for n in all_db_names if n.startswith("tenant_")]
+        tenant_db_names = [n for n in all_db_names if is_tenant_db(n)]  # p348
 
         global_data: dict = {
             "schema_version": SCHEMA_VERSION,

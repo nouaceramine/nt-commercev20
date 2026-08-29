@@ -829,6 +829,10 @@ async def startup_event():
         await db.ecom_leads.create_index([("channel", 1), ("status", 1)])
         await db.ecom_leads.create_index("ai_category")
         # p240: partial — empty external_id (manual leads) must not collide
+        # p348: الفهرس القديم بنفس الاسم (sparse) يمنع إنشاء الجزئي — احذفه إن خالف المواصفة
+        _le_idx = (await db.ecom_leads.index_information()).get("channel_1_external_id_1")
+        if _le_idx and "partialFilterExpression" not in _le_idx:
+            await db.ecom_leads.drop_index("channel_1_external_id_1")
         await db.ecom_leads.create_index([("channel", 1), ("external_id", 1)], unique=True,
                                          partialFilterExpression={"external_id": {"$gt": ""}})
         await db.ecom_import_batches.create_index("id", unique=True)
@@ -861,6 +865,10 @@ async def startup_event():
         await db.ecom_sms_logs.create_index("created_at")
         await db.ecom_shipping_labels.create_index("id", unique=True)
         await db.ecom_shipping_labels.create_index("order_id")
+        # p348: الفهرس القديم بنفس الاسم (غير فريد) يمنع إنشاء الفريد — احذفه إن خالف المواصفة
+        _tn_idx = (await db.ecom_shipping_labels.index_information()).get("tracking_number_1")
+        if _tn_idx and not _tn_idx.get("unique"):
+            await db.ecom_shipping_labels.drop_index("tracking_number_1")
         await db.ecom_shipping_labels.create_index("tracking_number", unique=True, sparse=True)
         await db.ecom_external_products.create_index([("channel", 1), ("integration_id", 1), ("external_id", 1)], unique=True)
         await db.ecom_external_products.create_index("updated_at")

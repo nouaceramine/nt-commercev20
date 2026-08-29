@@ -9,6 +9,7 @@ Enhanced with:
 import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
+from core.db_naming import resolve_db_name  # p348
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class MaintenanceRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348
                 for coll_name in ["reorder_recommendations", "stockout_predictions",
                                    "pricing_alerts", "debt_reminders"]:
                     try:
@@ -115,7 +116,7 @@ class MaintenanceRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348
                 for coll_name, keys in indexes_spec:
                     try:
                         await tdb[coll_name].create_index(keys, background=True)
@@ -175,7 +176,7 @@ class MaintenanceRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348
 
                 products_count = await tdb.products.count_documents({})
                 sales_count = await tdb.sales.count_documents({})

@@ -44,7 +44,7 @@ async def run():
 
     # 4) tenant employees (skip the auto-created owner mirror: same email as the tenant)
     for name in await client.list_database_names():
-        if not name.startswith("tenant_"):
+        if not name.startswith(("tenant_", "nt_")):  # p348
             continue
         tid = name[len("tenant_"):].replace("_", "-")
         tdb = client[name]

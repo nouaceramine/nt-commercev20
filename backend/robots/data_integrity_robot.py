@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
+from core.db_naming import resolve_db_name  # p348
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class DataIntegrityRobot:
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
-                tdb = self.client[f"tenant_{tid}"]
+                tdb = self.client[resolve_db_name(tid)]  # p348
                 await self._fix_sale_totals(tenant, tdb)
                 await self._fix_negative_quantities(tenant, tdb)
                 await self._check_duplicate_barcodes(tenant, tdb)

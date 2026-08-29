@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
+from core.db_naming import is_tenant_db  # p348
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class ProfitRobot:
         # older than 90 days are swept. Stops the unbounded pile-up.
         try:
             dbs = await self.client.list_database_names()
-            tenant_dbs = [d for d in dbs if d.startswith("tenant_")]
+            tenant_dbs = [d for d in dbs if is_tenant_db(d)]
             now = datetime.now(timezone.utc)
             day = now.strftime("%Y-%m-%d")
             cutoff = (now - timedelta(days=90)).isoformat()
@@ -101,7 +102,7 @@ class ProfitRobot:
             dbs = await self.client.list_database_names()
             total_revenue = 0
             total_cost = 0
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 sales = await tdb.sales.find({"date": {"$regex": today}}, {"_id": 0}).to_list(None)
                 for sale in sales:
@@ -116,7 +117,7 @@ class ProfitRobot:
         results = []
         try:
             dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 products = await tdb.products.find(
                     {"purchase_price": {"$gt": 0}}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1, "retail_price": 1, "wholesale_price": 1}
@@ -136,7 +137,7 @@ class ProfitRobot:
         results = []
         try:
             dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if d.startswith("tenant_")]:
+            for db_name in [d for d in dbs if is_tenant_db(d)]:
                 tdb = self.client[db_name]
                 products = await tdb.products.find(
                     {"purchase_price": {"$gt": 0}}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1, "retail_price": 1, "wholesale_price": 1}
