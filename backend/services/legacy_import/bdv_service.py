@@ -922,3 +922,52 @@ def run_full_import(db, dblx_path, work_dir, cb=None):
     report["purged_previous"] = purged
     report["duplicate_barcodes_moved"] = maps.get("dup_barcodes", 0)
     return report
+
+
+# ───────────────────────── canonical bundle import (p351) ─────────────────────────
+REQUIRED_BUNDLE_TABLES = ("Item", "Receipt", "ReceiptEntry")
+
+
+def validate_bundle_dir(src_dir):
+    """A canonical bundle (produced by the sync agent's --dump from ANY legacy
+    system — Access, SQL Server, …) must at least carry these tables."""
+    missing = [t for t in REQUIRED_BUNDLE_TABLES
+               if not os.path.exists(os.path.join(src_dir, f"{t}.json"))]
+    return not missing, missing
+
+
+def run_import_from_dir(db, src_dir, cb=None):
+    """Import from a pre-exported canonical JSON bundle (agent --dump output).
+    Same pipeline as run_full_import minus the mdbtools export step."""
+    ok, missing = validate_bundle_dir(src_dir)
+    if not ok:
+        raise RuntimeError(
+            "الحزمة ناقصة — الجداول الإلزامية غير موجودة: " + ", ".join(missing))
+
+    def wrap(step):
+        def _cb(_step, label, done, total):
+            if cb:
+                cb(step, label, done, total)
+        return _cb
+
+    counts = {}
+    for fname in os.listdir(src_dir):
+        if fname.endswith(".json"):
+            try:
+                counts[fname[:-5]] = len(load_table(src_dir, fname[:-5]))
+            except Exception:
+                counts[fname[:-5]] = -1
+    failed_tables = [t for t, n in counts.items() if n == -1]
+    purged = purge_previous(db)
+    if cb:
+        cb("purge", "تنظيف أي استيراد سابق", 1, 1)
+    maps = import_masters(db, src_dir, wrap("masters"))
+    stats = import_transactions(db, src_dir, maps, wrap("transactions"))
+    report = verify_import(db, src_dir, apply_mirrors=True, cb=wrap("verify"))
+    report["stats"] = stats
+    report["export_counts"] = counts
+    report["failed_tables"] = failed_tables
+    report["purged_previous"] = purged
+    report["duplicate_barcodes_moved"] = maps.get("dup_barcodes", 0)
+    report["bundle_import"] = True
+    return report

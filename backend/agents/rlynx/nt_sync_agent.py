@@ -1,34 +1,58 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NT Commerce — rlynx/BDV10 Live Mirror Agent (Windows)
-======================================================
-Watches the legacy rlynx/BDV10 Access database and pushes every new
-operation to NT Commerce in near real time (one-way mirror — the legacy
-system is never written to).
+NT Commerce — Legacy Live Mirror Agent (Windows)  v2
+=====================================================
+Watches a legacy system database and mirrors every new operation into
+NT Commerce in near real time (STRICTLY one-way — the legacy database is
+only ever READ, never written).
 
-Setup on the subscriber's PC:
-  1. Install Python 3.10+ (python.org) — check "Add python.exe to PATH"
-  2. pip install pyodbc
-  3. Make sure the "Microsoft Access Driver (*.mdb, *.accdb)" ODBC driver
-     exists (it ships with Microsoft Office / Access Runtime)
-  4. Put nt_sync_agent.json next to this file:
-       {
-         "server": "https://nt-commerce.net",
-         "token": "ntsync_...",
-         "db_path": "C:\\rlynx\\BDV10.dblx",
-         "interval_sec": 30
-       }
-  5. First run (right after the initial import on the web):
-       python nt_sync_agent.py --baseline
-     then normal operation:
-       python nt_sync_agent.py
-  6. (Optional) auto-start: Task Scheduler → "At log on" →
-     program: python.exe  arguments: "C:\\nt_sync\\nt_sync_agent.py"
+Supported engines:
+  • access — rlynx/BDV10 file (.dblx/.mdb/.accdb) via the Access ODBC driver
+  • mssql  — SQL Server systems (PC Compta / Sage / Ciel / custom) via any
+             installed SQL Server ODBC driver, with a field-mapping profile
 
-State is kept in nt_sync_agent_state.json next to the config — deleting it
-forces a fresh baseline (nothing is duplicated server-side anyway: every
-row is applied idempotently by its legacy id).
+Config file (nt_sync_agent.json, next to this script):
+  {
+    "server": "https://nt-commerce.net",
+    "token": "ntsync_...",
+    "engine": "access",
+    "db_path": "C:\\rlynx\\BDV10.dblx",          // engine=access
+    "interval_sec": 30,
+
+    // engine=mssql instead:
+    "mssql": {
+      "server": "localhost\\\\INSTANCE", "database": "GESTION",
+      "user": "sa", "password": "...",            // or "trusted": true
+      "driver": "ODBC Driver 17 for SQL Server"
+    },
+    // mapping profile: canonical name → source table + column map
+    "profile": {
+      "Receipt": {"table": "VENTES", "columns": {"ID": "VTE_ID", "ReceiptNo": "VTE_NUM",
+                  "Total": "VTE_TOTAL", "CreditAccount": "VTE_RESTE",
+                  "AccountPayment": "VTE_REGLE", "CustomerID": "VTE_CLI",
+                  "Time": "VTE_DATE"}},
+      "ReceiptEntry": {"table": "VENTES_LIGNES", "columns": {"ReceiptID": "VTE_ID",
+                  "ItemID": "ART_ID", "ItemName": "ART_NOM", "Qty": "QTE",
+                  "Price": "PRIX", "ExtPrice": "TOTAL_LIGNE"}},
+      "Item": ..., "Customer": ..., "Supplier": ...,
+      "Purchase": ..., "PurchaseEntry": ..., "Batch": ...
+    }
+  }
+  (engine=access needs no profile — the BDV10 layout is built in)
+
+Commands:
+  python nt_sync_agent.py --baseline        first run: mark current content as
+                                            already-imported (no push)
+  python nt_sync_agent.py                   live mirror loop
+  python nt_sync_agent.py --once            single poll (testing)
+  python nt_sync_agent.py --dump DIR        export FULL history as a canonical
+                                            bundle (folder + bundle.zip) —
+                                            upload bundle.zip in the web
+                                            wizard ("الترحيل من نظام قديم")
+
+Auto-start (optional): Task Scheduler → At log on →
+  program: python.exe  args: "C:\\nt_sync\\nt_sync_agent.py"
 """
 import argparse
 import hashlib
@@ -39,10 +63,23 @@ import time
 import traceback
 import urllib.request
 import urllib.error
+import zipfile
 
-AGENT_VERSION = "1.0"
+AGENT_VERSION = "2.0"
 
 MASTER_TABLES = ("Item", "Customer", "Supplier")
+LIVE_TABLES = ("Receipt", "Purchase", "Batch")
+
+# BDV10/rlynx built-in identity profile (engine=access)
+BDV_IDENTITY = {
+    t: {"table": t, "columns": None}  # columns None → SELECT * (already canonical)
+    for t in ("Receipt", "ReceiptEntry", "Purchase", "PurchaseEntry",
+              "Batch", "Item", "Customer", "Supplier",
+              "ItemFamily", "CustomerFamily", "ItemAlias", "UnitOfMeasure",
+              "Employee", "StockTake", "StockTakeEntry", "ItemAdjustment",
+              "Store", "PriceLevel", "PaymentMethod", "Register")
+}
+DUMP_TABLES = list(BDV_IDENTITY.keys())
 
 
 def log(msg):
@@ -70,14 +107,49 @@ def save_json(path, data):
     os.replace(tmp, path)
 
 
-def connect(db_path):
-    import pyodbc  # only dependency
-    conn_str = (r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
-                f"DBQ={db_path};")
+# ───────────────────────── engine layer ─────────────────────────
+def connect(cfg):
+    import pyodbc  # only third-party dependency
+    engine = cfg.get("engine", "access")
+    if engine == "access":
+        conn_str = (r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
+                    f"DBQ={cfg['db_path']};")
+    elif engine == "mssql":
+        m = cfg["mssql"]
+        if m.get("trusted"):
+            auth = "Trusted_Connection=yes;"
+        else:
+            auth = f"UID={m['user']};PWD={m['password']};"
+        conn_str = (f"DRIVER={{{m.get('driver', 'ODBC Driver 17 for SQL Server')}}};"
+                    f"SERVER={m['server']};DATABASE={m['database']};{auth}")
+    else:
+        raise RuntimeError(f"unknown engine: {engine}")
     return pyodbc.connect(conn_str, autocommit=True)
 
 
-def rows_of(cur, sql, params=()):
+def profile(cfg):
+    """canonical → {table, columns}. Access uses the built-in identity profile."""
+    if cfg.get("engine", "access") == "access":
+        return BDV_IDENTITY
+    prof = cfg.get("profile") or {}
+    if "Receipt" not in prof or "Item" not in prof:
+        raise RuntimeError("mssql engine needs a profile with at least Receipt + Item")
+    merged = dict(prof)
+    return merged
+
+
+def select_rows(cur, prof, canon, where=None, params=()):
+    """SELECT canonical columns (renamed per profile) from the source table."""
+    spec = prof[canon]
+    if spec["columns"] is None:
+        sql = f"SELECT * FROM [{spec['table']}]"
+    else:
+        cols = ", ".join(f"[{src}] AS [{dst}]" for dst, src in spec["columns"].items())
+        sql = f"SELECT {cols} FROM [{spec['table']}]"
+    if where:
+        sql += f" WHERE {where}"
+    sql += f" ORDER BY [{spec['columns']['ID'] if spec['columns'] else 'ID'}]" \
+        if canon in LIVE_TABLES and where else sql
     cur.execute(sql, *params)
     cols = [c[0] for c in cur.description]
     out = []
@@ -100,6 +172,13 @@ def row_hash(row):
     ).hexdigest()
 
 
+def num(x):
+    try:
+        return float(x)
+    except Exception:
+        return 0.0
+
+
 def push(cfg, tables):
     body = json.dumps({"tables": tables,
                        "agent_version": AGENT_VERSION}).encode()
@@ -113,60 +192,58 @@ def push(cfg, tables):
         return json.loads(resp.read() or b"{}")
 
 
-def num(x):
-    try:
-        return float(x)
-    except Exception:
-        return 0.0
-
-
-def collect_new(cur, table, entry_table, fk, wm):
-    """New rows of `table` with ID > watermark, each with nested entries."""
-    rows = rows_of(cur, f"SELECT * FROM [{table}] WHERE ID > ? ORDER BY ID", (wm,))
+# ───────────────────────── polling ─────────────────────────
+def collect_new(cur, prof, canon, entry_canon, fk, wm):
+    spec = prof[canon]
+    id_col = spec["columns"]["ID"] if spec["columns"] else "ID"
+    rows = select_rows(cur, prof, canon, f"[{id_col}] > ?", (wm,))
     for r in rows:
-        r["entries"] = rows_of(
-            cur, f"SELECT * FROM [{entry_table}] WHERE [{fk}] = ?", (r["ID"],))
+        espec = prof[entry_canon]
+        fk_col = espec["columns"][fk] if espec["columns"] else fk
+        r["entries"] = select_rows(cur, prof, entry_canon,
+                                   f"[{fk_col}] = ?", (r["ID"],))
     return rows
 
 
 def poll_once(cfg, state):
-    conn = connect(cfg["db_path"])
+    prof = profile(cfg)
+    conn = connect(cfg)
     cur = conn.cursor()
     tables = {}
 
-    # ── new receipts (+entries) ──
-    receipts = collect_new(cur, "Receipt", "ReceiptEntry", "ReceiptID",
+    receipts = collect_new(cur, prof, "Receipt", "ReceiptEntry", "ReceiptID",
                            num(state.get("wm_receipt", 0)))
     if receipts:
         tables["receipts"] = receipts
         state["wm_receipt"] = max(num(r["ID"]) for r in receipts)
 
-    # ── new purchases (+entries) ──
-    purchases = collect_new(cur, "Purchase", "PurchaseEntry", "PurchaseID",
-                            num(state.get("wm_purchase", 0)))
-    if purchases:
-        tables["purchases"] = purchases
-        state["wm_purchase"] = max(num(r["ID"]) for r in purchases)
+    if "Purchase" in prof:
+        purchases = collect_new(cur, prof, "Purchase", "PurchaseEntry", "PurchaseID",
+                                num(state.get("wm_purchase", 0)))
+        if purchases:
+            tables["purchases"] = purchases
+            state["wm_purchase"] = max(num(r["ID"]) for r in purchases)
 
-    # ── batches: new OR status-changed (open→closed) ──
-    batches = rows_of(cur, "SELECT * FROM [Batch]")
-    known = state.get("batches", {})
-    changed = []
-    for bt in batches:
-        bid = str(bt.get("ID", ""))
-        sig = f"{bt.get('Status')}|{bt.get('CashClose')}|{bt.get('ClosingTime')}"
-        if known.get(bid) != sig:
-            known[bid] = sig
-            changed.append(bt)
-    if changed:
-        tables["batches"] = changed
-    state["batches"] = known
+    if "Batch" in prof:
+        batches = select_rows(cur, prof, "Batch")
+        known = state.get("batches", {})
+        changed = []
+        for bt in batches:
+            bid = str(bt.get("ID", ""))
+            sig = f"{bt.get('Status')}|{bt.get('CashClose')}|{bt.get('ClosingTime')}"
+            if known.get(bid) != sig:
+                known[bid] = sig
+                changed.append(bt)
+        if changed:
+            tables["batches"] = changed
+        state["batches"] = known
 
-    # ── masters: hash-diff full scan ──
     hashes = state.get("hashes", {})
-    for table in MASTER_TABLES:
-        rows = rows_of(cur, f"SELECT * FROM [{table}]")
-        tmap = hashes.setdefault(table, {})
+    for canon in MASTER_TABLES:
+        if canon not in prof:
+            continue
+        rows = select_rows(cur, prof, canon)
+        tmap = hashes.setdefault(canon, {})
         diff = []
         for row in rows:
             rid = str(row.get("ID", ""))
@@ -176,7 +253,7 @@ def poll_once(cfg, state):
                 diff.append(row)
         if diff:
             tables[{"Item": "items", "Customer": "customers",
-                    "Supplier": "suppliers"}[table]] = diff
+                    "Supplier": "suppliers"}[canon]] = diff
 
     conn.close()
 
@@ -188,38 +265,77 @@ def poll_once(cfg, state):
 
 
 def baseline(cfg, state):
-    """Initialize watermarks/hashes to the CURRENT content without pushing
-    (history was already imported via the web wizard)."""
-    conn = connect(cfg["db_path"])
+    """Mark current content as already-imported (nothing pushed)."""
+    prof = profile(cfg)
+    conn = connect(cfg)
     cur = conn.cursor()
-    for table, key in (("Receipt", "wm_receipt"), ("Purchase", "wm_purchase")):
-        cur.execute(f"SELECT MAX(ID) FROM [{table}]")
+    for canon, key in (("Receipt", "wm_receipt"), ("Purchase", "wm_purchase")):
+        if canon not in prof:
+            continue
+        spec = prof[canon]
+        id_col = spec["columns"]["ID"] if spec["columns"] else "ID"
+        cur.execute(f"SELECT MAX([{id_col}]) FROM [{spec['table']}]")
         val = cur.fetchone()[0]
         state[key] = float(val) if val is not None else 0
-    known = {}
-    for bt in rows_of(cur, "SELECT * FROM [Batch]"):
-        known[str(bt.get("ID", ""))] = (
-            f"{bt.get('Status')}|{bt.get('CashClose')}|{bt.get('ClosingTime')}")
-    state["batches"] = known
+    if "Batch" in prof:
+        known = {}
+        for bt in select_rows(cur, prof, "Batch"):
+            known[str(bt.get("ID", ""))] = (
+                f"{bt.get('Status')}|{bt.get('CashClose')}|{bt.get('ClosingTime')}")
+        state["batches"] = known
     hashes = {}
-    for table in MASTER_TABLES:
+    for canon in MASTER_TABLES:
+        if canon not in prof:
+            continue
         tmap = {}
-        for row in rows_of(cur, f"SELECT * FROM [{table}]"):
+        for row in select_rows(cur, prof, canon):
             tmap[str(row.get("ID", ""))] = row_hash(row)
-        hashes[table] = tmap
+        hashes[canon] = tmap
     state["hashes"] = hashes
     conn.close()
-    log(f"baseline set: receipt≤{state['wm_receipt']:.0f} "
-        f"purchase≤{state['wm_purchase']:.0f} "
-        f"batches={len(known)} masters hashed")
+    log(f"baseline set: receipt≤{state.get('wm_receipt', 0):.0f} "
+        f"purchase≤{state.get('wm_purchase', 0):.0f} masters hashed")
+
+
+def dump(cfg, out_dir):
+    """Export FULL history as a canonical bundle: {Table}.json + bundle.zip.
+    Upload bundle.zip in the web wizard — the server imports it directly."""
+    prof = profile(cfg)
+    conn = connect(cfg)
+    cur = conn.cursor()
+    os.makedirs(out_dir, exist_ok=True)
+    total = 0
+    for canon in DUMP_TABLES:
+        if canon not in prof:
+            continue
+        try:
+            rows = select_rows(cur, prof, canon)
+        except Exception as e:
+            log(f"dump: skipping {canon}: {e}")
+            continue
+        with open(os.path.join(out_dir, f"{canon}.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(rows, fh, ensure_ascii=False)
+        total += len(rows)
+        log(f"dump: {canon} = {len(rows)} rows")
+    conn.close()
+    zip_path = os.path.join(out_dir, "bundle.zip")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in os.listdir(out_dir):
+            if fname.endswith(".json"):
+                zf.write(os.path.join(out_dir, fname), fname)
+    log(f"dump complete: {total} rows → {zip_path} "
+        f"(upload bundle.zip in the web wizard)")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="NT Commerce rlynx live mirror agent")
+    ap = argparse.ArgumentParser(description="NT Commerce legacy live mirror agent")
     ap.add_argument("--config", default=None)
     ap.add_argument("--baseline", action="store_true",
                     help="initialize state without pushing (first run)")
     ap.add_argument("--once", action="store_true", help="single poll then exit")
+    ap.add_argument("--dump", metavar="DIR", default=None,
+                    help="export full history to a canonical bundle + bundle.zip")
     args = ap.parse_args()
 
     cfg_path = args.config or os.path.join(BASE_DIR, "nt_sync_agent.json")
@@ -227,10 +343,20 @@ def main():
     if not cfg:
         print(f"config not found: {cfg_path}")
         sys.exit(2)
-    for key in ("server", "token", "db_path"):
+    for key in ("server", "token"):
         if not cfg.get(key):
             print(f"missing config key: {key}")
             sys.exit(2)
+    if cfg.get("engine", "access") == "access" and not cfg.get("db_path"):
+        print("missing config key: db_path")
+        sys.exit(2)
+    if cfg.get("engine") == "mssql" and not cfg.get("mssql"):
+        print("missing config section: mssql")
+        sys.exit(2)
+
+    if args.dump:
+        dump(cfg, args.dump)
+        return
 
     state_path = os.path.join(BASE_DIR, "nt_sync_agent_state.json")
     state = load_json(state_path, {})
@@ -241,7 +367,7 @@ def main():
         save_json(state_path, state)
         return
 
-    log(f"agent {AGENT_VERSION} started — mirror {cfg['db_path']} → "
+    log(f"agent {AGENT_VERSION} started — engine={cfg.get('engine', 'access')} → "
         f"{cfg['server']} every {interval}s")
     while True:
         try:

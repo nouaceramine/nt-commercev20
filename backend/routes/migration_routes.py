@@ -30,7 +30,7 @@ from services.legacy_import import bdv_service
 router = APIRouter(prefix="/migration", tags=["legacy-migration"])
 
 UPLOAD_ROOT = os.environ.get("LEGACY_UPLOAD_ROOT", "/legacy_uploads")
-ALLOWED_EXT = (".dblx", ".mdb", ".accdb")
+ALLOWED_EXT = (".dblx", ".mdb", ".accdb", ".zip")  # p351: .zip = canonical bundle (agent --dump)
 MAX_BYTES = 300 * 1024 * 1024  # 300MB hard cap per legacy DB file
 JOBS_COLL = "migration_jobs"
 
@@ -43,9 +43,11 @@ def _sync_db(tenant_id: str):
     return MongoClient(os.environ["MONGO_URL"])[resolve_db_name(tenant_id)]
 
 
-def _run_job(job_id: str, tenant_id: str, dblx_path: str, work_dir: str):
+def _run_job(job_id: str, tenant_id: str, dblx_path: str, work_dir: str,
+             bundle_dir: str = None):
     """Background worker (thread): runs the full pipeline, writes progress
-    into the job doc in the tenant DB."""
+    into the job doc in the tenant DB. bundle_dir set ⇒ p351 canonical bundle
+    (agent --dump) — skip mdbtools, import directly."""
     db = _sync_db(tenant_id)
 
     def cb(step, label, done, total):
@@ -57,7 +59,10 @@ def _run_job(job_id: str, tenant_id: str, dblx_path: str, work_dir: str):
     db[JOBS_COLL].update_one({"id": job_id},
                              {"$set": {"status": "running", "started_at": _now()}})
     try:
-        report = bdv_service.run_full_import(db, dblx_path, work_dir, cb)
+        if bundle_dir:
+            report = bdv_service.run_import_from_dir(db, bundle_dir, cb)
+        else:
+            report = bdv_service.run_full_import(db, dblx_path, work_dir, cb)
         db[JOBS_COLL].update_one(
             {"id": job_id},
             {"$set": {"status": "done", "report": report, "finished_at": _now(),
@@ -94,7 +99,7 @@ async def create_legacy_import_job(
     if not fname.endswith(ALLOWED_EXT):
         raise HTTPException(
             status_code=400,
-            detail="صيغة غير مدعومة — ارفع ملف قاعدة النظام القديم (.dblx / .mdb / .accdb)")
+            detail="صيغة غير مدعومة — ارفع ملف قاعدة النظام القديم (.dblx / .mdb / .accdb) أو حزمة وكيل (.zip)")
 
     tdb = get_tenant_db(tenant_id)
     active = await tdb[JOBS_COLL].find_one(
@@ -132,17 +137,46 @@ async def create_legacy_import_job(
                                     detail="الملف أكبر من 300MB")
             out.write(chunk)
 
-    if not bdv_service.detect_access_file(dblx_path):
+    bundle_dir = None
+    if fname.endswith(".zip"):
+        # p351: canonical bundle (sync agent --dump) — {Table}.json files
+        import zipfile
+        bundle_dir = os.path.join(job_dir, "bundle")
+        os.makedirs(bundle_dir, exist_ok=True)
+        try:
+            with zipfile.ZipFile(dblx_path) as zf:
+                for member in zf.namelist():
+                    # zip-slip guard: flat names only
+                    base = os.path.basename(member)
+                    if not base.endswith(".json") or ".." in member:
+                        continue
+                    with zf.open(member) as src_fh, \
+                            open(os.path.join(bundle_dir, base), "wb") as dst_fh:
+                        dst_fh.write(src_fh.read())
+        except zipfile.BadZipFile:
+            try:
+                os.remove(dblx_path)
+            except OSError:
+                pass
+            raise HTTPException(status_code=400, detail="ملف ZIP تالف أو غير قابل للقراءة")
+        ok, missing = bdv_service.validate_bundle_dir(bundle_dir)
+        if not ok:
+            raise HTTPException(
+                status_code=400,
+                detail="حزمة غير صالحة — أنتجها بأمر --dump من وكيل المزامنة "
+                       f"(النواقص: {', '.join(missing)})")
+    elif not bdv_service.detect_access_file(dblx_path):
         try:
             os.remove(dblx_path)
         except OSError:
             pass
         raise HTTPException(
             status_code=400,
-            detail="الملف ليس قاعدة بيانات Access صالحة — تأكد أنه ملف rlynx/BDV10 الأصلي")
+            detail="الملف ليس قاعدة بيانات Access صالحة ولا حزمة وكيل — "
+                   "تأكد أنه ملف rlynx/BDV10 الأصلي أو مخرجات --dump")
 
     job = {
-        "id": job_id, "source_system": "rlynx-bdv10",
+        "id": job_id, "source_system": ("canonical-bundle" if bundle_dir else "rlynx-bdv10"),
         "file_name": file.filename, "file_size": size,
         "status": "queued", "step": "queued", "step_label": "في الانتظار",
         "done": 0, "total": 0, "report": None, "error": None,
@@ -153,7 +187,8 @@ async def create_legacy_import_job(
     job.pop("_id", None)
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _run_job, job_id, tenant_id, dblx_path, job_dir)
+    loop.run_in_executor(None, _run_job, job_id, tenant_id, dblx_path, job_dir,
+                         bundle_dir)
     return {"ok": True, "job": job}
 
 

@@ -222,12 +222,12 @@ export default function LegacyMigrationPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Link2 className="h-5 w-5" />
-              {ar ? 'الترحيل من نظام قديم (rlynx)' : 'Migration depuis un système legacy (rlynx)'}
+              {ar ? 'الترحيل من نظام قديم (rlynx / PC Compta / Sage…)' : 'Migration depuis un système legacy'}
             </CardTitle>
             <CardDescription>
               {ar
-                ? 'ارفع ملف قاعدة بيانات نظامك القديم (.dblx) وسيستورد النظام منتجاتك وزبائنك ومورديك ومبيعاتك وديونك كاملة مع تقرير مطابقة — دون المساس بأي بيانات حالية.'
-                : 'Téléversez le fichier .dblx de votre ancien système: produits, clients, fournisseurs, ventes et dettes importés avec rapport de vérification.'}
+                ? 'ارفع ملف قاعدة بيانات نظامك القديم — rlynx (.dblx) مباشرة، أو bundle.zip من وكيل SQL Server (PC Compta / Sage / Ciel) — وسيستورد النظام منتجاتك وزبائنك ومورديك ومبيعاتك وديونك كاملة مع تقرير مطابقة — دون المساس بأي بيانات حالية.'
+                : 'Téléversez la base de votre ancien système (.dblx rlynx ou bundle.zip SQL Server): produits, clients, fournisseurs, ventes et dettes importés avec rapport de vérification.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -237,7 +237,7 @@ export default function LegacyMigrationPage() {
               data-testid="legacy-upload-dropzone"
             >
               <input
-                ref={fileRef} type="file" accept=".dblx,.mdb,.accdb" className="hidden"
+                ref={fileRef} type="file" accept=".dblx,.mdb,.accdb,.zip" className="hidden"
                 onChange={e => { setFile(e.target.files[0] || null); setNeedForce(''); }}
               />
               <FileUp className="h-10 w-10 mx-auto mb-2 text-muted-foreground" />
@@ -248,7 +248,7 @@ export default function LegacyMigrationPage() {
                 </div>
               ) : (
                 <p className="text-muted-foreground">
-                  {ar ? 'اضغط لاختيار ملف قاعدة البيانات (.dblx / .mdb / .accdb)' : 'Choisir le fichier (.dblx / .mdb / .accdb)'}
+                  {ar ? 'اضغط لاختيار ملف قاعدة البيانات (.dblx / .mdb / .accdb) أو حزمة bundle.zip من وكيل SQL Server (--dump)' : 'Choisir le fichier (.dblx / .mdb / .accdb) ou bundle.zip (--dump)'}
                 </p>
               )}
             </div>
