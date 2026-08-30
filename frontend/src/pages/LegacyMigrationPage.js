@@ -15,7 +15,7 @@ import {
 import { toast } from 'sonner';
 import {
   Upload, Database, Loader2, CheckCircle2, AlertTriangle, XCircle,
-  RefreshCw, History, Undo2, FileUp, Link2,
+  RefreshCw, History, Undo2, FileUp, Link2, Radio, Copy, Download, Trash2,
 } from 'lucide-react';
 
 // p349: Legacy migration wizard — upload an rlynx/BDV10 (.dblx/Access) database
@@ -45,8 +45,78 @@ export default function LegacyMigrationPage() {
   const [uploading, setUploading] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState(null);
   const [rollingBack, setRollingBack] = useState(false);
+  // p350: live mirror
+  const [agents, setAgents] = useState([]);
+  const [counters, setCounters] = useState({});
+  const [newToken, setNewToken] = useState('');
+  const [genLabel, setGenLabel] = useState('');
+  const [generating, setGenerating] = useState(false);
   const fileRef = useRef(null);
   const pollRef = useRef(null);
+
+  const loadMirror = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/migration/live/status');
+      setAgents(res.data.agents || []);
+      setCounters(res.data.counters || {});
+    } catch (e) { /* silent */ }
+  }, []);
+
+  const generateToken = async () => {
+    setGenerating(true);
+    try {
+      const res = await apiClient.post('/migration/live/tokens', { label: genLabel });
+      setNewToken(res.data.token);
+      setGenLabel('');
+      toast.success(ar ? 'أُنشئ رمز المزامنة — انسخه الآن (لن يظهر مرة أخرى)' : 'Token créé — copiez-le maintenant');
+      loadMirror();
+    } catch (e) {
+      toast.error(errText(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const revokeToken = async (id) => {
+    try {
+      await apiClient.delete(`/migration/live/tokens/${id}`);
+      toast.success(ar ? 'أُوقف الوكيل' : 'Agent révoqué');
+      loadMirror();
+    } catch (e) {
+      toast.error(errText(e));
+    }
+  };
+
+  const downloadAgent = async () => {
+    try {
+      const res = await apiClient.get('/migration/live/agent/download', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'nt_sync_agent.py';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(errText(e));
+    }
+  };
+
+  const downloadConfig = () => {
+    if (!newToken) return;
+    const cfg = {
+      server: window.location.origin,
+      token: newToken,
+      db_path: 'C:\\rlynx\\BDV10.dblx',
+      interval_sec: 30,
+    };
+    const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'nt_sync_agent.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const loadJobs = useCallback(async () => {
     try {
@@ -67,6 +137,7 @@ export default function LegacyMigrationPage() {
 
   useEffect(() => {
     loadJobs();
+    loadMirror();
   }, []); // eslint-disable-line
 
   useEffect(() => {
@@ -307,6 +378,100 @@ export default function LegacyMigrationPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* p350: live mirror card */}
+        <Card data-testid="live-mirror-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Radio className="h-5 w-5" />
+              {ar ? 'المرآة الحية — اعمل على القديم وشاهد هنا' : 'Miroir temps réel'}
+            </CardTitle>
+            <CardDescription>
+              {ar
+                ? 'برنامج صغير يُثبَّت على جهازك، يراقب قاعدة rlynx ويرسل كل عملية جديدة لحظياً إلى هنا — اتجاه واحد فقط، نظامك القديم لا يُمس إطلاقاً.'
+                : 'Un petit agent Windows envoie chaque nouvelle opération ici en temps réel (sens unique).'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                placeholder={ar ? 'وصف الجهاز (مثال: كاسير 1)' : 'Nom du poste'}
+                value={genLabel}
+                onChange={e => setGenLabel(e.target.value)}
+                data-testid="mirror-label-input"
+              />
+              <Button onClick={generateToken} disabled={generating} data-testid="mirror-generate-btn">
+                {generating ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <Radio className="h-4 w-4 me-2" />}
+                {ar ? 'توليد رمز مزامنة' : 'Générer un token'}
+              </Button>
+            </div>
+
+            {newToken && (
+              <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-950/30 p-3 space-y-2" data-testid="mirror-token-box">
+                <p className="text-sm font-medium">{ar ? 'رمزك (يظهر مرة واحدة فقط):' : 'Votre token (affiché une seule fois):'}</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs break-all rounded bg-background p-2 border font-mono" dir="ltr">{newToken}</code>
+                  <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(newToken); toast.success(ar ? 'نُسخ' : 'Copié'); }}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={downloadAgent} data-testid="mirror-download-agent">
+                    <Download className="h-4 w-4 me-1" />
+                    {ar ? 'تحميل الوكيل nt_sync_agent.py' : 'Télécharger l\'agent'}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={downloadConfig} data-testid="mirror-download-config">
+                    <Download className="h-4 w-4 me-1" />
+                    {ar ? 'تحميل ملف الإعداد (برمزك)' : 'Télécharger la config'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {ar
+                    ? 'على جهازك: ثبّت Python ثم pip install pyodbc، ضع الملفين معاً في مجلد، عدّل db_path في ملف الإعداد لمسار BDV10.dblx، شغّل أولاً python nt_sync_agent.py --baseline ثم python nt_sync_agent.py'
+                    : 'Sur votre PC: installez Python + pyodbc, placez les deux fichiers ensemble, ajustez db_path, puis lancez --baseline une fois.'}
+                </p>
+              </div>
+            )}
+
+            {agents.length > 0 && (
+              <div className="space-y-2">
+                {agents.map(a => (
+                  <div key={a.id} className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium">{a.label || (ar ? 'وكيل' : 'Agent')} <span className="font-mono text-xs text-muted-foreground">…{a.token_hint}</span></p>
+                      <p className="text-xs text-muted-foreground">
+                        {a.last_seen_at
+                          ? (ar ? `آخر اتصال: ${new Date(a.last_seen_at).toLocaleString('ar-DZ')}` : `Vu: ${new Date(a.last_seen_at).toLocaleString('fr-FR')}`)
+                          : (ar ? 'لم يتصل بعد' : 'Jamais connecté')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={a.last_seen_at ? 'default' : 'secondary'}>
+                        {a.last_seen_at ? (ar ? 'نشط' : 'Actif') : (ar ? 'بانتظار' : 'En attente')}
+                      </Badge>
+                      <Button size="sm" variant="ghost" onClick={() => revokeToken(a.id)}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {Object.keys(counters).length > 0 && (
+              <p className="text-sm text-muted-foreground" data-testid="mirror-counters">
+                {ar ? 'مزامَن حتى الآن: ' : 'Synchronisé: '}
+                {[
+                  counters.receipts ? `${counters.receipts} ${ar ? 'بيعاً' : 'ventes'}` : '',
+                  counters.items ? `${counters.items} ${ar ? 'صنفاً' : 'articles'}` : '',
+                  counters.customers ? `${counters.customers} ${ar ? 'زبوناً' : 'clients'}` : '',
+                  counters.purchases ? `${counters.purchases} ${ar ? 'شراءً' : 'achats'}` : '',
+                ].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         {jobs.length > 0 && (
           <Card>
