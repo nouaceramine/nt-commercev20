@@ -196,6 +196,7 @@ const StoreManagementPage = lazy(() => import("./pages/store/StoreManagementPage
 const PublicStorePage = lazy(() => import("./pages/store/PublicStorePage"));  // p273
 const DataImportExportPage = lazy(() => import("./pages/DataImportExportPage"));  // p273
 const ImportDataPage = lazy(() => import("./pages/ImportDataPage"));  // p273  // p151
+const LegacyMigrationPage = lazy(() => import("./pages/LegacyMigrationPage"));  // p349
 const MotherboardPage = lazy(() => import("./pages/MotherboardPage"));  // p273
 const TemplateEditorPage = lazy(() => import("./pages/settings/TemplateEditorPage"));  // p273
 const DailyReportPage = lazy(() => import("./pages/DailyReportPage"));  // p273
@@ -577,6 +578,7 @@ function AppRoutes() {
       <Route path="/backup-system" element={<ProtectedRoute featureKey="backup"><BackupSystemPage /></ProtectedRoute>} />
       <Route path="/data-import-export" element={<ProtectedRoute><DataImportExportPage /></ProtectedRoute>} />
       <Route path="/import-wizard" element={<ProtectedRoute><ImportDataPage /></ProtectedRoute>} />  {/* p151 */}
+      <Route path="/legacy-migration" element={<ProtectedRoute><LegacyMigrationPage /></ProtectedRoute>} />  {/* p349 */}
       <Route path="/security-dashboard" element={<ProtectedRoute><SecurityDashboardPage /></ProtectedRoute>} />
       <Route path="/motherboard" element={<ProtectedRoute superAdminOnly><MotherboardPage /></ProtectedRoute>} />
       <Route path="/daily-report" element={<ProtectedRoute><DailyReportPage /></ProtectedRoute>} />

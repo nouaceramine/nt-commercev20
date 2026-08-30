@@ -1,0 +1,379 @@
+import { errText } from '../lib/errorText';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import apiClient from '../lib/apiClient';
+import { Layout } from '../components/Layout';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '../components/ui/table';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '../components/ui/dialog';
+import { toast } from 'sonner';
+import {
+  Upload, Database, Loader2, CheckCircle2, AlertTriangle, XCircle,
+  RefreshCw, History, Undo2, FileUp, Link2,
+} from 'lucide-react';
+
+// p349: Legacy migration wizard — upload an rlynx/BDV10 (.dblx/Access) database
+// file; the server converts it (mdbtools) and imports products, customers,
+// suppliers, sales (with FIFO debt allocation), purchases, sessions and
+// inventory counts, then verifies everything against the source.
+
+const STEP_LABELS = {
+  queued: { ar: 'في الانتظار', fr: 'En attente' },
+  export: { ar: 'قراءة قاعدة البيانات القديمة', fr: 'Lecture de la base legacy' },
+  purge: { ar: 'تنظيف استيراد سابق', fr: 'Purge ancien import' },
+  masters: { ar: 'استيراد المنتجات والزبائن والموردين', fr: 'Import données de base' },
+  transactions: { ar: 'استيراد المبيعات والمشتريات والديون', fr: 'Import transactions' },
+  verify: { ar: 'التحقق والمطابقة', fr: 'Vérification' },
+  done: { ar: 'اكتمل', fr: 'Terminé' },
+};
+
+export default function LegacyMigrationPage() {
+  const { language } = useLanguage();
+  const ar = language === 'ar';
+  const [jobs, setJobs] = useState([]);
+  const [activeJob, setActiveJob] = useState(null);
+  const [reportJob, setReportJob] = useState(null);
+  const [file, setFile] = useState(null);
+  const [force, setForce] = useState(false);
+  const [needForce, setNeedForce] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [rollbackTarget, setRollbackTarget] = useState(null);
+  const [rollingBack, setRollingBack] = useState(false);
+  const fileRef = useRef(null);
+  const pollRef = useRef(null);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/migration/legacy/jobs');
+      const list = res.data.jobs || [];
+      setJobs(list);
+      const running = list.find(j => j.status === 'queued' || j.status === 'running');
+      setActiveJob(running || null);
+      if (!running && !reportJob) {
+        const finished = list.find(j => j.status === 'done' || j.status === 'failed');
+        if (finished) {
+          const full = await apiClient.get(`/migration/legacy/jobs/${finished.id}`);
+          setReportJob(full.data.job);
+        }
+      }
+    } catch (e) { /* silent on poll */ }
+  }, [reportJob]);
+
+  useEffect(() => {
+    loadJobs();
+  }, []); // eslint-disable-line
+
+  useEffect(() => {
+    if (activeJob) {
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await apiClient.get(`/migration/legacy/jobs/${activeJob.id}`);
+          const j = res.data.job;
+          if (j.status === 'done' || j.status === 'failed') {
+            clearInterval(pollRef.current);
+            setActiveJob(null);
+            setReportJob(j);
+            setJobs(prev => [j, ...prev.filter(x => x.id !== j.id)]);
+            if (j.status === 'done') {
+              toast.success(ar ? 'اكتمل الاستيراد' : 'Import terminé');
+            } else {
+              toast.error(j.error || (ar ? 'فشل الاستيراد' : 'Échec import'));
+            }
+          } else {
+            setActiveJob(j);
+          }
+        } catch (e) { /* keep polling */ }
+      }, 3000);
+      return () => clearInterval(pollRef.current);
+    }
+  }, [activeJob?.id]); // eslint-disable-line
+
+  const upload = async () => {
+    if (!file) return;
+    setUploading(true);
+    setNeedForce('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiClient.post(`/migration/legacy/jobs?force=${force}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 600000,
+      });
+      toast.success(ar ? 'بدأ الاستيراد — تابع التقدم' : 'Import démarré');
+      setFile(null);
+      setForce(false);
+      if (fileRef.current) fileRef.current.value = '';
+      const j = res.data.job;
+      setActiveJob(j);
+      setReportJob(null);
+      loadJobs();
+    } catch (e) {
+      const msg = errText(e);
+      if (e?.response?.status === 409 && msg.includes('force')) {
+        setNeedForce(msg);
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const doRollback = async () => {
+    if (!rollbackTarget) return;
+    setRollingBack(true);
+    try {
+      const res = await apiClient.post(`/migration/legacy/jobs/${rollbackTarget.id}/rollback`);
+      toast.success(ar ? 'تم التراجع عن كل البيانات المستوردة' : 'Rollback effectué');
+      setRollbackTarget(null);
+      setReportJob(null);
+      loadJobs();
+    } catch (e) {
+      toast.error(errText(e));
+    } finally {
+      setRollingBack(false);
+    }
+  };
+
+  const pct = activeJob && activeJob.total > 0
+    ? Math.round((activeJob.done / activeJob.total) * 100) : null;
+
+  return (
+    <Layout>
+      <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6" data-testid="legacy-migration-page">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Link2 className="h-5 w-5" />
+              {ar ? 'الترحيل من نظام قديم (rlynx)' : 'Migration depuis un système legacy (rlynx)'}
+            </CardTitle>
+            <CardDescription>
+              {ar
+                ? 'ارفع ملف قاعدة بيانات نظامك القديم (.dblx) وسيستورد النظام منتجاتك وزبائنك ومورديك ومبيعاتك وديونك كاملة مع تقرير مطابقة — دون المساس بأي بيانات حالية.'
+                : 'Téléversez le fichier .dblx de votre ancien système: produits, clients, fournisseurs, ventes et dettes importés avec rapport de vérification.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div
+              className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+              onClick={() => fileRef.current?.click()}
+              data-testid="legacy-upload-dropzone"
+            >
+              <input
+                ref={fileRef} type="file" accept=".dblx,.mdb,.accdb" className="hidden"
+                onChange={e => { setFile(e.target.files[0] || null); setNeedForce(''); }}
+              />
+              <FileUp className="h-10 w-10 mx-auto mb-2 text-muted-foreground" />
+              {file ? (
+                <div>
+                  <p className="font-medium">{file.name}</p>
+                  <p className="text-sm text-muted-foreground">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">
+                  {ar ? 'اضغط لاختيار ملف قاعدة البيانات (.dblx / .mdb / .accdb)' : 'Choisir le fichier (.dblx / .mdb / .accdb)'}
+                </p>
+              )}
+            </div>
+
+            {needForce && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3">
+                <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <p className="text-sm">{needForce}</p>
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input type="checkbox" checked={force} onChange={e => setForce(e.target.checked)} />
+                    {ar ? 'أفهم — تابع الاستيراد بجانب بياناتي الحالية' : 'Je comprends — continuer'}
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <Button
+              onClick={upload}
+              disabled={!file || uploading || !!activeJob}
+              className="w-full"
+              data-testid="legacy-upload-btn"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <Upload className="h-4 w-4 me-2" />}
+              {ar ? 'رفع وبدء الاستيراد' : 'Téléverser et importer'}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {activeJob && (
+          <Card data-testid="legacy-active-job">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                {ar ? 'الاستيراد جارٍ...' : 'Import en cours...'}
+              </CardTitle>
+              <CardDescription>{activeJob.file_name}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span>{activeJob.step_label || STEP_LABELS[activeJob.step]?.[ar ? 'ar' : 'fr']}</span>
+                {pct !== null && <span className="font-mono">{pct}%</span>}
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-500"
+                  style={{ width: pct !== null ? `${pct}%` : '100%', opacity: pct !== null ? 1 : 0.4 }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {ar ? 'قد تستغرق القواعد الكبيرة عدة دقائق — يمكنك مغادرة الصفحة والعودة لاحقاً.'
+                     : 'Les grandes bases peuvent prendre plusieurs minutes.'}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {reportJob && reportJob.status === 'done' && reportJob.report && (
+          <Card data-testid="legacy-report">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {reportJob.report.all_ok
+                  ? <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  : <AlertTriangle className="h-5 w-5 text-amber-600" />}
+                {ar ? 'تقرير المطابقة' : 'Rapport de vérification'}
+                <Badge variant={reportJob.report.all_ok ? 'default' : 'destructive'}>
+                  {reportJob.report.all_ok
+                    ? (ar ? 'مطابقة تامة' : 'Conforme')
+                    : (ar ? 'فروقات موجودة' : 'Écarts détectés')}
+                </Badge>
+              </CardTitle>
+              <CardDescription>{reportJob.file_name} — {new Date(reportJob.finished_at).toLocaleString(ar ? 'ar-DZ' : 'fr-FR')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{ar ? 'البند' : 'Élément'}</TableHead>
+                    <TableHead>{ar ? 'المصدر' : 'Source'}</TableHead>
+                    <TableHead>{ar ? 'المستورد' : 'Importé'}</TableHead>
+                    <TableHead>{ar ? 'الحالة' : 'État'}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(reportJob.report.checks || []).map((c, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{c.check}</TableCell>
+                      <TableCell className="font-mono">{typeof c.source === 'number' ? c.source.toLocaleString() : c.source}</TableCell>
+                      <TableCell className="font-mono">{typeof c.imported === 'number' ? c.imported.toLocaleString() : c.imported}</TableCell>
+                      <TableCell>
+                        {c.ok
+                          ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          : <XCircle className="h-4 w-4 text-red-600" />}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {reportJob.report.balance_mismatches_fixed > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {ar ? `أرصدة صُحّحت لتطابق النظام القديم: ${reportJob.report.balance_mismatches_fixed}`
+                      : `Soldes corrigés: ${reportJob.report.balance_mismatches_fixed}`}
+                </p>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => setRollbackTarget(reportJob)}
+                data-testid="legacy-rollback-btn"
+              >
+                <Undo2 className="h-4 w-4 me-2" />
+                {ar ? 'التراجع عن هذا الاستيراد' : 'Annuler cet import'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {reportJob && reportJob.status === 'failed' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-600">
+                <XCircle className="h-5 w-5" />
+                {ar ? 'فشل الاستيراد' : 'Échec de l\'import'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm">{reportJob.error}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {jobs.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <History className="h-4 w-4" />
+                {ar ? 'عمليات سابقة' : 'Historique'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {jobs.map(j => (
+                  <div key={j.id} className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium">{j.file_name}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(j.created_at).toLocaleString(ar ? 'ar-DZ' : 'fr-FR')}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={
+                        j.status === 'done' ? 'default' :
+                        j.status === 'failed' ? 'destructive' :
+                        j.status === 'rolled_back' ? 'secondary' : 'outline'
+                      }>
+                        {j.status === 'done' ? (ar ? 'مكتمل' : 'Terminé') :
+                         j.status === 'failed' ? (ar ? 'فشل' : 'Échec') :
+                         j.status === 'rolled_back' ? (ar ? 'متراجع عنه' : 'Annulé') :
+                         (ar ? 'جارٍ' : 'En cours')}
+                      </Badge>
+                      {j.status === 'done' && (
+                        <Button size="sm" variant="ghost" onClick={async () => {
+                          const full = await apiClient.get(`/migration/legacy/jobs/${j.id}`);
+                          setReportJob(full.data.job);
+                        }}>
+                          <RefreshCw className="h-3 w-3 me-1" />
+                          {ar ? 'التقرير' : 'Rapport'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Dialog open={!!rollbackTarget} onOpenChange={() => setRollbackTarget(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{ar ? 'تأكيد التراجع' : 'Confirmer l\'annulation'}</DialogTitle>
+              <DialogDescription>
+                {ar
+                  ? 'سيتم حذف كل البيانات التي استوردتها هذه العملية (المنتجات والزبائن والموردون والمبيعات والمشتريات الموسومة بالنظام القديم). بياناتك الأخرى لا تُمس.'
+                  : 'Toutes les données importées par cette opération seront supprimées.'}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRollbackTarget(null)}>
+                {ar ? 'إلغاء' : 'Annuler'}
+              </Button>
+              <Button variant="destructive" onClick={doRollback} disabled={rollingBack}>
+                {rollingBack && <Loader2 className="h-4 w-4 animate-spin me-2" />}
+                {ar ? 'نعم، تراجع' : 'Oui, annuler'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </Layout>
+  );
+}

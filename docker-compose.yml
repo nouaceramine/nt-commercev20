@@ -16,6 +16,7 @@ services:
     volumes:
       - ./backend:/app
       - ./backups:/backups
+      - ./legacy_uploads:/legacy_uploads
     restart: unless-stopped
     networks:
       - ntcommerce

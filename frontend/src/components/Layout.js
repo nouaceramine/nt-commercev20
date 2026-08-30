@@ -665,6 +665,7 @@ export const Layout = ({ children }) => {
           { path: '/backup-system', icon: Database, label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes', featureKey: 'backup' },
           { path: '/data-import-export', icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
           { path: '/import-wizard', icon: Sparkles, label: language === 'ar' ? 'الاستيراد الذكي' : 'Import intelligent' },  // p151
+          { path: '/legacy-migration', icon: Database, label: language === 'ar' ? 'الترحيل من نظام قديم' : 'Migration legacy' },  // p349
           { path: '/settings/sidebar', icon: LayoutDashboard, label: language === 'ar' ? 'ترتيب القائمة' : 'Ordre menu' },
           { path: '/settings/datetime', icon: Clock, label: language === 'ar' ? 'التاريخ والوقت' : 'Date & heure' },
           { path: '/settings/printing/template-editor', icon: FileText, label: language === 'ar' ? 'قوالب الطباعة' : 'Modèles impression' },
