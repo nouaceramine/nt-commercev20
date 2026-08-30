@@ -118,6 +118,20 @@ export default function LegacyMigrationPage() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadKit = async () => {
+    try {
+      const res = await apiClient.get('/migration/live/agent/kit', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'nt_sync_agent_kit.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(errText(e));
+    }
+  };
+
   const loadJobs = useCallback(async () => {
     try {
       const res = await apiClient.get('/migration/legacy/jobs');
@@ -417,19 +431,23 @@ export default function LegacyMigrationPage() {
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={downloadKit} data-testid="mirror-download-kit">
+                    <Download className="h-4 w-4 me-1" />
+                    {ar ? 'حزمة Windows الكاملة (وكيل + بناء exe + تشغيل تلقائي + دليل)' : 'Kit Windows complet'}
+                  </Button>
                   <Button size="sm" variant="outline" onClick={downloadAgent} data-testid="mirror-download-agent">
                     <Download className="h-4 w-4 me-1" />
-                    {ar ? 'تحميل الوكيل nt_sync_agent.py' : 'Télécharger l\'agent'}
+                    {ar ? 'الوكيل فقط nt_sync_agent.py' : 'Agent seul'}
                   </Button>
                   <Button size="sm" variant="outline" onClick={downloadConfig} data-testid="mirror-download-config">
                     <Download className="h-4 w-4 me-1" />
-                    {ar ? 'تحميل ملف الإعداد (برمزك)' : 'Télécharger la config'}
+                    {ar ? 'ملف الإعداد (برمزك)' : 'Config'}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {ar
-                    ? 'على جهازك: ثبّت Python ثم pip install pyodbc، ضع الملفين معاً في مجلد، عدّل db_path في ملف الإعداد لمسار BDV10.dblx، شغّل أولاً python nt_sync_agent.py --baseline ثم python nt_sync_agent.py'
-                    : 'Sur votre PC: installez Python + pyodbc, placez les deux fichiers ensemble, ajustez db_path, puis lancez --baseline une fois.'}
+                    ? 'على جهاز المشترك: فك ضغط الحزمة في C:\\nt_sync، عدّل db_path في ملف الإعداد، نفّذ build_exe.bat (يبني exe)، ثم --baseline مرة واحدة، ثم install_task.bat كمسؤول — التفاصيل في README داخل الحزمة.'
+                    : 'Sur le PC: dézippez le kit, ajustez db_path, lancez build_exe.bat, --baseline une fois, puis install_task.bat en admin.'}
                 </p>
               </div>
             )}

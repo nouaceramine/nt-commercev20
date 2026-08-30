@@ -65,7 +65,7 @@ import urllib.request
 import urllib.error
 import zipfile
 
-AGENT_VERSION = "2.0"
+AGENT_VERSION = "2.1"
 
 MASTER_TABLES = ("Item", "Customer", "Supplier")
 LIVE_TABLES = ("Receipt", "Purchase", "Batch")
@@ -391,7 +391,11 @@ def main():
         time.sleep(interval)
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+if getattr(sys, "frozen", False):
+    # running as PyInstaller exe — config/state/log live next to the exe
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 LOG_PATH = os.path.join(BASE_DIR, "nt_sync_agent.log")
 
 if __name__ == "__main__":

@@ -368,3 +368,27 @@ async def download_agent(user: dict = Depends(get_tenant_admin)):
         raise HTTPException(status_code=404, detail="ملف الوكيل غير منشور بعد")
     return FileResponse(AGENT_FILE, filename="nt_sync_agent.py",
                         media_type="text/x-python")
+
+
+@router.get("/live/agent/kit")
+async def download_agent_kit(user: dict = Depends(get_tenant_admin)):
+    """p352: full Windows kit zip — agent + exe builder + auto-start installer
+    + Arabic README. Subscriber builds the .exe with one double-click."""
+    import io as _io
+    import zipfile as _zipfile
+    kit_dir = os.path.join(os.path.dirname(AGENT_FILE), "kit")
+    files = [("nt_sync_agent.py", AGENT_FILE)]
+    for name in ("build_exe.bat", "install_task.bat", "README_WINDOWS.txt"):
+        files.append((name, os.path.join(kit_dir, name)))
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        for arcname, path in files:
+            if not os.path.exists(path):
+                raise HTTPException(status_code=404,
+                                    detail=f"ملف الحزمة مفقود: {arcname}")
+            zf.write(path, arcname)
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=nt_sync_agent_kit.zip"})
