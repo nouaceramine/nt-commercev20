@@ -426,7 +426,41 @@ def apply_batches(db, rows):
     return n
 
 
+# ───────────────────────── reconciliation digest (p355) ─────────────────────────
+def apply_digest(db, rows):
+    """Store the agent's daily truth digest (computed from the LEGACY database)
+    so the server can reconcile it against what the mirror actually stored."""
+    n = 0
+    for r in rows:
+        kind = s(r.get("kind"))
+        if kind == "masters":
+            db.sync_digests.update_one(
+                {"_id": "masters"},
+                {"$set": {"items": int(f(r.get("items"))),
+                          "customers": int(f(r.get("customers"))),
+                          "suppliers": int(f(r.get("suppliers"))),
+                          "at": _now()}},
+                upsert=True)
+            n += 1
+            continue
+        day = s(r.get("day"))[:10]
+        if kind not in ("sale", "purchase") or len(day) != 10:
+            continue
+        db.sync_digests.update_one(
+            {"_id": f"{kind}:{day}"},
+            {"$set": {"kind": kind, "day": day,
+                      "count": int(f(r.get("count"))),
+                      "total": round(f(r.get("total")), 2),
+                      "credit": round(f(r.get("credit")), 2),
+                      "at": _now()}},
+            upsert=True)
+        n += 1
+    _bump(db, "digest", n)
+    return n
+
+
 APPLIERS = {
+    "digest": apply_digest,
     "items": apply_items,
     "customers": apply_customers,
     "suppliers": apply_suppliers,
@@ -440,7 +474,7 @@ def apply_push(db, tables):
     """Dispatch one agent push: {kind: [rows]}. Order matters — masters
     before receipts so name lookups resolve. Returns {kind: applied}."""
     result = {}
-    for kind in ("items", "customers", "suppliers", "purchases", "receipts", "batches"):
+    for kind in ("items", "customers", "suppliers", "purchases", "receipts", "batches", "digest"):
         rows = tables.get(kind)
         if rows:
             n = APPLIERS[kind](db, rows)

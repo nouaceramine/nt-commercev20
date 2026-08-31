@@ -51,6 +51,7 @@ export default function LegacyMigrationPage() {
   const [newToken, setNewToken] = useState('');
   const [genLabel, setGenLabel] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [recon, setRecon] = useState(null);
   const fileRef = useRef(null);
   const pollRef = useRef(null);
 
@@ -59,6 +60,10 @@ export default function LegacyMigrationPage() {
       const res = await apiClient.get('/migration/live/status');
       setAgents(res.data.agents || []);
       setCounters(res.data.counters || {});
+    } catch (e) { /* silent */ }
+    try {
+      const rc = await apiClient.get('/migration/live/reconciliation');
+      setRecon(rc.data);
     } catch (e) { /* silent */ }
   }, []);
 
@@ -487,6 +492,47 @@ export default function LegacyMigrationPage() {
                   counters.purchases ? `${counters.purchases} ${ar ? 'شراءً' : 'achats'}` : '',
                 ].filter(Boolean).join(' · ')}
               </p>
+            )}
+            {recon && recon.has_data && (
+              <div className="mt-3 rounded-md border p-3 space-y-2" data-testid="recon-card">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">
+                    {ar ? 'مطابقة النظامين اليومية' : 'Concordance quotidienne'}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${recon.streak >= 30 ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}`} data-testid="recon-streak">
+                    {ar ? `${recon.streak} يوم متطابق متتالٍ` : `${recon.streak} jours concordants`}
+                  </span>
+                </div>
+                {recon.cutover && recon.cutover.suggested && (
+                  <div className="rounded border border-green-300 bg-green-50 p-2 text-sm text-green-900" data-testid="cutover-banner">
+                    {ar
+                      ? 'النظامان متطابقان تماماً منذ 30 يوماً على الأقل — يمكنك الآن الاستغناء عن النظام القديم بأمان والعمل على NT Commerce وحده.'
+                      : 'Les deux systèmes concordent depuis 30+ jours — bascule possible en toute sécurité.'}
+                  </div>
+                )}
+                <div className="text-xs space-y-1">
+                  {recon.days.slice(0, 14).map(d => (
+                    <div key={d.day} className="flex items-center justify-between" data-testid={`recon-day-${d.day}`}>
+                      <span dir="ltr" className="font-mono">{d.day}</span>
+                      {d.match ? (
+                        <span className="text-green-700">{ar ? 'متطابق' : 'OK'}</span>
+                      ) : (
+                        <span className="text-red-700" dir="ltr">{d.diff}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {recon.masters && (
+                  <p className="text-xs text-muted-foreground" data-testid="recon-masters">
+                    {ar ? 'الأساسيات (أصناف/زبائن/موردون): ' : 'Référentiels: '}
+                    {recon.masters.match
+                      ? (ar ? 'متطابقة' : 'concordants')
+                      : (ar
+                          ? `فرق — قديم ${recon.masters.legacy.items}/${recon.masters.legacy.customers}/${recon.masters.legacy.suppliers} ≠ هنا ${recon.masters.mirrored.items}/${recon.masters.mirrored.customers}/${recon.masters.mirrored.suppliers}`
+                          : 'écart')}
+                  </p>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>

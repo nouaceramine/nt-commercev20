@@ -65,7 +65,7 @@ import urllib.request
 import urllib.error
 import zipfile
 
-AGENT_VERSION = "2.1"
+AGENT_VERSION = "2.2"
 
 MASTER_TABLES = ("Item", "Customer", "Supplier")
 LIVE_TABLES = ("Receipt", "Purchase", "Batch")
@@ -205,6 +205,49 @@ def collect_new(cur, prof, canon, entry_canon, fk, wm):
     return rows
 
 
+def day_of(v):
+    """'YYYY-MM-DD HH:MM:SS' → 'YYYY-MM-DD' ('' when unusable)."""
+    s = str(v or "")[:10]
+    return s if len(s) == 10 and s[4] == "-" else ""
+
+
+def compute_digest(cur, prof, days=120):
+    """p355: daily truth digest computed from the LEGACY database itself.
+    The server reconciles these per-day aggregates against what the mirror
+    stored — drift here means a sync bug or a missed window, not guesswork.
+    Covers the last `days` days; masters row carries full-table counts."""
+    cutoff = time.strftime("%Y-%m-%d",
+                           time.localtime(time.time() - days * 86400))
+    agg = {}
+    if "Receipt" in prof:
+        for r in select_rows(cur, prof, "Receipt"):
+            day = day_of(r.get("Time"))
+            if not day or day < cutoff:
+                continue
+            a = agg.setdefault(("sale", day), [0, 0.0, 0.0])
+            a[0] += 1
+            a[1] += num(r.get("Total"))
+            a[2] += max(0.0, num(r.get("CreditAccount")))
+    if "Purchase" in prof:
+        for p in select_rows(cur, prof, "Purchase"):
+            day = day_of(p.get("ADate")) or day_of(p.get("DateValidated"))
+            if not day or day < cutoff:
+                continue
+            a = agg.setdefault(("purchase", day), [0, 0.0, 0.0])
+            a[0] += 1
+            a[1] += num(p.get("Total"))
+    rows = [{"kind": k, "day": d, "count": v[0],
+             "total": round(v[1], 2), "credit": round(v[2], 2)}
+            for (k, d), v in sorted(agg.items())]
+    masters = {"kind": "masters"}
+    for canon, key in (("Item", "items"), ("Customer", "customers"),
+                       ("Supplier", "suppliers")):
+        if canon in prof:
+            masters[key] = len(select_rows(cur, prof, canon))
+    rows.append(masters)
+    return rows
+
+
 def poll_once(cfg, state):
     prof = profile(cfg)
     conn = connect(cfg)
@@ -254,6 +297,15 @@ def poll_once(cfg, state):
         if diff:
             tables[{"Item": "items", "Customer": "customers",
                     "Supplier": "suppliers"}[canon]] = diff
+
+    today = time.strftime("%Y-%m-%d")
+    if state.get("digest_day") != today:
+        try:
+            tables["digest"] = compute_digest(
+                cur, prof, int(cfg.get("digest_days", 120) or 120))
+            state["digest_day"] = today
+        except Exception as e:
+            log(f"digest failed (non-fatal): {e}")
 
     conn.close()
 

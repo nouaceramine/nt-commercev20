@@ -361,6 +361,93 @@ async def live_status(user: dict = Depends(get_tenant_admin)):
             "live_docs": live_counts, "updated_at": stats.get("updated_at")}
 
 
+@router.get("/live/reconciliation")
+async def live_reconciliation(days: int = Query(40, le=120),
+                              user: dict = Depends(get_tenant_admin)):
+    """p355: two-system daily reconciliation — the agent's digest (truth computed
+    from the LEGACY database) vs what the mirror actually stored here.
+    Suggests cutover (dropping the legacy system) after 30 consecutive
+    matching days with matching masters."""
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="حساب غير مرتبط بمستأجر")
+    tdb = get_tenant_db(tenant_id)
+    SRC = live_sync.SRC
+
+    digests = await tdb.sync_digests.find(
+        {"_id": {"$ne": "masters"}}, {"_id": 0}).sort("day", -1).to_list(days * 2)
+
+    async def _actual(coll):
+        pipeline = [
+            {"$match": {"import_source": SRC}},
+            {"$group": {
+                "_id": {"$substrCP": [{"$ifNull": ["$created_at", ""]}, 0, 10]},
+                "n": {"$sum": 1},
+                "t": {"$sum": {"$ifNull": ["$total", 0]}},
+                "c": {"$sum": {"$ifNull": ["$debt_amount", 0]}},
+            }},
+        ]
+        return {d["_id"]: d for d in await tdb[coll].aggregate(pipeline).to_list(None)}
+
+    actual = {"sale": await _actual("sales"),
+              "purchase": await _actual("purchases")}
+
+    by_day = {}
+    for dg in digests:
+        by_day.setdefault(dg.get("day", ""), []).append(dg)
+
+    out_days = []
+    for day in sorted(by_day.keys(), reverse=True)[:days]:
+        ok_all, diffs = True, []
+        for dg in by_day[day]:
+            kind = dg.get("kind")
+            act = actual.get(kind, {}).get(day) or {"n": 0, "t": 0.0, "c": 0.0}
+            dn = int(dg.get("count") or 0) - int(act["n"])
+            dt = round(float(dg.get("total") or 0) - float(act["t"]), 2)
+            dc = (round(float(dg.get("credit") or 0) - float(act.get("c", 0.0)), 2)
+                  if kind == "sale" else 0.0)
+            if dn or abs(dt) >= 0.01 or abs(dc) >= 0.01:
+                ok_all = False
+                diffs.append(f"{kind}: n{dn:+d} t{dt:+.2f} c{dc:+.2f}")
+        out_days.append({"day": day, "match": ok_all, "diff": "; ".join(diffs)})
+
+    streak = 0
+    for d in out_days:
+        if d["match"]:
+            streak += 1
+        else:
+            break
+
+    md = await tdb.sync_digests.find_one({"_id": "masters"}, {"_id": 0})
+    masters = None
+    if md:
+        mi = await tdb.products.count_documents({"import_source": SRC})
+        mc = await tdb.customers.count_documents({"import_source": SRC})
+        ms = await tdb.suppliers.count_documents({"import_source": SRC})
+        masters = {
+            "legacy": {"items": md.get("items", 0),
+                       "customers": md.get("customers", 0),
+                       "suppliers": md.get("suppliers", 0)},
+            "mirrored": {"items": mi, "customers": mc, "suppliers": ms},
+            "match": (mi == md.get("items", 0)
+                      and mc == md.get("customers", 0)
+                      and ms == md.get("suppliers", 0)),
+        }
+
+    suggested = streak >= 30 and (masters is None or masters["match"])
+    return {
+        "has_data": bool(digests),
+        "days": out_days,
+        "streak": streak,
+        "masters": masters,
+        "cutover": {
+            "suggested": suggested,
+            "reason": ("30+ يوماً متتالية متطابقة — الفصال آمن"
+                       if suggested else "لم تكتمل 30 يوماً متطابقة بعد"),
+        },
+    }
+
+
 @router.get("/live/agent/download")
 async def download_agent(user: dict = Depends(get_tenant_admin)):
     """Serve the Windows sync agent script."""
