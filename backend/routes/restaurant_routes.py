@@ -988,6 +988,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             {"_id": "order_settings"}, {"$set": {"payment_mode": data.payment_mode}}, upsert=True)
         return {"ok": True, "payment_mode": data.payment_mode}
 
+    # ---------- p360: إعدادات الكشك الذاتي داخل المحل ----------
+    class KioskSettingsIn(BaseModel):
+        enabled: bool
+        counter_name: Optional[str] = "كشك"
+        require_phone: Optional[bool] = False
+
+    @router.get("/settings/kiosk")
+    async def get_kiosk_settings(admin: dict = Depends(get_tenant_admin)):
+        doc = await db.restaurant_settings.find_one({"_id": "kiosk_settings"}, {"_id": 0}) or {}
+        return {"enabled": bool(doc.get("enabled")),
+                "counter_name": doc.get("counter_name") or "كشك",
+                "require_phone": bool(doc.get("require_phone"))}
+
+    @router.put("/settings/kiosk")
+    async def put_kiosk_settings(data: KioskSettingsIn, admin: dict = Depends(get_tenant_admin)):
+        payload = {"enabled": bool(data.enabled),
+                   "counter_name": ((data.counter_name or "").strip()[:30] or "كشك"),
+                   "require_phone": bool(data.require_phone)}
+        await db.restaurant_settings.update_one({"_id": "kiosk_settings"}, {"$set": payload}, upsert=True)
+        return {"ok": True, **payload}
+
     # ---------- p334: روابط التواصل الاجتماعي (إعدادات المطعم) ----------
     SOCIAL_KEYS = ("instagram", "facebook", "tiktok", "google_maps", "whatsapp", "website")
 
@@ -1198,6 +1219,124 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _out = _order_out(doc)
         _out["payment_mode"] = _mode  # p336
         return _out
+
+    # ---------- p360: الكشك الذاتي داخل المحل (عمومي — بلا حساب، يُفعَّل من الإعدادات) ----------
+    async def _kiosk_ctx(tenant_id: str):
+        from config.database import get_tenant_db
+        t = await _qr_tenant(tenant_id)
+        tdb = get_tenant_db(tenant_id)
+        ks = await tdb.restaurant_settings.find_one({"_id": "kiosk_settings"}, {"_id": 0}) or {}
+        if not ks.get("enabled"):
+            raise HTTPException(status_code=404, detail="غير موجود")
+        return t, tdb, ks
+
+    class KioskOrderCreate(BaseModel):
+        items: List[QrOrderItem]
+        notes: Optional[str] = None
+        customer_name: Optional[str] = None
+        customer_phone: Optional[str] = None
+
+    @router.get("/public/kiosk/{tenant_id}")
+    async def public_kiosk_menu(tenant_id: str):
+        t, tdb, ks = await _kiosk_ctx(tenant_id)
+        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+        prods = await tdb.products.find(
+            {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "image_url": 1},
+        ).to_list(1000)
+        items = [{
+            "id": p["id"],
+            "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+            "price": p.get("retail_price") or 0,
+            "family": fams.get(p.get("family_id")) or "",
+            "modifier_groups": p.get("modifier_groups") or [],
+            "image_url": p.get("image_url"),
+        } for p in prods]
+        return {"restaurant_name": t.get("company_name") or t.get("name") or "",
+                "counter_name": ks.get("counter_name") or "كشك",
+                "require_phone": bool(ks.get("require_phone")),
+                "payment_mode": await _payment_mode(tdb),
+                "items": items}
+
+    @router.post("/public/kiosk/{tenant_id}/order")
+    async def public_kiosk_order(tenant_id: str, data: KioskOrderCreate):
+        import time as _time
+        t, tdb, ks = await _kiosk_ctx(tenant_id)
+        if not data.items or len(data.items) > 20:
+            raise HTTPException(status_code=400, detail="طلب غير صالح")
+        phone = _clean_phone(data.customer_phone)
+        if ks.get("require_phone") and not phone:
+            raise HTTPException(status_code=400, detail="رقم الهاتف مطلوب للطلب من الكشك")
+        now_ts = _time.time()
+        # نفس درع QR: طلب واحد كل 10 ثوانٍ (DB — يعمل عبر عمال uvicorn الأربعة)
+        _last = await tdb["_qr_throttle"].find_one({"_id": "kiosk"})
+        if _last and now_ts - float(_last.get("last") or 0) < 10:
+            raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
+        await tdb["_qr_throttle"].update_one({"_id": "kiosk"}, {"$set": {"last": now_ts}}, upsert=True)
+        items = []
+        for it in data.items:
+            if not (0 < float(it.quantity or 0) <= 20):
+                raise HTTPException(status_code=400, detail="كمية غير صالحة")
+            p = await tdb.products.find_one(
+                {"id": it.product_id},
+                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "modifier_groups": 1},
+            )
+            if not p:
+                raise HTTPException(status_code=400, detail="منتج غير موجود")
+            mods = []
+            extra = 0.0
+            groups = p.get("modifier_groups") or []
+            for m in (it.modifiers or []):
+                hit = None
+                for g in groups:
+                    for opt in (g.get("options") or []):
+                        if opt.get("name") == (m.get("option") or ""):
+                            hit = (g, opt)
+                            break
+                    if hit:
+                        break
+                if not hit:
+                    raise HTTPException(status_code=400, detail="خيار غير صالح")
+                g, opt = hit
+                delta = float(opt.get("price_delta") or 0)
+                mods.append({"group": g.get("name"), "option": opt.get("name"),
+                             "price_delta": delta, "product_id": opt.get("product_id"),
+                             "qty": opt.get("qty") or 1})
+                extra += delta
+            items.append({
+                "product_id": p["id"],
+                "product_name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                "quantity": float(it.quantity),
+                "unit_price": (p.get("retail_price") or 0) + extra,
+                "note": it.note,
+                "modifiers": mods or None,
+            })
+        pseudo = {"tenant_id": tenant_id, "email": "kiosk@counter", "username": "KIOSK"}
+        _mode = await _payment_mode(tdb)  # p336
+        day = _now().strftime("%Y%m%d")
+        count = await tdb.kitchen_orders.count_documents({"code": {"$regex": f"^KCH-{day}-"}})
+        doc = {
+            "id": f"kch_{uuid.uuid4().hex[:12]}",
+            "code": f"KCH-{day}-{count + 1:04d}",
+            "table_id": None,  # كشك — بلا طاولة
+            "table_name": ks.get("counter_name") or "كشك",
+            "items": items,
+            "notes": data.notes,
+            "customer_name": (data.customer_name or "").strip()[:60] or None,
+            "customer_phone": phone,
+            "status": "pending_payment" if _mode == "prepaid" else "pending",  # p336
+            "payment_status": "unpaid" if _mode == "prepaid" else None,        # p336
+            "sale_id": None,
+            "source": "kiosk",
+            "created_by": "KIOSK",
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        await tdb.kitchen_orders.insert_one(doc)
+        await _publish("kitchen_order.created", doc, pseudo)
+        out = _order_out(doc)
+        out["payment_mode"] = _mode  # p336
+        return out
 
     # ---------- p335: واجهة الجار العمومية (بلا حساب — برابط/QR خاص دائم) ----------
     async def _qr_neighbor(tenant_id: str, token: str):

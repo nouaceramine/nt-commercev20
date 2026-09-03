@@ -48,6 +48,8 @@ export default function TablesMapPage() {
   const [social, setSocial] = useState({ instagram: '', facebook: '', tiktok: '', google_maps: '', whatsapp: '', website: '' });  // p334
   const [savingSocial, setSavingSocial] = useState(false);  // p334
   const [payMode, setPayMode] = useState('postpaid');  // p336
+  const [kiosk, setKiosk] = useState({ enabled: false, counter_name: 'كشك', require_phone: false });  // p360
+  const [savingKiosk, setSavingKiosk] = useState(false);  // p360
   // p337: خصومات + طلبيات مجدولة
   const [schedList, setSchedList] = useState([]);
   const [schedDlg, setSchedDlg] = useState(false);
@@ -90,6 +92,7 @@ export default function TablesMapPage() {
   useEffect(() => {
     apiClient.get('/restaurant/settings/social').then(r => setSocial(prev => ({ ...prev, ...(r.data || {}) }))).catch(() => {});
     apiClient.get('/restaurant/settings/orders').then(r => setPayMode(r.data?.payment_mode || 'postpaid')).catch(() => {});  // p336
+    apiClient.get('/restaurant/settings/kiosk').then(r => setKiosk(prev => ({ ...prev, ...(r.data || {}) }))).catch(() => {});  // p360
   }, []);
 
   const saveSocial = async () => {
@@ -110,6 +113,18 @@ export default function TablesMapPage() {
         ? (v === 'prepaid' ? 'الدفع المسبق مفعّل — الطلبات الجديدة لا تدخل المطبخ إلا بعد تأكيد الدفع' : 'الدفع بعد التسليم — الطلبات تدخل المطبخ فورًا')
         : 'Mode enregistre');
     } catch (e) { toast.error(errText(e)); }
+  };
+
+  // p360: حفظ إعدادات الكشك الذاتي
+  const saveKiosk = async (patch) => {
+    const next = { ...kiosk, ...patch };
+    setKiosk(next);
+    setSavingKiosk(true);
+    try {
+      await apiClient.put('/restaurant/settings/kiosk', next);
+      toast.success(isAr ? (next.enabled ? 'الكشك مفعّل — افتح الرابط على شاشة المحل' : 'الكشك موقوف') : 'Kiosque enregistre');
+    } catch (e) { toast.error(errText(e)); }
+    finally { setSavingKiosk(false); }
   };
 
   // p336: تأكيد دفع طلب (كاش) من خريطة الطاولات
@@ -270,6 +285,43 @@ export default function TablesMapPage() {
                 <SelectItem value="prepaid" data-testid="payment-mode-prepaid">{isAr ? 'الدفع مسبقًا — لا يدخل المطبخ إلا بعد تأكيد الدفع' : 'Paiement anticipe'}</SelectItem>
               </SelectContent>
             </Select>
+          </CardContent>
+        </Card>
+
+        {/* p360: الكشك الذاتي — الزبون يطلب من شاشة المحل */}
+        <Card data-testid="kiosk-settings-card">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <QrCode className="h-4 w-4" />{isAr ? 'الكشك الذاتي (الزبون يطلب من شاشة المحل)' : 'Kiosque libre-service'}
+              </h2>
+              <Button size="sm" variant={kiosk.enabled ? 'default' : 'outline'} disabled={savingKiosk}
+                onClick={() => saveKiosk({ enabled: !kiosk.enabled })} data-testid="kiosk-toggle">
+                {kiosk.enabled ? (isAr ? 'مفعّل — اضغط للإيقاف' : 'Actif') : (isAr ? 'موقوف — اضغط للتفعيل' : 'Inactif')}
+              </Button>
+              <Input value={kiosk.counter_name || ''} onChange={e => setKiosk(prev => ({ ...prev, counter_name: e.target.value }))}
+                onBlur={() => saveKiosk({})} placeholder={isAr ? 'اسم الكشك (كشك 1…)' : 'Nom'} className="h-9 text-sm w-40" data-testid="kiosk-counter-name" />
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                <input type="checkbox" checked={!!kiosk.require_phone} onChange={e => saveKiosk({ require_phone: e.target.checked })} data-testid="kiosk-require-phone" />
+                {isAr ? 'الهاتف إجباري' : 'Tel obligatoire'}
+              </label>
+            </div>
+            {kiosk.enabled && (
+              <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="kiosk-link-row">
+                <span className="text-muted-foreground">{isAr ? 'افتح هذا الرابط بملء الشاشة على جهاز الكونتوار:' : 'Lien:'}</span>
+                <code className="bg-muted rounded px-2 py-1 break-all" dir="ltr" data-testid="kiosk-url">{`${window.location.origin}/kiosk/${user?.tenant_id}`}</code>
+                <Button size="sm" variant="outline" className="h-7"
+                  onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/kiosk/${user?.tenant_id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (e) {} }}
+                  data-testid="kiosk-copy">
+                  <Copy className="h-3.5 w-3.5 ml-1" />{isAr ? 'نسخ' : 'Copier'}
+                </Button>
+                <a href={`/kiosk/${user?.tenant_id}`} target="_blank" rel="noopener noreferrer"
+                  className="underline text-primary" data-testid="kiosk-open">{isAr ? 'فتح الكشك' : 'Ouvrir'}</a>
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              {isAr ? 'طلبات الكشك تدخل شاشة المطبخ فورًا (أو بعد الدفع في النمط المسبق) باسم الكشك بدل الطاولة، ويظهر للزبون رقم طلب كبير' : ''}
+            </p>
           </CardContent>
         </Card>
 
