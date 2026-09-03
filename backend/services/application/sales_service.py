@@ -30,7 +30,20 @@ async def create_sale_op(db, s, user: dict) -> dict:
         try:
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
-                    return await _create_sale_impl(db, s, user, _tx_session)
+                    result = await _create_sale_impl(db, s, user, _tx_session)
+            # p356: كسب نقاط الولاء بعد commit المعاملة — خارجها حتى لا يؤثر
+            # على ذرّية البيع، والمساعد idempotent ولا يفشل البيع أبداً
+            if result.get("customer_id") and float(result.get("total") or 0) > 0 \
+                    and result.get("sale_type", "sale") == "sale":
+                from services import pos_loyalty
+                earned = await pos_loyalty.earn_points(
+                    db, amount=result["total"], ref_id=result["id"],
+                    ref_label=f"فاتورة {result.get('invoice_number', '')}",
+                    user_name=user.get("name", ""),
+                    customer_id=result["customer_id"])
+                if earned:
+                    result["loyalty_earned"] = earned["points"]
+            return result
         except DuplicateKeyError:
             if _attempt == 1:
                 raise

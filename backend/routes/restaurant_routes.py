@@ -55,6 +55,7 @@ class OrderSettingsIn(BaseModel):
 class PayBody(BaseModel):
     # p336: تأكيد دفع طلب مطبخ
     method: str = "cash"  # cash | card | debt
+    customer_phone: Optional[str] = None  # p356: ولاء — هاتف الزبون عند الدفع
 
 
 class NeighborIn(BaseModel):
@@ -642,7 +643,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _orders().update_one({"id": order_id}, {"$set": upd})
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
-        return _order_out(updated)
+        out = _order_out(updated)
+        # p356: كسب نقاط الولاء عند الدفع الفعلي (الآجل لا يكسب حتى السداد)
+        if data.method != "debt":
+            from services import pos_loyalty
+            earned = await pos_loyalty.earn_points(
+                db, amount=out.get("final_total") or out.get("total") or 0,
+                ref_id=order_id, ref_label=f"طلب مطعم {o.get('code', '')}",
+                user_name=user.get("username") or user.get("email", ""),
+                phone=data.customer_phone or o.get("customer_phone") or "")
+            if earned:
+                out["loyalty_earned"] = earned["points"]
+        return out
 
     @router.post("/tables/{table_id}/checkout")
     async def checkout_table(table_id: str, data: CheckoutBody, user: dict = Depends(get_current_user)):

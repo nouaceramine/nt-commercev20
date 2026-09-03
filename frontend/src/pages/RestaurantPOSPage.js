@@ -34,6 +34,7 @@ export default function RestaurantPOSPage() {
   const [bill, setBill] = useState(null); // order being billed (table mode)
   const [discType, setDiscType] = useState('percent');
   const [discValue, setDiscValue] = useState('');
+  const [custPhone, setCustPhone] = useState('');  // p356: ولاء
 
   const fetchAll = useCallback(async () => {
     try {
@@ -96,6 +97,7 @@ export default function RestaurantPOSPage() {
       note: o.mods.length ? o.mods.map(m => m.option).join(' + ') : null,
     })),
     source: 'pos',
+    customer_phone: custPhone.trim() || null,  // p356
   });
 
   const sendToKitchen = async () => {
@@ -106,6 +108,7 @@ export default function RestaurantPOSPage() {
       const r = await apiClient.post('/restaurant/kitchen-orders', payload());
       toast.success((isAr ? 'أُرسل للمطبخ ' : 'Envoye ') + (r.data.code || ''));
       setCart([]);
+      setCustPhone('');
       fetchAll();
       return r.data;
     } catch (e) { toast.error(errText(e)); }
@@ -116,16 +119,18 @@ export default function RestaurantPOSPage() {
     const ord = await sendToKitchen();
     if (!ord) return;
     try {
-      await apiClient.post(`/restaurant/kitchen-orders/${ord.id}/pay`, { method: 'cash' });
+      const _pr = await apiClient.post(`/restaurant/kitchen-orders/${ord.id}/pay`, { method: 'cash' });
       toast.success(isAr ? 'دُفع كاش — الطلب في المطبخ' : 'Paye cash');
+      if (_pr.data?.loyalty_earned) toast.success(isAr ? `كسب الزبون ${_pr.data.loyalty_earned} نقطة ولاء` : `+${_pr.data.loyalty_earned} pts`);
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
   };
 
   const payOrder = async (oid) => {
     try {
-      await apiClient.post(`/restaurant/kitchen-orders/${oid}/pay`, { method: 'cash' });
+      const _pr = await apiClient.post(`/restaurant/kitchen-orders/${oid}/pay`, { method: 'cash' });
       toast.success(isAr ? 'أُكّد الدفع' : 'Paiement confirme');
+      if (_pr.data?.loyalty_earned) toast.success(isAr ? `كسب الزبون ${_pr.data.loyalty_earned} نقطة ولاء` : `+${_pr.data.loyalty_earned} pts`);
       setBill(null);
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
@@ -274,6 +279,14 @@ export default function RestaurantPOSPage() {
                 </div>
               ))}
             </div>
+            <Input
+              value={custPhone}
+              onChange={e => setCustPhone(e.target.value)}
+              placeholder={isAr ? 'هاتف الزبون (اختياري — لنقاط الولاء)' : 'Tel client (fidelite)'}
+              className="text-center"
+              data-testid="resto-cust-phone"
+              inputMode="tel"
+            />
             <div className="flex gap-2">
               {mode === 'fast' ? (
                 <>

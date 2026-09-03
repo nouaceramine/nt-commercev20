@@ -756,6 +756,12 @@ export default function POSPage() {
       toast.success(language === 'ar' ? 'تم البيع بنجاح' : 'Vente effectuee');
       setLastSaleId(response.data.id);
       setLastSaleInvoice(response.data.invoice_number);
+      // p356: كسب الولاء التلقائي — الخادم منح النقاط مع البيع
+      if (response.data.loyalty_earned > 0 && selectedCustomer) {
+        const _earnedPts = response.data.loyalty_earned;
+        setCustomers(prev => prev.map(c => c.id === selectedCustomer ? { ...c, loyalty_points: (c.loyalty_points || 0) + _earnedPts } : c));
+        toast.success(language === 'ar' ? `كسب الزبون ${_earnedPts} نقطة ولاء` : `+${_earnedPts} pts fidelite`);
+      }
       // p186: restaurant checkout — link sale + free the table
       if (restaurantOn && selectedTable) {
         apiClient.post('/restaurant/tables/' + selectedTable.id + '/checkout', { sale_id: response.data.id }).catch(() => {});
