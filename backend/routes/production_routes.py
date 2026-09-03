@@ -386,6 +386,103 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             "waste": waste_items,
         }
 
+    @router.get("/menu-engineering")
+    async def menu_engineering(days: int = 30, user: dict = Depends(get_current_user)):
+        """p358: هندسة القائمة (Kasavana–Smith) — كل الأصناف المباعة:
+        الهامش (كلفة الوصفة منذ p303 أو purchase_price) + سرعة الدوران
+        + تصنيف نجمة/حصان/لغز/كلب مع توصية عملية لكل طبق.
+        عتبة الشعبية: 70% من النصيب العادل؛ عتبة الهامش: متوسط الهامش المرجح."""
+        since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()
+        rmap = {}
+        async for r in _recipes().find({}, {"_id": 0, "product_id": 1}):
+            rmap[r["product_id"]] = True
+        dishes = {}
+        async for sale in db.sales.find(
+            {"created_at": {"$gte": since}, "status": {"$ne": "returned"}},
+            {"_id": 0, "items": 1},
+        ):
+            for it in (sale.get("items") or []):
+                pid = it.get("product_id")
+                if not pid:
+                    continue
+                qty = abs(it.get("quantity") or 0)
+                rev = abs(it.get("total") or 0)
+                if qty == 0 and rev == 0:
+                    continue
+                cost = (it.get("purchase_price") or 0) * qty
+                d = dishes.setdefault(pid, {
+                    "product_id": pid,
+                    "product_name": it.get("product_name") or "",
+                    "qty": 0.0, "revenue": 0.0, "cost": 0.0,
+                })
+                d["qty"] += qty
+                d["revenue"] += rev
+                d["cost"] += cost
+        items = list(dishes.values())
+        if not items:
+            return {"days": days, "since": since[:10], "items": [],
+                    "summary": {"dishes": 0, "total_qty": 0, "revenue": 0,
+                                "margin": 0, "avg_margin_pct": 0,
+                                "pop_threshold_pct": 0,
+                                "counts": {"star": 0, "workhorse": 0, "puzzle": 0, "dog": 0}}}
+        n = len(items)
+        total_qty = sum(d["qty"] for d in items)
+        total_rev = sum(d["revenue"] for d in items)
+        total_cost = sum(d["cost"] for d in items)
+        avg_margin_pct = ((total_rev - total_cost) / total_rev * 100) if total_rev > 0 else 0.0
+        pop_threshold = (1.0 / n) * 0.7  # Kasavana–Smith
+        CLASSES = {
+            "star":      ("نجمة", "حافظ عليه بارزاً — مربح ومطلوب"),
+            "workhorse": ("حصان", "مطلوب بهامش ضعيف — ارفع السعر قليلاً أو خفّف كلفته"),
+            "puzzle":    ("لغز", "مربح لكنه لا يُباع — روّج له أو حسّن وصفه وموقعه في القائمة"),
+            "dog":       ("كلب", "ضعيف الطلب والهامش — أعد تسعيره أو احذفه من القائمة"),
+        }
+        out = []
+        for d in items:
+            margin = d["revenue"] - d["cost"]
+            margin_pct = (margin / d["revenue"] * 100) if d["revenue"] > 0 else 0.0
+            pop_share = (d["qty"] / total_qty) if total_qty > 0 else 0.0
+            high_margin = margin_pct >= avg_margin_pct
+            high_pop = pop_share >= pop_threshold
+            if high_margin and high_pop:
+                cls = "star"
+            elif high_pop:
+                cls = "workhorse"
+            elif high_margin:
+                cls = "puzzle"
+            else:
+                cls = "dog"
+            ar, advice = CLASSES[cls]
+            out.append({
+                "product_id": d["product_id"],
+                "product_name": d["product_name"],
+                "qty": round(d["qty"], 2),
+                "revenue": round(d["revenue"], 2),
+                "cost": round(d["cost"], 2),
+                "margin": round(margin, 2),
+                "margin_pct": round(margin_pct, 1),
+                "popularity": round(pop_share * 100, 1),
+                "has_recipe": d["product_id"] in rmap,
+                "classification": cls,
+                "class_ar": ar,
+                "advice_ar": advice,
+            })
+        out.sort(key=lambda x: -x["margin"])
+        counts = {k: sum(1 for i in out if i["classification"] == k) for k in CLASSES}
+        return {
+            "days": days, "since": since[:10],
+            "summary": {
+                "dishes": n,
+                "total_qty": round(total_qty, 2),
+                "revenue": round(total_rev, 2),
+                "margin": round(total_rev - total_cost, 2),
+                "avg_margin_pct": round(avg_margin_pct, 1),
+                "pop_threshold_pct": round(pop_threshold * 100, 1),
+                "counts": counts,
+            },
+            "items": out,
+        }
+
     @router.get("/demand-forecast")
     async def demand_forecast(days: int = 30, cover: int = 7, user: dict = Depends(get_current_user)):
         """p313: تنبؤ طلب المكوّنات من الاستهلاك الفعلي للوصفات (أسطر البيع المكلفة)

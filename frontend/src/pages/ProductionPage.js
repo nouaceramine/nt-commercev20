@@ -42,6 +42,9 @@ const ProductionPage = () => {
   // p305: food cost report + waste
   const [fcDays, setFcDays] = useState(30);
   const [fcstDays, setFcstDays] = useState(30);
+  // p358: menu engineering
+  const [meDays, setMeDays] = useState(30);
+  const [meReport, setMeReport] = useState(null);
   const [forecast, setForecast] = useState(null);
   const [fcReport, setFcReport] = useState(null);
   const [wasteList, setWasteList] = useState([]);
@@ -107,6 +110,15 @@ const ProductionPage = () => {
     } catch (e) { /* silent */ }
   }, []);
   useEffect(() => { fetchFcst(fcstDays); }, [fetchFcst, fcstDays]);
+
+  // p358: menu engineering loader
+  const fetchMe = useCallback(async (d) => {
+    try {
+      const r = await apiClient.get(`/production/menu-engineering?days=${d}`);
+      setMeReport(r.data || null);
+    } catch (e) { /* silent */ }
+  }, []);
+  useEffect(() => { fetchMe(meDays); }, [fetchMe, meDays]);
 
   // p308: modifier groups editor (إضافات/بدائل الطبق — مثل جبن إضافي أو حجم أكبر)
   const openMods = async (r) => {
@@ -235,6 +247,7 @@ const ProductionPage = () => {
             <TabsTrigger value="orders">{isAr ? 'أوامر الإنتاج' : 'Ordres'}</TabsTrigger>
             <TabsTrigger value="foodcost" data-testid="foodcost-tab-trigger">{isAr ? 'تكلفة الطعام' : 'Food Cost'}</TabsTrigger>
             <TabsTrigger value="forecast" data-testid="forecast-tab-trigger">{isAr ? 'توقع الطلب' : 'Prevision'}</TabsTrigger>
+          <TabsTrigger value="menueng" data-testid="menueng-tab-trigger">{isAr ? 'هندسة القائمة' : 'Menu Engineering'}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="recipes" className="space-y-2 mt-3">
@@ -383,6 +396,51 @@ const ProductionPage = () => {
                 </Card>
               </>
             )}
+          </TabsContent>
+          <TabsContent value="menueng" className="space-y-3 mt-3" data-testid="menueng-tab">
+            <div className="flex items-center gap-2">
+              <Label>{isAr ? 'الفترة (أيام)' : 'Periode'}</Label>
+              <Input type="number" min="1" max="365" value={meDays} onChange={e => setMeDays(Number(e.target.value) || 30)} className="w-24" dir="ltr" data-testid="menueng-days" />
+            </div>
+            {meReport && meReport.summary && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {[
+                  ['star', isAr ? 'نجوم' : 'Stars', 'bg-green-100 text-green-800'],
+                  ['workhorse', isAr ? 'خيول' : 'Workhorses', 'bg-blue-100 text-blue-800'],
+                  ['puzzle', isAr ? 'ألغاز' : 'Puzzles', 'bg-amber-100 text-amber-800'],
+                  ['dog', isAr ? 'كلاب' : 'Dogs', 'bg-red-100 text-red-800'],
+                ].map(([k, label, cls]) => (
+                  <Card key={k}><CardContent className="p-3 text-center">
+                    <div className={`text-2xl font-bold rounded ${cls}`} data-testid={`menueng-count-${k}`}>{(meReport.summary.counts || {})[k] || 0}</div>
+                    <div className="text-xs mt-1">{label}</div>
+                  </CardContent></Card>
+                ))}
+              </div>
+            )}
+            {meReport && meReport.summary && meReport.summary.dishes > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="menueng-summary">
+                {isAr
+                  ? `متوسط الهامش ${meReport.summary.avg_margin_pct}% · عتبة الشعبية ${meReport.summary.pop_threshold_pct}% · إيراد ${Number(meReport.summary.revenue || 0).toLocaleString('fr-DZ')} دج`
+                  : `Marge moy ${meReport.summary.avg_margin_pct}% · Seuil ${meReport.summary.pop_threshold_pct}%`}
+              </p>
+            )}
+            {(!meReport || !(meReport.items || []).length) && (
+              <p className="text-sm text-muted-foreground">{isAr ? 'لا مبيعات في هذه الفترة' : 'Aucune vente'}</p>
+            )}
+            {(meReport && meReport.items ? meReport.items : []).map(d => (
+              <Card key={d.product_id}><CardContent className="p-3 flex items-center justify-between gap-2 flex-wrap" data-testid={`menueng-item-${d.product_id}`}>
+                <div>
+                  <div className="font-medium">{d.product_name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {isAr ? `${d.qty} مبيعاً · شعبية ${d.popularity}% · هامش ${d.margin_pct}% · ربح ${Number(d.margin || 0).toLocaleString('fr-DZ')} دج` : `${d.qty} vendus · ${d.popularity}% · ${d.margin_pct}%`}
+                  </div>
+                </div>
+                <div className="text-left">
+                  <Badge className={{ star: 'bg-green-100 text-green-800', workhorse: 'bg-blue-100 text-blue-800', puzzle: 'bg-amber-100 text-amber-800', dog: 'bg-red-100 text-red-800' }[d.classification]}>{d.class_ar}</Badge>
+                  <div className="text-xs mt-1 text-muted-foreground max-w-[280px]">{d.advice_ar}</div>
+                </div>
+              </CardContent></Card>
+            ))}
           </TabsContent>
         </Tabs>
 
