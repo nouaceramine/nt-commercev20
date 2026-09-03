@@ -69,6 +69,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
     async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "", admin_name: str = ""):
         # sign=+1 confirm stock, sign=-1 reverse
+        price_changes = []  # p359: انحراف كلفة الوصفات
         for item in items:
             pid = item.get("product_id")
             qty = item.get("quantity", 0)
@@ -81,9 +82,19 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             if sign > 0 and sync_prices:
                 # p171: purchase_price always syncs; sale price goes ONLY to retail_price via _sync_item_extras
                 updates["$set"] = {"purchase_price": float(item.get("unit_price", 0) or 0), "updated_at": now}
+                # p359: capture price change BEFORE it lands
+                old_pp = float(product.get("purchase_price") or 0)
+                new_pp = float(item.get("unit_price", 0) or 0)
+                if old_pp > 0 and abs(new_pp - old_pp) > 1e-9:
+                    price_changes.append({"product_id": pid, "name": product.get("name_ar") or product.get("name_en") or pid,
+                                          "old_price": old_pp, "new_price": new_pp})
             await db.products.update_one({"id": pid}, updates)
             if sign > 0:
                 await _sync_item_extras(product, item, ref, now, admin_name)
+        # p359: recipe cost-drift alerts (confirm path)
+        if price_changes:
+            from services.cost_drift import check_cost_drift
+            await check_cost_drift(db, price_changes, ref_label=ref, user_name=admin_name)
 
     @router.post("", status_code=201)
     async def create_purchase(purchase: dict, admin: dict = Depends(require_permission("purchases.add"))):
@@ -127,6 +138,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             purchase_doc.pop("_id", None)
             return purchase_doc
 
+        price_changes = []  # p359: انحراف كلفة الوصفات
         for item in p.items:
             product = await db.products.find_one({"id": item.product_id})
             old_quantity = product.get("quantity", 0) if product else 0
@@ -141,6 +153,13 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 set_fields["updated_at"] = now
             if set_fields:
                 product_updates["$set"] = set_fields
+                # p359: capture price change BEFORE it lands
+                old_pp = float((product or {}).get("purchase_price") or 0)
+                new_pp = float(item.unit_price or 0)
+                if product and old_pp > 0 and abs(new_pp - old_pp) > 1e-9:
+                    price_changes.append({"product_id": item.product_id,
+                                          "name": product.get("name_ar") or product.get("name_en") or item.product_id,
+                                          "old_price": old_pp, "new_price": new_pp})
 
             await db.products.update_one({"id": item.product_id}, product_updates)
 
@@ -154,6 +173,11 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     "message_ar": f"المنتج '{product.get('name_ar')}' متوفر مرة أخرى!",
                     "product_id": item.product_id, "read": False, "created_at": now
                 })
+
+        # p359: recipe cost-drift alerts (create path)
+        if price_changes:
+            from services.cost_drift import check_cost_drift
+            await check_cost_drift(db, price_changes, ref_label=invoice_number, user_name=admin.get("name", ""))
 
         await adjust_supplier_mirror(db, p.supplier_id,
             total_purchases=p.total, balance=remaining)
