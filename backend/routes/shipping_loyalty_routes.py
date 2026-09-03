@@ -541,4 +541,45 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     # ============ SMS REMINDER -> routes/sms_marketing_routes.py ============
 
 
+    # ── p357: إعادة تنشيط الزبائن الغائبين ──
+    class ReactivationSettings(BaseModel):
+        enabled: bool = False
+        dormant_days: int = 30
+        cooldown_days: int = 30
+        message: Optional[str] = None
+        max_per_run: int = 50
+
+    @router.get("/loyalty/reactivation/settings")
+    async def get_reactivation_settings(admin: dict = Depends(get_tenant_admin)):
+        from services import reactivation_service
+        return await reactivation_service.get_settings(db)
+
+    @router.put("/loyalty/reactivation/settings")
+    async def put_reactivation_settings(st: ReactivationSettings,
+                                        admin: dict = Depends(get_tenant_admin)):
+        doc = st.model_dump()
+        doc["id"] = "global"
+        await db.reactivation_settings.update_one(
+            {"id": "global"}, {"$set": doc}, upsert=True)
+        return {"message": "تم حفظ إعدادات إعادة التنشيط"}
+
+    @router.get("/loyalty/reactivation/preview")
+    async def reactivation_preview(days: int = 30, admin: dict = Depends(get_tenant_admin)):
+        """معاينة: كم زبوناً غائباً سيتلقى رسالة لو شُغّل الآن."""
+        from services import reactivation_service
+        days = max(7, min(days, 365))
+        dormant = await reactivation_service.find_dormant(db, days, limit=200)
+        return {"days": days, "count": len(dormant),
+                "sample": dormant[:20]}
+
+    @router.post("/loyalty/reactivation/run")
+    async def reactivation_run_now(admin: dict = Depends(get_tenant_admin)):
+        """تشغيل يدوي فوري (نفس منطق الروبوت اليومي)."""
+        from services import reactivation_service
+        from services.sms_service import SMSService
+        tenant_doc = {"id": admin.get("tenant_id", ""),
+                      "company_name": admin.get("company_name", "")}
+        return await reactivation_service.run_reactivation(
+            db, tenant_doc, SMSService(db))
+
     return router

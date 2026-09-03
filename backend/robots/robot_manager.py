@@ -25,6 +25,7 @@ from .supplier_robot import SupplierRobot
 from .recharge_recovery_robot import RechargeRecoveryRobot
 from .commission_robot import CommissionRobot
 from .data_integrity_robot import DataIntegrityRobot
+from .reactivation_robot import ReactivationRobot
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class RobotManager:
             "recharge_recovery": RechargeRecoveryRobot(self.db, self.client),
             "commission": CommissionRobot(self.db, self.client),
             "data_integrity": DataIntegrityRobot(self.db, self.client, self.notification),
+            "reactivation": ReactivationRobot(self.db, self.client, self.notification, self.sms),
         }
         logger.info(f"Initialized {len(self.robots)} robots")
 

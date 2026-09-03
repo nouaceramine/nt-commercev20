@@ -78,19 +78,25 @@ export default function LoyaltyPage() {
   // Customers
   const [customers, setCustomers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  // p357: reactivation
+  const [reactSettings, setReactSettings] = useState({ enabled: false, dormant_days: 30, cooldown_days: 30, message: '', max_per_run: 50 });
+  const [reactPreview, setReactPreview] = useState(null);
+  const [reactRunning, setReactRunning] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [settingsRes, campaignsRes, customersRes] = await Promise.all([
+      const [settingsRes, campaignsRes, customersRes, reactRes] = await Promise.all([
         apiClient.get(`/loyalty/settings`),
         apiClient.get(`/marketing/sms/campaigns`),
-        apiClient.get(`/customers`)
+        apiClient.get(`/customers`),
+        apiClient.get(`/marketing/reactivation/settings`).catch(() => ({ data: null }))
       ]);
-      
+
       setLoyaltySettings(settingsRes.data);
       setCampaigns(campaignsRes.data);
       setCustomers(customersRes.data);
+      if (reactRes.data) setReactSettings(prev => ({ ...prev, ...reactRes.data }));
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -109,6 +115,28 @@ export default function LoyaltyPage() {
     } catch (error) {
       toast.error(language === 'ar' ? 'خطأ في الحفظ' : 'Erreur de sauvegarde');
     }
+  };
+
+  // p357: reactivation handlers
+  const saveReactivation = async () => {
+    try {
+      await apiClient.put(`/marketing/reactivation/settings`, reactSettings);
+      toast.success(language === 'ar' ? 'حُفظت إعدادات إعادة التنشيط' : 'Paramètres enregistrés');
+    } catch (e) { toast.error(language === 'ar' ? 'فشل الحفظ' : 'Erreur'); }
+  };
+  const previewReactivation = async () => {
+    try {
+      const r = await apiClient.get(`/marketing/reactivation/preview?days=${reactSettings.dormant_days || 30}`);
+      setReactPreview(r.data);
+    } catch (e) { toast.error(language === 'ar' ? 'فشلت المعاينة' : 'Erreur'); }
+  };
+  const runReactivation = async () => {
+    setReactRunning(true);
+    try {
+      const r = await apiClient.post(`/marketing/reactivation/run`);
+      toast.success(language === 'ar' ? `أُرسلت ${r.data.sent} رسالة (من أصل ${r.data.dormant} غائباً)` : `${r.data.sent} SMS envoyes`);
+    } catch (e) { toast.error(language === 'ar' ? 'فشل التشغيل' : 'Erreur'); }
+    finally { setReactRunning(false); }
   };
 
   const createCampaign = async () => {
@@ -174,6 +202,10 @@ export default function LoyaltyPage() {
             <TabsTrigger value="campaigns" className="gap-2">
               <MessageSquare className="h-4 w-4" />
               {language === 'ar' ? 'الحملات' : 'Campagnes'}
+            </TabsTrigger>
+            <TabsTrigger value="reactivation" className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              {language === 'ar' ? 'التنشيط' : 'Réactivation'}
             </TabsTrigger>
           </TabsList>
 
@@ -416,6 +448,62 @@ export default function LoyaltyPage() {
                       )}
                     </TableBody>
                   </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Reactivation Tab — p357 */}
+          <TabsContent value="reactivation" className="space-y-6 mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <RefreshCw className="h-5 w-5 text-emerald-500" />
+                  {language === 'ar' ? 'إعادة تنشيط الزبائن الغائبين' : 'Réactivation des clients inactifs'}
+                </CardTitle>
+                <CardDescription>
+                  {language === 'ar'
+                    ? 'روبوت يومي يرسل SMS لكل زبون غاب أكثر من المدة المحددة — مع تبريد يمنع الإزعاج'
+                    : 'SMS quotidien automatique aux clients inactifs, avec anti-spam'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div>
+                    <p className="font-medium">{language === 'ar' ? 'تفعيل الإرسال التلقائي اليومي' : 'Activer l envoi quotidien'}</p>
+                    <p className="text-sm text-muted-foreground">{language === 'ar' ? 'آخر نشاط = آخر بيع أو آخر كسب نقاط' : 'Derniere activite = vente ou points'}</p>
+                  </div>
+                  <Switch checked={!!reactSettings.enabled} onCheckedChange={v => setReactSettings({ ...reactSettings, enabled: v })} data-testid="react-enabled" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label>{language === 'ar' ? 'غائب منذ (أيام)' : 'Inactif depuis (jours)'}</Label>
+                    <Input type="number" min="7" value={reactSettings.dormant_days} onChange={e => setReactSettings({ ...reactSettings, dormant_days: Number(e.target.value) })} data-testid="react-days" />
+                  </div>
+                  <div>
+                    <Label>{language === 'ar' ? 'تبريد بين رسالتين (أيام)' : 'Cooldown (jours)'}</Label>
+                    <Input type="number" min="7" value={reactSettings.cooldown_days} onChange={e => setReactSettings({ ...reactSettings, cooldown_days: Number(e.target.value) })} data-testid="react-cooldown" />
+                  </div>
+                  <div>
+                    <Label>{language === 'ar' ? 'أقصى عدد بالدفعة' : 'Max par lot'}</Label>
+                    <Input type="number" min="1" value={reactSettings.max_per_run} onChange={e => setReactSettings({ ...reactSettings, max_per_run: Number(e.target.value) })} data-testid="react-max" />
+                  </div>
+                </div>
+                <div>
+                  <Label>{language === 'ar' ? 'نص الرسالة ({name} و {company} تُعوَّض تلقائياً)' : 'Message ({name} et {company})'}</Label>
+                  <Input value={reactSettings.message || ''} onChange={e => setReactSettings({ ...reactSettings, message: e.target.value })} placeholder={language === 'ar' ? 'مرحباً {name}، اشتقنا لك في {company}!' : 'Bonjour {name}, {company} vous attend!'} data-testid="react-message" />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button variant="outline" onClick={saveReactivation} data-testid="react-save">{language === 'ar' ? 'حفظ' : 'Enregistrer'}</Button>
+                  <Button variant="outline" onClick={previewReactivation} data-testid="react-preview">{language === 'ar' ? 'معاينة الغائبين' : 'Aperçu'}</Button>
+                  <Button onClick={runReactivation} disabled={reactRunning || !reactSettings.enabled} data-testid="react-run">
+                    {language === 'ar' ? 'تشغيل الآن' : 'Envoyer maintenant'}
+                  </Button>
+                  {reactPreview && (
+                    <Badge variant="secondary" data-testid="react-preview-count">
+                      {language === 'ar' ? `${reactPreview.count} زبون غائب` : `${reactPreview.count} inactifs`}
+                    </Badge>
+                  )}
                 </div>
               </CardContent>
             </Card>
