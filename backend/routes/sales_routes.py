@@ -70,6 +70,38 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
         return {"code": await next_code(db, "sales", "BV", 4, True)}
 
     # ── Get Single Sale ──
+    # ── p361: اقتراحات ذكية — «من اشترى هذا اشترى معه» (co-occurrence من المبيعات) ──
+    @router.get("/suggestions")
+    async def sale_suggestions(product_ids: str = "", limit: int = 6, user: dict = Depends(require_tenant)):
+        ids = [x for x in (product_ids or "").split(",") if x][:20]
+        if not ids:
+            return {"suggestions": []}
+        limit = max(1, min(int(limit or 6), 10))
+        pipeline = [
+            {"$match": {"status": {"$ne": "returned"}, "items.product_id": {"$in": ids}}},
+            {"$sort": {"created_at": -1}},
+            {"$limit": 2000},  # نافذة حديثة — الأذواق تتغيّر
+            {"$unwind": "$items"},
+            {"$match": {"items.product_id": {"$nin": ids}}},
+            {"$group": {"_id": "$items.product_id", "n": {"$sum": 1}}},
+            {"$sort": {"n": -1}},
+            {"$limit": limit},
+        ]
+        rows = await db.sales.aggregate(pipeline).to_list(limit)
+        out = []
+        for r in rows:
+            p = await db.products.find_one(
+                {"id": r["_id"], "is_active": {"$ne": False}},
+                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "quantity": 1})
+            if not p:
+                continue
+            out.append({"product_id": p["id"],
+                        "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                        "price": p.get("retail_price") or 0,
+                        "stock": p.get("quantity"),
+                        "count": r["n"]})
+        return {"suggestions": out}
+
     @router.get("/{sale_id}")
     async def get_sale(sale_id: str, user: dict = Depends(require_permission("sales.view"))):
         sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})

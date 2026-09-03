@@ -414,6 +414,19 @@ export default function POSPage() {
     checkFefoLot(product);
   }, [cart, checkFefoLot]);
 
+  // p361: اقتراحات «معها غالباً» — co-occurrence من سجل المبيعات
+  const [suggestions, setSuggestions] = useState([]);
+  useEffect(() => {
+    const ids = [...new Set((cart.cart || []).map(i => i.product_id).filter(Boolean))];
+    if (!ids.length) { setSuggestions([]); return; }
+    const tmr = setTimeout(() => {
+      apiClient.get('/sales/suggestions', { params: { product_ids: ids.join(','), limit: 6 } })
+        .then(r => setSuggestions(r.data?.suggestions || []))
+        .catch(() => {});
+    }, 350);
+    return () => clearTimeout(tmr);
+  }, [cart.cart]);
+
   const confirmWeight = () => {
     const w = parseFloat(weightValue);
     if (!w || w <= 0) { toast.error(language === 'ar' ? 'أدخل وزناً صحيحاً' : 'Poids invalide'); return; }
@@ -1014,6 +1027,24 @@ export default function POSPage() {
                 </div>
               </div>
             </POSCart>
+            {suggestions.length > 0 && !cart.returnMode && (
+              <div className="border-t p-1.5 flex items-center gap-1.5 overflow-x-auto" data-testid="pos-suggestions">
+                <span className="text-[10px] text-muted-foreground shrink-0 font-semibold">{language === 'ar' ? 'معها غالباً:' : 'Souvent avec:'}</span>
+                {suggestions.map(s => {
+                  const prod = products.find(p => p.id === s.product_id);
+                  if (!prod) return null;
+                  return (
+                    <Button key={s.product_id} size="sm" variant="outline"
+                      className="h-8 shrink-0 gap-1 text-xs border-amber-400 text-amber-700 hover:bg-amber-50"
+                      onClick={() => { addProductSmart(prod); setSuggestions(prev => prev.filter(x => x.product_id !== s.product_id)); }}
+                      data-testid="pos-suggest-chip">
+                      <Plus className="h-3 w-3" />{s.name}
+                      <span className="text-[10px] opacity-70">{formatCurrency(s.price)}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
             </div>
           </div>
 
