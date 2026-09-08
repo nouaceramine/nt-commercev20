@@ -608,6 +608,70 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                         for h in (fac.get("hours") or [])],
         }
 
+    # ---------- p367: دوران الطاولات — طلبات وإيراد ومدة الجلسة لكل طاولة ----------
+    @router.get("/table-stats")
+    async def table_stats(days: int = 7, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days or 7), 90))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}, "table_id": {"$ne": None},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "bill": {"$max": [{"$subtract": [
+                    {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                                 "in": {"$add": ["$$value",
+                                                 {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                                {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+                    {"$ifNull": ["$discount.amount", 0]}]}, 0]},
+                "dur_ms": {"$cond": [
+                    {"$and": ["$timestamps.served", "$created_at"]},
+                    {"$subtract": ["$timestamps.served", "$created_at"]}, None]},
+                # p367/p366: الإيراد = المدفوع فعلاً — كامل الفاتورة إن paid، وإلا مجموع دفعات payments
+                "rev": {"$cond": [
+                    {"$eq": ["$payment_status", "paid"]},
+                    {"$max": [{"$subtract": [
+                        {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                                     "in": {"$add": ["$$value",
+                                                     {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                                    {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+                        {"$ifNull": ["$discount.amount", 0]}]}, 0]},
+                    {"$reduce": {"input": {"$ifNull": ["$payments", []]}, "initialValue": 0,
+                                 "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}]}}},
+            {"$group": {
+                "_id": "$table_id",
+                "orders": {"$sum": 1},
+                "revenue": {"$sum": "$rev"},
+                "avg_bill": {"$avg": "$bill"},
+                "avg_dur_ms": {"$avg": "$dur_ms"}}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(100)
+        tables = {t["id"]: t async for t in _tables().find({}, {"_id": 0})}
+        out = []
+        for r in rows:
+            t = tables.get(r["_id"]) or {}
+            out.append({
+                "table_id": r["_id"],
+                "table_name": t.get("name") or r["_id"],
+                "seats": t.get("seats") or 0,
+                "orders": r["orders"],
+                "revenue": round(float(r.get("revenue") or 0), 2),
+                "avg_bill": round(float(r.get("avg_bill") or 0), 2),
+                "avg_duration_min": round(float(r.get("avg_dur_ms") or 0) / 60000, 1),
+                "orders_per_day": round(r["orders"] / days, 2),
+            })
+        # الطاولات بلا طلبات في الفترة تظهر بأصفار — لكشف الطاولات الميتة
+        seen = {r["table_id"] for r in out}
+        for tid, t in tables.items():
+            if tid not in seen:
+                out.append({"table_id": tid, "table_name": t.get("name") or tid,
+                            "seats": t.get("seats") or 0, "orders": 0, "revenue": 0,
+                            "avg_bill": 0, "avg_duration_min": 0, "orders_per_day": 0})
+        out.sort(key=lambda x: -x["revenue"])
+        return {"days": days,
+                "tables": out,
+                "total_orders": sum(r["orders"] for r in out),
+                "total_revenue": round(sum(r["revenue"] for r in out), 2)}
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):

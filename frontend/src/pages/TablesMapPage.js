@@ -95,6 +95,13 @@ export default function TablesMapPage() {
     apiClient.get('/restaurant/settings/kiosk').then(r => setKiosk(prev => ({ ...prev, ...(r.data || {}) }))).catch(() => {});  // p360
   }, []);
 
+  // p367: دوران الطاولات — يُجلب عند الفتح وعند تغيير الفترة فقط (لا يدخل الجلب الدوري)
+  const [tstats, setTstats] = useState(null);
+  const [tstatsDays, setTstatsDays] = useState(7);
+  useEffect(() => {
+    apiClient.get(`/restaurant/table-stats?days=${tstatsDays}`).then(r => setTstats(r.data)).catch(() => {});
+  }, [tstatsDays]);
+
   const saveSocial = async () => {
     setSavingSocial(true);
     try {
@@ -340,6 +347,63 @@ export default function TablesMapPage() {
             <p className="text-[11px] text-muted-foreground">
               {isAr ? 'طلبات الكشك تدخل شاشة المطبخ فورًا (أو بعد الدفع في النمط المسبق) باسم الكشك بدل الطاولة، ويظهر للزبون رقم طلب كبير' : ''}
             </p>
+          </CardContent>
+        </Card>
+
+        {/* p367: دوران الطاولات — طلبات/إيراد/مدة الجلسة لكل طاولة */}
+        <Card data-testid="table-stats">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <Clock className="h-4 w-4" />{isAr ? 'دوران الطاولات' : 'Rotation des tables'}
+              </h2>
+              <Select value={String(tstatsDays)} onValueChange={v => setTstatsDays(Number(v))}>
+                <SelectTrigger className="w-28 h-8" data-testid="tstats-days"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">{isAr ? '7 أيام' : '7j'}</SelectItem>
+                  <SelectItem value="30">{isAr ? '30 يوماً' : '30j'}</SelectItem>
+                  <SelectItem value="90">{isAr ? '90 يوماً' : '90j'}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {!tstats ? (
+              <p className="text-xs text-muted-foreground">{isAr ? 'جارٍ التحميل…' : 'Chargement…'}</p>
+            ) : tstats.total_orders === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="tstats-empty">{isAr ? 'لا طلبات على الطاولات في هذه الفترة' : 'Aucune commande'}</p>
+            ) : (
+              <>
+                <div className="flex gap-4 text-xs">
+                  <span data-testid="tstat-total-orders">{isAr ? 'الطلبات' : 'Commandes'}: <b>{tstats.total_orders}</b></span>
+                  <span data-testid="tstat-total-revenue">{isAr ? 'الإيراد المحصَّل' : 'Revenu encaisse'}: <b dir="ltr">{tstats.total_revenue} {isAr ? 'دج' : 'DA'}</b></span>
+                </div>
+                <div className="border rounded overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted text-muted-foreground">
+                        <th className="p-1.5 text-right font-medium">{isAr ? 'الطاولة' : 'Table'}</th>
+                        <th className="p-1.5 text-center font-medium">{isAr ? 'طلبات' : 'Cmd'}</th>
+                        <th className="p-1.5 text-center font-medium">{isAr ? 'طلب/يوم' : 'Cmd/j'}</th>
+                        <th className="p-1.5 text-center font-medium">{isAr ? 'متوسط الفاتورة' : 'Panier'}</th>
+                        <th className="p-1.5 text-center font-medium">{isAr ? 'مدة الجلسة' : 'Duree'}</th>
+                        <th className="p-1.5 text-center font-medium">{isAr ? 'الإيراد' : 'Revenu'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(tstats.tables || []).map(r => (
+                        <tr key={r.table_id} className="border-t" data-testid={`tstat-row-${r.table_id}`}>
+                          <td className="p-1.5 font-medium">{r.table_name}</td>
+                          <td className="p-1.5 text-center">{r.orders}</td>
+                          <td className="p-1.5 text-center" dir="ltr">{r.orders_per_day}</td>
+                          <td className="p-1.5 text-center" dir="ltr">{r.avg_bill}</td>
+                          <td className="p-1.5 text-center" dir="ltr">{r.avg_duration_min} {isAr ? 'د' : 'min'}</td>
+                          <td className="p-1.5 text-center font-mono" dir="ltr">{r.revenue}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
