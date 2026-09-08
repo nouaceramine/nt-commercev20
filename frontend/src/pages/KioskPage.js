@@ -7,6 +7,7 @@ import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2, Store, Timer 
 
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
 const TAG_AR = { gluten: 'غلوتين', nuts: 'مكسرات', dairy: 'ألبان', egg: 'بيض', fish: 'سمك', sesame: 'سمسم', spicy: 'حار', vegan: 'نباتي صرف', vegetarian: 'نباتي' };  // p365
+const TAG_EN = { gluten: 'Gluten', nuts: 'Nuts', dairy: 'Dairy', egg: 'Egg', fish: 'Fish', sesame: 'Sesame', spicy: 'Spicy', vegan: 'Vegan', vegetarian: 'Vegetarian' };  // p368
 const RESET_SECONDS = 15;
 
 export default function KioskPage() {
@@ -22,6 +23,32 @@ export default function KioskPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [showCart, setShowCart] = useState(false);
+  // p368: مفتاح اللغة عربي/إنجليزي — يُحفظ محلياً ويشمل أسماء الأطباق (name_en) والنصوص
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem('pub_lang') || 'ar'; } catch (e) { return 'ar'; } });
+  const isAr = lang !== 'en';
+  const setL = (l) => { setLang(l); try { localStorage.setItem('pub_lang', l); } catch (e) {} };
+  const dname = (x) => (!isAr && x && x.name_en) ? x.name_en : (x ? x.name : '');
+  const STR = isAr ? {
+    askStaff: 'اسأل الموظف عن طريقة الطلب', gotIt: 'استلمنا طلبك!',
+    prepaidDone: 'ادفع عند الكاشير ثم يجهز طلبك', inKitchen: 'طلبك الآن في المطبخ',
+    yourNo: 'رقم طلبك', total: 'المجموع', cur: 'دج', newIn: 'طلب جديد خلال', sec: 'ث',
+    newNow: 'طلب جديد الآن', selfOrder: 'اطلب بنفسك', menu: 'القائمة', cart: 'السلة',
+    addCart: 'أضف للسلة', yourCart: 'سلتك', namePh: 'اسمك (اختياري — لناديك عند الجاهزية)',
+    phoneReq: 'رقم هاتفك (إجباري)', phoneOpt: 'رقم هاتفك (اختياري)',
+    submitPre: 'أرسل الطلب وادفع عند الكاشير', submitPost: 'أرسل الطلب للمطبخ',
+  } : {
+    askStaff: 'Ask a staff member how to order', gotIt: 'Order received!',
+    prepaidDone: 'Pay at the cashier, then your order is prepared', inKitchen: 'Your order is now in the kitchen',
+    yourNo: 'Your order number', total: 'Total', cur: 'DA', newIn: 'New order in', sec: 's',
+    newNow: 'New order now', selfOrder: 'Self-ordering', menu: 'Menu', cart: 'Cart',
+    addCart: 'Add to cart', yourCart: 'Your cart', namePh: 'Your name (optional — to call you when ready)',
+    phoneReq: 'Your phone number (required)', phoneOpt: 'Your phone number (optional)',
+    submitPre: 'Send order & pay at cashier', submitPost: 'Send order to kitchen',
+  };
+  const TAG_L = isAr ? TAG_AR : TAG_EN;
+  const langBtn = (
+    <button onClick={() => setL(isAr ? 'en' : 'ar')} className="border rounded-full px-3 py-1.5 text-xs font-bold shrink-0 bg-background" data-testid="lang-toggle">{isAr ? 'EN' : 'عربي'}</button>
+  );
 
   useEffect(() => {
     fetch(`/api/restaurant/public/kiosk/${tenantId}`)
@@ -48,15 +75,15 @@ export default function KioskPage() {
 
   const families = useMemo(() => {
     const m = {};
-    (menu?.items || []).forEach((it) => { (m[it.family || 'القائمة'] = m[it.family || 'القائمة'] || []).push(it); });
+    (menu?.items || []).forEach((it) => { (m[it.family || STR.menu] = m[it.family || STR.menu] || []).push(it); });
     return m;
-  }, [menu]);
+  }, [menu, lang]);  // p368
 
   const addPlain = (it) => {
     setCart((prev) => {
       const ex = prev.find((c) => c.id === it.id && !c.mods.length);
       if (ex) return prev.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c));
-      return [...prev, { id: it.id, name: it.name, price: it.price, qty: 1, mods: [] }];
+      return [...prev, { id: it.id, name: it.name, name_en: it.name_en || '', price: it.price, qty: 1, mods: [] }];  // p368
     });
   };
 
@@ -73,7 +100,7 @@ export default function KioskPage() {
         if (op) { mods.push({ group: g.name, option: op.name }); delta += Number(op.price_delta) || 0; }
       }
     }
-    setCart((prev) => [...prev, { id: modFor.id, name: modFor.name, price: modFor.price + delta, qty: 1, mods }]);
+    setCart((prev) => [...prev, { id: modFor.id, name: modFor.name, name_en: modFor.name_en || '', price: modFor.price + delta, qty: 1, mods }]);  // p368
     setModFor(null); setModSel({});
   };
 
@@ -107,11 +134,11 @@ export default function KioskPage() {
 
   if (error) {
     return (
-      <div dir="rtl" className="min-h-screen flex items-center justify-center bg-background p-6">
+      <div dir={isAr ? 'rtl' : 'ltr'} className="min-h-screen flex items-center justify-center bg-background p-6">
         <div className="text-center space-y-3" data-testid="kiosk-error">
           <Store className="h-14 w-14 mx-auto text-muted-foreground" />
           <p className="text-xl font-bold">{error}</p>
-          <p className="text-sm text-muted-foreground">اسأل الموظف عن طريقة الطلب</p>
+          <p className="text-sm text-muted-foreground">{STR.askStaff}</p>
         </div>
       </div>
     );
@@ -119,7 +146,7 @@ export default function KioskPage() {
 
   if (!menu) {
     return (
-      <div dir="rtl" className="min-h-screen flex items-center justify-center bg-background">
+      <div dir={isAr ? 'rtl' : 'ltr'} className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-10 w-10 animate-spin text-primary" data-testid="kiosk-loading" />
       </div>
     );
@@ -127,32 +154,36 @@ export default function KioskPage() {
 
   if (done) {
     return (
-      <div dir="rtl" className="min-h-screen flex flex-col items-center justify-center bg-background p-6 gap-5">
+      <div dir={isAr ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col items-center justify-center bg-background p-6 gap-5">
         <CheckCircle2 className="h-20 w-20 text-green-600" />
-        <p className="text-2xl font-bold" data-testid="kiosk-done-title">استلمنا طلبك!</p>
-        <p className="text-muted-foreground">{menu.payment_mode === 'prepaid' ? 'ادفع عند الكاشير ثم يجهز طلبك' : 'طلبك الآن في المطبخ'}</p>
+        <p className="text-2xl font-bold" data-testid="kiosk-done-title">{STR.gotIt}</p>
+        <p className="text-muted-foreground">{menu.payment_mode === 'prepaid' ? STR.prepaidDone : STR.inKitchen}</p>
         <div className="border-4 border-primary rounded-3xl px-10 py-6 text-center">
-          <p className="text-sm text-muted-foreground mb-1">رقم طلبك</p>
+          <p className="text-sm text-muted-foreground mb-1">{STR.yourNo}</p>
           <p className="text-4xl font-black tracking-wider" dir="ltr" data-testid="kiosk-done-code">{done.code}</p>
         </div>
-        <p className="text-lg font-semibold">المجموع: {fmt(done.final_total ?? done.total)} دج</p>
+        <p className="text-lg font-semibold">{STR.total}: {fmt(done.final_total ?? done.total)} {STR.cur}</p>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Timer className="h-4 w-4" />
-          <span data-testid="kiosk-countdown">طلب جديد خلال {countdown} ث</span>
+          <span data-testid="kiosk-countdown">{STR.newIn} {countdown} {STR.sec}</span>
         </div>
-        <Button size="lg" className="min-h-[56px] px-10 text-lg" onClick={resetAll} data-testid="kiosk-new-order">طلب جديد الآن</Button>
+        <Button size="lg" className="min-h-[56px] px-10 text-lg" onClick={resetAll} data-testid="kiosk-new-order">{STR.newNow}</Button>
+        {langBtn}
       </div>
     );
   }
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background pb-28" data-testid="kiosk-page">
+    <div dir={isAr ? 'rtl' : 'ltr'} className="min-h-screen bg-background pb-28" data-testid="kiosk-page">
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b px-4 py-3 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-black">{menu.restaurant_name}</h1>
-          <p className="text-xs text-muted-foreground">{menu.counter_name} — اطلب بنفسك</p>
+          <p className="text-xs text-muted-foreground">{menu.counter_name} — {STR.selfOrder}</p>
         </div>
-        <Badge variant="secondary" className="text-sm px-3 py-1" data-testid="kiosk-counter-badge">{menu.counter_name}</Badge>
+        <div className="flex items-center gap-2">
+          {langBtn}
+          <Badge variant="secondary" className="text-sm px-3 py-1" data-testid="kiosk-counter-badge">{menu.counter_name}</Badge>
+        </div>
       </header>
 
       <main className="max-w-5xl mx-auto p-4 space-y-8">
@@ -165,13 +196,13 @@ export default function KioskPage() {
                   onClick={() => (it.modifier_groups || []).length ? (setModFor(it), setModSel({})) : addPlain(it)}
                   className="border rounded-2xl p-4 text-right hover:border-primary active:scale-95 transition-all bg-card min-h-[96px] flex flex-col justify-between"
                   data-testid={`kiosk-item-${it.name}`}>
-                  <span className="font-bold text-base leading-snug">{it.name}</span>
+                  <span className="font-bold text-base leading-snug">{dname(it)}</span>
                   {(it.dietary_tags || []).length > 0 && (
                     <span className="flex flex-wrap gap-1 mt-1">
-                      {(it.dietary_tags || []).map(tg => <span key={tg} className="text-[10px] border rounded-full px-1.5 py-0.5 text-muted-foreground" data-testid="kiosk-tag">{TAG_AR[tg] || tg}</span>)}
+                      {(it.dietary_tags || []).map(tg => <span key={tg} className="text-[10px] border rounded-full px-1.5 py-0.5 text-muted-foreground" data-testid="kiosk-tag">{TAG_L[tg] || tg}</span>)}
                     </span>
                   )}
-                  <span className="text-primary font-black text-lg mt-2">{fmt(it.price)} دج</span>
+                  <span className="text-primary font-black text-lg mt-2">{fmt(it.price)} {STR.cur}</span>
                 </button>
               ))}
             </div>
@@ -184,7 +215,7 @@ export default function KioskPage() {
         <div className="fixed bottom-0 inset-x-0 p-4 bg-gradient-to-t from-background via-background">
           <Button size="lg" className="w-full min-h-[60px] text-lg font-bold rounded-2xl" onClick={() => setShowCart(true)} data-testid="kiosk-open-cart">
             <ShoppingCart className="h-5 w-5 ml-2" />
-            السلة ({cartCount}) — {fmt(total)} دج
+            {STR.cart} ({cartCount}) — {fmt(total)} {STR.cur}
           </Button>
         </div>
       )}
@@ -193,7 +224,7 @@ export default function KioskPage() {
       {modFor && (
         <div className="fixed inset-0 z-20 bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setModFor(null)}>
           <div className="bg-background rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} data-testid="kiosk-mods">
-            <h3 className="text-lg font-bold">{modFor.name}</h3>
+            <h3 className="text-lg font-bold">{dname(modFor)}</h3>
             {(modFor.modifier_groups || []).map((g) => (
               <div key={g.name}>
                 <p className="font-semibold mb-2">{g.name}{g.required ? ' *' : ''}</p>
@@ -216,7 +247,7 @@ export default function KioskPage() {
                 </div>
               </div>
             ))}
-            <Button size="lg" className="w-full min-h-[56px] text-lg" onClick={addWithMods} data-testid="kiosk-mods-add">أضف للسلة</Button>
+            <Button size="lg" className="w-full min-h-[56px] text-lg" onClick={addWithMods} data-testid="kiosk-mods-add">{STR.addCart}</Button>
           </div>
         </div>
       )}
@@ -225,13 +256,13 @@ export default function KioskPage() {
       {showCart && (
         <div className="fixed inset-0 z-20 bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setShowCart(false)}>
           <div className="bg-background rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} data-testid="kiosk-cart">
-            <h3 className="text-lg font-bold">سلتك</h3>
+            <h3 className="text-lg font-bold">{STR.yourCart}</h3>
             {cart.map((c, i) => (
               <div key={i} className="flex items-center justify-between gap-2 border rounded-xl p-3">
                 <div className="min-w-0">
-                  <p className="font-semibold truncate">{c.name}</p>
+                  <p className="font-semibold truncate">{dname(c)}</p>
                   {c.mods.length > 0 && <p className="text-xs text-muted-foreground truncate">{c.mods.map((m) => m.option).join('، ')}</p>}
-                  <p className="text-sm text-primary font-bold">{fmt(c.price * c.qty)} دج</p>
+                  <p className="text-sm text-primary font-bold">{fmt(c.price * c.qty)} {STR.cur}</p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <Button size="icon" variant="outline" className="h-11 w-11" onClick={() => setQty(i, c.qty - 1)} data-testid="kiosk-qty-minus">
@@ -245,18 +276,18 @@ export default function KioskPage() {
               </div>
             ))}
             <div className="space-y-2">
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسمك (اختياري — لناديك عند الجاهزية)"
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={STR.namePh}
                 className="w-full border rounded-xl px-4 min-h-[52px] text-base bg-background" data-testid="kiosk-name" />
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={menu.require_phone ? 'رقم هاتفك (إجباري)' : 'رقم هاتفك (اختياري)'}
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={menu.require_phone ? STR.phoneReq : STR.phoneOpt}
                 inputMode="tel" dir="ltr" className="w-full border rounded-xl px-4 min-h-[52px] text-base bg-background text-right" data-testid="kiosk-phone" />
             </div>
             <div className="flex items-center justify-between text-lg font-black border-t pt-3">
-              <span>المجموع</span><span data-testid="kiosk-total">{fmt(total)} دج</span>
+              <span>{STR.total}</span><span data-testid="kiosk-total">{fmt(total)} {STR.cur}</span>
             </div>
             <Button size="lg" className="w-full min-h-[60px] text-lg font-bold"
               disabled={sending || (menu.require_phone && !phone.trim())}
               onClick={submit} data-testid="kiosk-submit">
-              {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : (menu.payment_mode === 'prepaid' ? 'أرسل الطلب وادفع عند الكاشير' : 'أرسل الطلب للمطبخ')}
+              {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : (menu.payment_mode === 'prepaid' ? STR.submitPre : STR.submitPost)}
             </Button>
           </div>
         </div>

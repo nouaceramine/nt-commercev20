@@ -1299,6 +1299,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         items = [{
             "id": p["id"],
             "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+            "name_en": p.get("name_en") or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
             "price": p.get("retail_price") or 0,
             "family": fams.get(p.get("family_id")) or "",
             "modifier_groups": p.get("modifier_groups") or [],
@@ -1342,6 +1343,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         items = [{
             "id": p["id"],
             "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+            "name_en": p.get("name_en") or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
             "price": p.get("retail_price") or 0,
             "family": fams.get(p.get("family_id")) or "",
             "modifier_groups": p.get("modifier_groups") or [],
@@ -1491,6 +1493,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         items = [{
             "id": p["id"],
             "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+            "name_en": p.get("name_en") or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
             "price": p.get("retail_price") or 0,
             "family": fams.get(p.get("family_id")) or "",
             "modifier_groups": p.get("modifier_groups") or [],

@@ -7,6 +7,7 @@ import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2, Share2, Check
 
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
 const TAG_AR = { gluten: 'غلوتين', nuts: 'مكسرات', dairy: 'ألبان', egg: 'بيض', fish: 'سمك', sesame: 'سمسم', spicy: 'حار', vegan: 'نباتي صرف', vegetarian: 'نباتي' };  // p365
+const TAG_EN = { gluten: 'Gluten', nuts: 'Nuts', dairy: 'Dairy', egg: 'Egg', fish: 'Fish', sesame: 'Sesame', spicy: 'Spicy', vegan: 'Vegan', vegetarian: 'Vegetarian' };  // p368
 
 export default function QrMenuPage() {
   const { tenantId, tableId, token } = useParams();
@@ -21,6 +22,27 @@ export default function QrMenuPage() {
   const [phone, setPhone] = useState('');  // p315: اختياري — إشعار واتساب عند الجاهزية
   const [showCart, setShowCart] = useState(false);
   const [copied, setCopied] = useState(false);  // p334
+  // p368: مفتاح اللغة عربي/إنجليزي — يُحفظ محلياً ويشمل أسماء الأطباق (name_en) والنصوص
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem('pub_lang') || 'ar'; } catch (e) { return 'ar'; } });
+  const isAr = lang !== 'en';
+  const setL = (l) => { setLang(l); try { localStorage.setItem('pub_lang', l); } catch (e) {} };
+  const dname = (x) => (!isAr && x && x.name_en) ? x.name_en : (x ? x.name : '');
+  const STR = isAr ? {
+    subtitle: 'اطلب مباشرة من طاولتك', menu: 'القائمة', items: 'عنصر', cur: 'دج',
+    addCart: 'إضافة للسلة', yourOrder: 'طلبك', total: 'المجموع', payAtCashier: 'الدفع عند الكاشير',
+    phonePh: 'رقم الهاتف (اختياري) — لإشعارك عند الجاهزية', submit: 'إرسال الطلب للمطبخ',
+    gotIt: 'استلمنا طلبك!', orderNo: 'رقم الطلب', newOrder: 'طلب جديد',
+    prepaidMsg: 'سجّلنا طلبك — أكّد الدفع عند الكاشير وسيبدأ التحضير فورًا',
+    postpaidMsg: 'سيصلك طلبك إلى طاولتك قريبًا',
+  } : {
+    subtitle: 'Order directly from your table', menu: 'Menu', items: 'items', cur: 'DA',
+    addCart: 'Add to cart', yourOrder: 'Your order', total: 'Total', payAtCashier: 'Pay at the cashier',
+    phonePh: 'Phone number (optional) — to notify you when ready', submit: 'Send order to kitchen',
+    gotIt: 'Order received!', orderNo: 'Order number', newOrder: 'New order',
+    prepaidMsg: 'Order registered — confirm payment at the cashier and preparation starts immediately',
+    postpaidMsg: 'Your order will arrive at your table shortly',
+  };
+  const TAG_L = isAr ? TAG_AR : TAG_EN;
 
   useEffect(() => {
     const EXPIRED = 'انتهت صلاحية رابط الطلب — امسح رمز الطاولة من جديد';
@@ -50,15 +72,15 @@ export default function QrMenuPage() {
 
   const families = useMemo(() => {
     const m = {};
-    (menu?.items || []).forEach((it) => { (m[it.family || 'القائمة'] = m[it.family || 'القائمة'] || []).push(it); });
+    (menu?.items || []).forEach((it) => { (m[it.family || STR.menu] = m[it.family || STR.menu] || []).push(it); });
     return m;
-  }, [menu]);
+  }, [menu, lang]);  // p368: إعادة التجميع عند تبديل اللغة (اسم العائلة الاحتياطي)
 
   const addPlain = (it) => {
     setCart((prev) => {
       const ex = prev.find((c) => c.id === it.id && !c.mods.length);
       if (ex) return prev.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c));
-      return [...prev, { id: it.id, name: it.name, price: it.price, qty: 1, mods: [] }];
+      return [...prev, { id: it.id, name: it.name, name_en: it.name_en || '', price: it.price, qty: 1, mods: [] }];  // p368
     });
   };
 
@@ -75,7 +97,7 @@ export default function QrMenuPage() {
         if (op) { mods.push({ group: g.name, option: op.name }); delta += Number(op.price_delta) || 0; }
       }
     }
-    setCart((prev) => [...prev, { id: modFor.id, name: modFor.name, price: modFor.price + delta, qty: 1, mods }]);
+    setCart((prev) => [...prev, { id: modFor.id, name: modFor.name, name_en: modFor.name_en || '', price: modFor.price + delta, qty: 1, mods }]);  // p368
     setModFor(null); setModSel({});
   };
 
@@ -145,21 +167,19 @@ export default function QrMenuPage() {
   };
 
   if (error) return (
-    <div className="min-h-screen flex items-center justify-center p-6 text-center" dir="rtl" data-testid="qr-error">
+    <div className="min-h-screen flex items-center justify-center p-6 text-center" dir={isAr ? 'rtl' : 'ltr'} data-testid="qr-error">
       <p className="text-lg text-muted-foreground">{error}</p>
     </div>
   );
   if (done) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center" dir="rtl" data-testid="qr-success">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center" dir={isAr ? 'rtl' : 'ltr'} data-testid="qr-success">
       <CheckCircle2 className="h-16 w-16 text-emerald-600" />
-      <h1 className="text-2xl font-bold">استلمنا طلبك!</h1>
-      <p className="text-muted-foreground">رقم الطلب: <span className="font-mono font-bold">{done.code}</span></p>
+      <h1 className="text-2xl font-bold">{STR.gotIt}</h1>
+      <p className="text-muted-foreground">{STR.orderNo}: <span className="font-mono font-bold">{done.code}</span></p>
       <p className="text-sm text-muted-foreground">
-        {done.prepaid
-          ? 'سجّلنا طلبك — أكّد الدفع عند الكاشير وسيبدأ التحضير فورًا'
-          : 'سيصلك طلبك إلى طاولتك قريبًا'}
+        {done.prepaid ? STR.prepaidMsg : STR.postpaidMsg}
       </p>
-      <Button onClick={() => setDone(null)} data-testid="qr-new-order">طلب جديد</Button>
+      <Button onClick={() => setDone(null)} data-testid="qr-new-order">{STR.newOrder}</Button>
       {/* p334: مشاركة الطاولة + سوشيال المطعم بعد نجاح الطلب */}
       {shareBtn}
       <p className="text-xs text-muted-foreground max-w-xs">شارك رابط الطاولة مع من معك — كل الطلبات تجتمع تلقائيًا على نفس الطاولة</p>
@@ -167,14 +187,17 @@ export default function QrMenuPage() {
     </div>
   );
   if (!menu) return (
-    <div className="min-h-screen flex items-center justify-center" dir="rtl"><Loader2 className="h-8 w-8 animate-spin" /></div>
+    <div className="min-h-screen flex items-center justify-center" dir={isAr ? 'rtl' : 'ltr'}><Loader2 className="h-8 w-8 animate-spin" /></div>
   );
 
   return (
-    <div className="min-h-screen bg-background pb-24" dir="rtl" data-testid="qr-menu-page">
-      <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b p-4">
-        <h1 className="text-xl font-bold">{menu.restaurant_name || 'القائمة'}</h1>
-        <p className="text-xs text-muted-foreground">اطلب مباشرة من طاولتك</p>
+    <div className="min-h-screen bg-background pb-24" dir={isAr ? 'rtl' : 'ltr'} data-testid="qr-menu-page">
+      <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b p-4 flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-xl font-bold">{menu.restaurant_name || STR.menu}</h1>
+          <p className="text-xs text-muted-foreground">{STR.subtitle}</p>
+        </div>
+        <button onClick={() => setL(isAr ? 'en' : 'ar')} className="border rounded-full px-3 py-1.5 text-xs font-bold shrink-0" data-testid="lang-toggle">{isAr ? 'EN' : 'عربي'}</button>
       </header>
       <main className="p-4 space-y-6">
         {Object.entries(families).map(([fam, items]) => (
@@ -184,13 +207,13 @@ export default function QrMenuPage() {
               {items.map((it) => (
                 <div key={it.id} className="flex items-center gap-3 border rounded-lg p-3" data-testid={`qr-item-${it.id}`}>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold">{it.name}</p>
+                    <p className="font-semibold">{dname(it)}</p>
                     {(it.dietary_tags || []).length > 0 && (
                       <span className="flex flex-wrap gap-1 mt-0.5">
-                        {(it.dietary_tags || []).map(tg => <span key={tg} className="text-[10px] border rounded-full px-1.5 py-0.5 text-muted-foreground" data-testid="qr-tag">{TAG_AR[tg] || tg}</span>)}
+                        {(it.dietary_tags || []).map(tg => <span key={tg} className="text-[10px] border rounded-full px-1.5 py-0.5 text-muted-foreground" data-testid="qr-tag">{TAG_L[tg] || tg}</span>)}
                       </span>
                     )}
-                    <p className="text-primary font-bold">{fmt(it.price)} دج</p>
+                    <p className="text-primary font-bold">{fmt(it.price)} {STR.cur}</p>
                   </div>
                   <Button size="sm" className="min-h-[44px] min-w-[44px]"
                     data-testid={`qr-add-${it.id}`}
@@ -214,15 +237,15 @@ export default function QrMenuPage() {
         <button onClick={() => setShowCart(true)}
           className="fixed bottom-4 inset-x-4 z-20 bg-primary text-primary-foreground rounded-xl p-4 flex items-center justify-between shadow-lg"
           data-testid="qr-cart-bar">
-          <span className="flex items-center gap-2 font-bold"><ShoppingCart className="h-5 w-5" /> {cart.reduce((s, c) => s + c.qty, 0)} عنصر</span>
-          <span className="font-bold">{fmt(total)} دج</span>
+          <span className="flex items-center gap-2 font-bold"><ShoppingCart className="h-5 w-5" /> {cart.reduce((s, c) => s + c.qty, 0)} {STR.items}</span>
+          <span className="font-bold">{fmt(total)} {STR.cur}</span>
         </button>
       )}
 
       {modFor && (
         <div className="fixed inset-0 z-30 bg-black/50 flex items-end" onClick={() => setModFor(null)}>
           <div className="bg-background w-full rounded-t-2xl p-4 space-y-4 max-h-[75vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} data-testid="qr-mod-dialog">
-            <h3 className="font-bold text-lg">{modFor.name}</h3>
+            <h3 className="font-bold text-lg">{dname(modFor)}</h3>
             {(modFor.modifier_groups || []).map((g) => (
               <div key={g.name}>
                 <p className="font-semibold text-sm mb-1">{g.name}{g.required ? ' *' : ''}</p>
@@ -245,7 +268,7 @@ export default function QrMenuPage() {
                 </div>
               </div>
             ))}
-            <Button className="w-full min-h-[44px]" onClick={addWithMods} data-testid="qr-mod-confirm">إضافة للسلة</Button>
+            <Button className="w-full min-h-[44px]" onClick={addWithMods} data-testid="qr-mod-confirm">{STR.addCart}</Button>
           </div>
         </div>
       )}
@@ -253,13 +276,13 @@ export default function QrMenuPage() {
       {showCart && (
         <div className="fixed inset-0 z-30 bg-black/50 flex items-end" onClick={() => setShowCart(false)}>
           <div className="bg-background w-full rounded-t-2xl p-4 space-y-3 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} data-testid="qr-cart-sheet">
-            <h3 className="font-bold text-lg">طلبك</h3>
+            <h3 className="font-bold text-lg">{STR.yourOrder}</h3>
             {cart.map((c, i) => (
               <div key={i} className="flex items-center gap-2 border-b pb-2">
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm">{c.name}</p>
+                  <p className="font-semibold text-sm">{dname(c)}</p>
                   {c.mods.length > 0 && <p className="text-xs text-muted-foreground">{c.mods.map((m) => m.option).join(' + ')}</p>}
-                  <p className="text-primary text-sm font-bold">{fmt(c.price * c.qty)} دج</p>
+                  <p className="text-primary text-sm font-bold">{fmt(c.price * c.qty)} {STR.cur}</p>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => setQty(i, c.qty - 1)} data-testid={`qr-minus-${i}`}>{c.qty === 1 ? <Trash2 className="h-4 w-4" /> : <Minus className="h-4 w-4" />}</Button>
@@ -268,16 +291,16 @@ export default function QrMenuPage() {
                 </div>
               </div>
             ))}
-            <div className="flex justify-between font-bold text-lg pt-1"><span>المجموع</span><span>{fmt(total)} دج</span></div>
-            <p className="text-xs text-muted-foreground text-center">الدفع عند الكاشير</p>
+            <div className="flex justify-between font-bold text-lg pt-1"><span>{STR.total}</span><span>{fmt(total)} {STR.cur}</span></div>
+            <p className="text-xs text-muted-foreground text-center">{STR.payAtCashier}</p>
             <input
               type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
-              placeholder="رقم الهاتف (اختياري) — لإشعارك عند الجاهزية"
+              placeholder={STR.phonePh}
               className="w-full border rounded-lg p-3 text-sm bg-background"
               data-testid="qr-phone-input"
             />
             <Button className="w-full min-h-[48px] text-lg" onClick={submit} disabled={sending} data-testid="qr-submit-btn">
-              {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : 'إرسال الطلب للمطبخ'}
+              {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : STR.submit}
             </Button>
           </div>
         </div>
