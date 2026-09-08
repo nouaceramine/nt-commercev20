@@ -536,4 +536,54 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             "items": items,
         }
 
+    # ---------- p364: تحويل توقع الطلب إلى مسودة شراء بنقرة ----------
+    class ForecastPurchaseIn(BaseModel):
+        supplier_id: str
+        days: int = 30
+        cover: int = 7
+        product_ids: Optional[List[str]] = None  # افتراضياً: كل الأصناف المقترحة
+
+    @router.post("/demand-forecast/create-purchase")
+    async def forecast_create_purchase(data: ForecastPurchaseIn, admin: dict = Depends(get_tenant_admin)):
+        """p364: يحوّل اقتراحات p313 إلى مسودة شراء حقيقية (draft — لا تلامس المخزون
+        ولا الأسعار حتى تأكيدها من صفحة المشتريات، فيسري عليها كل شيء بما فيه p359)."""
+        fc = await demand_forecast(data.days, data.cover, admin)
+        picks = [i for i in fc["items"] if i["suggested_qty"] > 0
+                 and (not data.product_ids or i["product_id"] in data.product_ids)]
+        if not picks:
+            raise HTTPException(status_code=400, detail="لا أصناف مقترحة للشراء في هذه التغطية")
+        supplier = await db.suppliers.find_one({"id": data.supplier_id})
+        if not supplier:
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
+        items = []
+        total = 0.0
+        for i in picks:
+            qty = max(1, int(math.ceil(i["suggested_qty"])))
+            cp = await _product(i["product_id"]) or {}
+            price = float(cp.get("purchase_price") or 0)
+            items.append({"product_id": i["product_id"], "product_name": i["product_name"],
+                          "quantity": qty, "unit_price": price, "total": round(qty * price, 2)})
+            total += qty * price
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        cnt = await db.counters.find_one_and_update(
+            {"_id": f"PUR_{today}"}, {"$inc": {"seq": 1}}, upsert=True, return_document=True)
+        now = datetime.now(timezone.utc).isoformat()
+        doc = {
+            "id": str(uuid.uuid4()),
+            "invoice_number": f"PUR-{today}-{cnt['seq']:04d}",
+            "code": "",
+            "supplier_id": data.supplier_id, "supplier_name": supplier.get("name", ""),
+            "items": items, "total": round(total, 2), "paid_amount": 0,
+            "remaining": round(total, 2), "payment_method": "cash", "payments": [],
+            "status": "unpaid",
+            "notes": f"مسودة آلية من توقع الطلب — تغطية {fc['cover']} يوماً على استهلاك {fc['days']} يوماً",
+            "warehouse_id": "", "warehouse_name": "",
+            "stock_status": "draft",
+            "source": "forecast",
+            "created_at": now, "created_by": admin.get("name", ""),
+        }
+        await db.purchases.insert_one(doc)
+        doc.pop("_id", None)
+        return {"ok": True, "purchase": doc, "items_count": len(items)}
+
     return {"router": router}

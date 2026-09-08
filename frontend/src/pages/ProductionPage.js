@@ -46,6 +46,10 @@ const ProductionPage = () => {
   const [meDays, setMeDays] = useState(30);
   const [meReport, setMeReport] = useState(null);
   const [forecast, setForecast] = useState(null);
+  // p364: تحويل التوقع إلى مسودة شراء
+  const [suppliers, setSuppliers] = useState([]);
+  const [poSupplier, setPoSupplier] = useState('');
+  const [poCreating, setPoCreating] = useState(false);
   const [fcReport, setFcReport] = useState(null);
   const [wasteList, setWasteList] = useState([]);
   const [showWasteDialog, setShowWasteDialog] = useState(false);
@@ -110,6 +114,28 @@ const ProductionPage = () => {
     } catch (e) { /* silent */ }
   }, []);
   useEffect(() => { fetchFcst(fcstDays); }, [fetchFcst, fcstDays]);
+
+  // p364: suppliers + create draft purchase from forecast
+  useEffect(() => {
+    apiClient.get('/suppliers').then(r => {
+      const list = Array.isArray(r.data) ? r.data : (r.data?.suppliers || r.data?.items || []);
+      setSuppliers(list);
+      if (list.length && !poSupplier) setPoSupplier(list[0].id);
+    }).catch(() => {});
+  }, []);
+
+  const createForecastPo = async () => {
+    if (!poSupplier || poCreating) return;
+    setPoCreating(true);
+    try {
+      const r = await apiClient.post('/production/demand-forecast/create-purchase',
+        { supplier_id: poSupplier, days: fcstDays, cover: 7 });
+      toast.success(isAr
+        ? `أُنشئت مسودة الشراء ${r.data?.purchase?.invoice_number || ''} (${r.data?.items_count} صنف) — راجعها في المشتريات وأكّد مخزونها`
+        : 'Brouillon cree');
+    } catch (e) { toast.error(errText(e)); }
+    finally { setPoCreating(false); }
+  };
 
   // p358: menu engineering loader
   const fetchMe = useCallback(async (d) => {
@@ -366,10 +392,21 @@ const ProductionPage = () => {
             )}
           </TabsContent>
           <TabsContent value="forecast" className="space-y-3 mt-3" data-testid="forecast-tab">
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 flex-wrap items-center">
               {[14, 30, 60].map(d => (
                 <Button key={d} size="sm" variant={fcstDays === d ? 'default' : 'outline'} onClick={() => setFcstDays(d)} data-testid={`fcst-days-${d}`}>{d}{isAr ? ' يوم' : 'j'}</Button>
               ))}
+              {forecast && forecast.items.some(i => i.suggested_qty > 0) && (
+                <span className="flex items-center gap-2 mr-auto">
+                  <select value={poSupplier} onChange={e => setPoSupplier(e.target.value)}
+                    className="h-8 border rounded-md px-2 text-xs bg-background" data-testid="fcst-po-supplier">
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <Button size="sm" onClick={createForecastPo} disabled={poCreating || !poSupplier} data-testid="fcst-create-po">
+                    {poCreating ? '...' : (isAr ? 'إنشاء مسودة شراء' : 'Brouillon achat')}
+                  </Button>
+                </span>
+              )}
             </div>
             {forecast && (
               <>
