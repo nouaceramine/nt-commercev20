@@ -66,14 +66,16 @@ export default function TablesMapPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [t, o, sc] = await Promise.all([
+      const [t, o, sc, rv] = await Promise.all([
         apiClient.get('/restaurant/tables'),
         apiClient.get('/restaurant/kitchen-orders?all=1'),  // p336: نرى طلبات «بانتظار الدفع» أيضًا
         apiClient.get('/restaurant/scheduled-orders').catch(() => ({ data: [] })),  // p337
+        apiClient.get('/restaurant/reservations').catch(() => ({ data: [] })),  // p370
       ]);
       setTables(t.data || []);
       setOrders((o.data || []).filter(x => x.status !== 'served' && x.status !== 'cancelled'));
       setSchedList(sc.data || []);  // p337
+      setResvList(rv.data || []);  // p370
     } catch (e) { /* جلب دوري صامت */ }
     finally { setLoading(false); }
   }, []);
@@ -103,6 +105,36 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/table-stats?days=${tstatsDays}`).then(r => setTstats(r.data)).catch(() => {});
     apiClient.get(`/restaurant/waiter-stats?days=${tstatsDays}`).then(r => setWstats(r.data)).catch(() => {});  // p369
   }, [tstatsDays]);
+
+  // p370: حجوزات الطاولات المسبقة
+  const [resvList, setResvList] = useState([]);
+  const [resvDlg, setResvDlg] = useState(false);
+  const [resvTable, setResvTable] = useState('');
+  const [resvName, setResvName] = useState('');
+  const [resvPhone, setResvPhone] = useState('');
+  const [resvWhen, setResvWhen] = useState('');
+  const [resvSize, setResvSize] = useState('2');
+  const [resvSaving, setResvSaving] = useState(false);
+  const saveResv = async () => {
+    setResvSaving(true);
+    try {
+      await apiClient.post('/restaurant/reservations', {
+        table_id: resvTable, customer_name: resvName.trim(),
+        customer_phone: resvPhone.trim() || null, reserved_for: resvWhen,
+        party_size: Number(resvSize) || 1,
+      });
+      toast.success(isAr ? 'سُجّل الحجز' : 'Reservation enregistree');
+      setResvDlg(false); setResvName(''); setResvPhone(''); setResvWhen('');
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+    finally { setResvSaving(false); }
+  };
+  const resvStatus = async (id, status) => {
+    try {
+      await apiClient.put(`/restaurant/reservations/${id}/status`, { status });
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+  };
 
   const saveSocial = async () => {
     setSavingSocial(true);
@@ -446,6 +478,70 @@ export default function TablesMapPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* p370: حجوزات الطاولات المسبقة */}
+        <Card data-testid="resv-card">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <CalendarClock className="h-4 w-4" />{isAr ? 'حجوزات الطاولات' : 'Reservations'}
+              </h2>
+              <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => setResvDlg(true)}>
+                <Plus className="h-4 w-4 ml-1" />{isAr ? 'حجز جديد' : 'Nouvelle'}
+              </Button>
+            </div>
+            {(resvList || []).length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="resv-empty">{isAr ? 'لا حجوزات قادمة' : 'Aucune reservation'}</p>
+            ) : (
+              <div className="space-y-1">
+                {(resvList || []).map(r => (
+                  <div key={r.id} className="flex items-center justify-between gap-2 border rounded p-2 text-sm" data-testid={`resv-row-${r.id}`}>
+                    <div className="min-w-0">
+                      <span className="font-semibold">{r.customer_name}</span>
+                      <span className="text-muted-foreground text-xs"> — {r.table_name} · {r.party_size} {isAr ? 'أشخاص' : 'pers.'}</span>
+                      <div className="text-xs text-muted-foreground" dir="ltr">{new Date(r.reserved_for).toLocaleString('fr-DZ')}</div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {r.status === 'booked' ? (
+                        <>
+                          <Button size="sm" variant="outline" className="h-7" onClick={() => resvStatus(r.id, 'seated')} data-testid={`resv-seat-${r.id}`}>{isAr ? 'جلوس' : 'Assis'}</Button>
+                          <Button size="sm" variant="ghost" className="h-7" onClick={() => resvStatus(r.id, 'cancelled')} data-testid={`resv-cancel-${r.id}`}><Trash2 className="h-3.5 w-3.5 text-red-500" /></Button>
+                        </>
+                      ) : (
+                        <Badge variant={r.status === 'seated' ? 'default' : 'secondary'} data-testid={`resv-status-${r.id}`}>
+                          {r.status === 'seated' ? (isAr ? 'جلس' : 'Assis') : r.status === 'cancelled' ? (isAr ? 'ملغي' : 'Annule') : (isAr ? 'لم يحضر' : 'Absent')}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* p370: نافذة حجز جديد */}
+        <Dialog open={resvDlg} onOpenChange={setResvDlg}>
+          <DialogContent className="max-w-sm" data-testid="resv-dialog">
+            <DialogHeader><DialogTitle>{isAr ? 'حجز طاولة مسبق' : 'Reserver une table'}</DialogTitle></DialogHeader>
+            <div className="space-y-2">
+              <Select value={resvTable} onValueChange={setResvTable}>
+                <SelectTrigger data-testid="resv-table"><SelectValue placeholder={isAr ? 'الطاولة' : 'Table'} /></SelectTrigger>
+                <SelectContent>
+                  {tables.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input value={resvName} onChange={e => setResvName(e.target.value)} placeholder={isAr ? 'اسم الزبون' : 'Nom du client'} data-testid="resv-name" />
+              <Input value={resvPhone} onChange={e => setResvPhone(e.target.value)} placeholder={isAr ? 'الهاتف (اختياري)' : 'Tel (optionnel)'} dir="ltr" data-testid="resv-phone" />
+              <input type="datetime-local" value={resvWhen} onChange={e => setResvWhen(e.target.value)}
+                className="w-full border rounded h-9 px-2 text-sm bg-background" data-testid="resv-when" />
+              <Input type="number" min="1" max="50" value={resvSize} onChange={e => setResvSize(e.target.value)} placeholder={isAr ? 'عدد الأشخاص' : 'Couverts'} dir="ltr" data-testid="resv-size" />
+              <Button className="w-full" disabled={resvSaving || !resvName.trim() || !resvTable || !resvWhen} onClick={saveResv} data-testid="resv-save">
+                {isAr ? 'تأكيد الحجز' : 'Reserver'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* p337: الطلبيات المجدولة — لوحة قيد التجهيز مرتبة زمنيًا */}
         <Card data-testid="sched-card">

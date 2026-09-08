@@ -13,6 +13,20 @@ class TableCreate(BaseModel):
     zone: Optional[str] = None
 
 
+class ReservationIn(BaseModel):
+    # p370: حجز طاولة مسبق
+    table_id: str
+    customer_name: str
+    customer_phone: Optional[str] = None
+    reserved_for: str  # ISO — الموعد بلا منطقة يُفترض توقيت الجزائر
+    party_size: int = 2
+    notes: Optional[str] = None
+
+
+class ReservationStatusIn(BaseModel):
+    status: str  # seated | cancelled | no_show
+
+
 class TableUpdate(BaseModel):
     name: Optional[str] = None
     seats: Optional[int] = None
@@ -719,6 +733,87 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     "avg_duration_min": round(float(r.get("avg_dur_ms") or 0) / 60000, 1),
                 } for r in rows],
                 "total_waiters": len(rows)}
+
+    # ---------- p370: حجوزات الطاولات المسبقة ----------
+    def _resv():
+        return db.restaurant_reservations
+
+    def _resv_out(r):
+        r = dict(r)
+        r.pop("_id", None)
+        return r
+
+    def _parse_when(raw):
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone(timedelta(hours=1)))  # الافتراضي توقيت الجزائر
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    @router.get("/reservations")
+    async def list_reservations(days: int = 7, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days or 7), 30))
+        now = _now()
+        rows = await _resv().find({
+            "reserved_for": {"$gte": now - timedelta(hours=3),
+                             "$lte": now + timedelta(days=days)},
+        }).sort("reserved_for", 1).to_list(300)
+        return [_resv_out(r) for r in rows]
+
+    @router.post("/reservations")
+    async def create_reservation(data: ReservationIn, user: dict = Depends(get_current_user)):
+        name = (data.customer_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+        t = await _tables().find_one({"id": data.table_id})
+        if not t:
+            raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+        when = _parse_when(data.reserved_for)
+        if not when:
+            raise HTTPException(status_code=400, detail="موعد الحجز غير صالح")
+        if when <= _now():
+            raise HTTPException(status_code=400, detail="موعد الحجز يجب أن يكون في المستقبل")
+        if not (1 <= int(data.party_size or 1) <= 50):
+            raise HTTPException(status_code=400, detail="عدد الأشخاص غير صالح")
+        win = timedelta(minutes=90)  # تعارض: نفس الطاولة وحجز قائم ضمن ±90 دقيقة
+        clash = await _resv().find_one({
+            "table_id": data.table_id, "status": "booked",
+            "reserved_for": {"$gt": when - win, "$lt": when + win}})  # حدّان حصريان: فرق 90د بالضبط مسموح
+        if clash:
+            raise HTTPException(status_code=409,
+                                detail=f"الطاولة محجوزة في موعد قريب ({clash.get('customer_name', '')})")
+        doc = {
+            "id": f"resv_{uuid.uuid4().hex[:12]}",
+            "table_id": t["id"],
+            "table_name": t.get("name"),
+            "customer_name": name,
+            "customer_phone": _clean_phone(data.customer_phone),
+            "reserved_for": when,
+            "party_size": int(data.party_size or 1),
+            "notes": (data.notes or "").strip() or None,
+            "status": "booked",
+            "created_by": user.get("username") or user.get("email"),
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        await _resv().insert_one(doc)
+        return _resv_out(doc)
+
+    @router.put("/reservations/{resv_id}/status")
+    async def update_reservation_status(resv_id: str, data: ReservationStatusIn, user: dict = Depends(get_current_user)):
+        if data.status not in ("seated", "cancelled", "no_show"):
+            raise HTTPException(status_code=400, detail="حالة غير صالحة")
+        r = await _resv().find_one({"id": resv_id})
+        if not r:
+            raise HTTPException(status_code=404, detail="الحجز غير موجود")
+        if r.get("status") in ("cancelled", "no_show"):
+            raise HTTPException(status_code=400, detail="الحجز منتهٍ — لا يمكن تعديله")
+        await _resv().update_one({"id": resv_id}, {"$set": {
+            "status": data.status, "updated_at": _now(),
+            "handled_by": user.get("username") or user.get("email")}})
+        return _resv_out(await _resv().find_one({"id": resv_id}))
 
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
