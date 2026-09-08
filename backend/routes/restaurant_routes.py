@@ -672,6 +672,54 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_orders": sum(r["orders"] for r in out),
                 "total_revenue": round(sum(r["revenue"] for r in out), 2)}
 
+    # ---------- p369: أداء النوادل — طلبات وإيراد وزمن لكل موظف ----------
+    @router.get("/waiter-stats")
+    async def waiter_stats(days: int = 7, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days or 7), 90))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _rev = {"$cond": [  # الإيراد المحصَّل: كامل الفاتورة إن paid وإلا مجموع دفعات p366
+            {"$eq": ["$payment_status", "paid"]}, _bill,
+            {"$reduce": {"input": {"$ifNull": ["$payments", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "created_by": {"$nin": [None, "QR", "KIOSK"],  # قنوات الزبون الذاتية ليست نوادل
+                                       "$not": {"$regex": "^جار:"}}}},
+            {"$addFields": {
+                "bill": _bill,
+                "rev": _rev,
+                "dur_ms": {"$cond": [
+                    {"$and": ["$timestamps.served", "$created_at"]},
+                    {"$subtract": ["$timestamps.served", "$created_at"]}, None]},
+                "cxl": {"$eq": ["$status", "cancelled"]}}},
+            {"$group": {
+                "_id": "$created_by",
+                "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                "revenue": {"$sum": {"$cond": ["$cxl", 0, "$rev"]}},
+                "avg_bill": {"$avg": {"$cond": ["$cxl", None, "$bill"]}},
+                "avg_dur_ms": {"$avg": "$dur_ms"}}},
+            {"$sort": {"revenue": -1}},
+            {"$limit": 50},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(50)
+        return {"days": days,
+                "waiters": [{
+                    "name": r["_id"],
+                    "orders": r["orders"],
+                    "cancelled": r["cancelled"],
+                    "revenue": round(float(r.get("revenue") or 0), 2),
+                    "avg_bill": round(float(r.get("avg_bill") or 0), 2),
+                    "avg_duration_min": round(float(r.get("avg_dur_ms") or 0) / 60000, 1),
+                } for r in rows],
+                "total_waiters": len(rows)}
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):

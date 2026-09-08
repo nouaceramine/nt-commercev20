@@ -98,8 +98,10 @@ export default function TablesMapPage() {
   // p367: دوران الطاولات — يُجلب عند الفتح وعند تغيير الفترة فقط (لا يدخل الجلب الدوري)
   const [tstats, setTstats] = useState(null);
   const [tstatsDays, setTstatsDays] = useState(7);
+  const [wstats, setWstats] = useState(null);  // p369
   useEffect(() => {
     apiClient.get(`/restaurant/table-stats?days=${tstatsDays}`).then(r => setTstats(r.data)).catch(() => {});
+    apiClient.get(`/restaurant/waiter-stats?days=${tstatsDays}`).then(r => setWstats(r.data)).catch(() => {});  // p369
   }, [tstatsDays]);
 
   const saveSocial = async () => {
@@ -406,6 +408,44 @@ export default function TablesMapPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* p369: أداء النوادل — طلبات/إيراد/زمن الجلسة لكل موظف (نفس فترة دوران الطاولات) */}
+        {wstats && wstats.total_waiters > 0 && (
+          <Card data-testid="waiter-stats">
+            <CardContent className="p-3 space-y-2">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <UtensilsCrossed className="h-4 w-4" />{isAr ? 'أداء النوادل' : 'Performance serveurs'}
+                <span className="text-xs text-muted-foreground font-normal">({tstatsDays} {isAr ? 'يوماً' : 'j'})</span>
+              </h2>
+              <div className="border rounded overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-muted text-muted-foreground">
+                      <th className="p-1.5 text-right font-medium">{isAr ? 'الموظف' : 'Employe'}</th>
+                      <th className="p-1.5 text-center font-medium">{isAr ? 'طلبات' : 'Cmd'}</th>
+                      <th className="p-1.5 text-center font-medium">{isAr ? 'ملغاة' : 'Annul.'}</th>
+                      <th className="p-1.5 text-center font-medium">{isAr ? 'متوسط الفاتورة' : 'Panier'}</th>
+                      <th className="p-1.5 text-center font-medium">{isAr ? 'مدة الجلسة' : 'Duree'}</th>
+                      <th className="p-1.5 text-center font-medium">{isAr ? 'الإيراد المحصَّل' : 'Revenu'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(wstats.waiters || []).map((w, i) => (
+                      <tr key={i} className="border-t" data-testid={`wstat-row-${i}`}>
+                        <td className="p-1.5 font-medium">{w.name}</td>
+                        <td className="p-1.5 text-center">{w.orders}</td>
+                        <td className={`p-1.5 text-center ${w.cancelled > 0 ? 'text-red-600 font-bold' : ''}`}>{w.cancelled}</td>
+                        <td className="p-1.5 text-center" dir="ltr">{w.avg_bill}</td>
+                        <td className="p-1.5 text-center" dir="ltr">{w.avg_duration_min} {isAr ? 'د' : 'min'}</td>
+                        <td className="p-1.5 text-center font-mono" dir="ltr">{w.revenue}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* p337: الطلبيات المجدولة — لوحة قيد التجهيز مرتبة زمنيًا */}
         <Card data-testid="sched-card">
