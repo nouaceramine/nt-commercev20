@@ -43,6 +43,7 @@ export default function KitchenDisplayPage() {
   // p338: طبع تلقائي + فلتر المصدر + تذكرة الطبع
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem("kds_autoprint") === "1");
   const [srcFilter, setSrcFilter] = useState("all");
+  const [stats, setStats] = useState(null);  // p363: شريط أداء المطبخ
   const [ticket, setTicket] = useState(null);
 
   const printOrder = useCallback(async (orderId) => {
@@ -65,6 +66,7 @@ export default function KitchenDisplayPage() {
     try {
       const res = await apiClient.get("/restaurant/kitchen-orders");
       setOrders(res.data || []);
+      apiClient.get("/restaurant/kitchen-stats?days=1").then(r => setStats(r.data)).catch(() => {});  // p363
     } catch (e) { /* عرض خفيف: لا إزعاج عند فشل جلب دوري */ }
     finally { setLoading(false); }
   }, []);
@@ -108,6 +110,19 @@ export default function KitchenDisplayPage() {
           </Button>
         </div>
       </div>
+      {stats && stats.count > 0 && (
+        <div className="flex items-center gap-2 flex-wrap text-xs" data-testid="kds-stats">
+          <Badge variant="secondary">اليوم: {stats.count} طلب</Badge>
+          <Badge variant="secondary" data-testid="kds-stat-wait">انتظار {stats.avg_wait_min} د</Badge>
+          <Badge variant="secondary" data-testid="kds-stat-prep">تحضير {stats.avg_prep_min} د</Badge>
+          <Badge variant={stats.late_count > 0 ? "destructive" : "secondary"} data-testid="kds-stat-late">متأخر (≥15د): {stats.late_count}</Badge>
+          {stats.slowest_dishes?.[0] && (
+            <Badge variant="outline" className="border-amber-400 text-amber-700" data-testid="kds-slowest">
+              أبطأ طبق: {stats.slowest_dishes[0].name} ({stats.slowest_dishes[0].avg_total_min} د)
+            </Badge>
+          )}
+        </div>
+      )}
       {loading ? <p className="text-muted-foreground">جارٍ التحميل...</p> : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {COLS.map((col) => {

@@ -496,7 +496,10 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
-        await _orders().update_one({"id": order_id}, {"$set": {"status": data.status, "updated_at": _now()}})
+        await _orders().update_one({"id": order_id}, {"$set": {
+            "status": data.status, "updated_at": _now(),
+            f"timestamps.{data.status}": _now(),  # p363: ختم كل انتقال لقياس أداء المطبخ
+        }})
         if data.status in ("served", "cancelled") and o.get("table_id"):
             # p323: تحرير الطاولة يقتل رابط QR الحالي — رابط مؤقت لكل زيارة
             await _tables().update_one({"id": o["table_id"]}, {"$set": {
@@ -518,6 +521,52 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             except Exception:
                 pass
         return _order_out(updated)
+
+    # ---------- p363: أداء المطبخ — زمن الانتظار/التحضير وأبطأ الأطباق ----------
+    @router.get("/kitchen-stats")
+    async def kitchen_stats(days: int = 7, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days or 7), 90))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}, "status": "served",
+                        "timestamps.preparing": {"$exists": True},
+                        "timestamps.served": {"$exists": True}}},
+            {"$addFields": {
+                "wait_ms": {"$subtract": ["$timestamps.preparing", "$created_at"]},
+                "prep_ms": {"$subtract": ["$timestamps.served", "$timestamps.preparing"]},
+                "total_ms": {"$subtract": ["$timestamps.served", "$created_at"]}}},
+            {"$facet": {
+                "overall": [{"$group": {"_id": None, "n": {"$sum": 1},
+                                        "avg_wait": {"$avg": "$wait_ms"},
+                                        "avg_prep": {"$avg": "$prep_ms"},
+                                        "avg_total": {"$avg": "$total_ms"},
+                                        "late": {"$sum": {"$cond": [{"$gte": ["$total_ms", 900000]}, 1, 0]}}}}],
+                "dishes": [{"$unwind": "$items"},
+                           {"$group": {"_id": "$items.product_name", "n": {"$sum": 1},
+                                       "avg_total": {"$avg": "$total_ms"}}},
+                           {"$sort": {"avg_total": -1}}, {"$limit": 8}],
+                "hours": [{"$group": {"_id": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
+                                      "n": {"$sum": 1}, "avg_total": {"$avg": "$total_ms"}}},
+                          {"$sort": {"_id": 1}}],
+            }},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(1)
+        fac = rows[0] if rows else {}
+        def _mins(ms):
+            return round(float(ms or 0) / 60000, 1)
+        ov = (fac.get("overall") or [{}])[0]
+        return {
+            "days": days,
+            "count": ov.get("n", 0),
+            "avg_wait_min": _mins(ov.get("avg_wait")),
+            "avg_prep_min": _mins(ov.get("avg_prep")),
+            "avg_total_min": _mins(ov.get("avg_total")),
+            "late_count": ov.get("late", 0),
+            "slowest_dishes": [{"name": d["_id"], "count": d["n"], "avg_total_min": _mins(d["avg_total"])}
+                               for d in (fac.get("dishes") or [])],
+            "by_hour": [{"hour": h["_id"], "count": h["n"], "avg_total_min": _mins(h["avg_total"])}
+                        for h in (fac.get("hours") or [])],
+        }
 
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
