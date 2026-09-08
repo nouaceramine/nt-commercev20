@@ -644,8 +644,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         out = _order_out(updated)
-        # p356: كسب نقاط الولاء عند الدفع الفعلي (الآجل لا يكسب حتى السداد)
-        if data.method != "debt":
+        # p362: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع حقيقية (مخزون + صندوق + محاسبة)
+        # — قبلها كان المال يُحصَّل بلا قيد نهائياً. الآجل debt يبقى بلا قيد (يحتاج حساب زبون).
+        if data.method != "debt" and not updated.get("sale_id"):
+            try:
+                from models.schemas import SaleCreate
+                from services.application.sales_service import create_sale_op
+                from services import pos_loyalty as _pl
+                phone = _clean_phone(data.customer_phone or o.get("customer_phone") or "")
+                cust = await _pl._resolve_customer(db, phone=phone) if phone else None
+                items = [{
+                    "product_id": i.get("product_id"),
+                    "product_name": i.get("product_name") or "",
+                    "quantity": float(i.get("quantity") or 0),
+                    "unit_price": float(i.get("unit_price") or 0),
+                    "total": round(float(i.get("quantity") or 0) * float(i.get("unit_price") or 0), 2),
+                    "note": i.get("note") or "",
+                    "modifiers": i.get("modifiers"),
+                } for i in (updated.get("items") or [])]
+                sub = round(sum(i["total"] for i in items), 2)
+                disc = float((updated.get("discount") or {}).get("amount") or 0)
+                total = round(max(0.0, sub - disc), 2)
+                if items and total > 0:
+                    s = SaleCreate(
+                        customer_id=(cust or {}).get("id"),
+                        items=items, subtotal=sub, discount=disc, total=total,
+                        paid_amount=total,
+                        payment_method="cash" if data.method == "cash" else "bank",
+                        payment_type="cash",
+                        notes=f"طلب مطعم {updated.get('code', '')} ({updated.get('table_name') or 'سفري'})")
+                    sale = await create_sale_op(db, s, user)
+                    await _orders().update_one(
+                        {"id": order_id},
+                        {"$set": {"sale_id": sale["id"], "updated_at": _now()}})
+                    out["sale_id"] = sale["id"]
+                    out["invoice_number"] = sale.get("invoice_number")
+                    if sale.get("loyalty_earned"):
+                        out["loyalty_earned"] = sale["loyalty_earned"]
+            except Exception:
+                pass  # القيد المحاسبي لا يُسقط الدفع — الطلب يبقى مدفوعاً
+        # p356: كسب نقاط الولاء عند الدفع الفعلي — فقط إن لم تُنشأ فاتورة (الفاتورة تكسب بنفسها)
+        if data.method != "debt" and not out.get("sale_id"):
             from services import pos_loyalty
             earned = await pos_loyalty.earn_points(
                 db, amount=out.get("final_total") or out.get("total") or 0,
