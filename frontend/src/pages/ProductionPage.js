@@ -60,6 +60,10 @@ const ProductionPage = () => {
   // p308: modifier groups editor state
   const [modRecipe, setModRecipe] = useState(null);
   const [modGroups, setModGroups] = useState([]);
+  // p365: علامات الحساسية/الغذائية للطبق
+  const [tagRecipe, setTagRecipe] = useState(null);
+  const [tagSel, setTagSel] = useState([]);
+  const [tagSaving, setTagSaving] = useState(false);
   const [modSaving, setModSaving] = useState(false);
 
   // p309: combo meal wizard state
@@ -168,6 +172,29 @@ const ProductionPage = () => {
       setModRecipe(null);
     } catch (e) { toast.error(errText(e)); }
     finally { setModSaving(false); }
+  };
+
+  // p365: dietary tags (حساسية/غذائية) — تظهر للزبون في QR والكشك
+  const DIET_TAGS = [
+    { k: 'gluten', ar: 'غلوتين' }, { k: 'nuts', ar: 'مكسرات' }, { k: 'dairy', ar: 'ألبان' },
+    { k: 'egg', ar: 'بيض' }, { k: 'fish', ar: 'سمك' }, { k: 'sesame', ar: 'سمسم' },
+    { k: 'spicy', ar: 'حار' }, { k: 'vegan', ar: 'نباتي صرف' }, { k: 'vegetarian', ar: 'نباتي' },
+  ];
+  const openTags = async (r) => {
+    setTagRecipe(r);
+    try {
+      const res = await apiClient.get(`/restaurant/products/${r.product_id}/dietary`);
+      setTagSel(res.data.tags || []);
+    } catch { setTagSel([]); }
+  };
+  const saveTags = async () => {
+    setTagSaving(true);
+    try {
+      await apiClient.put(`/restaurant/products/${tagRecipe.product_id}/dietary`, { tags: tagSel });
+      toast.success(isAr ? 'حُفظت العلامات — ستظهر للزبون في QR والكشك' : 'Etiquettes enregistrees');
+      setTagRecipe(null);
+    } catch (e) { toast.error(errText(e)); }
+    finally { setTagSaving(false); }
   };
 
   // p309: combo = منتج حزمة قابل للبيع + وصفة مكوّناتها منتجات قابلة للبيع
@@ -301,6 +328,7 @@ const ProductionPage = () => {
                   <div className="flex gap-1">
                     <Button size="sm" className="gap-1" data-testid={`run-btn-${r.id}`} onClick={() => openRun(r)}><Play className="h-3 w-3" />{isAr ? 'إنتاج' : 'Produire'}</Button>
                     <Button size="sm" variant="outline" data-testid={`mods-btn-${r.id}`} onClick={() => openMods(r)}>{isAr ? 'الإضافات' : 'Options'}</Button>
+                    <Button size="sm" variant="outline" data-testid={`tags-btn-${r.id}`} onClick={() => openTags(r)}>{isAr ? 'العلامات' : 'Etiquettes'}</Button>
                     <Button size="sm" variant="outline" onClick={() => openEdit(r)}><Pencil className="h-3 w-3" /></Button>
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteRecipe(r)}><Trash2 className="h-3 w-3" /></Button>
                   </div>
@@ -548,6 +576,28 @@ const ProductionPage = () => {
               </Button>
               <Button className="w-full" onClick={saveMods} disabled={modSaving} data-testid="mods-save-btn">{isAr ? 'حفظ الإضافات' : 'Enregistrer'}</Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* p365: حوار علامات الحساسية/الغذائية */}
+        <Dialog open={!!tagRecipe} onOpenChange={(o) => { if (!o) setTagRecipe(null); }}>
+          <DialogContent className="max-w-md" data-testid="tags-dialog">
+            <DialogHeader><DialogTitle>{isAr ? 'علامات الحساسية والنظام الغذائي' : 'Etiquettes'} — {tagRecipe?.product_name}</DialogTitle></DialogHeader>
+            <div className="flex flex-wrap gap-2 py-2">
+              {DIET_TAGS.map(t => {
+                const on = tagSel.includes(t.k);
+                return (
+                  <button key={t.k} type="button"
+                    onClick={() => setTagSel(prev => on ? prev.filter(x => x !== t.k) : [...prev, t.k])}
+                    className={`border rounded-full px-4 py-2 text-sm font-medium min-h-[44px] ${on ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                    data-testid={`tag-${t.k}`}>
+                    {t.ar}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground">{isAr ? 'تظهر هذه العلامات للزبون بجانب الطبق في صفحة QR وشاشة الكشك' : ''}</p>
+            <Button className="w-full" onClick={saveTags} disabled={tagSaving} data-testid="tags-save-btn">{isAr ? 'حفظ العلامات' : 'Enregistrer'}</Button>
           </DialogContent>
         </Dialog>
 

@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2, Share2, Check, Instagram, Facebook, Music2, MapPin, MessageCircle, Globe } from 'lucide-react';  // p334
 
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
+const TAG_AR = { gluten: 'غلوتين', nuts: 'مكسرات', dairy: 'ألبان', egg: 'بيض', fish: 'سمك', sesame: 'سمسم', spicy: 'حار', vegan: 'نباتي صرف', vegetarian: 'نباتي' };  // p365
 
 export default function QrMenuPage() {
   const { tenantId, tableId, token } = useParams();
@@ -184,6 +185,11 @@ export default function QrMenuPage() {
                 <div key={it.id} className="flex items-center gap-3 border rounded-lg p-3" data-testid={`qr-item-${it.id}`}>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold">{it.name}</p>
+                    {(it.dietary_tags || []).length > 0 && (
+                      <span className="flex flex-wrap gap-1 mt-0.5">
+                        {(it.dietary_tags || []).map(tg => <span key={tg} className="text-[10px] border rounded-full px-1.5 py-0.5 text-muted-foreground" data-testid="qr-tag">{TAG_AR[tg] || tg}</span>)}
+                      </span>
+                    )}
                     <p className="text-primary font-bold">{fmt(it.price)} دج</p>
                   </div>
                   <Button size="sm" className="min-h-[44px] min-w-[44px]"

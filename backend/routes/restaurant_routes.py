@@ -308,6 +308,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "groups": p.get("modifier_groups") or [],
         }
 
+    # ---------- p365: علامات الحساسية/النظام الغذائي للأطباق ----------
+    DIETARY_TAGS = ("gluten", "nuts", "dairy", "egg", "fish", "sesame", "spicy", "vegan", "vegetarian")
+
+    class DietaryBody(BaseModel):
+        tags: List[str] = []
+
+    @router.get("/products/{product_id}/dietary")
+    async def get_dietary(product_id: str, user: dict = Depends(get_current_user)):
+        p = await db.products.find_one({"id": product_id}, {"_id": 0, "dietary_tags": 1, "name": 1, "name_ar": 1})
+        if not p:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        return {"product_id": product_id, "product_name": p.get("name_ar") or p.get("name"),
+                "tags": [t for t in (p.get("dietary_tags") or []) if t in DIETARY_TAGS]}
+
+    @router.put("/products/{product_id}/dietary")
+    async def set_dietary(product_id: str, body: DietaryBody, admin: dict = Depends(get_tenant_admin)):
+        clean = []
+        for t in body.tags:
+            t = (t or "").strip()
+            if t not in DIETARY_TAGS:
+                raise HTTPException(status_code=400, detail=f"علامة غير معروفة: {t}")
+            if t not in clean:
+                clean.append(t)
+        res = await db.products.update_one({"id": product_id}, {"$set": {"dietary_tags": clean}})
+        if not res.matched_count:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        return {"ok": True, "tags": clean}
+
     @router.put("/products/{product_id}/modifier-groups")
     async def set_modifier_groups(
         product_id: str, body: ModifierGroupsBody, admin: dict = Depends(get_tenant_admin)
@@ -1140,7 +1168,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "image_url": 1},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "dietary_tags": 1, "image_url": 1},
         ).to_list(1000)
         items = [{
             "id": p["id"],
@@ -1148,6 +1176,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "price": p.get("retail_price") or 0,
             "family": fams.get(p.get("family_id")) or "",
             "modifier_groups": p.get("modifier_groups") or [],
+            "dietary_tags": p.get("dietary_tags") or [],
             "image_url": p.get("image_url"),
         } for p in prods]
         return {"restaurant_name": t.get("company_name") or t.get("name") or "", "items": items}
@@ -1182,7 +1211,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "image_url": 1},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "dietary_tags": 1, "image_url": 1},
         ).to_list(1000)
         items = [{
             "id": p["id"],
@@ -1190,6 +1219,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "price": p.get("retail_price") or 0,
             "family": fams.get(p.get("family_id")) or "",
             "modifier_groups": p.get("modifier_groups") or [],
+            "dietary_tags": p.get("dietary_tags") or [],
             "image_url": p.get("image_url"),
         } for p in prods]
         _soc = await tdb.restaurant_settings.find_one({"_id": "social_links"}, {"_id": 0}) or {}
@@ -1330,7 +1360,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "image_url": 1},
+            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "dietary_tags": 1, "image_url": 1},
         ).to_list(1000)
         items = [{
             "id": p["id"],
@@ -1338,6 +1368,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "price": p.get("retail_price") or 0,
             "family": fams.get(p.get("family_id")) or "",
             "modifier_groups": p.get("modifier_groups") or [],
+            "dietary_tags": p.get("dietary_tags") or [],
             "image_url": p.get("image_url"),
         } for p in prods]
         return {"restaurant_name": t.get("company_name") or t.get("name") or "",

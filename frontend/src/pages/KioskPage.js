@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2, Store, Timer } from 'lucide-react';
 
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
+const TAG_AR = { gluten: 'غلوتين', nuts: 'مكسرات', dairy: 'ألبان', egg: 'بيض', fish: 'سمك', sesame: 'سمسم', spicy: 'حار', vegan: 'نباتي صرف', vegetarian: 'نباتي' };  // p365
 const RESET_SECONDS = 15;
 
 export default function KioskPage() {
@@ -165,6 +166,11 @@ export default function KioskPage() {
                   className="border rounded-2xl p-4 text-right hover:border-primary active:scale-95 transition-all bg-card min-h-[96px] flex flex-col justify-between"
                   data-testid={`kiosk-item-${it.name}`}>
                   <span className="font-bold text-base leading-snug">{it.name}</span>
+                  {(it.dietary_tags || []).length > 0 && (
+                    <span className="flex flex-wrap gap-1 mt-1">
+                      {(it.dietary_tags || []).map(tg => <span key={tg} className="text-[10px] border rounded-full px-1.5 py-0.5 text-muted-foreground" data-testid="kiosk-tag">{TAG_AR[tg] || tg}</span>)}
+                    </span>
+                  )}
                   <span className="text-primary font-black text-lg mt-2">{fmt(it.price)} دج</span>
                 </button>
               ))}
