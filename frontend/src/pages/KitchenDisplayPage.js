@@ -157,6 +157,9 @@ export default function KitchenDisplayPage() {
                           {o.payment_status === "paid" && (
                             <span className="text-[10px] text-white rounded-full px-2 py-0.5 font-bold bg-emerald-600" data-testid={`kds-paid-${o.id}`}>مدفوع</span>
                           )}
+                          {o.payment_status === "partial" && (
+                            <span className="text-[10px] text-white rounded-full px-2 py-0.5 font-bold bg-amber-500" data-testid={`kds-partial-${o.id}`}>مدفوع جزئياً</span>
+                          )}
                         </div>
                         <ul className="text-sm space-y-0.5">
                           {(o.items || []).map((it, i) => (

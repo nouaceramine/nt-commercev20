@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';  // p336
-import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent } from 'lucide-react';  // p334+p336+p337
+import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors } from 'lucide-react';  // p334+p336+p337+p366
 import { QRCodeCanvas } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
@@ -125,6 +125,24 @@ export default function TablesMapPage() {
       toast.success(isAr ? (next.enabled ? 'الكشك مفعّل — افتح الرابط على شاشة المحل' : 'الكشك موقوف') : 'Kiosque enregistre');
     } catch (e) { toast.error(errText(e)); }
     finally { setSavingKiosk(false); }
+  };
+
+  // p366: تقسيم الفاتورة — دفع عناصر محددة في دفعة مستقلة
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitSel, setSplitSel] = useState([]);
+  const [splitMethod, setSplitMethod] = useState('cash');
+  const [splitPaying, setSplitPaying] = useState(false);
+  const toggleSplitItem = (i) => setSplitSel(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]);
+  const paySplit = async (ord) => {
+    if (!splitSel.length) return;
+    setSplitPaying(true);
+    try {
+      await apiClient.post(`/restaurant/kitchen-orders/${ord.id}/pay`, { method: splitMethod, item_indexes: splitSel });
+      toast.success(isAr ? 'سُجّلت الدفعة' : 'Versement enregistre');
+      setSplitSel([]); setSplitOpen(false);
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+    finally { setSplitPaying(false); }
   };
 
   // p336: تأكيد دفع طلب (كاش) من خريطة الطاولات
@@ -395,9 +413,11 @@ export default function TablesMapPage() {
                           <div className="text-xs space-y-0.5">
                             {ord.status === 'pending_payment' || ord.payment_status === 'unpaid'
                               ? <span className="font-bold text-red-600" data-testid={`table-unpaid-${t.id}`}>{isAr ? 'غير مدفوع' : 'Non paye'}</span>
-                              : ord.payment_status === 'paid'
-                                ? <span className="font-bold text-emerald-600" data-testid={`table-paid-${t.id}`}>{isAr ? 'مدفوع' : 'Paye'}</span>
-                                : null}
+                              : ord.payment_status === 'partial'
+                                ? <span className="font-bold text-amber-600" data-testid={`table-partial-${t.id}`}>{isAr ? 'مدفوع جزئياً' : 'Partiel'}</span>
+                                : ord.payment_status === 'paid'
+                                  ? <span className="font-bold text-emerald-600" data-testid={`table-paid-${t.id}`}>{isAr ? 'مدفوع' : 'Paye'}</span>
+                                  : null}
                             {ord.total > 0 && <div className="font-mono text-muted-foreground" dir="ltr">{ord.total} {isAr ? 'دج' : 'DA'}</div>}
                           </div>
                         )}
@@ -446,9 +466,11 @@ export default function TablesMapPage() {
                         )}</span>
                         {ord.payment_status === 'paid'
                           ? <Badge className="bg-emerald-600">{isAr ? 'مدفوع' : 'Paye'}</Badge>
-                          : (ord.payment_status === 'unpaid' || ord.status === 'pending_payment')
-                            ? <Badge variant="destructive">{isAr ? 'غير مدفوع' : 'Non paye'}</Badge>
-                            : <Badge variant="secondary">{isAr ? 'يُدفع عند الإنهاء' : 'A la cloture'}</Badge>}
+                          : ord.payment_status === 'partial'
+                            ? <Badge className="bg-amber-500" data-testid="table-partial">{isAr ? 'مدفوع جزئياً' : 'Partiel'}</Badge>
+                            : (ord.payment_status === 'unpaid' || ord.status === 'pending_payment')
+                              ? <Badge variant="destructive">{isAr ? 'غير مدفوع' : 'Non paye'}</Badge>
+                              : <Badge variant="secondary">{isAr ? 'يُدفع عند الإنهاء' : 'A la cloture'}</Badge>}
                       </div>
                       {/* p337: خصم على الفاتورة — نسبة/مبلغ مباشر أو كود كوبون */}
                       <div className="border rounded p-2 space-y-2" data-testid="table-discount">
@@ -485,6 +507,53 @@ export default function TablesMapPage() {
                         <Button variant="outline" className="w-full min-h-[44px]" onClick={() => payOrder(ord.id)} data-testid="table-pay-btn">
                           <Banknote className="h-4 w-4 ml-1" />{isAr ? 'تأكيد الدفع (كاش)' : 'Confirmer paiement'}
                         </Button>
+                      )}
+                      {/* p366: تقسيم الفاتورة — اختر العناصر وادفعها كدفعة مستقلة */}
+                      {ord.payment_status !== 'paid' && (ord.items || []).length > 1 && (
+                        <div className="border rounded p-2 space-y-2" data-testid="split-box">
+                          <Button variant="ghost" size="sm" className="w-full" data-testid="split-toggle"
+                            onClick={() => { setSplitOpen(!splitOpen); setSplitSel([]); }}>
+                            <Scissors className="h-3.5 w-3.5 ml-1" />{isAr ? 'تقسيم الفاتورة' : 'Diviser addition'}
+                          </Button>
+                          {splitOpen && (
+                            <>
+                              {ord.paid_amount > 0 && (
+                                <div className="text-xs text-muted-foreground flex justify-between" data-testid="split-progress">
+                                  <span>{isAr ? 'المدفوع' : 'Paye'}: <span dir="ltr">{ord.paid_amount}</span></span>
+                                  <span>{isAr ? 'المتبقي' : 'Reste'}: <span dir="ltr" className="font-bold text-red-600">{ord.remaining_total}</span></span>
+                                </div>
+                              )}
+                              <div className="space-y-1">
+                                {(ord.items || []).map((it, i) => it.paid ? (
+                                  <div key={i} className="flex justify-between text-xs text-muted-foreground line-through px-1" data-testid={`split-paid-${i}`}>
+                                    <span>{it.product_name} ×{it.quantity}</span>
+                                    <span>{isAr ? 'مدفوع' : 'paye'}</span>
+                                  </div>
+                                ) : (
+                                  <Button key={i} variant={splitSel.includes(i) ? 'default' : 'outline'} size="sm"
+                                    className="w-full justify-between h-8" data-testid={`split-item-${i}`}
+                                    onClick={() => toggleSplitItem(i)}>
+                                    <span>{it.product_name} ×{it.quantity}</span>
+                                    <span className="font-mono" dir="ltr">{Math.round((it.quantity || 0) * (it.unit_price || 0) * 100) / 100}</span>
+                                  </Button>
+                                ))}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Select value={splitMethod} onValueChange={setSplitMethod}>
+                                  <SelectTrigger className="w-24 h-8" data-testid="split-method"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="cash">{isAr ? 'كاش' : 'Especes'}</SelectItem>
+                                    <SelectItem value="card">{isAr ? 'بطاقة' : 'Carte'}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <Button size="sm" className="flex-1 h-8" disabled={!splitSel.length || splitPaying}
+                                  onClick={() => paySplit(ord)} data-testid="split-pay-btn">
+                                  {isAr ? 'دفع المحدد' : 'Payer la selection'}
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       )}
                       <Button className="w-full min-h-[44px]" onClick={() => checkout(selTable)} data-testid="table-checkout-btn">
                         {isAr ? 'إنهاء وتحرير الطاولة' : 'Cloturer et liberer'}

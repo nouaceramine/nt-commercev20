@@ -56,6 +56,7 @@ class PayBody(BaseModel):
     # p336: تأكيد دفع طلب مطبخ
     method: str = "cash"  # cash | card | debt
     customer_phone: Optional[str] = None  # p356: ولاء — هاتف الزبون عند الدفع
+    item_indexes: Optional[List[int]] = None  # p366: تقسيم الفاتورة — فهارس العناصر في هذه الدفعة (None = كل غير المدفوع)
 
 
 class NeighborIn(BaseModel):
@@ -281,6 +282,17 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         except Exception:
             o["discount_amount"] = 0
             o["final_total"] = o["total"]
+        try:  # p366: تقسيم الفاتورة — المدفوع حتى الآن والمتبقي
+            pays = o.get("payments") or []
+            o["paid_amount"] = round(sum(float(p.get("amount") or 0) for p in pays), 2)
+            if o.get("payment_status") == "paid" and not pays:
+                o["paid_amount"] = o["final_total"]  # طلبات قديمة مدفوعة بلا سجل دفعات
+            o["remaining_total"] = round(max(0.0, (o["final_total"] or 0) - o["paid_amount"]), 2)
+            o["unpaid_count"] = 0 if o.get("payment_status") == "paid" else sum(
+                1 for i in (o.get("items") or []) if not i.get("paid"))
+        except Exception:
+            o["paid_amount"] = 0
+            o["remaining_total"] = o.get("final_total") or 0
         return o
 
     async def _payment_mode(tdb=None):
@@ -706,66 +718,116 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.post("/kitchen-orders/{order_id}/pay")
     async def pay_kitchen_order(order_id: str, data: PayBody, user: dict = Depends(get_current_user)):
-        """p336: تأكيد دفع الطلب — في النمط المسبق يدخل المطبخ الآن فقط"""
+        """p336: تأكيد دفع الطلب — p366: item_indexes لدفع جزء من العناصر (تقسيم الفاتورة)"""
         if data.method not in ("cash", "card", "debt"):
             raise HTTPException(status_code=400, detail="طريقة دفع غير صالحة")
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
-        upd = {"payment_status": "paid", "payment_method": data.method,
-               "paid_at": _now(), "paid_by": user.get("username") or user.get("email"),
-               "updated_at": _now()}
+        items_doc = o.get("items") or []
+        legacy_paid = o.get("payment_status") == "paid" and not o.get("payments")  # طلبات ما قبل p366
+        unpaid_idx = [i for i, it in enumerate(items_doc)
+                      if not it.get("paid") and not legacy_paid]
+        if data.item_indexes is not None:
+            if not data.item_indexes:
+                raise HTTPException(status_code=400, detail="لم تُحدَّد عناصر للدفع")
+            bad = [i for i in data.item_indexes
+                   if not isinstance(i, int) or i < 0 or i >= len(items_doc)]
+            if bad:
+                raise HTTPException(status_code=400, detail="فهرس عنصر غير صالح")
+            sel = sorted(set(data.item_indexes))
+            if any(i not in unpaid_idx for i in sel):
+                raise HTTPException(status_code=400, detail="بعض العناصر مدفوعة مسبقاً")
+        else:
+            sel = unpaid_idx
+        if not sel:
+            return _order_out(o)  # الفاتورة مسددة بالكامل — إعادة الدفع لا تغيّر شيئاً
+        if o.get("status") == "pending_payment" and len(sel) < len(unpaid_idx):
+            raise HTTPException(status_code=400, detail="الدفع المسبق يتطلب دفع كامل الفاتورة")
+        # p366: الخصم يُوزَّع تناسبياً على الدفعات، والدفعة الأخيرة تسدد الباقي بالضبط ليطابق final_total
+        total_all = round(sum(
+            float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+            for i in items_doc), 2)
+        disc = float((o.get("discount") or {}).get("amount") or 0)
+        final_total = round(max(0.0, total_all - disc), 2)
+        payments = list(o.get("payments") or [])
+        paid_so_far = round(sum(float(p.get("amount") or 0) for p in payments), 2)
+        sub = round(sum(
+            float(items_doc[i].get("quantity") or 0) * float(items_doc[i].get("unit_price") or 0)
+            for i in sel), 2)
+        last_part = len(sel) == len(unpaid_idx)
+        ratio = (final_total / total_all) if total_all > 0 else 1.0
+        part = max(0.0, round(final_total - paid_so_far, 2) if last_part else round(sub * ratio, 2))
+        part_disc = round(max(0.0, sub - part), 2)
+        who = user.get("username") or user.get("email")
+        set_fields = {"updated_at": _now(), "paid_at": _now(), "paid_by": who}
+        for i in sel:
+            set_fields[f"items.{i}.paid"] = True
+        if last_part:
+            set_fields["payment_status"] = "paid"
+            set_fields["payment_method"] = data.method
+        else:
+            set_fields["payment_status"] = "partial"  # p366
         if o.get("status") == "pending_payment":
-            upd["status"] = "pending"
-        await _orders().update_one({"id": order_id}, {"$set": upd})
-        updated = await _orders().find_one({"id": order_id})
-        await _publish("kitchen_order.updated", updated, user)
-        out = _order_out(updated)
-        # p362: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع حقيقية (مخزون + صندوق + محاسبة)
-        # — قبلها كان المال يُحصَّل بلا قيد نهائياً. الآجل debt يبقى بلا قيد (يحتاج حساب زبون).
-        if data.method != "debt" and not updated.get("sale_id"):
+            set_fields["status"] = "pending"  # p336: المسبق يدخل المطبخ بعد اكتمال الدفع
+        payment_rec = {"method": data.method, "amount": part, "item_indexes": sel,
+                       "paid_by": who, "paid_at": _now()}
+        sale_id = None
+        # p362: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع حقيقية لكل دفعة (مخزون + صندوق + محاسبة)
+        # — الآجل debt يبقى بلا قيد (يحتاج حساب زبون)
+        if data.method != "debt" and part > 0:
             try:
                 from models.schemas import SaleCreate
                 from services.application.sales_service import create_sale_op
                 from services import pos_loyalty as _pl
                 phone = _clean_phone(data.customer_phone or o.get("customer_phone") or "")
                 cust = await _pl._resolve_customer(db, phone=phone) if phone else None
-                items = [{
-                    "product_id": i.get("product_id"),
-                    "product_name": i.get("product_name") or "",
-                    "quantity": float(i.get("quantity") or 0),
-                    "unit_price": float(i.get("unit_price") or 0),
-                    "total": round(float(i.get("quantity") or 0) * float(i.get("unit_price") or 0), 2),
-                    "note": i.get("note") or "",
-                    "modifiers": i.get("modifiers"),
-                } for i in (updated.get("items") or [])]
-                sub = round(sum(i["total"] for i in items), 2)
-                disc = float((updated.get("discount") or {}).get("amount") or 0)
-                total = round(max(0.0, sub - disc), 2)
-                if items and total > 0:
+                sitems = [{
+                    "product_id": items_doc[i].get("product_id"),
+                    "product_name": items_doc[i].get("product_name") or "",
+                    "quantity": float(items_doc[i].get("quantity") or 0),
+                    "unit_price": float(items_doc[i].get("unit_price") or 0),
+                    "total": round(float(items_doc[i].get("quantity") or 0) * float(items_doc[i].get("unit_price") or 0), 2),
+                    "note": items_doc[i].get("note") or "",
+                    "modifiers": items_doc[i].get("modifiers"),
+                } for i in sel]
+                if sitems:
                     s = SaleCreate(
                         customer_id=(cust or {}).get("id"),
-                        items=items, subtotal=sub, discount=disc, total=total,
-                        paid_amount=total,
+                        items=sitems, subtotal=sub, discount=part_disc, total=part,
+                        paid_amount=part,
                         payment_method="cash" if data.method == "cash" else "bank",
                         payment_type="cash",
-                        notes=f"طلب مطعم {updated.get('code', '')} ({updated.get('table_name') or 'سفري'})")
+                        notes=f"طلب مطعم {o.get('code', '')} ({o.get('table_name') or 'سفري'}) — دفعة {len(payments) + 1}")
                     sale = await create_sale_op(db, s, user)
-                    await _orders().update_one(
-                        {"id": order_id},
-                        {"$set": {"sale_id": sale["id"], "updated_at": _now()}})
-                    out["sale_id"] = sale["id"]
-                    out["invoice_number"] = sale.get("invoice_number")
+                    sale_id = sale["id"]
+                    payment_rec["sale_id"] = sale_id
+                    payment_rec["invoice_number"] = sale.get("invoice_number")
                     if sale.get("loyalty_earned"):
-                        out["loyalty_earned"] = sale["loyalty_earned"]
+                        payment_rec["loyalty_earned"] = sale["loyalty_earned"]
             except Exception:
-                pass  # القيد المحاسبي لا يُسقط الدفع — الطلب يبقى مدفوعاً
+                pass  # القيد المحاسبي لا يُسقط الدفع — الدفعة تبقى مسجلة
+        if sale_id and not o.get("sale_id"):
+            set_fields["sale_id"] = sale_id  # توافق p362: أول فاتورة تبقى في الحقل المفرد
+        upd = {"$set": set_fields, "$push": {"payments": payment_rec}}
+        if sale_id:
+            upd["$push"]["sale_ids"] = sale_id
+        await _orders().update_one({"id": order_id}, upd)
+        updated = await _orders().find_one({"id": order_id})
+        await _publish("kitchen_order.updated", updated, user)
+        out = _order_out(updated)
+        out["payment"] = payment_rec
+        if sale_id:
+            out["sale_id"] = sale_id
+            out["invoice_number"] = payment_rec.get("invoice_number")
+            if payment_rec.get("loyalty_earned"):
+                out["loyalty_earned"] = payment_rec["loyalty_earned"]
         # p356: كسب نقاط الولاء عند الدفع الفعلي — فقط إن لم تُنشأ فاتورة (الفاتورة تكسب بنفسها)
-        if data.method != "debt" and not out.get("sale_id"):
+        if data.method != "debt" and not sale_id and part > 0:
             from services import pos_loyalty
             earned = await pos_loyalty.earn_points(
-                db, amount=out.get("final_total") or out.get("total") or 0,
-                ref_id=order_id, ref_label=f"طلب مطعم {o.get('code', '')}",
+                db, amount=part,
+                ref_id=f"{order_id}#{len(payments) + 1}", ref_label=f"طلب مطعم {o.get('code', '')}",
                 user_name=user.get("username") or user.get("email", ""),
                 phone=data.customer_phone or o.get("customer_phone") or "")
             if earned:
