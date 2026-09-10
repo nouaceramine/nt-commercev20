@@ -106,6 +106,13 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/waiter-stats?days=${tstatsDays}`).then(r => setWstats(r.data)).catch(() => {});  // p369
   }, [tstatsDays]);
 
+  // p371: تقرير إقفال اليوم (Z) — يُجلب عند تغيير التاريخ فقط
+  const [zrep, setZrep] = useState(null);
+  const [zdate, setZdate] = useState('');
+  useEffect(() => {
+    apiClient.get(`/restaurant/z-report${zdate ? `?date=${zdate}` : ''}`).then(r => setZrep(r.data)).catch(() => {});
+  }, [zdate]);
+
   // p370: حجوزات الطاولات المسبقة
   const [resvList, setResvList] = useState([]);
   const [resvDlg, setResvDlg] = useState(false);
@@ -478,6 +485,51 @@ export default function TablesMapPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* p371: تقرير إقفال اليوم (Z) */}
+        <Card data-testid="zreport-card">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <Banknote className="h-4 w-4" />{isAr ? 'تقرير إقفال اليوم (Z)' : 'Rapport Z'}
+              </h2>
+              <input type="date" value={zdate} onChange={e => setZdate(e.target.value)}
+                className="border rounded h-8 px-2 text-xs bg-background" data-testid="z-date" />
+            </div>
+            {!zrep ? (
+              <p className="text-xs text-muted-foreground">{isAr ? 'جارٍ التحميل…' : 'Chargement…'}</p>
+            ) : zrep.orders === 0 && zrep.cancelled === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="z-empty">{isAr ? `لا طلبات يوم ${zrep.date}` : 'Aucune commande'}</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-center">
+                  <div className="border rounded p-1.5"><div className="text-lg font-black" data-testid="z-orders">{zrep.orders}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'طلبات' : 'Cmd'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black text-red-600" data-testid="z-cancelled">{zrep.cancelled}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'ملغاة' : 'Annul.'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black text-emerald-700" dir="ltr" data-testid="z-revenue">{zrep.revenue}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'الإيراد المحصَّل' : 'Revenu'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black" dir="ltr" data-testid="z-discounts">{zrep.discounts}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'الخصومات' : 'Remises'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black" dir="ltr" data-testid="z-avg">{zrep.avg_order}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'متوسط الطلب' : 'Panier'}</div></div>
+                </div>
+                {(zrep.by_method || []).length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs" data-testid="z-methods">
+                    {(zrep.by_method || []).map(m => (
+                      <span key={m.method} className="border rounded-full px-2 py-1" data-testid={`z-method-${m.method}`}>
+                        {m.method === 'cash' ? (isAr ? 'كاش' : 'Especes') : m.method === 'card' ? (isAr ? 'بطاقة' : 'Carte') : (isAr ? 'آجل' : 'Credit')}: <b dir="ltr">{m.amount}</b> ({m.count})
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {(zrep.top_dishes || []).length > 0 && (
+                  <div className="text-xs" data-testid="z-dishes">
+                    <span className="text-muted-foreground">{isAr ? 'الأكثر طلباً: ' : 'Top: '}</span>
+                    {(zrep.top_dishes || []).slice(0, 5).map((d, i) => (
+                      <span key={i} className="inline-block bg-muted rounded-full px-2 py-0.5 ml-1 mb-1" data-testid={`z-dish-${i}`}>{d.name} ×{d.qty}</span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
 
         {/* p370: حجوزات الطاولات المسبقة */}
         <Card data-testid="resv-card">

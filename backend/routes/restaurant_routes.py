@@ -815,6 +815,74 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "handled_by": user.get("username") or user.get("email")}})
         return _resv_out(await _resv().find_one({"id": resv_id}))
 
+    # ---------- p371: تقرير إقفال اليوم (Z) للمطعم — بتوقيت الجزائر ----------
+    @router.get("/z-report")
+    async def z_report(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+        dz = timezone(timedelta(hours=1))
+        try:
+            day = datetime.fromisoformat(str(date)).date() if date else _now().astimezone(dz).date()
+        except Exception:
+            raise HTTPException(status_code=400, detail="تاريخ غير صالح")
+        start = datetime(day.year, day.month, day.day, tzinfo=dz).astimezone(timezone.utc)
+        end = start + timedelta(days=1)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": start, "$lt": end}}},
+            {"$addFields": {
+                "bill": _bill,
+                "cxl": {"$eq": ["$status", "cancelled"]},
+                "disc_amt": {"$cond": [{"$eq": ["$status", "cancelled"]}, 0,
+                                       {"$ifNull": ["$discount.amount", 0]}]},
+                # توحيد الدفعات: p366+ لها payments[]؛ الطلبات الأقدم المدفوعة تُشتق من payment_method
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$facet": {
+                "overall": [{"$group": {"_id": None,
+                                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                                        "discounts": {"$sum": "$disc_amt"},
+                                        "avg_bill": {"$avg": {"$cond": ["$cxl", None, "$bill"]}}}}],
+                "methods": [{"$unwind": "$pay_list"},
+                            {"$group": {"_id": "$pay_list.method",
+                                        "amount": {"$sum": {"$ifNull": ["$pay_list.amount", 0]}},
+                                        "count": {"$sum": 1}}},
+                            {"$sort": {"amount": -1}}],
+                "dishes": [{"$match": {"cxl": False}},
+                           {"$unwind": "$items"},
+                           {"$group": {"_id": "$items.product_name", "qty": {"$sum": "$items.quantity"}}},
+                           {"$sort": {"qty": -1}}, {"$limit": 8}],
+                "hours": [{"$match": {"cxl": False}},
+                          {"$group": {"_id": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
+                                      "n": {"$sum": 1}}},
+                          {"$sort": {"_id": 1}}],
+            }},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(1)
+        fac = rows[0] if rows else {}
+        ov = (fac.get("overall") or [{}])[0]
+        methods = [{"method": m["_id"], "amount": round(float(m.get("amount") or 0), 2),
+                    "count": m["count"]} for m in (fac.get("methods") or [])]
+        return {
+            "date": day.isoformat(),
+            "orders": ov.get("orders", 0),
+            "cancelled": ov.get("cancelled", 0),
+            "discounts": round(float(ov.get("discounts") or 0), 2),
+            "avg_order": round(float(ov.get("avg_bill") or 0), 2),
+            "revenue": round(sum(m["amount"] for m in methods if m["method"] != "debt"), 2),
+            "by_method": methods,
+            "top_dishes": [{"name": d["_id"], "qty": d["qty"]} for d in (fac.get("dishes") or [])],
+            "by_hour": [{"hour": h["_id"], "count": h["n"]} for h in (fac.get("hours") or [])],
+        }
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):
