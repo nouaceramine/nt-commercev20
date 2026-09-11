@@ -883,6 +883,64 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "by_hour": [{"hour": h["_id"], "count": h["n"]} for h in (fac.get("hours") or [])],
         }
 
+    # ---------- p372: فاتورة/إيصال الزبون — بيانات جاهزة للطباعة ----------
+    @router.get("/kitchen-orders/{order_id}/receipt")
+    async def kitchen_order_receipt(order_id: str, user: dict = Depends(get_current_user)):
+        o = await _orders().find_one({"id": order_id})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        data = _order_out(o)  # total / discount_amount / final_total / paid_amount / remaining_total
+
+        def _iso(v):
+            return v.isoformat() if hasattr(v, "isoformat") else (str(v) if v else "")
+
+        table_name = ""
+        if o.get("table_id"):
+            t = await _tables().find_one({"id": o["table_id"]}, {"_id": 0, "name": 1})
+            table_name = (t or {}).get("name") or ""
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+        items = [{
+            "name": i.get("product_name") or "",
+            "quantity": i.get("quantity") or 0,
+            "unit_price": round(float(i.get("unit_price") or 0), 2),
+            "total": round(float(i.get("quantity") or 0) * float(i.get("unit_price") or 0), 2),
+            "paid": bool(i.get("paid")),
+        } for i in (o.get("items") or [])]
+        pays = [{
+            "method": p.get("method") or "cash",
+            "amount": round(float(p.get("amount") or 0), 2),
+            "paid_by": p.get("paid_by") or "",
+            "paid_at": _iso(p.get("paid_at")),
+            "invoice_number": p.get("invoice_number") or "",
+        } for p in (o.get("payments") or [])]
+        ts = o.get("timestamps") or {}
+        return {
+            "store_name": store,
+            "code": o.get("code") or "",
+            "order_id": o.get("id"),
+            "table_name": table_name,
+            "status": o.get("status") or "",
+            "payment_status": o.get("payment_status") or "unpaid",
+            "payment_method": o.get("payment_method") or "",
+            "created_by": o.get("created_by") or "",
+            "created_at": _iso(o.get("created_at")),
+            "served_at": _iso(ts.get("served")),
+            "items": items,
+            "total": data.get("total") or 0,
+            "discount_amount": data.get("discount_amount") or 0,
+            "final_total": data.get("final_total") or 0,
+            "paid_amount": data.get("paid_amount") or 0,
+            "remaining_total": data.get("remaining_total") or 0,
+            "payments": pays,
+        }
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):

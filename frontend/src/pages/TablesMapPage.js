@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';  // p336
-import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors } from 'lucide-react';  // p334+p336+p337+p366
+import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors, Printer } from 'lucide-react';  // p334+p336+p337+p366+p372
 import { QRCodeCanvas } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
@@ -178,6 +178,7 @@ export default function TablesMapPage() {
   // p366: تقسيم الفاتورة — دفع عناصر محددة في دفعة مستقلة
   const [splitOpen, setSplitOpen] = useState(false);
   const [splitSel, setSplitSel] = useState([]);
+  const [receipt, setReceipt] = useState(null);  // p372: فاتورة الزبون للطباعة
   const [splitMethod, setSplitMethod] = useState('cash');
   const [splitPaying, setSplitPaying] = useState(false);
   const toggleSplitItem = (i) => setSplitSel(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]);
@@ -191,6 +192,15 @@ export default function TablesMapPage() {
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
     finally { setSplitPaying(false); }
+  };
+
+  // p372: فاتورة الزبون — جلب البيانات من الخادم ثم طباعة منطقة مخفية
+  const printReceipt = async (oid) => {
+    try {
+      const res = await apiClient.get(`/restaurant/kitchen-orders/${oid}/receipt`);
+      setReceipt(res.data);
+      setTimeout(() => { try { window.print(); } catch (e) {} }, 400);
+    } catch (e) { toast.error(isAr ? 'تعذر جلب الفاتورة' : 'Recu indisponible'); }
   };
 
   // p336: تأكيد دفع طلب (كاش) من خريطة الطاولات
@@ -807,6 +817,9 @@ export default function TablesMapPage() {
                           )}
                         </div>
                       )}
+                      <Button variant="outline" className="w-full min-h-[44px]" onClick={() => printReceipt(ord.id)} data-testid="receipt-print-btn">
+                        <Printer className="h-4 w-4 ml-1" />{isAr ? 'طباعة فاتورة الزبون' : 'Imprimer le recu'}
+                      </Button>
                       <Button className="w-full min-h-[44px]" onClick={() => checkout(selTable)} data-testid="table-checkout-btn">
                         {isAr ? 'إنهاء وتحرير الطاولة' : 'Cloturer et liberer'}
                       </Button>
@@ -904,6 +917,56 @@ export default function TablesMapPage() {
             </div>
           </DialogContent>
         </Dialog>
+        {/* p372: فاتورة الزبون — مخفية على الشاشة، تظهر عند الطبع فقط */}
+        {receipt && (
+          <div id="receipt-print" className="hidden print:block" dir="rtl" data-testid="receipt-print">
+            <style>{`@media print { body * { visibility: hidden; } #receipt-print, #receipt-print * { visibility: visible; } #receipt-print { position: absolute; inset: 0; background: #fff; color: #000; padding: 24px; font-family: monospace; } }`}</style>
+            <div style={{ textAlign: 'center', borderBottom: '2px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 22, fontWeight: 900 }} data-testid="receipt-store">{receipt.store_name || ''}</div>
+              <div style={{ fontSize: 16 }}>{isAr ? 'فاتورة زبون' : 'Recu client'}</div>
+              <div style={{ fontSize: 14 }} data-testid="receipt-code">{receipt.code}{receipt.table_name ? ` · ${receipt.table_name}` : ''}</div>
+              <div style={{ fontSize: 13 }}>{receipt.created_at ? new Date(receipt.created_at).toLocaleString('ar-DZ') : ''}{receipt.created_by ? ` · ${receipt.created_by}` : ''}</div>
+            </div>
+            <table style={{ width: '100%', fontSize: 15, borderCollapse: 'collapse' }}>
+              <tbody>
+                {(receipt.items || []).map((it, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #ccc' }} data-testid={`receipt-item-${i}`}>
+                    <td style={{ padding: '4px 0' }}>×{it.quantity} {it.name}{it.paid ? '' : (isAr ? ' (غير مدفوع)' : ' (non paye)')}</td>
+                    <td style={{ textAlign: 'left', fontFamily: 'monospace' }} dir="ltr">{it.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ marginTop: 8, fontSize: 15 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{isAr ? 'المجموع' : 'Sous-total'}</span><span dir="ltr" data-testid="receipt-total">{receipt.total}</span></div>
+              {receipt.discount_amount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{isAr ? 'الخصم' : 'Remise'}</span><span dir="ltr" data-testid="receipt-discount">-{receipt.discount_amount}</span></div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 18, borderTop: '2px solid #000', marginTop: 4, paddingTop: 4 }}>
+                <span>{isAr ? 'الصافي' : 'Net'}</span><span dir="ltr" data-testid="receipt-final">{receipt.final_total} {isAr ? 'دج' : 'DA'}</span>
+              </div>
+            </div>
+            {(receipt.payments || []).length > 0 && (
+              <div style={{ marginTop: 8, borderTop: '1px dashed #000', paddingTop: 6, fontSize: 14 }}>
+                {(receipt.payments || []).map((p, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }} data-testid={`receipt-pay-${i}`}>
+                    <span>{isAr ? ({ cash: 'كاش', card: 'بطاقة', debt: 'دين' }[p.method] || p.method) : p.method}{p.invoice_number ? ` · ${p.invoice_number}` : ''}</span>
+                    <span dir="ltr">{p.amount}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                  <span>{isAr ? 'المدفوع' : 'Paye'}</span><span dir="ltr" data-testid="receipt-paid">{receipt.paid_amount}</span>
+                </div>
+                {receipt.remaining_total > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                    <span>{isAr ? 'المتبقي' : 'Reste'}</span><span dir="ltr" data-testid="receipt-remaining">{receipt.remaining_total}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ textAlign: 'center', marginTop: 10, fontSize: 14 }}>{isAr ? 'شكرًا لزيارتكم' : 'Merci de votre visite'}</div>
+          </div>
+        )}
       </div>
     </Layout>
   );
