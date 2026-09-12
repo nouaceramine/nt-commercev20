@@ -941,6 +941,65 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "payments": pays,
         }
 
+    # ---------- p374: منحنى إيرادات المطعم متعدد الأيام ----------
+    @router.get("/revenue-trend")
+    async def revenue_trend(days: int = 7, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days or 7), 90))  # days=0 → 7 (اتفاق p363)، سقف 90
+        dz = timezone(timedelta(hours=1))
+        today = _now().astimezone(dz).date()
+        start_d = today - timedelta(days=days - 1)
+        start = datetime(start_d.year, start_d.month, start_d.day, tzinfo=dz).astimezone(timezone.utc)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": start}}},
+            {"$addFields": {
+                "bill": _bill,
+                "cxl": {"$eq": ["$status", "cancelled"]},
+                "disc_amt": {"$cond": [{"$eq": ["$status", "cancelled"]}, 0,
+                                       {"$ifNull": ["$discount.amount", 0]}]},
+                # توحيد الدفعات كما في z-report: p366+ لها payments[] والأقدم يُشتق من payment_method
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "day": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
+                                          "timezone": "Africa/Algiers"}},
+                # المحصَّل النقدي الفعلي يستثني الآجل — نفس دلالة revenue في z-report
+                "paid_nd": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": "$day",
+                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                        "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_nd"]}},
+                        "discounts": {"$sum": "$disc_amt"}}},
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(100)
+        by_day = {r["_id"]: r for r in rows}
+        series = []
+        d = start_d
+        while d <= today:  # ملء الأيام الفارغة بأصفار — المنحنى متصل زمنيًا
+            k = d.isoformat()
+            r = by_day.get(k) or {}
+            series.append({"date": k,
+                           "orders": int(r.get("orders") or 0),
+                           "revenue": round(float(r.get("revenue") or 0), 2),
+                           "discounts": round(float(r.get("discounts") or 0), 2)})
+            d += timedelta(days=1)
+        return {"days": days, "series": series,
+                "total_orders": sum(s["orders"] for s in series),
+                "total_revenue": round(sum(s["revenue"] for s in series), 2)}
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):

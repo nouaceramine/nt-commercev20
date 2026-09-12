@@ -113,6 +113,13 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/z-report${zdate ? `?date=${zdate}` : ''}`).then(r => setZrep(r.data)).catch(() => {});
   }, [zdate]);
 
+  // p374: منحنى الإيرادات متعدد الأيام — يُجلب عند تغيير الفترة فقط
+  const [trend, setTrend] = useState(null);
+  const [trendDays, setTrendDays] = useState(7);
+  useEffect(() => {
+    apiClient.get(`/restaurant/revenue-trend?days=${trendDays}`).then(r => setTrend(r.data)).catch(() => {});
+  }, [trendDays]);
+
   // p370: حجوزات الطاولات المسبقة
   const [resvList, setResvList] = useState([]);
   const [resvDlg, setResvDlg] = useState(false);
@@ -537,6 +544,44 @@ export default function TablesMapPage() {
                   </div>
                 )}
               </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* p374: منحنى إيرادات المطعم متعدد الأيام — أعمدة CSS بسيطة */}
+        <Card data-testid="trend-card">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <Banknote className="h-4 w-4" />{isAr ? 'منحنى الإيرادات المحصَّلة' : 'Tendance revenus'}
+                <span className="text-xs text-muted-foreground font-normal">(<span dir="ltr" data-testid="trend-total-revenue">{trend ? trend.total_revenue : '…'}</span> {isAr ? 'دج' : 'DA'})</span>
+              </h2>
+              <Select value={String(trendDays)} onValueChange={v => setTrendDays(Number(v))}>
+                <SelectTrigger className="w-24 h-8" data-testid="trend-days"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">7</SelectItem>
+                  <SelectItem value="14">14</SelectItem>
+                  <SelectItem value="30">30</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {!trend ? (
+              <p className="text-xs text-muted-foreground">{isAr ? 'جارٍ التحميل…' : 'Chargement…'}</p>
+            ) : (
+              <div className="flex items-end gap-1 h-28" dir="ltr" data-testid="trend-bars">
+                {(trend.series || []).map(s => {
+                  const mx = Math.max(1, ...(trend.series || []).map(x => x.revenue || 0));
+                  const h = Math.max(2, Math.round(((s.revenue || 0) / mx) * 72));
+                  return (
+                    <div key={s.date} className="flex-1 flex flex-col items-center justify-end gap-0.5 h-full"
+                      title={`${s.date}: ${s.revenue} (${s.orders})`}>
+                      <div className="text-[9px] text-muted-foreground" dir="ltr">{s.revenue || ''}</div>
+                      <div className="w-full bg-emerald-600/70 rounded-t" style={{ height: `${h}px` }} data-testid={`trend-bar-${s.date}`} />
+                      <div className="text-[9px] text-muted-foreground" dir="ltr">{s.date.slice(5)}</div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
