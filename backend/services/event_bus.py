@@ -196,7 +196,12 @@ class RedisEventBus:
                 log.info("consume_loop cancelled")
                 break
             except Exception as exc:
-                log.exception("consume_loop iteration failed: %s", exc)
+                # p373: مهلة القراءة الحجبية لـ XREADGROUP حميدة (تُعاد المحاولة تلقائيًا) —
+                # سطر debug واحد بلا traceback؛ الأخطاء الحقيقية تبقى مُسجَّلة كاملة
+                if "Timeout" in type(exc).__name__ or "timed out" in str(exc).lower():
+                    log.debug("consume_loop: blocking-read timeout (benign) — continuing")
+                else:
+                    log.exception("consume_loop iteration failed: %s", exc)
                 await asyncio.sleep(1)
         log.info("consume_loop stopped")
 
