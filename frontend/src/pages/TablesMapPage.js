@@ -186,6 +186,7 @@ export default function TablesMapPage() {
   const [splitOpen, setSplitOpen] = useState(false);
   const [splitSel, setSplitSel] = useState([]);
   const [receipt, setReceipt] = useState(null);  // p372: فاتورة الزبون للطباعة
+  const [printMode, setPrintMode] = useState(null);  // p375: receipt | z — أي منطقة طباعة تظهر
   const [splitMethod, setSplitMethod] = useState('cash');
   const [splitPaying, setSplitPaying] = useState(false);
   const toggleSplitItem = (i) => setSplitSel(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]);
@@ -205,6 +206,7 @@ export default function TablesMapPage() {
   const printReceipt = async (oid) => {
     try {
       const res = await apiClient.get(`/restaurant/kitchen-orders/${oid}/receipt`);
+      setPrintMode('receipt');
       setReceipt(res.data);
       setTimeout(() => { try { window.print(); } catch (e) {} }, 400);
     } catch (e) { toast.error(isAr ? 'تعذر جلب الفاتورة' : 'Recu indisponible'); }
@@ -510,8 +512,15 @@ export default function TablesMapPage() {
               <h2 className="font-semibold text-sm flex items-center gap-2">
                 <Banknote className="h-4 w-4" />{isAr ? 'تقرير إقفال اليوم (Z)' : 'Rapport Z'}
               </h2>
-              <input type="date" value={zdate} onChange={e => setZdate(e.target.value)}
-                className="border rounded h-8 px-2 text-xs bg-background" data-testid="z-date" />
+              <div className="flex items-center gap-1">
+                <input type="date" value={zdate} onChange={e => setZdate(e.target.value)}
+                  className="border rounded h-8 px-2 text-xs bg-background" data-testid="z-date" />
+                <Button size="sm" variant="outline" className="h-8" data-testid="z-print-btn"
+                  disabled={!zrep || (zrep.orders === 0 && zrep.cancelled === 0)}
+                  onClick={() => { setPrintMode('z'); setTimeout(() => { try { window.print(); } catch (e) {} }, 300); }}>
+                  <Printer className="h-3.5 w-3.5 ml-1" />{isAr ? 'طباعة' : 'Imprimer'}
+                </Button>
+              </div>
             </div>
             {!zrep ? (
               <p className="text-xs text-muted-foreground">{isAr ? 'جارٍ التحميل…' : 'Chargement…'}</p>
@@ -963,7 +972,7 @@ export default function TablesMapPage() {
           </DialogContent>
         </Dialog>
         {/* p372: فاتورة الزبون — مخفية على الشاشة، تظهر عند الطبع فقط */}
-        {receipt && (
+        {printMode === 'receipt' && receipt && (
           <div id="receipt-print" className="hidden print:block" dir="rtl" data-testid="receipt-print">
             <style>{`@media print { body * { visibility: hidden; } #receipt-print, #receipt-print * { visibility: visible; } #receipt-print { position: absolute; inset: 0; background: #fff; color: #000; padding: 24px; font-family: monospace; } }`}</style>
             <div style={{ textAlign: 'center', borderBottom: '2px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
@@ -1010,6 +1019,43 @@ export default function TablesMapPage() {
               </div>
             )}
             <div style={{ textAlign: 'center', marginTop: 10, fontSize: 14 }}>{isAr ? 'شكرًا لزيارتكم' : 'Merci de votre visite'}</div>
+          </div>
+        )}
+        {/* p375: تقرير الإقفال للطباعة — مخفي على الشاشة، يظهر عند الطبع فقط */}
+        {printMode === 'z' && zrep && (
+          <div id="z-print" className="hidden print:block" dir="rtl" data-testid="z-print">
+            <style>{`@media print { body * { visibility: hidden; } #z-print, #z-print * { visibility: visible; } #z-print { position: absolute; inset: 0; background: #fff; color: #000; padding: 24px; font-family: monospace; } }`}</style>
+            <div style={{ textAlign: 'center', borderBottom: '2px dashed #000', paddingBottom: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{isAr ? 'تقرير إقفال اليوم (Z)' : 'Rapport Z'}</div>
+              <div style={{ fontSize: 16 }} data-testid="z-print-date">{zrep.date}</div>
+            </div>
+            <div style={{ fontSize: 15, lineHeight: 2 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{isAr ? 'الطلبات' : 'Commandes'}</span><b dir="ltr">{zrep.orders}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{isAr ? 'الملغاة' : 'Annulees'}</span><b dir="ltr">{zrep.cancelled}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{isAr ? 'الخصومات' : 'Remises'}</span><b dir="ltr">{zrep.discounts}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{isAr ? 'متوسط الطلب' : 'Panier moyen'}</span><b dir="ltr">{zrep.avg_order}</b></div>
+            </div>
+            <div style={{ marginTop: 6, borderTop: '1px dashed #000', paddingTop: 6, fontSize: 15 }}>
+              {(zrep.by_method || []).map(m => (
+                <div key={m.method} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{m.method === 'cash' ? (isAr ? 'كاش' : 'Especes') : m.method === 'card' ? (isAr ? 'بطاقة' : 'Carte') : (isAr ? 'آجل' : 'Credit')} ({m.count})</span>
+                  <b dir="ltr">{m.amount}</b>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 18, borderTop: '2px solid #000', marginTop: 4, paddingTop: 4 }}>
+                <span>{isAr ? 'الإيراد المحصَّل (بلا الآجل)' : 'Revenu encaisse'}</span><b dir="ltr" data-testid="z-print-revenue">{zrep.revenue} {isAr ? 'دج' : 'DA'}</b>
+              </div>
+            </div>
+            {(zrep.top_dishes || []).length > 0 && (
+              <div style={{ marginTop: 6, borderTop: '1px dashed #000', paddingTop: 6, fontSize: 14 }}>
+                <div style={{ fontWeight: 700 }}>{isAr ? 'الأكثر طلبًا:' : 'Top plats:'}</div>
+                {(zrep.top_dishes || []).slice(0, 8).map((d, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{d.name}</span><b dir="ltr">×{d.qty}</b>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
