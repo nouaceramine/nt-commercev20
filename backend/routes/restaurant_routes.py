@@ -756,6 +756,10 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     async def list_reservations(days: int = 7, user: dict = Depends(get_current_user)):
         days = max(1, min(int(days or 7), 30))
         now = _now()
+        # p382: حجز مضى على موعده أكثر من ساعتين بلا حضور يُوسم no_show تلقائيًا (كسولًا عند القراءة)
+        await _resv().update_many(
+            {"status": "booked", "reserved_for": {"$lt": now - timedelta(hours=2)}},
+            {"$set": {"status": "no_show", "auto_no_show": True, "updated_at": now}})
         rows = await _resv().find({
             "reserved_for": {"$gte": now - timedelta(hours=3),
                              "$lte": now + timedelta(days=days)},
