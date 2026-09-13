@@ -884,8 +884,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         }
 
     # ---------- p372: فاتورة/إيصال الزبون — بيانات جاهزة للطباعة ----------
-    @router.get("/kitchen-orders/{order_id}/receipt")
-    async def kitchen_order_receipt(order_id: str, user: dict = Depends(get_current_user)):
+    async def _receipt_payload(order_id: str, user: dict) -> dict:
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
@@ -940,6 +939,97 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "remaining_total": data.get("remaining_total") or 0,
             "payments": pays,
         }
+
+    @router.get("/kitchen-orders/{order_id}/receipt")
+    async def kitchen_order_receipt(order_id: str, user: dict = Depends(get_current_user)):
+        return await _receipt_payload(order_id, user)
+
+    # ---------- p377: إيصال الزبون PDF — نفس بيانات p372 بتنسيق قابل للتنزيل والمشاركة ----------
+    @router.get("/kitchen-orders/{order_id}/receipt.pdf")
+    async def kitchen_order_receipt_pdf(order_id: str, user: dict = Depends(get_current_user)):
+        d = await _receipt_payload(order_id, user)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.units import mm
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        # نمط import_export المجرب: Noto Naskh Arabic + تشكيل + bidi
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        items = d.get("items") or []
+        pays = d.get("payments") or []
+        W = 80 * mm  # عرض طابعة الإيصالات القياسي
+        rows = 16 + len(items) + (len(pays) + 3 if pays else 0) \
+            + (1 if d.get("discount_amount") else 0) + (1 if d.get("remaining_total") else 0)
+        H = 20 * mm + rows * 5.2 * mm
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=(W, H))
+        y = [H - 9 * mm]
+
+        def _center(txt, size=9):
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= 5.0 * mm
+
+        def _row(label, val, size=9):
+            c.setFont("Arabic", size)
+            c.drawRightString(W - 6 * mm, y[0], _ar(label))
+            c.drawString(6 * mm, y[0], _ar(val))
+            y[0] -= 5.0 * mm
+
+        def _dash():
+            c.setDash(1, 2)
+            c.line(5 * mm, y[0] + 1.5 * mm, W - 5 * mm, y[0] + 1.5 * mm)
+            c.setDash(1, 0)
+            y[0] -= 3.5 * mm
+
+        _center(d.get("store_name") or "", 13)
+        _center("فاتورة زبون", 10)
+        _center((d.get("code") or "") + (" · " + d["table_name"] if d.get("table_name") else ""), 9)
+        if d.get("created_at"):
+            _center(str(d["created_at"]).replace("T", " ")[:16], 8)
+        _dash()
+        for it in items:
+            _row("{} ×{}".format(it.get("name"), it.get("quantity")), str(it.get("total")), 9)
+        _dash()
+        _row("المجموع", str(d.get("total")), 9)
+        if d.get("discount_amount"):
+            _row("الخصم", "-" + str(d.get("discount_amount")), 9)
+        _row("الصافي", str(d.get("final_total")), 12)
+        if pays:
+            _dash()
+            mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
+            for p in pays:
+                lab = mlabel.get(p.get("method"), p.get("method") or "")
+                if p.get("invoice_number"):
+                    lab += " " + str(p["invoice_number"])
+                _row(lab, str(p.get("amount")), 8)
+            _row("المدفوع", str(d.get("paid_amount")), 10)
+            if d.get("remaining_total"):
+                _row("المتبقي", str(d.get("remaining_total")), 10)
+        _dash()
+        _center("شكرًا لزيارتكم", 9)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "receipt-" + (d.get("code") or order_id) + ".pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p374: منحنى إيرادات المطعم متعدد الأيام ----------
     @router.get("/revenue-trend")

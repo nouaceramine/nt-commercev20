@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';  // p336
-import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors, Printer } from 'lucide-react';  // p334+p336+p337+p366+p372
+import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors, Printer, Download } from 'lucide-react';  // p334+p336+p337+p366+p372+p377
 import { QRCodeCanvas } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
@@ -210,6 +210,21 @@ export default function TablesMapPage() {
       setReceipt(res.data);
       setTimeout(() => { try { window.print(); } catch (e) {} }, 400);
     } catch (e) { toast.error(isAr ? 'تعذر جلب الفاتورة' : 'Recu indisponible'); }
+  };
+
+  // p377: تحميل فاتورة الزبون PDF — جلب مصادق عليه ثم تنزيل كملف
+  const downloadReceiptPdf = async (oid, code) => {
+    try {
+      const res = await apiClient.get(`/restaurant/kitchen-orders/${oid}/receipt.pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `receipt-${code || oid}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
   // p336: تأكيد دفع طلب (كاش) من خريطة الطاولات
@@ -873,6 +888,9 @@ export default function TablesMapPage() {
                       )}
                       <Button variant="outline" className="w-full min-h-[44px]" onClick={() => printReceipt(ord.id)} data-testid="receipt-print-btn">
                         <Printer className="h-4 w-4 ml-1" />{isAr ? 'طباعة فاتورة الزبون' : 'Imprimer le recu'}
+                      </Button>
+                      <Button variant="outline" className="w-full min-h-[44px]" onClick={() => downloadReceiptPdf(ord.id, ord.code)} data-testid="receipt-pdf-btn">
+                        <Download className="h-4 w-4 ml-1" />{isAr ? 'تحميل الفاتورة PDF' : 'Telecharger PDF'}
                       </Button>
                       <Button className="w-full min-h-[44px]" onClick={() => checkout(selTable)} data-testid="table-checkout-btn">
                         {isAr ? 'إنهاء وتحرير الطاولة' : 'Cloturer et liberer'}
