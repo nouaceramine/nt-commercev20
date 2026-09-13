@@ -754,6 +754,11 @@ export default function TablesMapPage() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h2 className="font-semibold text-sm flex items-center gap-2">
                 <CalendarClock className="h-4 w-4" />{isAr ? 'حجوزات الطاولات' : 'Reservations'}
+                {(resvList || []).filter(r => r.status === 'booked').length > 0 && (
+                  <span className="text-xs text-muted-foreground font-normal" data-testid="resv-booked-count">
+                    ({(resvList || []).filter(r => r.status === 'booked').length} {isAr ? 'قائم' : 'actif'})
+                  </span>
+                )}
               </h2>
               <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => setResvDlg(true)}>
                 <Plus className="h-4 w-4 ml-1" />{isAr ? 'حجز جديد' : 'Nouvelle'}
@@ -768,6 +773,12 @@ export default function TablesMapPage() {
                     <div className="min-w-0">
                       <span className="font-semibold">{r.customer_name}</span>
                       <span className="text-muted-foreground text-xs"> — {r.table_name} · {r.party_size} {isAr ? 'أشخاص' : 'pers.'}</span>
+                      {/* p384: وسم الحجز الوشيك — ضمن 30 دقيقة القادمة (يتحدث مع نبض الصفحة كل 30ث) */}
+                      {r.status === 'booked' && (() => { const ms = new Date(r.reserved_for) - Date.now(); return ms > 0 && ms <= 30 * 60000; })() && (
+                        <span className="inline-block bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 rounded-full px-2 py-0.5 text-[10px] font-bold mr-1 animate-pulse" data-testid={`resv-soon-${r.id}`}>
+                          {isAr ? '⏰ قادم قريبًا' : '⏰ Bientot'}
+                        </span>
+                      )}
                       <div className="text-xs text-muted-foreground" dir="ltr">{new Date(r.reserved_for).toLocaleString('fr-DZ')}</div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
