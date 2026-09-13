@@ -113,6 +113,32 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/z-report${zdate ? `?date=${zdate}` : ''}`).then(r => setZrep(r.data)).catch(() => {});
   }, [zdate]);
 
+  // p380: تقرير فترة مخصصة — يُجلب عند الضغط على «عرض» فقط
+  const [period, setPeriod] = useState(null);
+  const [pFrom, setPFrom] = useState('');
+  const [pTo, setPTo] = useState('');
+  const [pLoading, setPLoading] = useState(false);
+  const loadPeriod = async () => {
+    setPLoading(true);
+    try {
+      const q = `${pFrom ? `date_from=${pFrom}&` : ''}${pTo ? `date_to=${pTo}` : ''}`;
+      const res = await apiClient.get(`/restaurant/period-report${q ? `?${q}` : ''}`);
+      setPeriod(res.data);
+    } catch (e) { toast.error(errText(e)); }
+    finally { setPLoading(false); }
+  };
+  const downloadPeriodPdf = async () => {
+    try {
+      const q = `${pFrom ? `date_from=${pFrom}&` : ''}${pTo ? `date_to=${pTo}` : ''}`;
+      const res = await apiClient.get(`/restaurant/period-report.pdf${q ? `?${q}` : ''}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `period-report.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
+
   // p379: تنزيل تقرير الإقفال Z كملف PDF — جلب مصادق عليه ثم تنزيل
   const downloadZPdf = async () => {
     try {
@@ -665,6 +691,59 @@ export default function TablesMapPage() {
                   );
                 })}
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* p380: تقرير فترة مخصصة (من/إلى) */}
+        <Card data-testid="period-card">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <CalendarClock className="h-4 w-4" />{isAr ? 'تقرير فترة مخصصة' : 'Rapport periode'}
+              </h2>
+              <div className="flex items-center gap-1">
+                <input type="date" value={pFrom} onChange={e => setPFrom(e.target.value)}
+                  className="border rounded h-8 px-2 text-xs bg-background" data-testid="period-from" />
+                <span className="text-xs text-muted-foreground">←</span>
+                <input type="date" value={pTo} onChange={e => setPTo(e.target.value)}
+                  className="border rounded h-8 px-2 text-xs bg-background" data-testid="period-to" />
+                <Button size="sm" className="h-8" onClick={loadPeriod} disabled={pLoading} data-testid="period-run">
+                  {isAr ? 'عرض' : 'Voir'}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8" data-testid="period-pdf-btn"
+                  title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}
+                  disabled={!period || period.orders === 0} onClick={downloadPeriodPdf}>
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+            {period && (
+              <>
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="border rounded p-1.5"><div className="text-lg font-black" data-testid="period-days">{period.days}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'أيام' : 'Jours'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black" data-testid="period-orders">{period.orders}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'طلبات' : 'Cmd'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black text-emerald-700" dir="ltr" data-testid="period-revenue">{period.revenue}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'الإيراد المحصَّل' : 'Revenu'}</div></div>
+                  <div className="border rounded p-1.5"><div className="text-lg font-black" dir="ltr" data-testid="period-discounts">{period.discounts}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'الخصومات' : 'Remises'}</div></div>
+                </div>
+                {(period.by_method || []).length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs" data-testid="period-methods">
+                    {(period.by_method || []).map(m => (
+                      <span key={m.method} className="border rounded-full px-2 py-1" data-testid={`period-method-${m.method}`}>
+                        {m.method === 'cash' ? (isAr ? 'كاش' : 'Especes') : m.method === 'card' ? (isAr ? 'بطاقة' : 'Carte') : (isAr ? 'آجل' : 'Credit')}: <b dir="ltr">{m.amount}</b> ({m.count})
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {(period.top_dishes || []).length > 0 && (
+                  <div className="text-xs" data-testid="period-dishes">
+                    <span className="text-muted-foreground">{isAr ? 'الأكثر طلباً: ' : 'Top: '}</span>
+                    {(period.top_dishes || []).slice(0, 5).map((d, i) => (
+                      <span key={i} className="inline-block bg-muted rounded-full px-2 py-0.5 ml-1 mb-1" data-testid={`period-dish-${i}`}>{d.name} ×{d.qty}</span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>

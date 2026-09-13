@@ -816,14 +816,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _resv_out(await _resv().find_one({"id": resv_id}))
 
     # ---------- p371: تقرير إقفال اليوم (Z) للمطعم — بتوقيت الجزائر ----------
-    async def _zreport_payload(date: Optional[str]) -> dict:
-        dz = timezone(timedelta(hours=1))
-        try:
-            day = datetime.fromisoformat(str(date)).date() if date else _now().astimezone(dz).date()
-        except Exception:
-            raise HTTPException(status_code=400, detail="تاريخ غير صالح")
-        start = datetime(day.year, day.month, day.day, tzinfo=dz).astimezone(timezone.utc)
-        end = start + timedelta(days=1)
+    async def _zreport_agg(start, end) -> dict:
+        # p380: نواة تجميع z-report — مشتركة بين اليوم الواحد (p371) وتقارير الفترات (p380)
         _bill = {"$max": [{"$subtract": [
             {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                          "in": {"$add": ["$$value",
@@ -871,7 +865,6 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         methods = [{"method": m["_id"], "amount": round(float(m.get("amount") or 0), 2),
                     "count": m["count"]} for m in (fac.get("methods") or [])]
         return {
-            "date": day.isoformat(),
             "orders": ov.get("orders", 0),
             "cancelled": ov.get("cancelled", 0),
             "discounts": round(float(ov.get("discounts") or 0), 2),
@@ -881,6 +874,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "top_dishes": [{"name": d["_id"], "qty": d["qty"]} for d in (fac.get("dishes") or [])],
             "by_hour": [{"hour": h["_id"], "count": h["n"]} for h in (fac.get("hours") or [])],
         }
+
+    async def _zreport_payload(date: Optional[str]) -> dict:
+        dz = timezone(timedelta(hours=1))
+        try:
+            day = datetime.fromisoformat(str(date)).date() if date else _now().astimezone(dz).date()
+        except Exception:
+            raise HTTPException(status_code=400, detail="تاريخ غير صالح")
+        start = datetime(day.year, day.month, day.day, tzinfo=dz).astimezone(timezone.utc)
+        end = start + timedelta(days=1)
+        d = await _zreport_agg(start, end)
+        d["date"] = day.isoformat()
+        return d
 
     @router.get("/z-report")
     async def z_report(date: Optional[str] = None, user: dict = Depends(get_current_user)):
@@ -986,6 +991,130 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "z-report-" + (d.get("date") or "today") + ".pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p380: تقرير فترة مخصصة (من/إلى) — JSON وPDF ----------
+    async def _period_bounds(date_from, date_to):
+        dz = timezone(timedelta(hours=1))
+        today = _now().astimezone(dz).date()
+        try:
+            d1 = datetime.fromisoformat(str(date_from)).date() if date_from else today - timedelta(days=6)
+            d2 = datetime.fromisoformat(str(date_to)).date() if date_to else today
+        except Exception:
+            raise HTTPException(status_code=400, detail="تاريخ غير صالح")
+        if d1 > d2:
+            raise HTTPException(status_code=400, detail="تاريخ البداية بعد النهاية")
+        if (d2 - d1).days > 92:
+            raise HTTPException(status_code=400, detail="الفترة أطول من 92 يومًا")
+        start = datetime(d1.year, d1.month, d1.day, tzinfo=dz).astimezone(timezone.utc)
+        end = datetime(d2.year, d2.month, d2.day, tzinfo=dz).astimezone(timezone.utc) + timedelta(days=1)
+        return d1, d2, start, end
+
+    async def _period_payload(date_from, date_to) -> dict:
+        d1, d2, start, end = await _period_bounds(date_from, date_to)
+        d = await _zreport_agg(start, end)
+        d["from"] = d1.isoformat()
+        d["to"] = d2.isoformat()
+        d["days"] = (d2 - d1).days + 1
+        return d
+
+    @router.get("/period-report")
+    async def period_report(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                            user: dict = Depends(get_current_user)):
+        return await _period_payload(date_from, date_to)
+
+    @router.get("/period-report.pdf")
+    async def period_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                user: dict = Depends(get_current_user)):
+        d = await _period_payload(date_from, date_to)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 20:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, val, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], _ar(val))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0] + 4, W - MARGIN, y[0] + 4)
+            c.setDash(1, 0)
+            y[0] -= 10
+
+        _center(store, 16)
+        _center("تقرير الفترة", 13)
+        _center((d.get("from") or "") + " → " + (d.get("to") or ""), 11)
+        _dash()
+        _row("أيام الفترة", str(d.get("days") or 0))
+        _row("الطلبات (بلا الملغاة)", str(d.get("orders") or 0))
+        _row("الملغاة", str(d.get("cancelled") or 0))
+        _row("الخصومات", str(d.get("discounts") or 0))
+        _row("متوسط الطلب", str(d.get("avg_order") or 0))
+        _dash()
+        mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
+        for m in (d.get("by_method") or []):
+            _row("{} ({})".format(mlabel.get(m.get("method"), m.get("method") or ""), m.get("count")),
+                 str(m.get("amount")), 10)
+        _row("الإيراد المحصَّل (بلا الآجل)", str(d.get("revenue") or 0), 13)
+        dishes = d.get("top_dishes") or []
+        if dishes:
+            _dash()
+            _center("الأكثر طلبًا", 11)
+            for x in dishes:
+                _row(str(x.get("name") or ""), "×" + str(x.get("qty")), 9)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "period-report-" + (d.get("from") or "") + "_" + (d.get("to") or "") + ".pdf"
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
