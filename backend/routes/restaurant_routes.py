@@ -816,8 +816,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _resv_out(await _resv().find_one({"id": resv_id}))
 
     # ---------- p371: تقرير إقفال اليوم (Z) للمطعم — بتوقيت الجزائر ----------
-    @router.get("/z-report")
-    async def z_report(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    async def _zreport_payload(date: Optional[str]) -> dict:
         dz = timezone(timedelta(hours=1))
         try:
             day = datetime.fromisoformat(str(date)).date() if date else _now().astimezone(dz).date()
@@ -882,6 +881,113 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "top_dishes": [{"name": d["_id"], "qty": d["qty"]} for d in (fac.get("dishes") or [])],
             "by_hour": [{"hour": h["_id"], "count": h["n"]} for h in (fac.get("hours") or [])],
         }
+
+    @router.get("/z-report")
+    async def z_report(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+        return await _zreport_payload(date)
+
+    # ---------- p379: تقرير الإقفال Z كملف PDF — نفس بيانات p371 قابلة للتنزيل والأرشفة ----------
+    @router.get("/z-report.pdf")
+    async def z_report_pdf(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+        d = await _zreport_payload(date)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 20:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, val, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], _ar(val))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0] + 4, W - MARGIN, y[0] + 4)
+            c.setDash(1, 0)
+            y[0] -= 10
+
+        _center(store, 16)
+        _center("تقرير إقفال اليوم (Z)", 13)
+        _center(d.get("date") or "", 11)
+        _dash()
+        _row("الطلبات (بلا الملغاة)", str(d.get("orders") or 0))
+        _row("الملغاة", str(d.get("cancelled") or 0))
+        _row("الخصومات", str(d.get("discounts") or 0))
+        _row("متوسط الطلب", str(d.get("avg_order") or 0))
+        _dash()
+        mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
+        for m in (d.get("by_method") or []):
+            _row("{} ({})".format(mlabel.get(m.get("method"), m.get("method") or ""), m.get("count")),
+                 str(m.get("amount")), 10)
+        _row("الإيراد المحصَّل (بلا الآجل)", str(d.get("revenue") or 0), 13)
+        dishes = d.get("top_dishes") or []
+        if dishes:
+            _dash()
+            _center("الأكثر طلبًا", 11)
+            for x in dishes:
+                _row(str(x.get("name") or ""), "×" + str(x.get("qty")), 9)
+        hours = d.get("by_hour") or []
+        if hours:
+            _dash()
+            _center("التوزيع الساعي (توقيت الجزائر)", 11)
+            cells = ["{}:00 ({})".format(h.get("hour"), h.get("count")) for h in hours]
+            for i in range(0, len(cells), 4):
+                _need()
+                c.setFont("Arabic", 9)
+                c.drawCentredString(W / 2, y[0], _ar(" · ".join(cells[i:i + 4])))
+                y[0] -= 15
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "z-report-" + (d.get("date") or "today") + ".pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p372: فاتورة/إيصال الزبون — بيانات جاهزة للطباعة ----------
     async def _receipt_payload(order_id: str, user: dict) -> dict:

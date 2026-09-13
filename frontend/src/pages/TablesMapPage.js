@@ -113,6 +113,21 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/z-report${zdate ? `?date=${zdate}` : ''}`).then(r => setZrep(r.data)).catch(() => {});
   }, [zdate]);
 
+  // p379: تنزيل تقرير الإقفال Z كملف PDF — جلب مصادق عليه ثم تنزيل
+  const downloadZPdf = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/z-report.pdf${zdate ? `?date=${zdate}` : ''}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `z-report-${zdate || 'today'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
+
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
   const beep = useCallback(() => {
     try {
@@ -572,6 +587,12 @@ export default function TablesMapPage() {
                   disabled={!zrep || (zrep.orders === 0 && zrep.cancelled === 0)}
                   onClick={() => { setPrintMode('z'); setTimeout(() => { try { window.print(); } catch (e) {} }, 300); }}>
                   <Printer className="h-3.5 w-3.5 ml-1" />{isAr ? 'طباعة' : 'Imprimer'}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8" data-testid="z-pdf-btn"
+                  title={isAr ? 'تنزيل التقرير PDF' : 'Telecharger PDF'}
+                  disabled={!zrep || (zrep.orders === 0 && zrep.cancelled === 0)}
+                  onClick={downloadZPdf}>
+                  <Download className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
