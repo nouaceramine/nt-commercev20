@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';  // p336
-import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors, Printer, Download } from 'lucide-react';  // p334+p336+p337+p366+p372+p377
+import { UtensilsCrossed, Plus, Trash2, Clock, RefreshCw, QrCode, Copy, Share2, Banknote, CalendarClock, Percent, Scissors, Printer, Download, Volume2, VolumeX } from 'lucide-react';  // p334+p336+p337+p366+p372+p377+p378
 import { QRCodeCanvas } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
@@ -113,6 +113,36 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/z-report${zdate ? `?date=${zdate}` : ''}`).then(r => setZrep(r.data)).catch(() => {});
   }, [zdate]);
 
+  // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
+  const beep = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880; osc.type = 'sine';
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.start(); osc.stop(ctx.currentTime + 0.6);
+      osc.onended = () => { try { ctx.close(); } catch (e) {} };
+    } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
+  }, []);
+
+  useEffect(() => {
+    const un = onEvent('kitchen_order.updated', (payload) => {
+      if (payload && payload.status === 'served') {
+        toast.success(
+          isAr
+            ? `✅ الطلب ${payload.code || ''} جاهز${payload.table_name ? ' — الطاولة ' + payload.table_name : ''}`
+            : `✅ Commande ${payload.code || ''} prete${payload.table_name ? ' — ' + payload.table_name : ''}`,
+          { duration: 8000 }
+        );
+        if (localStorage.getItem('waiter_sound') !== '0') beep();
+      }
+    });
+    return () => { un && un(); };
+  }, [isAr, beep]);
+
   // p374: منحنى الإيرادات متعدد الأيام — يُجلب عند تغيير الفترة فقط
   const [trend, setTrend] = useState(null);
   const [trendDays, setTrendDays] = useState(7);
@@ -187,6 +217,7 @@ export default function TablesMapPage() {
   const [splitSel, setSplitSel] = useState([]);
   const [receipt, setReceipt] = useState(null);  // p372: فاتورة الزبون للطباعة
   const [printMode, setPrintMode] = useState(null);  // p375: receipt | z — أي منطقة طباعة تظهر
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem('waiter_sound') !== '0');  // p378
   const [splitMethod, setSplitMethod] = useState('cash');
   const [splitPaying, setSplitPaying] = useState(false);
   const toggleSplitItem = (i) => setSplitSel(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]);
@@ -337,9 +368,16 @@ export default function TablesMapPage() {
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <UtensilsCrossed className="h-7 w-7" /> {isAr ? 'خريطة الطاولات' : 'Plan des tables'}
           </h1>
-          <Button variant="outline" size="sm" onClick={fetchAll} data-testid="tables-refresh">
-            <RefreshCw className="h-4 w-4 ml-1" /> {isAr ? 'تحديث' : 'Rafraichir'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" data-testid="waiter-sound-toggle"
+              title={isAr ? 'تنبيه صوتي عند جاهزية الطلب' : 'Alerte sonore'}
+              onClick={() => { const v = !soundOn; setSoundOn(v); localStorage.setItem('waiter_sound', v ? '1' : '0'); toast.success(v ? (isAr ? 'التنبيه الصوتي مفعّل' : 'Son active') : (isAr ? 'التنبيه الصوتي متوقف' : 'Son coupe')); }}>
+              {soundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </Button>
+            <Button variant="outline" size="sm" onClick={fetchAll} data-testid="tables-refresh">
+              <RefreshCw className="h-4 w-4 ml-1" /> {isAr ? 'تحديث' : 'Rafraichir'}
+            </Button>
+          </div>
         </div>
 
         <Card>
