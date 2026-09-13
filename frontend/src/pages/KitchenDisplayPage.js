@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Clock, ChefHat, CheckCircle2, RefreshCw, Printer } from "lucide-react";  // p338
+import { Clock, ChefHat, CheckCircle2, RefreshCw, Printer, Volume2, VolumeX } from "lucide-react";  // p338+p381
 import apiClient from "../lib/apiClient";
 import { startRealtime, onEvent, stopRealtime } from "../lib/realtime";
 import { toast } from "sonner";
@@ -42,6 +42,7 @@ export default function KitchenDisplayPage() {
   const timer = useRef(null);
   // p338: طبع تلقائي + فلتر المصدر + تذكرة الطبع
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem("kds_autoprint") === "1");
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem("kds_sound") !== "0");  // p381
   const [srcFilter, setSrcFilter] = useState("all");
   const [stats, setStats] = useState(null);  // p363: شريط أداء المطبخ
   const [ticket, setTicket] = useState(null);
@@ -54,6 +55,24 @@ export default function KitchenDisplayPage() {
       setTicket(o);
       setTimeout(() => { try { window.print(); } catch (e) {} }, 400);
     } catch (e) { /* الطبع التلقائي صامت */ }
+  }, []);
+
+  // p381: نغمة تنبيه المطبخ — WebAudio ثنائية النبرة، بلا ملفات صوتية
+  const beep = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [880, 1320].forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = f; osc.type = "sine";
+        const t0 = ctx.currentTime + i * 0.18;
+        gain.gain.setValueAtTime(0.15, t0);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.16);
+        osc.start(t0); osc.stop(t0 + 0.16);
+      });
+      setTimeout(() => { try { ctx.close(); } catch (e) {} }, 800);
+    } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
   }, []);
 
   const toggleAutoPrint = () => {
@@ -76,12 +95,17 @@ export default function KitchenDisplayPage() {
     const un1 = onEvent("kitchen_order.created", (payload) => {
       fetchOrders();
       if (autoPrint && payload?.order_id) printOrder(payload.order_id);  // p338
+      // p381: تنبيه لحظي عند وصول طلب جديد — نغمة + منبثق قصير
+      if (localStorage.getItem("kds_sound") !== "0") {
+        beep();
+        toast.success(`طلب جديد${payload?.code ? " " + payload.code : ""}${payload?.table_name ? " — " + payload.table_name : ""}`, { duration: 5000 });
+      }
     });
     const un2 = onEvent("kitchen_order.updated", fetchOrders);
     const poll = setInterval(fetchOrders, 15000);
     timer.current = setInterval(() => setTick((t) => t + 1), 30000);
     return () => { un1 && un1(); un2 && un2(); clearInterval(poll); clearInterval(timer.current); stopRealtime(); };
-  }, [fetchOrders, autoPrint, printOrder]);  // p338
+  }, [fetchOrders, autoPrint, printOrder, beep]);  // p338+p381
   const setStatus = async (o, status) => {
     try {
       await apiClient.put(`/restaurant/kitchen-orders/${o.id}/status`, { status });
@@ -104,6 +128,10 @@ export default function KitchenDisplayPage() {
           </div>
           <Button variant={autoPrint ? "default" : "outline"} size="sm" onClick={toggleAutoPrint} data-testid="kds-autoprint">
             <Printer className="h-4 w-4 ml-1" /> {autoPrint ? "الطبع التلقائي: مفعّل" : "الطبع التلقائي: متوقف"}
+          </Button>
+          <Button variant={soundOn ? "default" : "outline"} size="sm" data-testid="kds-sound-toggle"
+            onClick={() => { const v = !soundOn; setSoundOn(v); localStorage.setItem("kds_sound", v ? "1" : "0"); toast.success(v ? "التنبيه الصوتي مفعّل" : "التنبيه الصوتي متوقف"); }}>
+            {soundOn ? <Volume2 className="h-4 w-4 ml-1" /> : <VolumeX className="h-4 w-4 ml-1" />} {soundOn ? "الصوت: مفعّل" : "الصوت: متوقف"}
           </Button>
           <Button variant="outline" size="sm" onClick={fetchOrders} data-testid="kds-refresh">
             <RefreshCw className="h-4 w-4 ml-1" /> تحديث
