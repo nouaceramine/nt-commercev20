@@ -734,6 +734,105 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 } for r in rows],
                 "total_waiters": len(rows)}
 
+    # ---------- p385: تقرير أداء الندل PDF ----------
+    @router.get("/waiter-stats.pdf")
+    async def waiter_stats_pdf(days: int = 7, user: dict = Depends(get_current_user)):
+        d = await waiter_stats(days, user)  # نفس تجميعة JSON تمامًا — لا تغيير على المنطق
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 30:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, val, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], _ar(val))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0] + 4, W - MARGIN, y[0] + 4)
+            c.setDash(1, 0)
+            y[0] -= 10
+
+        _center(store, 16)
+        _center("تقرير أداء الندل", 13)
+        _center("آخر {} يومًا".format(d.get("days") or 0), 11)
+        _dash()
+        waiters = d.get("waiters") or []
+        tot_orders = sum(int(w.get("orders") or 0) for w in waiters)
+        tot_rev = round(sum(float(w.get("revenue") or 0) for w in waiters), 2)
+        _row("عدد الندل", str(d.get("total_waiters") or 0))
+        _row("إجمالي الطلبات", str(tot_orders))
+        _row("إجمالي الإيراد المحصَّل", str(tot_rev), 12)
+        if waiters:
+            _dash()
+            _center("الترتيب حسب الإيراد", 11)
+            for i, w in enumerate(waiters, 1):
+                _need()
+                c.setFont("Arabic", 11)
+                c.drawRightString(W - MARGIN, y[0], _ar("{}. {}".format(i, w.get("name") or "—")))
+                c.drawString(MARGIN, y[0], _ar(str(w.get("revenue") or 0)))
+                y[0] -= 15
+                _need()
+                c.setFont("Arabic", 9)
+                sub = "طلبات: {} · ملغاة: {} · متوسط الفاتورة: {} · متوسط المدة: {} د".format(
+                    w.get("orders") or 0, w.get("cancelled") or 0,
+                    w.get("avg_bill") or 0, w.get("avg_duration_min") or 0)
+                c.drawRightString(W - MARGIN - 14, y[0], _ar(sub))
+                y[0] -= 14
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "waiter-stats-" + str(d.get("days") or 0) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p370: حجوزات الطاولات المسبقة ----------
     def _resv():
         return db.restaurant_reservations

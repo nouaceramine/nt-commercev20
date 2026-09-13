@@ -153,6 +153,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p385: تحميل تقرير أداء الندل PDF (نفس فترة جدول الأداء tstatsDays)
+  const downloadWsPdf = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/waiter-stats.pdf?days=${tstatsDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `waiter-stats-${tstatsDays}d.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
 
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
   const beep = useCallback(() => {
@@ -568,6 +582,9 @@ export default function TablesMapPage() {
               <h2 className="font-semibold text-sm flex items-center gap-2">
                 <UtensilsCrossed className="h-4 w-4" />{isAr ? 'أداء النوادل' : 'Performance serveurs'}
                 <span className="text-xs text-muted-foreground font-normal">({tstatsDays} {isAr ? 'يوماً' : 'j'})</span>
+                <Button variant="outline" size="sm" className="h-7 px-2 ms-auto" onClick={downloadWsPdf} data-testid="ws-pdf-btn">
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
               </h2>
               <div className="border rounded overflow-x-auto">
                 <table className="w-full text-xs">
