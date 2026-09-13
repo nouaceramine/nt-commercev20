@@ -75,6 +75,25 @@ export default function KitchenDisplayPage() {
     } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
   }, []);
 
+  // p386: نغمة تصعيد المتأخرات — ثلاثية تصاعدية تميّزها عن نغمة الطلب الجديد
+  const lateBeep = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [660, 880, 1320].forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = f; osc.type = "sine";
+        const t0 = ctx.currentTime + i * 0.16;
+        gain.gain.setValueAtTime(0.18, t0);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
+        osc.start(t0); osc.stop(t0 + 0.15);
+      });
+      setTimeout(() => { try { ctx.close(); } catch (e) {} }, 900);
+    } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
+  }, []);
+  const lateAlerted = useRef(new Set());  // طلبات نُبّه عنها — لا تكرار
+
   const toggleAutoPrint = () => {
     const v = !autoPrint;
     setAutoPrint(v);
@@ -106,6 +125,26 @@ export default function KitchenDisplayPage() {
     timer.current = setInterval(() => setTick((t) => t + 1), 30000);
     return () => { un1 && un1(); un2 && un2(); clearInterval(poll); clearInterval(timer.current); stopRealtime(); };
   }, [fetchOrders, autoPrint, printOrder, beep]);  // p338+p381
+
+  // p386: تصعيد صوتي للطلبات المتأخرة — كل طلب يتجاوز 15د بلا تقديم يُنبّه عنه مرة واحدة
+  useEffect(() => {
+    const ids = new Set();
+    const fresh = [];
+    (orders || []).forEach((o) => {
+      if (o.status === "served" || o.status === "cancelled") return;
+      if (elapsedMin(o.created_at) >= 15) {
+        ids.add(o.id);
+        if (!lateAlerted.current.has(o.id)) fresh.push(o);
+      }
+    });
+    lateAlerted.current.forEach((id) => { if (!ids.has(id)) lateAlerted.current.delete(id); });
+    if (!fresh.length) return;
+    fresh.forEach((o) => lateAlerted.current.add(o.id));
+    if (localStorage.getItem("kds_sound") === "0") return;
+    lateBeep();
+    toast.error(`طلب متأخر ≥15د${fresh[0]?.code ? " — " + fresh[0].code : ""}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ""}`, { duration: 9000 });
+    console.info("kds-late-escalation", fresh.map((o) => o.id).join(","));
+  }, [orders, lateBeep]);
   const setStatus = async (o, status) => {
     try {
       await apiClient.put(`/restaurant/kitchen-orders/${o.id}/status`, { status });
