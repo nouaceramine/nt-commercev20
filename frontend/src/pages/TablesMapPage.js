@@ -118,10 +118,13 @@ export default function TablesMapPage() {
   const [pFrom, setPFrom] = useState('');
   const [pTo, setPTo] = useState('');
   const [pLoading, setPLoading] = useState(false);
-  const loadPeriod = async () => {
+  const [pCompare, setPCompare] = useState(false);  // p389: مقارنة بالفترة السابقة
+  const loadPeriod = async (cmp) => {
     setPLoading(true);
     try {
-      const q = `${pFrom ? `date_from=${pFrom}&` : ''}${pTo ? `date_to=${pTo}` : ''}`;
+      const useCmp = typeof cmp === 'boolean' ? cmp : pCompare;
+      let q = `${pFrom ? `date_from=${pFrom}&` : ''}${pTo ? `date_to=${pTo}` : ''}`;
+      if (useCmp) q += `${q ? '&' : ''}compare=1`;
       const res = await apiClient.get(`/restaurant/period-report${q ? `?${q}` : ''}`);
       setPeriod(res.data);
     } catch (e) { toast.error(errText(e)); }
@@ -742,6 +745,11 @@ export default function TablesMapPage() {
                 <Button size="sm" className="h-8" onClick={loadPeriod} disabled={pLoading} data-testid="period-run">
                   {isAr ? 'عرض' : 'Voir'}
                 </Button>
+                <Button size="sm" variant={pCompare ? 'default' : 'outline'} className="h-8" data-testid="period-compare-toggle"
+                  title={isAr ? 'قارن بالفترة السابقة' : 'Comparer periode prec.'}
+                  onClick={() => { const v = !pCompare; setPCompare(v); if (period) loadPeriod(v); }}>
+                  <Percent className="h-3.5 w-3.5" />
+                </Button>
                 <Button size="sm" variant="outline" className="h-8" data-testid="period-pdf-btn"
                   title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}
                   disabled={!period || period.orders === 0} onClick={downloadPeriodPdf}>
@@ -757,6 +765,17 @@ export default function TablesMapPage() {
                   <div className="border rounded p-1.5"><div className="text-lg font-black text-emerald-700" dir="ltr" data-testid="period-revenue">{period.revenue}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'الإيراد المحصَّل' : 'Revenu'}</div></div>
                   <div className="border rounded p-1.5"><div className="text-lg font-black" dir="ltr" data-testid="period-discounts">{period.discounts}</div><div className="text-[10px] text-muted-foreground">{isAr ? 'الخصومات' : 'Remises'}</div></div>
                 </div>
+                {period.prev && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="period-compare">
+                    <span className="text-muted-foreground">{isAr ? `مقابل (${period.prev.from} ← ${period.prev.to}):` : `vs (${period.prev.from} - ${period.prev.to}):`}</span>
+                    <span dir="ltr" data-testid="period-delta-revenue" className={period.delta?.revenue_pct == null ? 'text-muted-foreground' : period.delta.revenue_pct >= 0 ? 'text-emerald-700 font-bold' : 'text-red-600 font-bold'}>
+                      {isAr ? 'الإيراد' : 'Rev.'} {period.delta?.revenue_pct == null ? '—' : `${period.delta.revenue_pct > 0 ? '+' : ''}${period.delta.revenue_pct}%`}
+                    </span>
+                    <span dir="ltr" data-testid="period-delta-orders" className={period.delta?.orders_pct == null ? 'text-muted-foreground' : period.delta.orders_pct >= 0 ? 'text-emerald-700 font-bold' : 'text-red-600 font-bold'}>
+                      {isAr ? 'الطلبات' : 'Cmd'} {period.delta?.orders_pct == null ? '—' : `${period.delta.orders_pct > 0 ? '+' : ''}${period.delta.orders_pct}%`}
+                    </span>
+                  </div>
+                )}
                 {(period.by_method || []).length > 0 && (
                   <div className="flex flex-wrap gap-2 text-xs" data-testid="period-methods">
                     {(period.by_method || []).map(m => (

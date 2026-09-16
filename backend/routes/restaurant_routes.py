@@ -1228,18 +1228,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         end = datetime(d2.year, d2.month, d2.day, tzinfo=dz).astimezone(timezone.utc) + timedelta(days=1)
         return d1, d2, start, end
 
-    async def _period_payload(date_from, date_to) -> dict:
+    async def _period_payload(date_from, date_to, compare: bool = False) -> dict:
         d1, d2, start, end = await _period_bounds(date_from, date_to)
         d = await _zreport_agg(start, end)
         d["from"] = d1.isoformat()
         d["to"] = d2.isoformat()
         d["days"] = (d2 - d1).days + 1
+        if compare:  # p389: مقارنة بالفترة السابقة المساوية في الطول مباشرة
+            span = end - start
+            prev = await _zreport_agg(start - span, start)
+            pd2 = d1 - timedelta(days=1)
+            pd1 = pd2 - timedelta(days=d["days"] - 1)
+
+            def _pct(cur, old):
+                try:
+                    cur = float(cur or 0)
+                    old = float(old or 0)
+                except Exception:
+                    return None
+                if old == 0:
+                    return None if cur == 0 else 100.0
+                return round(100.0 * (cur - old) / old, 1)
+
+            d["prev"] = {"from": pd1.isoformat(), "to": pd2.isoformat(), "days": d["days"],
+                         "orders": prev.get("orders"), "cancelled": prev.get("cancelled"),
+                         "revenue": prev.get("revenue"), "discounts": prev.get("discounts")}
+            d["delta"] = {"orders_pct": _pct(d.get("orders"), prev.get("orders")),
+                          "revenue_pct": _pct(d.get("revenue"), prev.get("revenue"))}
         return d
 
     @router.get("/period-report")
     async def period_report(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                            user: dict = Depends(get_current_user)):
-        return await _period_payload(date_from, date_to)
+                            compare: int = 0, user: dict = Depends(get_current_user)):
+        return await _period_payload(date_from, date_to, compare=bool(compare))
 
     @router.get("/period-report.pdf")
     async def period_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
