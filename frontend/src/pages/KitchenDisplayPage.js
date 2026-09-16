@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Clock, ChefHat, CheckCircle2, RefreshCw, Printer, Volume2, VolumeX } from "lucide-react";  // p338+p381
+import { Clock, ChefHat, CheckCircle2, RefreshCw, Printer, Volume2, VolumeX, Download } from "lucide-react";  // p338+p381+p390
 import apiClient from "../lib/apiClient";
 import { startRealtime, onEvent, stopRealtime } from "../lib/realtime";
 import { toast } from "sonner";
@@ -151,6 +151,20 @@ export default function KitchenDisplayPage() {
       fetchOrders();
     } catch (e) { toast.error(e.response?.data?.detail || "تعذر تحديث الحالة"); }
   };
+  // p390: تحميل تقرير أداء المطبخ PDF (نفس فترة شريط الإحصاءات: اليوم)
+  const downloadStatsPdf = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/kitchen-stats.pdf?days=1", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "kitchen-stats-1d.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل PDF"); }
+  };
   return (
     <div className="min-h-screen bg-background p-4 space-y-4" dir="rtl" data-testid="kds-page">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -188,6 +202,9 @@ export default function KitchenDisplayPage() {
               أبطأ طبق: {stats.slowest_dishes[0].name} ({stats.slowest_dishes[0].avg_total_min} د)
             </Badge>
           )}
+          <Button variant="outline" size="sm" className="h-6 px-2" data-testid="kds-stats-pdf" onClick={downloadStatsPdf} title="تقرير أداء المطبخ PDF">
+            <Download className="h-3.5 w-3.5" />
+          </Button>
         </div>
       )}
       {loading ? <p className="text-muted-foreground">جارٍ التحميل...</p> : (
