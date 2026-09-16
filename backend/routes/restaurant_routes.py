@@ -918,6 +918,120 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "handled_by": user.get("username") or user.get("email")}})
         return _resv_out(await _resv().find_one({"id": resv_id}))
 
+    # ---------- p388: تقرير الحجوزات PDF لفترة ----------
+    @router.get("/reservations/report.pdf")
+    async def reservations_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                      user: dict = Depends(get_current_user)):
+        d1, d2, start, end = await _period_bounds(date_from, date_to)
+        rows = await _resv().find(
+            {"reserved_for": {"$gte": start, "$lt": end}}).sort("reserved_for", 1).to_list(500)
+        dz = timezone(timedelta(hours=1))
+        counts = {}
+        guests = 0
+        for r in rows:
+            st = r.get("status") or "booked"
+            counts[st] = counts.get(st, 0) + 1
+            guests += int(r.get("party_size") or 0)
+        done = counts.get("seated", 0) + counts.get("no_show", 0)
+        noshow_pct = round(100.0 * counts.get("no_show", 0) / done, 1) if done else 0.0
+
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, val, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], _ar(val))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0] + 4, W - MARGIN, y[0] + 4)
+            c.setDash(1, 0)
+            y[0] -= 10
+
+        _center(store, 16)
+        _center("تقرير الحجوزات", 13)
+        _center(str(d1) + " → " + str(d2), 11)
+        _dash()
+        _row("إجمالي الحجوزات", str(len(rows)))
+        _row("مؤكدة (قائمة)", str(counts.get("booked", 0)))
+        _row("حضروا", str(counts.get("seated", 0)))
+        _row("ملغاة", str(counts.get("cancelled", 0)))
+        _row("لم يحضروا", str(counts.get("no_show", 0)))
+        _row("نسبة عدم الحضور", str(noshow_pct) + "%")
+        _row("إجمالي الضيوف", str(guests))
+        if rows:
+            _dash()
+            _center("القائمة التفصيلية", 11)
+            lbl = {"booked": "مؤكد", "seated": "حضر", "cancelled": "ملغى", "no_show": "لم يحضر"}
+            for r in rows:
+                _need()
+                when = r.get("reserved_for")
+                try:
+                    when_s = when.astimezone(dz).strftime("%d/%m %H:%M") if hasattr(when, "astimezone") else str(when)
+                except Exception:
+                    when_s = str(when or "")
+                line = "{} — {} — {} — {} ض — {}".format(
+                    when_s, r.get("customer_name") or "", r.get("table_name") or "—",
+                    r.get("party_size") or 0, lbl.get(r.get("status"), r.get("status") or ""))
+                c.setFont("Arabic", 9)
+                c.drawRightString(W - MARGIN, y[0], _ar(line))
+                y[0] -= 13
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "reservations-report-" + str(d1) + "_" + str(d2) + ".pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p371: تقرير إقفال اليوم (Z) للمطعم — بتوقيت الجزائر ----------
     async def _zreport_agg(start, end) -> dict:
         # p380: نواة تجميع z-report — مشتركة بين اليوم الواحد (p371) وتقارير الفترات (p380)

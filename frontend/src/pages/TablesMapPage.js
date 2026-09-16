@@ -167,6 +167,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p388: تحميل تقرير الحجوزات PDF (الفترة الافتراضية: آخر 7 أيام — حدود الباك-إند)
+  const downloadResvPdf = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/reservations/report.pdf', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'reservations-report.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
 
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
   const beep = useCallback(() => {
@@ -777,9 +791,14 @@ export default function TablesMapPage() {
                   </span>
                 )}
               </h2>
-              <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => setResvDlg(true)}>
-                <Plus className="h-4 w-4 ml-1" />{isAr ? 'حجز جديد' : 'Nouvelle'}
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="outline" data-testid="resv-pdf-btn" onClick={downloadResvPdf} title={isAr ? 'تقرير الحجوزات PDF' : 'Reservations PDF'}>
+                  <Download className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => setResvDlg(true)}>
+                  <Plus className="h-4 w-4 ml-1" />{isAr ? 'حجز جديد' : 'Nouvelle'}
+                </Button>
+              </div>
             </div>
             {(resvList || []).length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="resv-empty">{isAr ? 'لا حجوزات قادمة' : 'Aucune reservation'}</p>
