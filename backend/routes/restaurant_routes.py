@@ -786,6 +786,103 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_orders": sum(r["orders"] for r in out),
                 "total_revenue": round(sum(r["revenue"] for r in out), 2)}
 
+    # ---------- p392: تقرير دوران الطاولات PDF ----------
+    @router.get("/table-stats.pdf")
+    async def table_stats_pdf(days: int = 7, user: dict = Depends(get_current_user)):
+        d = await table_stats(days, user)  # نفس تجميعة JSON تمامًا — لا تغيير على المنطق
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 30:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, val, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], _ar(val))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0] + 4, W - MARGIN, y[0] + 4)
+            c.setDash(1, 0)
+            y[0] -= 10
+
+        _center(store, 16)
+        _center("تقرير دوران الطاولات", 13)
+        _center("آخر {} يومًا".format(d.get("days") or 0), 11)
+        _dash()
+        _row("إجمالي الطلبات", str(d.get("total_orders") or 0))
+        _row("إجمالي الإيراد المحصَّل", str(d.get("total_revenue") or 0), 12)
+        tables = d.get("tables") or []
+        if tables:
+            _dash()
+            _center("الترتيب حسب الإيراد", 11)
+            for i, t in enumerate(tables, 1):
+                _need()
+                c.setFont("Arabic", 11)
+                c.drawRightString(W - MARGIN, y[0], _ar("{}. {} ({} مقعد)".format(
+                    i, t.get("table_name") or "—", t.get("seats") or 0)))
+                c.drawString(MARGIN, y[0], _ar(str(t.get("revenue") or 0)))
+                y[0] -= 15
+                _need()
+                c.setFont("Arabic", 9)
+                sub = "طلبات: {} · متوسط الفاتورة: {} · متوسط الجلسة: {} د · طلب/يوم: {}".format(
+                    t.get("orders") or 0, t.get("avg_bill") or 0,
+                    t.get("avg_duration_min") or 0, t.get("orders_per_day") or 0)
+                c.drawRightString(W - MARGIN - 14, y[0], _ar(sub))
+                y[0] -= 14
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "table-stats-" + str(d.get("days") or 0) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p369: أداء النوادل — طلبات وإيراد وزمن لكل موظف ----------
     @router.get("/waiter-stats")
     async def waiter_stats(days: int = 7, user: dict = Depends(get_current_user)):

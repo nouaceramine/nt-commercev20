@@ -184,6 +184,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p392: تحميل تقرير دوران الطاولات PDF (نفس فترة الجدول tstatsDays)
+  const downloadTablePdf = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/table-stats.pdf?days=${tstatsDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `table-stats-${tstatsDays}d.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
 
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
   const beep = useCallback(() => {
@@ -542,14 +556,20 @@ export default function TablesMapPage() {
               <h2 className="font-semibold text-sm flex items-center gap-2">
                 <Clock className="h-4 w-4" />{isAr ? 'دوران الطاولات' : 'Rotation des tables'}
               </h2>
-              <Select value={String(tstatsDays)} onValueChange={v => setTstatsDays(Number(v))}>
-                <SelectTrigger className="w-28 h-8" data-testid="tstats-days"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="7">{isAr ? '7 أيام' : '7j'}</SelectItem>
-                  <SelectItem value="30">{isAr ? '30 يوماً' : '30j'}</SelectItem>
-                  <SelectItem value="90">{isAr ? '90 يوماً' : '90j'}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="outline" className="h-8 px-2" data-testid="tstats-pdf-btn" onClick={downloadTablePdf}
+                  title={isAr ? 'تقرير دوران الطاولات PDF' : 'Rotation PDF'}>
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+                <Select value={String(tstatsDays)} onValueChange={v => setTstatsDays(Number(v))}>
+                  <SelectTrigger className="w-28 h-8" data-testid="tstats-days"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">{isAr ? '7 أيام' : '7j'}</SelectItem>
+                    <SelectItem value="30">{isAr ? '30 يوماً' : '30j'}</SelectItem>
+                    <SelectItem value="90">{isAr ? '90 يوماً' : '90j'}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {!tstats ? (
               <p className="text-xs text-muted-foreground">{isAr ? 'جارٍ التحميل…' : 'Chargement…'}</p>
