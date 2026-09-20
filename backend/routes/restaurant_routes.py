@@ -279,6 +279,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         except Exception:
             pass  # فشل النشر لا يمنع عملية المطبخ
 
+    async def _publish_resv(event_type, r, user):
+        # p393: أحداث الحجوزات تغذي شاشة الطاولات لحظيًا عبر SSE
+        try:
+            from services.outbox import outbox_write
+            from config.database import main_db as _main_db
+            rf = r.get("reserved_for")
+            await outbox_write(
+                _main_db, event_type,
+                {
+                    "resv_id": r.get("id"), "customer_name": r.get("customer_name"),
+                    "table_name": r.get("table_name"), "party_size": r.get("party_size"),
+                    "status": r.get("status"),
+                    "reserved_for": rf.isoformat() if hasattr(rf, "isoformat") else str(rf or ""),
+                },
+                tenant_id=user.get("tenant_id") or "platform",
+                source="restaurant",
+            )
+        except Exception:
+            pass  # فشل النشر لا يمنع عملية الحجز
+
     def _order_out(o):
         o = dict(o)
         o.pop("_id", None)
@@ -1099,6 +1119,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "updated_at": _now(),
         }
         await _resv().insert_one(doc)
+        await _publish_resv("reservation.created", doc, user)  # p393
         return _resv_out(doc)
 
     @router.put("/reservations/{resv_id}/status")
@@ -1113,7 +1134,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _resv().update_one({"id": resv_id}, {"$set": {
             "status": data.status, "updated_at": _now(),
             "handled_by": user.get("username") or user.get("email")}})
-        return _resv_out(await _resv().find_one({"id": resv_id}))
+        upd = await _resv().find_one({"id": resv_id})
+        await _publish_resv("reservation.updated", upd, user)  # p393
+        return _resv_out(upd)
 
     # ---------- p388: تقرير الحجوزات PDF لفترة ----------
     @router.get("/reservations/report.pdf")

@@ -1,3 +1,9 @@
+## 2026-09-16 — p393: أحداث SSE للحجوزات + منبثق فوري
+
+- **الباك-إند**: `_publish_resv()` جديدة (نفس نمط `_publish` للطلبات — outbox → Redis → SSE) تبث `reservation.created` عند إنشاء حجز و`reservation.updated` عند تغيير حالته، بالحمولة: resv_id/customer_name/table_name/party_size/status/reserved_for (ISO). فشل النشر لا يمنع عملية الحجز.
+- **الواجهة (TablesMapPage)**: اشتراكا SSE جديدان يحدّثان القائمة فورًا (reservation.created/updated → fetchAll) + منبثق «📅 حجز جديد — الاسم — الطاولة» 7 ثوانٍ.
+- **E2E (13/13)**: مستأجر TEST-P393 — حدث created بكل حقول الحمولة الصحيحة (booked/ISO/source=restaurant) وحدث updated بحالة seated في outbox الفعلي؛ مسار الحجز سليم؛ تنظيف أحداث الاختبار وresidue=0.
+
 ## 2026-09-16 — p392: تقرير دوران الطاولات PDF
 
 - **الباك-إند**: `GET /api/restaurant/table-stats.pdf?days=` — تقرير A4 عربي (NotoNaskh) يعيد استخدام تجميعة `/table-stats` باستدعاء داخلي: ترويسة المتجر، إجمالي الطلبات/الإيراد، ثم الطاولات مرتبة حسب الإيراد (المقاعد، الطلبات، متوسط الفاتورة، متوسط الجلسة، طلب/يوم) — بما فيها الطاولات الميتة بأصفار. اسم الملف `table-stats-{days}d.pdf` مع ضبط الأيام 1–90.

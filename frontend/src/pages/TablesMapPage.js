@@ -85,9 +85,11 @@ export default function TablesMapPage() {
     startRealtime();
     const un1 = onEvent('kitchen_order.created', fetchAll);
     const un2 = onEvent('kitchen_order.updated', fetchAll);
+    const un3 = onEvent('reservation.created', fetchAll);   // p393: تحديث فوري عند حجز جديد
+    const un4 = onEvent('reservation.updated', fetchAll);   // p393: وعند تغيير حالة حجز
     const poll = setInterval(fetchAll, 15000);
     const tick = setInterval(() => setTick(x => x + 1), 30000);
-    return () => { un1 && un1(); un2 && un2(); clearInterval(poll); clearInterval(tick); stopRealtime(); };
+    return () => { un1 && un1(); un2 && un2(); un3 && un3(); un4 && un4(); clearInterval(poll); clearInterval(tick); stopRealtime(); };
   }, [fetchAll]);
 
   // p334: تحميل/حفظ روابط التواصل
@@ -228,6 +230,21 @@ export default function TablesMapPage() {
     });
     return () => { un && un(); };
   }, [isAr, beep]);
+
+  // p393: منبثق فوري عند وصول حجز جديد عبر SSE
+  useEffect(() => {
+    const un = onEvent('reservation.created', (payload) => {
+      if (payload) {
+        toast.success(
+          isAr
+            ? `📅 حجز جديد — ${payload.customer_name || ''}${payload.table_name ? ' — ' + payload.table_name : ''}`
+            : `📅 Reservation — ${payload.customer_name || ''}${payload.table_name ? ' — ' + payload.table_name : ''}`,
+          { duration: 7000 }
+        );
+      }
+    });
+    return () => { un && un(); };
+  }, [isAr]);
 
   // p374: منحنى الإيرادات متعدد الأيام — يُجلب عند تغيير الفترة فقط
   const [trend, setTrend] = useState(null);
