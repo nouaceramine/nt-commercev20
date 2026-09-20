@@ -1482,6 +1482,48 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                             compare: int = 0, user: dict = Depends(get_current_user)):
         return await _period_payload(date_from, date_to, compare=bool(compare))
 
+    # ---------- p394: تصدير التقرير المخصص CSV (BOM لـ Excel) ----------
+    @router.get("/period-report.csv")
+    async def period_report_csv(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                user: dict = Depends(get_current_user)):
+        d = await _period_payload(date_from, date_to)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = []
+        lines.append("البند,القيمة")
+        lines.append("من," + _cell(d.get("from")))
+        lines.append("إلى," + _cell(d.get("to")))
+        lines.append("أيام الفترة," + _cell(d.get("days")))
+        lines.append("الطلبات (بلا الملغاة)," + _cell(d.get("orders")))
+        lines.append("الملغاة," + _cell(d.get("cancelled")))
+        lines.append("الخصومات," + _cell(d.get("discounts")))
+        lines.append("متوسط الطلب," + _cell(d.get("avg_order")))
+        lines.append("الإيراد المحصَّل (بلا الآجل)," + _cell(d.get("revenue")))
+        methods = d.get("by_method") or []
+        if methods:
+            lines.append("")
+            lines.append("طريقة الدفع,العدد,المبلغ")
+            mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
+            for m in methods:
+                lines.append(",".join([_cell(mlabel.get(m.get("method"), m.get("method") or "")),
+                                       _cell(m.get("count")), _cell(m.get("amount"))]))
+        dishes = d.get("top_dishes") or []
+        if dishes:
+            lines.append("")
+            lines.append("الطبق,الكمية")
+            for x in dishes:
+                lines.append(",".join([_cell(x.get("name")), _cell(x.get("qty"))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "period-report-" + (d.get("from") or "") + "_" + (d.get("to") or "") + ".csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     @router.get("/period-report.pdf")
     async def period_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
                                 user: dict = Depends(get_current_user)):

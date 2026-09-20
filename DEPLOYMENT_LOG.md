@@ -1,3 +1,9 @@
+## 2026-09-16 — p394: تصدير التقرير المخصص CSV
+
+- **الباك-إند**: `GET /api/restaurant/period-report.csv?date_from&date_to` — يعيد استخدام `_period_payload` (نفس حدود/تحققات الفترة): ملخص (من/إلى/أيام/طلبات/ملغاة/خصومات/متوسط/إيراد) + قسم طرق الدفع + قسم الأطباق؛ BOM‏ UTF-8 ليفتح Excel العربية سليمة، CRLF، واقتباس الخلايا الحاوية فاصلة/علامة تنصيص. اسم الملف `period-report-{from}_{to}.csv`.
+- **الواجهة**: زر `period-csv-btn` بجانب زر PDF في بطاقة التقرير المخصص — يحترم نفس حقول التاريخ.
+- **E2E (18/18)**: مستأجر TEST-P394 — BOM + content-type + filename + صفوف الملخص/الطرق/الأطباق + اقتباس اسم طبق بفاصلة + تطابق مع JSON + 400 للمدى المعكوس + رفض بلا توكن + residue=0.
+
 ## 2026-09-16 — p393: أحداث SSE للحجوزات + منبثق فوري
 
 - **الباك-إند**: `_publish_resv()` جديدة (نفس نمط `_publish` للطلبات — outbox → Redis → SSE) تبث `reservation.created` عند إنشاء حجز و`reservation.updated` عند تغيير حالته، بالحمولة: resv_id/customer_name/table_name/party_size/status/reserved_for (ISO). فشل النشر لا يمنع عملية الحجز.

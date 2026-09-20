@@ -143,6 +143,18 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p394: تصدير التقرير المخصص CSV (BOM عربي لـ Excel)
+  const downloadPeriodCsv = async () => {
+    try {
+      const q = `${pFrom ? `date_from=${pFrom}&` : ''}${pTo ? `date_to=${pTo}` : ''}`;
+      const res = await apiClient.get(`/restaurant/period-report.csv${q ? `?${q}` : ''}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `period-report.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
 
   // p379: تنزيل تقرير الإقفال Z كملف PDF — جلب مصادق عليه ثم تنزيل
   const downloadZPdf = async () => {
@@ -791,6 +803,11 @@ export default function TablesMapPage() {
                   title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}
                   disabled={!period || period.orders === 0} onClick={downloadPeriodPdf}>
                   <Download className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="period-csv-btn"
+                  title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}
+                  disabled={!period || period.orders === 0} onClick={downloadPeriodCsv}>
+                  CSV
                 </Button>
               </div>
             </div>
