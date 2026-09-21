@@ -1,5 +1,5 @@
 // p310: خريطة الطاولات البصرية — حالة حية لكل طاولة مع طلبها النشط
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import apiClient from '../lib/apiClient';
 import { errText } from '../lib/errorText';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -271,6 +271,32 @@ export default function TablesMapPage() {
     });
     return () => { un && un(); };
   }, [isAr]);
+
+  // p398: تنبيه صوتي + منبثق عند دخول حجز نافذة الـ30 دقيقة — مرة واحدة لكل حجز
+  const resvAlerted = useRef(new Set());
+  useEffect(() => {
+    const ids = new Set();
+    const fresh = [];
+    (resvList || []).forEach((r) => {
+      if (r.status !== 'booked') return;
+      const ms = new Date(r.reserved_for) - Date.now();
+      if (ms > 0 && ms <= 30 * 60000) {
+        ids.add(r.id);
+        if (!resvAlerted.current.has(r.id)) fresh.push(r);
+      }
+    });
+    resvAlerted.current.forEach((id) => { if (!ids.has(id)) resvAlerted.current.delete(id); });
+    if (!fresh.length) return;
+    fresh.forEach((r) => resvAlerted.current.add(r.id));
+    toast.warning(
+      isAr
+        ? `⏰ حجز يحين خلال 30 دقيقة — ${fresh[0].customer_name || ''}${fresh[0].table_name ? ' — ' + fresh[0].table_name : ''}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`
+        : `⏰ Reservation dans 30min — ${fresh[0].customer_name || ''}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`,
+      { duration: 9000 }
+    );
+    if (localStorage.getItem('waiter_sound') !== '0') beep();
+    console.info('resv-soon-alert', fresh.map((r) => r.id).join(','));
+  }, [resvList, isAr, beep]);
 
   // p374: منحنى الإيرادات متعدد الأيام — يُجلب عند تغيير الفترة فقط
   const [trend, setTrend] = useState(null);
