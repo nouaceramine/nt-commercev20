@@ -457,10 +457,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     @router.get("/kitchen-orders")
     async def list_kitchen_orders(status: Optional[str] = None, all: bool = False, user: dict = Depends(get_current_user)):
         # p337: الطلبيات المجدولة التي حان موعدها تدخل المطبخ تلقائيًا
-        await _orders().update_many(
-            {"status": "scheduled", "scheduled_for": {"$lte": _now()}},
-            {"$set": {"status": "pending", "updated_at": _now()}},
-        )
+        # p400: التفعيل يبث kitchen_order.created لكل طلب — KDS يُنبّه ويطبع تلقائيًا كأي طلب جديد
+        due = await _orders().find(
+            {"status": "scheduled", "scheduled_for": {"$lte": _now()}}).to_list(50)
+        for d in due:
+            await _orders().update_one(
+                {"id": d["id"]}, {"$set": {"status": "pending", "updated_at": _now()}})
+            d["status"] = "pending"
+            await _publish("kitchen_order.created", d, user)
         q = {}
         if status:
             q["status"] = status
