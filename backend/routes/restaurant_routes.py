@@ -1496,6 +1496,51 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p401: تصدير الإقفال اليومي Z كملف CSV (BOM لـ Excel) ----------
+    @router.get("/z-report.csv")
+    async def z_report_csv(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+        d = await _zreport_payload(date)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = []
+        lines.append("البند,القيمة")
+        lines.append("التاريخ," + _cell(d.get("date")))
+        lines.append("الطلبات (بلا الملغاة)," + _cell(d.get("orders")))
+        lines.append("الملغاة," + _cell(d.get("cancelled")))
+        lines.append("الخصومات," + _cell(d.get("discounts")))
+        lines.append("متوسط الطلب," + _cell(d.get("avg_order")))
+        lines.append("الإيراد المحصَّل (بلا الآجل)," + _cell(d.get("revenue")))
+        methods = d.get("by_method") or []
+        if methods:
+            lines.append("")
+            lines.append("طريقة الدفع,العدد,المبلغ")
+            mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
+            for m in methods:
+                lines.append(",".join([_cell(mlabel.get(m.get("method"), m.get("method") or "")),
+                                       _cell(m.get("count")), _cell(m.get("amount"))]))
+        dishes = d.get("top_dishes") or []
+        if dishes:
+            lines.append("")
+            lines.append("الطبق,الكمية")
+            for x in dishes:
+                lines.append(",".join([_cell(x.get("name")), _cell(x.get("qty"))]))
+        hours = d.get("by_hour") or []
+        if hours:
+            lines.append("")
+            lines.append("الساعة,عدد الطلبات")
+            for h in hours:
+                lines.append(",".join([_cell(h.get("hour")), _cell(h.get("count"))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "z-report-" + (d.get("date") or "today") + ".csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p380: تقرير فترة مخصصة (من/إلى) — JSON وPDF ----------
     async def _period_bounds(date_from, date_to):
         dz = timezone(timedelta(hours=1))

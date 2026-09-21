@@ -170,6 +170,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p401: تصدير الإقفال اليومي Z كملف CSV (BOM عربي لـ Excel)
+  const downloadZCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/z-report.csv${zdate ? `?date=${zdate}` : ''}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `z-report-${zdate || 'today'}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p385: تحميل تقرير أداء الندل PDF (نفس فترة جدول الأداء tstatsDays)
   const downloadWsPdf = async () => {
     try {
@@ -758,6 +772,12 @@ export default function TablesMapPage() {
                   disabled={!zrep || (zrep.orders === 0 && zrep.cancelled === 0)}
                   onClick={downloadZPdf}>
                   <Download className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="z-csv-btn"
+                  title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}
+                  disabled={!zrep || (zrep.orders === 0 && zrep.cancelled === 0)}
+                  onClick={downloadZCsv}>
+                  CSV
                 </Button>
               </div>
             </div>
