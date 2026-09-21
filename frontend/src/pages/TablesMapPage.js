@@ -964,6 +964,12 @@ export default function TablesMapPage() {
                           {isAr ? '⏰ قادم قريبًا' : '⏰ Bientot'}
                         </span>
                       )}
+                      {/* p402: وسم «ضيف متأخر» — حجز قائم تجاوز موعده (قبل وسم no_show التلقائي عند ساعتين p382) */}
+                      {r.status === 'booked' && (() => { const ms = new Date(r.reserved_for) - Date.now(); return ms < 0; })() && (
+                        <span className="inline-block bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 rounded-full px-2 py-0.5 text-[10px] font-bold mr-1 animate-pulse" data-testid={`resv-late-${r.id}`}>
+                          {isAr ? `⚠ متأخر ${Math.max(1, Math.round((Date.now() - new Date(r.reserved_for)) / 60000))}د` : `⚠ Retard ${Math.max(1, Math.round((Date.now() - new Date(r.reserved_for)) / 60000))}min`}
+                        </span>
+                      )}
                       <div className="text-xs text-muted-foreground" dir="ltr">{new Date(r.reserved_for).toLocaleString('fr-DZ')}</div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
