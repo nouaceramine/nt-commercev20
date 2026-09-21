@@ -329,11 +329,23 @@ export default function TablesMapPage() {
 
   // p366: تقسيم الفاتورة — دفع عناصر محددة في دفعة مستقلة
   const [splitOpen, setSplitOpen] = useState(false);
+  const [moveTarget, setMoveTarget] = useState('');  // p396: وجهة نقل الطلب
   const [splitSel, setSplitSel] = useState([]);
   const [receipt, setReceipt] = useState(null);  // p372: فاتورة الزبون للطباعة
   const [printMode, setPrintMode] = useState(null);  // p375: receipt | z — أي منطقة طباعة تظهر
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem('waiter_sound') !== '0');  // p378
   const [splitMethod, setSplitMethod] = useState('cash');
+  // p396: نقل الطلب النشط إلى طاولة أخرى — يحرّر الحالية ويشغل الهدف
+  const moveOrder = async (ord) => {
+    if (!ord || !moveTarget) return;
+    try {
+      await apiClient.put(`/restaurant/kitchen-orders/${ord.id}/table`, { table_id: moveTarget });
+      toast.success(isAr ? 'نُقل الطلب إلى الطاولة الجديدة' : 'Commande deplacee');
+      setMoveTarget('');
+      setSelTable(null);
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+  };
   const [splitPaying, setSplitPaying] = useState(false);
   const toggleSplitItem = (i) => setSplitSel(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]);
   const paySplit = async (ord) => {
@@ -1142,6 +1154,22 @@ export default function TablesMapPage() {
                               </div>
                             </>
                           )}
+                        </div>
+                      )}
+                      {/* p396: نقل الطلب النشط إلى طاولة حرة أخرى */}
+                      {(tables || []).filter(t => t.id !== selTable.id && t.status !== 'occupied').length > 0 && (
+                        <div className="flex items-center gap-1" data-testid="order-move-box">
+                          <Select value={moveTarget} onValueChange={setMoveTarget}>
+                            <SelectTrigger className="flex-1 h-9" data-testid="order-move-select"><SelectValue placeholder={isAr ? 'نقل إلى طاولة…' : 'Deplacer vers…'} /></SelectTrigger>
+                            <SelectContent>
+                              {(tables || []).filter(t => t.id !== selTable.id && t.status !== 'occupied').map(t => (
+                                <SelectItem key={t.id} value={t.id} data-testid={`order-move-opt-${t.id}`}>{t.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button size="sm" variant="outline" className="h-9" disabled={!moveTarget} onClick={() => moveOrder(ord)} data-testid="order-move-btn">
+                            {isAr ? 'نقل' : 'Deplacer'}
+                          </Button>
                         </div>
                       )}
                       <Button variant="outline" className="w-full min-h-[44px]" onClick={() => printReceipt(ord.id)} data-testid="receipt-print-btn">

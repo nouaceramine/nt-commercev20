@@ -596,6 +596,41 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 pass
         return _order_out(updated)
 
+    # ---------- p396: نقل طلب نشط بين الطاولات ----------
+    class TableMoveIn(BaseModel):
+        table_id: str
+
+    @router.put("/kitchen-orders/{order_id}/table")
+    async def move_order_table(order_id: str, data: TableMoveIn, user: dict = Depends(get_current_user)):
+        o = await _orders().find_one({"id": order_id})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        if o.get("status") not in ("pending", "preparing", "pending_payment"):
+            raise HTTPException(status_code=400, detail="لا يمكن نقل طلب منتهٍ")
+        if not o.get("table_id"):
+            raise HTTPException(status_code=400, detail="الطلب غير مرتبط بطاولة")
+        if data.table_id == o.get("table_id"):
+            raise HTTPException(status_code=400, detail="الطلب على هذه الطاولة بالفعل")
+        target = await _tables().find_one({"id": data.table_id})
+        if not target:
+            raise HTTPException(status_code=404, detail="الطاولة الهدف غير موجودة")
+        if target.get("status") == "occupied":
+            raise HTTPException(status_code=400, detail="الطاولة الهدف مشغولة")
+        act = target.get("active_order_id")
+        if act and await _orders().find_one(
+                {"id": act, "status": {"$in": ["pending", "preparing", "pending_payment"]}}):
+            raise HTTPException(status_code=400, detail="الطاولة الهدف مشغولة")
+        # تحرير القديمة (مع تدوير QR كما p323) وإشغال الهدف
+        await _tables().update_one({"id": o["table_id"]}, {"$set": {
+            "status": "free", "active_order_id": None, "qr_token": secrets.token_hex(5)}})
+        await _tables().update_one({"id": target["id"]}, {"$set": {
+            "status": "occupied", "active_order_id": order_id}})
+        await _orders().update_one({"id": order_id}, {"$set": {
+            "table_id": target["id"], "table_name": target.get("name"), "updated_at": _now()}})
+        updated = await _orders().find_one({"id": order_id})
+        await _publish("kitchen_order.updated", updated, user)
+        return _order_out(updated)
+
     # ---------- p363: أداء المطبخ — زمن الانتظار/التحضير وأبطأ الأطباق ----------
     @router.get("/kitchen-stats")
     async def kitchen_stats(days: int = 7, user: dict = Depends(get_current_user)):
