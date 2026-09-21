@@ -986,6 +986,32 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 } for r in rows],
                 "total_waiters": len(rows)}
 
+    # ---------- p397: تصدير أداء الندل CSV (BOM لـ Excel) ----------
+    @router.get("/waiter-stats.csv")
+    async def waiter_stats_csv(days: int = 7, user: dict = Depends(get_current_user)):
+        d = await waiter_stats(days, user)  # نفس تجميعة JSON تمامًا
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["النادل,الطلبات,الملغاة,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل"]
+        for w in (d.get("waiters") or []):
+            lines.append(",".join([
+                _cell(w.get("name")), _cell(w.get("orders")), _cell(w.get("cancelled")),
+                _cell(w.get("avg_bill")), _cell(w.get("avg_duration_min")), _cell(w.get("revenue"))]))
+        lines.append("")
+        lines.append(",".join(["الإجمالي", _cell(sum(int(w.get("orders") or 0) for w in (d.get("waiters") or []))),
+                               _cell(sum(int(w.get("cancelled") or 0) for w in (d.get("waiters") or []))), "", "",
+                               _cell(round(sum(float(w.get("revenue") or 0) for w in (d.get("waiters") or [])), 2))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "waiter-stats-" + str(d.get("days") or 0) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p385: تقرير أداء الندل PDF ----------
     @router.get("/waiter-stats.pdf")
     async def waiter_stats_pdf(days: int = 7, user: dict = Depends(get_current_user)):

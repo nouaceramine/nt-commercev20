@@ -184,6 +184,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p397: تصدير أداء الندل CSV (BOM عربي لـ Excel — نفس فترة الجدول)
+  const downloadWsCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/waiter-stats.csv?days=${tstatsDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `waiter-stats-${tstatsDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p388: تحميل تقرير الحجوزات PDF (الفترة الافتراضية: آخر 7 أيام — حدود الباك-إند)
   const downloadResvPdf = async () => {
     try {
@@ -662,6 +676,10 @@ export default function TablesMapPage() {
                 <span className="text-xs text-muted-foreground font-normal">({tstatsDays} {isAr ? 'يوماً' : 'j'})</span>
                 <Button variant="outline" size="sm" className="h-7 px-2 ms-auto" onClick={downloadWsPdf} data-testid="ws-pdf-btn">
                   <Download className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={downloadWsCsv} data-testid="ws-csv-btn"
+                  title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
+                  CSV
                 </Button>
               </h2>
               <div className="border rounded overflow-x-auto">
