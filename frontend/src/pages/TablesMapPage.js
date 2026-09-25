@@ -240,6 +240,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p404: تصدير دوران الطاولات CSV (BOM عربي لـ Excel — نفس فترة الجدول)
+  const downloadTableCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/table-stats.csv?days=${tstatsDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `table-stats-${tstatsDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
 
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
   const beep = useCallback(() => {
@@ -655,6 +669,10 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="h-8 px-2" data-testid="tstats-pdf-btn" onClick={downloadTablePdf}
                   title={isAr ? 'تقرير دوران الطاولات PDF' : 'Rotation PDF'}>
                   <Download className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="tstats-csv-btn" onClick={downloadTableCsv}
+                  title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
+                  CSV
                 </Button>
                 <Select value={String(tstatsDays)} onValueChange={v => setTstatsDays(Number(v))}>
                   <SelectTrigger className="w-28 h-8" data-testid="tstats-days"><SelectValue /></SelectTrigger>

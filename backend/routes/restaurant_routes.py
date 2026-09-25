@@ -942,6 +942,32 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p404: تصدير إحصاءات الطاولات CSV (BOM لـ Excel) ----------
+    @router.get("/table-stats.csv")
+    async def table_stats_csv(days: int = 7, user: dict = Depends(get_current_user)):
+        d = await table_stats(days, user)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = []
+        lines.append("الطاولة,المقاعد,الطلبات,طلبات/يوم,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل")
+        for t in d.get("tables") or []:
+            lines.append(",".join([_cell(t.get("table_name")), _cell(t.get("seats")),
+                                   _cell(t.get("orders")), _cell(t.get("orders_per_day")),
+                                   _cell(t.get("avg_bill")), _cell(t.get("avg_duration_min")),
+                                   _cell(t.get("revenue"))]))
+        lines.append(",".join([_cell("الإجمالي"), "", _cell(d.get("total_orders")), "", "", "",
+                               _cell(d.get("total_revenue"))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "table-stats-" + str(d.get("days") or 0) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p369: أداء النوادل — طلبات وإيراد وزمن لكل موظف ----------
     @router.get("/waiter-stats")
     async def waiter_stats(days: int = 7, user: dict = Depends(get_current_user)):
