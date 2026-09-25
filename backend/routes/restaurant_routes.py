@@ -1382,6 +1382,61 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p406: تصدير تقرير الحجوزات CSV (BOM لـ Excel) — نفس بيانات p388 ----------
+    @router.get("/reservations/report.csv")
+    async def reservations_report_csv(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                      user: dict = Depends(get_current_user)):
+        d1, d2, start, end = await _period_bounds(date_from, date_to)
+        rows = await _resv().find(
+            {"reserved_for": {"$gte": start, "$lt": end}}).sort("reserved_for", 1).to_list(500)
+        dz = timezone(timedelta(hours=1))
+        counts = {}
+        guests = 0
+        for r in rows:
+            st = r.get("status") or "booked"
+            counts[st] = counts.get(st, 0) + 1
+            guests += int(r.get("party_size") or 0)
+        done = counts.get("seated", 0) + counts.get("no_show", 0)
+        noshow_pct = round(100.0 * counts.get("no_show", 0) / done, 1) if done else 0.0
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = []
+        lines.append("البند,القيمة")
+        lines.append("من," + _cell(d1))
+        lines.append("إلى," + _cell(d2))
+        lines.append("إجمالي الحجوزات," + _cell(len(rows)))
+        lines.append("مؤكد," + _cell(counts.get("booked", 0)))
+        lines.append("حضر," + _cell(counts.get("seated", 0)))
+        lines.append("ملغى," + _cell(counts.get("cancelled", 0)))
+        lines.append("لم يحضر," + _cell(counts.get("no_show", 0)))
+        lines.append("نسبة عدم الحضور %," + _cell(noshow_pct))
+        lines.append("إجمالي الضيوف," + _cell(guests))
+        if rows:
+            lines.append("")
+            lines.append("التاريخ,الوقت,الزبون,الطاولة,الأشخاص,الحالة")
+            lbl = {"booked": "مؤكد", "seated": "حضر", "cancelled": "ملغى", "no_show": "لم يحضر"}
+            for r in rows:
+                when = r.get("reserved_for")
+                try:
+                    local = when.astimezone(dz) if hasattr(when, "astimezone") else None
+                    d_s = local.strftime("%Y-%m-%d") if local else str(when or "")
+                    t_s = local.strftime("%H:%M") if local else ""
+                except Exception:
+                    d_s, t_s = str(when or ""), ""
+                lines.append(",".join([_cell(d_s), _cell(t_s), _cell(r.get("customer_name")),
+                                       _cell(r.get("table_name") or "—"), _cell(r.get("party_size") or 0),
+                                       _cell(lbl.get(r.get("status"), r.get("status") or ""))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "reservations-report-" + str(d1) + "_" + str(d2) + ".csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p371: تقرير إقفال اليوم (Z) للمطعم — بتوقيت الجزائر ----------
     async def _zreport_agg(start, end) -> dict:
         # p380: نواة تجميع z-report — مشتركة بين اليوم الواحد (p371) وتقارير الفترات (p380)

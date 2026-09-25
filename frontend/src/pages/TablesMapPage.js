@@ -226,6 +226,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p406: تصدير تقرير الحجوزات CSV (BOM عربي لـ Excel — نفس فترة تقرير PDF)
+  const downloadResvCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/reservations/report.csv', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'reservations-report.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p392: تحميل تقرير دوران الطاولات PDF (نفس فترة الجدول tstatsDays)
   const downloadTablePdf = async () => {
     try {
@@ -961,6 +975,9 @@ export default function TablesMapPage() {
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="outline" data-testid="resv-pdf-btn" onClick={downloadResvPdf} title={isAr ? 'تقرير الحجوزات PDF' : 'Reservations PDF'}>
                   <Download className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="outline" className="px-2 text-[10px]" data-testid="resv-csv-btn" onClick={downloadResvCsv} title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
+                  CSV
                 </Button>
                 <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => setResvDlg(true)}>
                   <Plus className="h-4 w-4 ml-1" />{isAr ? 'حجز جديد' : 'Nouvelle'}
