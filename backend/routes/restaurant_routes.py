@@ -781,6 +781,45 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p405: تصدير أداء المطبخ CSV (BOM لـ Excel) ----------
+    @router.get("/kitchen-stats.csv")
+    async def kitchen_stats_csv(days: int = 7, user: dict = Depends(get_current_user)):
+        d = await kitchen_stats(days, user)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = []
+        lines.append("البند,القيمة")
+        lines.append("أيام الفترة," + _cell(d.get("days")))
+        lines.append("الطلبات المقدَّمة," + _cell(d.get("count")))
+        lines.append("متوسط الانتظار (د)," + _cell(d.get("avg_wait_min")))
+        lines.append("متوسط التحضير (د)," + _cell(d.get("avg_prep_min")))
+        lines.append("متوسط الإجمالي (د)," + _cell(d.get("avg_total_min")))
+        lines.append("المتأخرة (≥15د)," + _cell(d.get("late_count")))
+        dishes = d.get("slowest_dishes") or []
+        if dishes:
+            lines.append("")
+            lines.append("الطبق,المرات,متوسط الزمن (د)")
+            for x in dishes:
+                lines.append(",".join([_cell(x.get("name")), _cell(x.get("count")),
+                                       _cell(x.get("avg_total_min"))]))
+        hours = d.get("by_hour") or []
+        if hours:
+            lines.append("")
+            lines.append("الساعة,عدد الطلبات,متوسط الزمن (د)")
+            for h in hours:
+                lines.append(",".join([_cell(h.get("hour")), _cell(h.get("count")),
+                                       _cell(h.get("avg_total_min"))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "kitchen-stats-" + str(d.get("days") or 0) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p367: دوران الطاولات — طلبات وإيراد ومدة الجلسة لكل طاولة ----------
     @router.get("/table-stats")
     async def table_stats(days: int = 7, user: dict = Depends(get_current_user)):

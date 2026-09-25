@@ -165,6 +165,20 @@ export default function KitchenDisplayPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error("تعذر تحميل PDF"); }
   };
+  // p405: تصدير أداء المطبخ CSV (BOM عربي لـ Excel — نفس فترة زر PDF: اليوم)
+  const downloadStatsCsv = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/kitchen-stats.csv?days=1", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "kitchen-stats-1d.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل CSV"); }
+  };
   return (
     <div className="min-h-screen bg-background p-4 space-y-4" dir="rtl" data-testid="kds-page">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -204,6 +218,9 @@ export default function KitchenDisplayPage() {
           )}
           <Button variant="outline" size="sm" className="h-6 px-2" data-testid="kds-stats-pdf" onClick={downloadStatsPdf} title="تقرير أداء المطبخ PDF">
             <Download className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-stats-csv" onClick={downloadStatsCsv} title="تصدير CSV (Excel)">
+            CSV
           </Button>
         </div>
       )}
