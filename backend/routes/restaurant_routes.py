@@ -2527,6 +2527,97 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
+    # ---------- p421: ملخص التوصيل PDF (نفس بيانات البطاقات — صفر ازدواجية) ----------
+    @router.get("/delivery-summary.pdf")
+    async def delivery_summary_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        d = await delivery_summary(days, user)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0], W - MARGIN, y[0])
+            c.setDash()
+            y[0] -= 10
+
+        bs = d.get("by_status") or {}
+        active = int(bs.get("pending") or 0) + int(bs.get("ready") or 0) + int(bs.get("out_for_delivery") or 0)
+        if store:
+            _center(store, 13)
+        _center("ملخص طلبات التوصيل", 12)
+        _center("آخر " + str(d.get("days") or 0) + " يومًا", 9)
+        y[0] -= 4
+        _row("نشطة الآن", active)
+        _row("مُسلَّمة", bs.get("delivered") or 0)
+        _row("ملغاة", bs.get("cancelled") or 0)
+        _row("إيراد التوصيل (المسلَّمة)", d.get("delivered_revenue"))
+        _row("رسوم التوصيل", d.get("delivered_fees"))
+        _dash()
+        _center("تفصيل الحالات", 11)
+        slbl = {"pending": "قيد التحضير", "ready": "جاهز", "out_for_delivery": "في الطريق",
+                "delivered": "سُلّم", "cancelled": "ملغى"}
+        for k in ("pending", "ready", "out_for_delivery", "delivered", "cancelled"):
+            _row(slbl[k], bs.get(k) or 0)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "delivery-summary-" + str(d.get("days") or 0) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p413: تصدير طلبات التوصيل CSV تفصيليًا (BOM لـ Excel) ----------
     @router.get("/delivery-orders.csv")
     async def delivery_orders_csv(status: Optional[str] = None, days: int = 30,
