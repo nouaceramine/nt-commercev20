@@ -147,7 +147,11 @@ export default function TablesMapPage() {
   // p394: تصدير التقرير المخصص CSV (BOM عربي لـ Excel)
   const downloadPeriodCsv = async () => {
     try {
-      const q = `${pFrom ? `date_from=${pFrom}&` : ''}${pTo ? `date_to=${pTo}` : ''}`;
+      const _pp = [];
+      if (pFrom) _pp.push(`date_from=${pFrom}`);
+      if (pTo) _pp.push(`date_to=${pTo}`);
+      if (pCompare) _pp.push('compare=1');  // p414: تضمين قسم المقارنة عند تفعيل التبديل
+      const q = _pp.join('&');
       const res = await apiClient.get(`/restaurant/period-report.csv${q ? `?${q}` : ''}`, { responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');

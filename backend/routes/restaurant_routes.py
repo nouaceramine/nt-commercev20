@@ -1729,8 +1729,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ---------- p394: تصدير التقرير المخصص CSV (BOM لـ Excel) ----------
     @router.get("/period-report.csv")
     async def period_report_csv(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                user: dict = Depends(get_current_user)):
-        d = await _period_payload(date_from, date_to)
+                                compare: int = 0, user: dict = Depends(get_current_user)):
+        d = await _period_payload(date_from, date_to, compare=bool(compare))
         from fastapi.responses import Response
 
         def _cell(v):
@@ -1763,8 +1763,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append("الطبق,الكمية")
             for x in dishes:
                 lines.append(",".join([_cell(x.get("name")), _cell(x.get("qty"))]))
+        prev = d.get("prev")  # p414: قسم المقارنة بالفترة السابقة عند compare=1
+        if prev:
+            lines.append("")
+            lines.append("الفترة السابقة,القيمة")
+            lines.append("من," + _cell(prev.get("from")))
+            lines.append("إلى," + _cell(prev.get("to")))
+            lines.append("الطلبات (بلا الملغاة)," + _cell(prev.get("orders")))
+            lines.append("الملغاة," + _cell(prev.get("cancelled")))
+            lines.append("الخصومات," + _cell(prev.get("discounts")))
+            lines.append("الإيراد المحصَّل," + _cell(prev.get("revenue")))
+            delta = d.get("delta") or {}
+
+            def _pct_lbl(v):
+                return "—" if v is None else (str(v) + "%")
+
+            lines.append("")
+            lines.append("نسب التغير,القيمة")
+            lines.append("الطلبات," + _cell(_pct_lbl(delta.get("orders_pct"))))
+            lines.append("الإيراد المحصَّل," + _cell(_pct_lbl(delta.get("revenue_pct"))))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        fname = "period-report-" + (d.get("from") or "") + "_" + (d.get("to") or "") + ".csv"
+        fname = "period-report-" + (d.get("from") or "") + "_" + (d.get("to") or "") + ("-compare" if prev else "") + ".csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
