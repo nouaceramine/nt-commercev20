@@ -2584,6 +2584,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         rows = await _neighbors().find({}).sort("created_at", 1).to_list(200)
         return [_neighbor_out(n) for n in rows]
 
+    # ---------- p416: تصدير قائمة الجيران CSV (BOM لـ Excel) ----------
+    @router.get("/neighbors.csv")
+    async def neighbors_csv(admin: dict = Depends(get_tenant_admin)):
+        rows = await _neighbors().find({}).sort("created_at", 1).to_list(200)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        plabel = {"debt": "آجل", "cash": "كاش"}
+        lines = ["الاسم,المدير,الهاتف,نمط الحساب,نسبة الخصم %,الرصيد,ملاحظات"]
+        for n in rows:
+            lines.append(",".join([
+                _cell(n.get("name")), _cell(n.get("manager_name")), _cell(n.get("phone")),
+                _cell(plabel.get(n.get("payment"), n.get("payment") or "")),
+                _cell(n.get("discount_pct")), _cell(n.get("balance", 0)),
+                _cell(n.get("notes"))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="neighbors.csv"'})
+
     @router.post("/neighbors", status_code=201)
     async def create_neighbor(data: NeighborIn, admin: dict = Depends(get_tenant_admin)):
         if not data.name.strip():
