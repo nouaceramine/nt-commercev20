@@ -2390,6 +2390,41 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
+    # ---------- p413: تصدير طلبات التوصيل CSV تفصيليًا (BOM لـ Excel) ----------
+    @router.get("/delivery-orders.csv")
+    async def delivery_orders_csv(status: Optional[str] = None, days: int = 30,
+                                  user: dict = Depends(get_current_user)):
+        rows = await list_delivery_orders(status, days, user)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        dz = timezone(timedelta(hours=1))
+        lbl = {"pending": "قيد التحضير", "ready": "جاهز", "out_for_delivery": "في الطريق",
+               "delivered": "سُلّم", "cancelled": "ملغى"}
+        lines = []
+        lines.append("الرمز,الزبون,الهاتف,العنوان,السائق,الحالة,المجموع الفرعي,رسوم التوصيل,الإجمالي,مُحصَّل,التاريخ")
+        for o in rows:
+            when = o.get("created_at")
+            try:
+                when_s = when.astimezone(dz).strftime("%Y-%m-%d %H:%M") if hasattr(when, "astimezone") else str(when)
+            except Exception:
+                when_s = str(when or "")
+            lines.append(",".join([
+                _cell(o.get("code")), _cell(o.get("customer_name")), _cell(o.get("customer_phone")),
+                _cell(o.get("address")), _cell(o.get("driver_name")),
+                _cell(lbl.get(o.get("status"), o.get("status") or "")),
+                _cell(o.get("subtotal")), _cell(o.get("delivery_fee")), _cell(o.get("total")),
+                _cell("نعم" if o.get("payment_collected") else "لا"), _cell(when_s)]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "delivery-orders-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     @router.post("/delivery-orders")
     async def create_delivery_order(data: DeliveryOrderCreate, user: dict = Depends(get_current_user)):
         if not data.items:

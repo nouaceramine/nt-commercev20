@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { Bike, Plus, Trash2, RefreshCw, MapPin, Phone, User } from "lucide-react";
+import { Bike, Plus, Trash2, RefreshCw, MapPin, Phone, User, FileDown } from "lucide-react";
 import apiClient from "../lib/apiClient";
 import { startRealtime, onEvent, stopRealtime } from "../lib/realtime";
 import { toast } from "sonner";
@@ -44,6 +44,21 @@ export default function DeliveryPage() {
     } catch (e) { /* جلب دوري صامت */ }
     finally { setLoading(false); }
   }, []);
+
+  // p413: تصدير طلبات التوصيل CSV (BOM عربي لـ Excel — نفس فترة القائمة)
+  const downloadCsv = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/delivery-orders.csv", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "delivery-orders.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل CSV"); }
+  };
 
   useEffect(() => {
     fetchAll();
@@ -110,6 +125,7 @@ export default function DeliveryPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2"><Bike className="h-7 w-7" /> طلبات التوصيل</h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} data-testid="dlv-refresh"><RefreshCw className="h-4 w-4 ml-1" /> تحديث</Button>
+          <Button variant="outline" size="sm" onClick={downloadCsv} data-testid="dlv-csv-btn" title="تصدير CSV (Excel)"><FileDown className="h-4 w-4 ml-1" /> CSV</Button>
           <Button size="sm" onClick={openNew} data-testid="dlv-new-btn"><Plus className="h-4 w-4 ml-1" /> طلب توصيل</Button>
         </div>
       </div>
