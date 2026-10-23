@@ -2217,6 +2217,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         rows = await _orders().aggregate(pipeline).to_list(50)
         return {"top": [{"product_id": r["_id"], "qty": r["qty"]} for r in rows]}
 
+    # ---------- p422: تصدير الأكثر مبيعًا CSV مع أسماء الأصناف (BOM لـ Excel) ----------
+    @router.get("/top-sellers.csv")
+    async def top_sellers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        d = await top_sellers(days, user)
+        top = d.get("top") or []
+        ids = [t.get("product_id") for t in top if t.get("product_id")]
+        names = {}
+        if ids:
+            async for p in db.products.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1}):
+                names[p.get("id")] = p.get("name")
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الترتيب,الصنف,الكمية"]
+        for i, t in enumerate(top, 1):
+            pid = t.get("product_id")
+            lines.append(",".join([_cell(i), _cell(names.get(pid) or pid), _cell(t.get("qty"))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "top-sellers-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p337: خصومات طلبات المطعم ----------
     @router.post("/kitchen-orders/{order_id}/discount")
     async def apply_discount(order_id: str, data: DiscountIn, user: dict = Depends(get_current_user)):

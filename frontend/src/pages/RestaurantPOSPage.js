@@ -36,6 +36,21 @@ export default function RestaurantPOSPage() {
   const [discValue, setDiscValue] = useState('');
   const [custPhone, setCustPhone] = useState('');  // p356: ولاء
 
+  // p422: تصدير الأكثر مبيعًا CSV (BOM عربي لـ Excel — 30 يومًا)
+  const downloadTopCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/top-sellers.csv?days=30', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'top-sellers-30d.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
+
   const fetchAll = useCallback(async () => {
     try {
       const [t, o, p, tp, pm] = await Promise.all([
@@ -177,6 +192,10 @@ export default function RestaurantPOSPage() {
                 <Zap className="h-4 w-4" />{isAr ? 'سريع' : 'Rapide'}
               </button>
             </div>
+            <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadTopCsv} data-testid="pos-topcsv-btn"
+              title={isAr ? 'تصدير الأكثر مبيعًا CSV (30 يوم)' : 'Top ventes CSV (30j)'}>
+              CSV
+            </Button>
             <Button variant="outline" size="sm" onClick={fetchAll} data-testid="resto-refresh"><RefreshCw className="h-4 w-4" /></Button>
           </div>
         </div>
