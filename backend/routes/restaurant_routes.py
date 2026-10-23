@@ -2631,6 +2631,111 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "balance": n.get("balance") or 0,
         }
 
+    # ---------- p412: كشف حساب الجار PDF — نفس بيانات الكشف قابلة للطباعة والأرشفة ----------
+    @router.get("/neighbors/{nid}/statement.pdf")
+    async def neighbor_statement_pdf(nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)):
+        d = await neighbor_statement(nid, days, admin)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": admin.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        dz = timezone(timedelta(hours=1))
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0], W - MARGIN, y[0])
+            c.setDash()
+            y[0] -= 10
+
+        nb = d.get("neighbor") or {}
+        if store:
+            _center(store, 13)
+        _center("كشف حساب جار — " + (nb.get("name") or ""), 12)
+        _center("آخر " + str(d.get("days") or 0) + " يومًا", 9)
+        y[0] -= 4
+        _row("إجمالي الطلبات", d.get("orders_total"))
+        _row("إجمالي التسديدات", d.get("settlements_total"))
+        _row("الرصيد الحالي", d.get("balance"))
+        orders = d.get("orders") or []
+        if orders:
+            _dash()
+            _center("الطلبات", 11)
+            for o in orders:
+                when = o.get("created_at")
+                try:
+                    when_s = when.astimezone(dz).strftime("%d/%m %H:%M") if hasattr(when, "astimezone") else str(when)
+                except Exception:
+                    when_s = str(when or "")
+                _row("{} — {}".format(when_s, o.get("code") or ""), o.get("total"), 9)
+        settles = d.get("settlements") or []
+        if settles:
+            _dash()
+            _center("التسديدات", 11)
+            for s in settles:
+                when = s.get("created_at")
+                try:
+                    when_s = when.astimezone(dz).strftime("%d/%m %H:%M") if hasattr(when, "astimezone") else str(when)
+                except Exception:
+                    when_s = str(when or "")
+                _row(when_s, s.get("amount"), 9)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "neighbor-statement-" + str(nid) + ".pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p311: QR table ordering (public — no auth) ----------
     # Security notes: tenant must have the restaurant feature ON; prices and
     # modifier deltas are ALWAYS taken from the DB (client sends ids/names

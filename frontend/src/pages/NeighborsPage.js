@@ -10,7 +10,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Store, Plus, Trash2, RefreshCw, Pencil, HandCoins, ReceiptText, Link2 } from 'lucide-react';
+import { Store, Plus, Trash2, RefreshCw, Pencil, HandCoins, ReceiptText, Link2, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -70,6 +70,21 @@ export default function NeighborsPage() {
       setStmt({ neighbor: n, data });
       setSettleAmt('');
     } catch (e) { toast.error(errText(e)); }
+  };
+
+  // p412: تنزيل كشف حساب الجار PDF (جلب مصادق عليه ثم تنزيل)
+  const downloadStatementPdf = async (n) => {
+    try {
+      const res = await apiClient.get(`/restaurant/neighbors/${n.id}/statement.pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `neighbor-statement-${n.name || n.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(ar ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
   const settle = async () => {
@@ -205,8 +220,8 @@ export default function NeighborsPage() {
             {stmt && (
               <div className="space-y-3" data-testid="nbr-statement">
                 <div className="flex justify-between text-sm">
-                  <span>{ar ? 'إجمالي الطلبات' : 'Total commandes'}: <b>{Number(stmt.data.total_orders || 0).toLocaleString()}</b></span>
-                  <span>{ar ? 'إجمالي التسديدات' : 'Total règlements'}: <b>{Number(stmt.data.total_settlements || 0).toLocaleString()}</b></span>
+                  <span>{ar ? 'إجمالي الطلبات' : 'Total commandes'}: <b data-testid="nbr-stmt-orders-total">{Number(stmt.data.orders_total || 0).toLocaleString()}</b></span>
+                  <span>{ar ? 'إجمالي التسديدات' : 'Total règlements'}: <b data-testid="nbr-stmt-settlements-total">{Number(stmt.data.settlements_total || 0).toLocaleString()}</b></span>
                   <span>{ar ? 'الرصيد' : 'Solde'}: <b className="text-red-600" data-testid="nbr-stmt-balance">{Number(stmt.data.balance || 0).toLocaleString()}</b></span>
                 </div>
                 <div className="max-h-56 overflow-auto border rounded">
@@ -224,6 +239,11 @@ export default function NeighborsPage() {
                     onChange={(e) => setSettleAmt(e.target.value)} data-testid="nbr-settle-amount" />
                   <Button onClick={settle} data-testid="nbr-settle-btn">
                     <HandCoins className="w-4 h-4 ml-1" />{ar ? 'تسديد' : 'Régler'}
+                  </Button>
+                  {/* p412: تنزيل كشف الحساب PDF — نفس بيانات الحوار قابلة للطباعة */}
+                  <Button variant="outline" onClick={() => downloadStatementPdf(stmt.neighbor)} data-testid="nbr-stmt-pdf"
+                    title={ar ? 'تنزيل الكشف PDF' : 'Telecharger PDF'}>
+                    <Download className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
