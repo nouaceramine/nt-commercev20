@@ -273,6 +273,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
+  // p418: منحنى الإيرادات PDF (نفس فترة trendDays)
+  const downloadTrendPdf = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/revenue-trend.pdf?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `revenue-trend-${trendDays}d.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
   // p417: تصدير الطلبيات المجدولة CSV (BOM عربي لـ Excel)
   const downloadSchedCsv = async () => {
     try {
@@ -906,6 +920,10 @@ export default function TablesMapPage() {
                 <span className="text-xs text-muted-foreground font-normal">(<span dir="ltr" data-testid="trend-total-revenue">{trend ? trend.total_revenue : '…'}</span> {isAr ? 'دج' : 'DA'})</span>
               </h2>
               <div className="flex items-center gap-1">
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-pdf-btn" onClick={downloadTrendPdf}
+                  title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}>
+                  PDF
+                </Button>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-csv-btn" onClick={downloadTrendCsv}
                   title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
                   CSV

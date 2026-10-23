@@ -2112,6 +2112,96 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p418: منحنى الإيرادات PDF (نفس بيانات JSON — صفر ازدواجية) ----------
+    @router.get("/revenue-trend.pdf")
+    async def revenue_trend_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        d = await revenue_trend(days, user)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0], W - MARGIN, y[0])
+            c.setDash()
+            y[0] -= 10
+
+        if store:
+            _center(store, 13)
+        _center("منحنى الإيرادات المحصَّلة", 12)
+        _center("آخر " + str(d.get("days") or 0) + " يومًا", 9)
+        y[0] -= 4
+        _row("إجمالي الطلبات (بلا الملغاة)", d.get("total_orders"))
+        _row("الإيراد المحصَّل", d.get("total_revenue"))
+        _dash()
+        series = d.get("series") or []
+        if series:
+            _center("التفصيل اليومي", 11)
+            for s in series:
+                _row(str(s.get("date") or ""),
+                     str(s.get("orders") or 0) + " طلب — "
+                     + str(s.get("revenue") or 0) + " دج — خصم " + str(s.get("discounts") or 0))
+        else:
+            _center("لا بيانات في الفترة", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "revenue-trend-" + str(d.get("days") or 0) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):
