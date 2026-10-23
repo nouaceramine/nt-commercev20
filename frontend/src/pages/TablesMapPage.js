@@ -87,9 +87,10 @@ export default function TablesMapPage() {
     const un2 = onEvent('kitchen_order.updated', fetchAll);
     const un3 = onEvent('reservation.created', fetchAll);   // p393: تحديث فوري عند حجز جديد
     const un4 = onEvent('reservation.updated', fetchAll);   // p393: وعند تغيير حالة حجز
+    const un5 = onEvent('scheduled_order.reminder', fetchAll); // p410: تحديث فوري عند تذكير طلبية مجدولة
     const poll = setInterval(fetchAll, 15000);
     const tick = setInterval(() => setTick(x => x + 1), 30000);
-    return () => { un1 && un1(); un2 && un2(); un3 && un3(); un4 && un4(); clearInterval(poll); clearInterval(tick); stopRealtime(); };
+    return () => { un1 && un1(); un2 && un2(); un3 && un3(); un4 && un4(); un5 && un5(); clearInterval(poll); clearInterval(tick); stopRealtime(); };
   }, [fetchAll]);
 
   // p334: تحميل/حفظ روابط التواصل
@@ -323,6 +324,22 @@ export default function TablesMapPage() {
             : `📅 Reservation — ${payload.customer_name || ''}${payload.table_name ? ' — ' + payload.table_name : ''}`,
           { duration: 7000 }
         );
+      }
+    });
+    return () => { un && un(); };
+  }, [isAr]);
+
+  // p410: منبثق فوري عند تذكير طلبية مجدولة عبر SSE (تُرسل مرة واحدة لكل طلبية — reminder_sent)
+  useEffect(() => {
+    const un = onEvent('scheduled_order.reminder', (payload) => {
+      if (payload) {
+        toast.info(
+          isAr
+            ? `🗓 تذكير — الطلبية ${payload.code || ''} تقترب${payload.table_name ? ' — ' + payload.table_name : ''} — جهّزوا المكونات`
+            : `🗓 Rappel — commande ${payload.code || ''} bientot${payload.table_name ? ' — ' + payload.table_name : ''}`,
+          { duration: 9000 }
+        );
+        console.info('sched-reminder-toast', payload.order_id || '');
       }
     });
     return () => { un && un(); };

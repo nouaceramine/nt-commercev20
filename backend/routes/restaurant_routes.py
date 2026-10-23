@@ -257,6 +257,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     await send_email(to, title, body=msg)
             except Exception:
                 pass
+            # p410: بث scheduled_order.reminder عبر SSE — تنبيه فوري في شاشة الطاولات دون انتظار الاستطلاع
+            try:
+                from services.outbox import outbox_write
+                from config.database import main_db as _mdb2
+                await outbox_write(
+                    _mdb2, "scheduled_order.reminder",
+                    {"order_id": o.get("id"), "code": o.get("code"),
+                     "table_name": o.get("table_name"),
+                     "scheduled_for": when.isoformat() if hasattr(when, "isoformat") else str(when or "")},
+                    tenant_id=tenant_id or "platform",
+                    source="restaurant",
+                )
+            except Exception:
+                pass
             await _orders().update_one({"id": o.get("id")}, {"$set": {"reminder_sent": True}})
         except Exception:
             pass
@@ -2171,6 +2185,10 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             remind_days = int(o.get("remind_days") or 1)
             due_soon = False
             try:
+                # p410: Mongo تُعيد datetime غير واعٍ (UTC) — تطبيعه قبل المقارنة مع now الواعي
+                # وإلا TypeError صامت يجعل due_soon=False دائمًا والتذكير لا يُرسل أبدًا
+                if sched is not None and getattr(sched, "tzinfo", None) is None:
+                    sched = sched.replace(tzinfo=timezone.utc)
                 due_soon = bool(sched) and (sched - timedelta(days=remind_days)) <= now
             except Exception:
                 pass

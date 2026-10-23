@@ -1,3 +1,15 @@
+## 2026-10-23 — p410: تذكير الطلبيات المجدولة يعمل فعلًا + حدث SSE وتنبيه فوري
+
+**إصلاح دفين (منذ p337):** المقارنة `(sched - timedelta(days=remind_days)) <= now` كانت تطرح datetime غير واعٍ (Mongo تُعيد UTC بلا tzinfo) من `_now()` الواعي → `TypeError` يُبتلع في `except` → `due_soon=False` دائمًا → **التذكير لم يُرسل قط** لأي مستأجر. الحل: تطبيع `sched` بـ `replace(tzinfo=timezone.utc)` قبل المقارنة.
+
+**الجديد:** `_send_sched_reminder` يبث الآن حدث `scheduled_order.reminder` عبر الـ outbox/SSE (order_id + code + table_name + scheduled_for) قبل تثبيت `reminder_sent` — فتظهر في شاشة الطاولات فورًا: تحديث لحظي للوحة (un5) + منبثق «🗓 تذكير — الطلبية … تقترب — جهّزوا المكونات» 9 ثوانٍ، مرة واحدة لكل طلبية.
+
+**الملفات:** `backend/routes/restaurant_routes.py` + `frontend/src/pages/TablesMapPage.js`.
+
+**الاختبار:** E2E من 16 نقطة على مستأجر TEST-P410: طلبية بعد 12 ساعة بـ remind_days=1 → `due_soon=true` → فتح اللوحة يطلق: إشعار داخلي للمدراء + تثبيت reminder_sent + حدث SSE واحد بالضبط بحمولة كاملة → بلا تكرار عند إعادة القراءة → تنظيف كامل (مستأجر + outbox = 0). **16/16 ✅**
+
+**النشر:** release `20261023_133828` — تحقق `sched-reminder-toast` في الحزمة؛ الصحة 200 ✅.
+
 ## 2026-10-23 — p409: بث kitchen_order.created في مسار scheduled-orders أيضًا
 
 **المشكلة:** p400 أصلح التفعيل الكسول الأعمى في `GET /kitchen-orders`، لكن `GET /scheduled-orders` بقي يُفعّل الطلبيات المستحقة بـ `update_many` أعمى بلا أحداث — أي مجرد فتح لوحة «قيد التجهيز» كان يُدخل الطلبات للمطبخ بصمت (بلا تنبيه KDS ولا طباعة تلقائية).
