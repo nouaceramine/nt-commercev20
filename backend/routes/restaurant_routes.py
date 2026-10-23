@@ -2217,6 +2217,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 await _send_sched_reminder(o, user)
         return out
 
+    # ---------- p417: تصدير الطلبيات المجدولة CSV (BOM لـ Excel) ----------
+    @router.get("/scheduled-orders.csv")
+    async def scheduled_orders_csv(user: dict = Depends(get_current_user)):
+        rows = await list_scheduled_orders(user)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _yn(v):
+            return "نعم" if v else "لا"
+
+        lines = ["الرمز,الطاولة,هاتف الزبون,الأصناف,الإجمالي,الموعد,تذكير قبل (يوم),قريب الاستحقاق,أُرسل التذكير"]
+        for o in rows:
+            when = o.get("scheduled_for")
+            when_s = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else str(when or "")
+            lines.append(",".join([
+                _cell(o.get("code")), _cell(o.get("table_name")), _cell(o.get("customer_phone")),
+                _cell(len(o.get("items") or [])), _cell(o.get("total")),
+                _cell(when_s), _cell(int(o.get("remind_days") or 1)),
+                _cell(_yn(o.get("due_soon"))), _cell(_yn(o.get("reminder_sent")))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="scheduled-orders.csv"'})
+
     @router.post("/scheduled-orders/{order_id}/activate")
     async def activate_scheduled_order(order_id: str, user: dict = Depends(get_current_user)):
         res = await _orders().find_one_and_update(

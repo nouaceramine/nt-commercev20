@@ -273,6 +273,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
+  // p417: تصدير الطلبيات المجدولة CSV (BOM عربي لـ Excel)
+  const downloadSchedCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/scheduled-orders.csv', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'scheduled-orders.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p408: تصدير منحنى الإيرادات CSV (BOM عربي لـ Excel — نفس فترة المنحنى trendDays)
   const downloadTrendCsv = async () => {
     try {
@@ -1097,6 +1111,10 @@ export default function TablesMapPage() {
               <h2 className="font-semibold text-sm flex items-center gap-2">
                 <CalendarClock className="h-4 w-4" />{isAr ? 'طلبيات مجدولة (قيد التجهيز)' : 'Commandes planifiees'}
               </h2>
+              <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="sched-csv-btn" onClick={downloadSchedCsv}
+                title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
+                CSV
+              </Button>
               <Button size="sm" variant="outline" data-testid="sched-add" onClick={() => { setSchedDlg(true); loadProducts(); }}>
                 <Plus className="h-4 w-4 ml-1" />{isAr ? 'طلبية ليوم محدد' : 'Planifier'}
               </Button>
