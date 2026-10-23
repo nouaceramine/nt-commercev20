@@ -268,6 +268,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
+  // p408: تصدير منحنى الإيرادات CSV (BOM عربي لـ Excel — نفس فترة المنحنى trendDays)
+  const downloadTrendCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/revenue-trend.csv?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `revenue-trend-${trendDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
 
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
   const beep = useCallback(() => {
@@ -856,14 +870,20 @@ export default function TablesMapPage() {
                 <Banknote className="h-4 w-4" />{isAr ? 'منحنى الإيرادات المحصَّلة' : 'Tendance revenus'}
                 <span className="text-xs text-muted-foreground font-normal">(<span dir="ltr" data-testid="trend-total-revenue">{trend ? trend.total_revenue : '…'}</span> {isAr ? 'دج' : 'DA'})</span>
               </h2>
-              <Select value={String(trendDays)} onValueChange={v => setTrendDays(Number(v))}>
-                <SelectTrigger className="w-24 h-8" data-testid="trend-days"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="7">7</SelectItem>
-                  <SelectItem value="14">14</SelectItem>
-                  <SelectItem value="30">30</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-csv-btn" onClick={downloadTrendCsv}
+                  title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
+                  CSV
+                </Button>
+                <Select value={String(trendDays)} onValueChange={v => setTrendDays(Number(v))}>
+                  <SelectTrigger className="w-24 h-8" data-testid="trend-days"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7</SelectItem>
+                    <SelectItem value="14">14</SelectItem>
+                    <SelectItem value="30">30</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {!trend ? (
               <p className="text-xs text-muted-foreground">{isAr ? 'جارٍ التحميل…' : 'Chargement…'}</p>

@@ -2055,6 +2055,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_orders": sum(s["orders"] for s in series),
                 "total_revenue": round(sum(s["revenue"] for s in series), 2)}
 
+    # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
+    @router.get("/revenue-trend.csv")
+    async def revenue_trend_csv(days: int = 7, user: dict = Depends(get_current_user)):
+        d = await revenue_trend(days, user)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = []
+        lines.append("التاريخ,الطلبات (بلا الملغاة),الإيراد المحصَّل,الخصومات")
+        for s in d.get("series") or []:
+            lines.append(",".join([_cell(s.get("date")), _cell(s.get("orders")),
+                                   _cell(s.get("revenue")), _cell(s.get("discounts"))]))
+        lines.append(",".join([_cell("الإجمالي"), _cell(d.get("total_orders")),
+                               _cell(d.get("total_revenue")), ""]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "revenue-trend-" + str(d.get("days") or 0) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):
