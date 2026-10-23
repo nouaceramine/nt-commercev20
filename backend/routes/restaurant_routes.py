@@ -2153,10 +2153,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ---------- p337: الطلبيات المجدولة (لوحة قيد التجهيز) ----------
     @router.get("/scheduled-orders")
     async def list_scheduled_orders(user: dict = Depends(get_current_user)):
-        await _orders().update_many(
-            {"status": "scheduled", "scheduled_for": {"$lte": _now()}},
-            {"$set": {"status": "pending", "updated_at": _now()}},
-        )
+        # p409: نفس إصلاح p400 هنا — التفعيل الكسول يبث kitchen_order.created لكل طلب
+        # وإلا فتح لوحة «قيد التجهيز» يُدخل الطلبات المستحقة للمطبخ بصمت (بلا تنبيه KDS ولا طباعة)
+        due = await _orders().find(
+            {"status": "scheduled", "scheduled_for": {"$lte": _now()}}).to_list(50)
+        for d in due:
+            await _orders().update_one(
+                {"id": d["id"]}, {"$set": {"status": "pending", "updated_at": _now()}})
+            d["status"] = "pending"
+            await _publish("kitchen_order.created", d, user)
         rows = await _orders().find({"status": "scheduled"}).sort("scheduled_for", 1).to_list(200)
         out = []
         now = _now()
