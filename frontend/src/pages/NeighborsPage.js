@@ -99,6 +99,21 @@ export default function NeighborsPage() {
     } catch (e) { toast.error(ar ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
+  // p420: كشف حساب الجار CSV (BOM عربي لـ Excel)
+  const downloadStatementCsv = async (n) => {
+    try {
+      const res = await apiClient.get(`/restaurant/neighbors/${n.id}/statement.csv`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `neighbor-statement-${n.name || n.id}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
+
   const settle = async () => {
     const amount = Number(settleAmt);
     if (!amount || amount <= 0) { toast.error(ar ? 'مبلغ غير صالح' : 'Montant invalide'); return; }
@@ -257,6 +272,10 @@ export default function NeighborsPage() {
                     <HandCoins className="w-4 h-4 ml-1" />{ar ? 'تسديد' : 'Régler'}
                   </Button>
                   {/* p412: تنزيل كشف الحساب PDF — نفس بيانات الحوار قابلة للطباعة */}
+                  <Button variant="outline" className="px-2 text-[10px]" onClick={() => downloadStatementCsv(stmt.neighbor)} data-testid="nbr-stmt-csv"
+                    title={ar ? 'تصدير الكشف CSV (Excel)' : 'Exporter CSV'}>
+                    CSV
+                  </Button>
                   <Button variant="outline" onClick={() => downloadStatementPdf(stmt.neighbor)} data-testid="nbr-stmt-pdf"
                     title={ar ? 'تنزيل الكشف PDF' : 'Telecharger PDF'}>
                     <Download className="w-4 h-4" />

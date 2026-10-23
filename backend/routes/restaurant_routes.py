@@ -2827,6 +2827,52 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "balance": n.get("balance") or 0,
         }
 
+    # ---------- p420: كشف حساب الجار CSV (BOM لـ Excel — نفس بيانات JSON) ----------
+    @router.get("/neighbors/{nid}/statement.csv")
+    async def neighbor_statement_csv(nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)):
+        d = await neighbor_statement(nid, days, admin)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _dt(v):
+            return v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
+
+        nb = d.get("neighbor") or {}
+        lines = []
+        lines.append("كشف حساب جار," + _cell(nb.get("name")))
+        lines.append("آخر (يوم)," + _cell(d.get("days")))
+        lines.append("")
+        lines.append("البند,القيمة")
+        lines.append("إجمالي الطلبات," + _cell(d.get("orders_total")))
+        lines.append("إجمالي التسديدات," + _cell(d.get("settlements_total")))
+        lines.append("الرصيد الحالي," + _cell(d.get("balance")))
+        lines.append("")
+        lines.append("الطلبات")
+        lines.append("التاريخ,الرمز,الحالة,الإجمالي")
+        slbl = {"pending": "قيد التحضير", "preparing": "قيد التحضير", "ready": "جاهز",
+                "served": "قُدّم", "paid": "مدفوع", "cancelled": "ملغى", "scheduled": "مجدول"}
+        for o in d.get("orders") or []:
+            lines.append(",".join([_cell(_dt(o.get("created_at"))), _cell(o.get("code")),
+                                   _cell(slbl.get(o.get("status"), o.get("status") or "")),
+                                   _cell(o.get("total"))]))
+        lines.append("الإجمالي,,," + _cell(d.get("orders_total")))
+        lines.append("")
+        lines.append("التسديدات")
+        lines.append("التاريخ,المبلغ,ملاحظة")
+        for s in d.get("settlements") or []:
+            lines.append(",".join([_cell(_dt(s.get("created_at"))), _cell(s.get("amount")),
+                                   _cell(s.get("notes"))]))
+        lines.append("الإجمالي,," + _cell(d.get("settlements_total")))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "neighbor-statement-" + nid + ".csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p412: كشف حساب الجار PDF — نفس بيانات الكشف قابلة للطباعة والأرشفة ----------
     @router.get("/neighbors/{nid}/statement.pdf")
     async def neighbor_statement_pdf(nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)):
