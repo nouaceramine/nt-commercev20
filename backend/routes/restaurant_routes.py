@@ -2194,6 +2194,65 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_revenue": round(sum(s["revenue"] for s in series), 2)}
 
     # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
+    # ---------- p454: أفضل زبائن الصالة CSV (حسب هاتف p356 — BOM لـ Excel) ----------
+    @router.get("/top-customers.csv")
+    async def top_customers_csv(days: int = 90, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "customer_phone": {"$nin": [None, ""]},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "paid_amt": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": "$customer_phone",
+                        "orders": {"$sum": 1},
+                        "spent": {"$sum": "$paid_amt"},
+                        "last": {"$max": "$created_at"}}},
+            {"$sort": {"orders": -1}},
+            {"$limit": 100},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(100)
+        dz = timezone(timedelta(hours=1))
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الهاتف,الطلبات,إجمالي المنفق,آخر زيارة"]
+        for r in rows:
+            ca = r.get("last")
+            if ca and ca.tzinfo is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            dstr = ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else ""
+            lines.append(",".join([
+                _cell(r.get("_id")), _cell(int(r.get("orders") or 0)),
+                _cell(round(float(r.get("spent") or 0), 2)), _cell(dstr)]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "top-customers-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p452: ربحية الأصناف CSV (إيراد/تكلفة/ربح/هامش — BOM لـ Excel) ----------
     @router.get("/items-profit.csv")
     async def items_profit_csv(days: int = 30, user: dict = Depends(get_current_user)):
