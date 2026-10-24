@@ -179,6 +179,16 @@ export default function DeliveryPage() {
       fetchAll();
     } catch (e) { toast.error(e.response?.data?.detail || "تعذر تحديث الحالة"); }
   };
+  // p445: حذف طلب التوصيل الملغى نهائيًا (الخادم يرفض غير الملغى)
+  const removeOrder = async (o) => {
+    if (!window.confirm(`حذف الطلب ${o.code} نهائيًا؟`)) return;
+    try {
+      await apiClient.delete(`/restaurant/delivery-orders/${o.id}`);
+      toast.success("حُذف الطلب");
+      fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || "تعذر الحذف"); }
+  };
+
   const collect = async () => {
     if (!saleId.trim()) { toast.error("أدخل رقم الفاتورة"); return; }
     try {
@@ -227,7 +237,14 @@ export default function DeliveryPage() {
                     </Badge>
                     {o.kitchen_code && <span className="text-xs text-muted-foreground">مطبخ: {o.kitchen_code}</span>}
                   </div>
-                  <span className="font-bold">{fmt(o.total)} دج</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-bold">{fmt(o.total)} دج</span>
+                    {o.status === "cancelled" && (
+                      <Button size="sm" variant="ghost" className="h-7 px-1.5" onClick={() => removeOrder(o)} data-testid={`dlv-del-${o.id}`} title="حذف نهائي">
+                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div className="text-sm text-muted-foreground flex flex-wrap gap-4">
                   <span className="flex items-center gap-1"><User className="h-3 w-3" /> {o.customer_name}</span>

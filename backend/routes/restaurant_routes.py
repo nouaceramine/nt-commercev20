@@ -3324,6 +3324,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish("delivery_order.created", doc, user)
         return _delivery_out(doc)
 
+    # ---------- p445: حذف طلب التوصيل الملغى نهائيًا ----------
+    @router.delete("/delivery-orders/{order_id}")
+    async def delete_delivery_order(order_id: str, user: dict = Depends(get_current_user)):
+        o = await _delivery().find_one({"id": order_id})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        if o.get("status") != "cancelled":
+            raise HTTPException(status_code=400, detail="ألغِ الطلب أولًا قبل حذفه")
+        if o.get("kitchen_order_id"):
+            await _orders().delete_one({"id": o["kitchen_order_id"], "status": "cancelled"})
+        await _delivery().delete_one({"id": order_id})
+        await _publish("delivery_order.deleted", o, user)
+        return {"deleted": True, "id": order_id}
+
     # ---------- p440: تعديل طلب التوصيل (قبل الانطلاق وقبل بدء المطبخ) ----------
     @router.put("/delivery-orders/{order_id}")
     async def update_delivery_order(order_id: str, data: DeliveryOrderCreate, user: dict = Depends(get_current_user)):
