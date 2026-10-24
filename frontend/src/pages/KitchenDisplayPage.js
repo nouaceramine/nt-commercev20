@@ -179,6 +179,21 @@ export default function KitchenDisplayPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error("تعذر تحميل CSV"); }
   };
+  // p456: حمل المطبخ حسب الساعة CSV (BOM عربي لـ Excel — آخر 30 يومًا)
+  const downloadLoadCsv = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/kitchen-load.csv?days=30", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "kitchen-load-30d.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل CSV"); }
+  };
+
   // p438: تقرير الإلغاءات اليومي CSV (BOM عربي لـ Excel — آخر 30 يومًا)
   const downloadCxlCsv = async () => {
     try {
@@ -250,6 +265,9 @@ export default function KitchenDisplayPage() {
           </Button>
           <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-stats-csv" onClick={downloadStatsCsv} title="تصدير CSV (Excel)">
             CSV
+          </Button>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-load-csv" onClick={downloadLoadCsv} title="حمل المطبخ حسب الساعة CSV (آخر 30 يومًا)">
+            حمل
           </Button>
           <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-cancel-csv" onClick={downloadCxlCsv} title="تقرير الإلغاءات CSV (آخر 30 يومًا)">
             إلغاءات

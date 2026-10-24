@@ -2410,6 +2410,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p456: حمل المطبخ حسب الساعة CSV (طلبات/أصناف/زمن تحضير — BOM لـ Excel) ----------
+    @router.get("/kitchen-load.csv")
+    async def kitchen_load_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "qty": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.quantity", 0]}]}}},
+                "prep_ms": {"$cond": [
+                    {"$and": ["$timestamps.preparing", "$timestamps.served"]},
+                    {"$subtract": ["$timestamps.served", "$timestamps.preparing"]}, None]}}},
+            {"$group": {"_id": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
+                        "orders": {"$sum": 1},
+                        "items": {"$sum": "$qty"},
+                        "avg_prep_ms": {"$avg": "$prep_ms"}}},
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(24)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الساعة,الطلبات,الأصناف,متوسط التحضير (د)"]
+        for r in rows:
+            pm = r.get("avg_prep_ms")
+            prep = round(float(pm) / 60000, 1) if pm is not None else ""
+            lines.append(",".join([
+                _cell(str(r["_id"]).zfill(2) + ":00"), _cell(int(r.get("orders") or 0)),
+                _cell(round(float(r.get("items") or 0), 2)), _cell(prep)]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "kitchen-load-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p437: المبيعات حسب الساعة CSV (توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/sales-by-hour.csv")
     async def sales_by_hour_csv(days: int = 30, user: dict = Depends(get_current_user)):
