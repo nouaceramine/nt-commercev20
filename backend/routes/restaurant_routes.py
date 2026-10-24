@@ -2350,6 +2350,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p434: الأقل مبيعًا CSV (يشمل الأصناف صفرية المبيعات — BOM لـ Excel) ----------
+    @router.get("/bottom-sellers.csv")
+    async def bottom_sellers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$unwind": "$items"},
+            {"$match": {"items.product_id": {"$ne": None}}},
+            {"$group": {"_id": "$items.product_id",
+                        "qty": {"$sum": "$items.quantity"},
+                        "revenue": {"$sum": {"$multiply": [
+                            {"$ifNull": ["$items.quantity", 0]},
+                            {"$ifNull": ["$items.unit_price", 0]}]}}}},
+        ]
+        sales = {}
+        async for r in _orders().aggregate(pipeline):
+            sales[r["_id"]] = (float(r.get("qty") or 0), round(float(r.get("revenue") or 0), 2))
+        products = await db.products.find(
+            {"is_blocked": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+        rows = []
+        for p in products:
+            qty, rev = sales.get(p.get("id"), (0.0, 0.0))
+            rows.append((qty, str(p.get("name") or ""), rev))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الترتيب,الصنف,الكمية,الإيراد"]
+        for i, (qty, name, rev) in enumerate(rows, 1):
+            lines.append(",".join([_cell(i), _cell(name), _cell(qty), _cell(rev)]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "bottom-sellers-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p337: خصومات طلبات المطعم ----------
     @router.post("/kitchen-orders/{order_id}/discount")
     async def apply_discount(order_id: str, data: DiscountIn, user: dict = Depends(get_current_user)):
