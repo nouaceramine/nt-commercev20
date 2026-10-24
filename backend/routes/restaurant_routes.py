@@ -2322,6 +2322,40 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         rows = await _orders().aggregate(pipeline).to_list(50)
         return {"top": [{"product_id": r["_id"], "qty": r["qty"]} for r in rows]}
 
+    # ---------- p436: مبيعات الفئات CSV (تجميع الأصناف حسب العائلة — BOM لـ Excel) ----------
+    @router.get("/category-sales.csv")
+    async def category_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        fams = {}
+        async for p in db.products.find({}, {"_id": 0, "id": 1, "family_name": 1}):
+            fams[p.get("id")] = (p.get("family_name") or "").strip() or "بدون فئة"
+        agg = {}
+        async for o in _orders().find(
+                {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}},
+                {"_id": 0, "items": 1}):
+            for i in (o.get("items") or []):
+                fam = fams.get(i.get("product_id"), "بدون فئة")
+                a = agg.setdefault(fam, [0.0, 0.0])
+                a[0] += float(i.get("quantity") or 0)
+                a[1] += float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الفئة,الكمية,الإيراد"]
+        for fam in sorted(agg, key=lambda k: -agg[k][1]):
+            a = agg[fam]
+            lines.append(",".join([_cell(fam), _cell(a[0]), _cell(round(a[1], 2))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "category-sales-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p422: تصدير الأكثر مبيعًا CSV مع أسماء الأصناف (BOM لـ Excel) ----------
     @router.get("/top-sellers.csv")
     async def top_sellers_csv(days: int = 30, user: dict = Depends(get_current_user)):
