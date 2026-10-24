@@ -58,6 +58,7 @@ export default function TablesMapPage() {
   const [schedPhone, setSchedPhone] = useState('');
   const [schedNotes, setSchedNotes] = useState('');
   const [schedItems, setSchedItems] = useState([]);
+  const [schedEditId, setSchedEditId] = useState(null);  // p428: تعديل طلبية مجدولة قائمة
   const [products, setProducts] = useState([]);
   const [prodSearch, setProdSearch] = useState('');
   const [discType, setDiscType] = useState('percent');
@@ -419,19 +420,40 @@ export default function TablesMapPage() {
   const [resvWhen, setResvWhen] = useState('');
   const [resvSize, setResvSize] = useState('2');
   const [resvSaving, setResvSaving] = useState(false);
+  const [resvEditId, setResvEditId] = useState(null);  // p429: تعديل حجز قائم
   const saveResv = async () => {
     setResvSaving(true);
     try {
-      await apiClient.post('/restaurant/reservations', {
-        table_id: resvTable, customer_name: resvName.trim(),
-        customer_phone: resvPhone.trim() || null, reserved_for: resvWhen,
-        party_size: Number(resvSize) || 1,
-      });
-      toast.success(isAr ? 'سُجّل الحجز' : 'Reservation enregistree');
-      setResvDlg(false); setResvName(''); setResvPhone(''); setResvWhen('');
+      if (resvEditId) {
+        // p429: تعديل حجز قائم
+        await apiClient.put(`/restaurant/reservations/${resvEditId}`, {
+          table_id: resvTable, customer_name: resvName.trim(),
+          customer_phone: resvPhone.trim() || null, reserved_for: resvWhen,
+          party_size: Number(resvSize) || 1,
+        });
+        toast.success(isAr ? 'عُدّل الحجز' : 'Modifiee');
+      } else {
+        await apiClient.post('/restaurant/reservations', {
+          table_id: resvTable, customer_name: resvName.trim(),
+          customer_phone: resvPhone.trim() || null, reserved_for: resvWhen,
+          party_size: Number(resvSize) || 1,
+        });
+        toast.success(isAr ? 'سُجّل الحجز' : 'Reservation enregistree');
+      }
+      setResvDlg(false); setResvName(''); setResvPhone(''); setResvWhen(''); setResvEditId(null);
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
     finally { setResvSaving(false); }
+  };
+  // p429: فتح حوار الحجز معبأً للتعديل
+  const openResvEdit = (r) => {
+    setResvEditId(r.id);
+    setResvTable(r.table_id || '');
+    setResvName(r.customer_name || '');
+    setResvPhone(r.customer_phone || '');
+    try { setResvWhen(r.reserved_for ? new Date(r.reserved_for).toISOString().slice(0, 16) : ''); } catch (e) { setResvWhen(''); }
+    setResvSize(String(r.party_size || 2));
+    setResvDlg(true);
   };
   const resvStatus = async (id, status) => {
     try {
@@ -582,6 +604,17 @@ export default function TablesMapPage() {
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
   };
+  // p428: فتح حوار الجدولة معبأً للتعديل
+  const openSchedEdit = (o) => {
+    setSchedEditId(o.id);
+    setSchedItems((o.items || []).map(i => ({ product_id: i.product_id || null, product_name: i.product_name,
+      quantity: i.quantity || 1, unit_price: i.unit_price || 0, note: i.note || '' })));
+    try { setSchedWhen(o.scheduled_for ? new Date(o.scheduled_for).toISOString().slice(0, 16) : ''); } catch (e) { setSchedWhen(''); }
+    setSchedRemind(String(o.remind_days || 1));
+    setSchedPhone(o.customer_phone || '');
+    setSchedNotes(o.notes || '');
+    setSchedDlg(true); loadProducts();
+  };
   const loadProducts = async () => {
     if (products.length) return;
     try {
@@ -600,16 +633,28 @@ export default function TablesMapPage() {
     if (!schedWhen) { toast.error(isAr ? 'حدد موعد التجهيز' : 'Date requise'); return; }
     if (!schedItems.length) { toast.error(isAr ? 'أضف صنفًا واحدًا على الأقل' : 'Ajoutez un article'); return; }
     try {
-      await apiClient.post('/restaurant/kitchen-orders', {
-        items: schedItems,
-        scheduled_for: new Date(schedWhen).toISOString(),
-        remind_days: Number(schedRemind),
-        customer_phone: schedPhone.trim() || null,
-        notes: schedNotes.trim() || null,
-        source: 'pos',
-      });
-      toast.success(isAr ? 'سُجّلت الطلبية المجدولة' : 'Commande planifiee');
-      setSchedDlg(false); setSchedItems([]); setSchedWhen(''); setSchedPhone(''); setSchedNotes('');
+      if (schedEditId) {
+        // p428: تعديل طلبية قائمة
+        await apiClient.put(`/restaurant/scheduled-orders/${schedEditId}`, {
+          items: schedItems,
+          scheduled_for: new Date(schedWhen).toISOString(),
+          remind_days: Number(schedRemind),
+          customer_phone: schedPhone.trim() || null,
+          notes: schedNotes.trim() || null,
+        });
+        toast.success(isAr ? 'عُدّلت الطلبية' : 'Modifiee');
+      } else {
+        await apiClient.post('/restaurant/kitchen-orders', {
+          items: schedItems,
+          scheduled_for: new Date(schedWhen).toISOString(),
+          remind_days: Number(schedRemind),
+          customer_phone: schedPhone.trim() || null,
+          notes: schedNotes.trim() || null,
+          source: 'pos',
+        });
+        toast.success(isAr ? 'سُجّلت الطلبية المجدولة' : 'Commande planifiee');
+      }
+      setSchedDlg(false); setSchedItems([]); setSchedWhen(''); setSchedPhone(''); setSchedNotes(''); setSchedEditId(null);
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
   };
@@ -1067,7 +1112,7 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="px-2 text-[10px]" data-testid="resv-csv-btn" onClick={downloadResvCsv} title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
                   CSV
                 </Button>
-                <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => setResvDlg(true)}>
+                <Button size="sm" variant="outline" data-testid="resv-add" onClick={() => { setResvEditId(null); setResvDlg(true); }}>
                   <Plus className="h-4 w-4 ml-1" />{isAr ? 'حجز جديد' : 'Nouvelle'}
                 </Button>
               </div>
@@ -1098,6 +1143,10 @@ export default function TablesMapPage() {
                     <div className="flex items-center gap-1 shrink-0">
                       {r.status === 'booked' ? (
                         <>
+                          <Button size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]" onClick={() => openResvEdit(r)}
+                            data-testid={`resv-edit-${r.id}`} title={isAr ? 'تعديل الحجز' : 'Modifier'}>
+                            ✎
+                          </Button>
                           <Button size="sm" variant="outline" className="h-7" onClick={() => resvStatus(r.id, 'seated')} data-testid={`resv-seat-${r.id}`}>{isAr ? 'جلوس' : 'Assis'}</Button>
                           <Button size="sm" variant="ghost" className="h-7" onClick={() => resvStatus(r.id, 'cancelled')} data-testid={`resv-cancel-${r.id}`}><Trash2 className="h-3.5 w-3.5 text-red-500" /></Button>
                         </>
@@ -1148,7 +1197,7 @@ export default function TablesMapPage() {
                 title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
                 CSV
               </Button>
-              <Button size="sm" variant="outline" data-testid="sched-add" onClick={() => { setSchedDlg(true); loadProducts(); }}>
+              <Button size="sm" variant="outline" data-testid="sched-add" onClick={() => { setSchedEditId(null); setSchedDlg(true); loadProducts(); }}>
                 <Plus className="h-4 w-4 ml-1" />{isAr ? 'طلبية ليوم محدد' : 'Planifier'}
               </Button>
             </div>
@@ -1168,6 +1217,10 @@ export default function TablesMapPage() {
                       <Badge variant={o.due_soon ? 'destructive' : 'secondary'} data-testid={`sched-when-${o.id}`}>
                         {o.scheduled_for ? new Date(o.scheduled_for).toLocaleString('fr-DZ', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                       </Badge>
+                      <Button size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]" onClick={() => openSchedEdit(o)}
+                        data-testid={`sched-edit-${o.id}`} title={isAr ? 'تعديل الطلبية' : 'Modifier'}>
+                        ✎
+                      </Button>
                       <Button size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]" onClick={() => postponeSched(o.id)}
                         data-testid={`sched-postpone-${o.id}`} title={isAr ? 'تأجيل يومًا كاملًا' : 'Reporter +1j'}>
                         +1ي

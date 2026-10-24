@@ -1282,6 +1282,58 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish_resv("reservation.updated", upd, user)  # p393
         return _resv_out(upd)
 
+    # ---------- p429: تعديل الحجز القائم (طاولة/اسم/هاتف/موعد/أشخاص/ملاحظات) ----------
+    @router.put("/reservations/{resv_id}")
+    async def edit_reservation(resv_id: str, data: dict = None, user: dict = Depends(get_current_user)):
+        data = data or {}
+        r = await _resv().find_one({"id": resv_id})
+        if not r:
+            raise HTTPException(status_code=404, detail="الحجز غير موجود")
+        if r.get("status") != "booked":
+            raise HTTPException(status_code=400, detail="لا يُعدَّل إلا حجز قائم")
+        sets = {"updated_at": _now()}
+        if "table_id" in data and data.get("table_id"):
+            t = await _tables().find_one({"id": data["table_id"]})
+            if not t:
+                raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+            sets["table_id"] = t["id"]
+            sets["table_name"] = t.get("name")
+        if "customer_name" in data:
+            nm = (data.get("customer_name") or "").strip()
+            if not nm:
+                raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+            sets["customer_name"] = nm
+        if "customer_phone" in data:
+            sets["customer_phone"] = _clean_phone(data.get("customer_phone"))
+        if "reserved_for" in data and data.get("reserved_for"):
+            rf = _parse_when(data.get("reserved_for"))  # نفس دلالة الإنشاء: النائي = توقيت الجزائر
+            if not rf:
+                raise HTTPException(status_code=400, detail="موعد غير صالح")
+            sets["reserved_for"] = rf
+            sets["auto_no_show"] = False  # تعديل الموعد يلغي الوسم الآلي السابق
+        if "party_size" in data and data.get("party_size") is not None:
+            ps = int(data.get("party_size"))
+            if ps < 1 or ps > 50:
+                raise HTTPException(status_code=400, detail="عدد الأشخاص 1–50")
+            sets["party_size"] = ps
+        if "notes" in data:
+            sets["notes"] = (data.get("notes") or "").strip() or None
+        # منع التعارض عند تغيير الطاولة/الموعد: حجز قائم آخر ضمن ±90 دقيقة
+        new_table = sets.get("table_id", r.get("table_id"))
+        new_when = sets.get("reserved_for", r.get("reserved_for"))
+        if new_when is not None and getattr(new_when, "tzinfo", None) is None:
+            new_when = new_when.replace(tzinfo=timezone.utc)
+        win = timedelta(minutes=90)
+        clash = await _resv().find_one({
+            "id": {"$ne": resv_id}, "table_id": new_table, "status": "booked",
+            "reserved_for": {"$gt": new_when - win, "$lt": new_when + win}})
+        if clash:
+            raise HTTPException(status_code=409, detail="تعارض مع حجز آخر على نفس الطاولة")
+        await _resv().update_one({"id": resv_id}, {"$set": sets})
+        upd = await _resv().find_one({"id": resv_id})
+        await _publish_resv("reservation.updated", upd, user)
+        return _resv_out(upd)
+
     # ---------- p388: تقرير الحجوزات PDF لفترة ----------
     @router.get("/reservations/report.pdf")
     async def reservations_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
@@ -2414,6 +2466,57 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=404, detail="الطلبية المجدولة غير موجودة")
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.created", updated, user)  # تدخل المطبخ فورًا (والطبع التلقائي p338)
+        return _order_out(updated)
+
+    # ---------- p428: تعديل الطلبية المجدولة قبل التفعيل (أصناف/موعد/تذكير/هاتف/ملاحظات) ----------
+    @router.put("/scheduled-orders/{order_id}")
+    async def edit_scheduled_order(order_id: str, data: dict = None, user: dict = Depends(get_current_user)):
+        data = data or {}
+        o = await _orders().find_one({"id": order_id, "status": "scheduled"})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلبية المجدولة غير موجودة")
+        sets = {"updated_at": _now()}
+        if "items" in data:
+            items = data.get("items") or []
+            if not items:
+                raise HTTPException(status_code=400, detail="أضف صنفًا واحدًا على الأقل")
+            clean = []
+            for it in items:
+                if not isinstance(it, dict) or not (it.get("product_name") or "").strip():
+                    raise HTTPException(status_code=400, detail="صنف غير صالح")
+                clean.append({
+                    "product_id": it.get("product_id"),
+                    "product_name": str(it.get("product_name")).strip(),
+                    "quantity": max(1, int(it.get("quantity") or 1)),
+                    "unit_price": float(it.get("unit_price") or 0),
+                    "note": it.get("note") or None,
+                })
+            sets["items"] = clean
+        if "scheduled_for" in data and data.get("scheduled_for"):
+            try:
+                raw = str(data["scheduled_for"]).replace("Z", "+00:00")
+                sched = datetime.fromisoformat(raw)
+                if sched.tzinfo is None:
+                    sched = sched.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="موعد غير صالح")
+            if sched <= _now():
+                raise HTTPException(status_code=400, detail="الموعد يجب أن يكون في المستقبل")
+            sets["scheduled_for"] = sched
+            sets["reminder_sent"] = False
+        if "remind_days" in data and data.get("remind_days") is not None:
+            rd_ = int(data.get("remind_days"))
+            if rd_ not in (1, 3):
+                raise HTTPException(status_code=400, detail="التذكير قبل يوم أو ثلاثة فقط")
+            sets["remind_days"] = rd_
+            sets["reminder_sent"] = False
+        if "customer_phone" in data:
+            sets["customer_phone"] = _clean_phone(data.get("customer_phone"))
+        if "notes" in data:
+            sets["notes"] = (data.get("notes") or "").strip() or None
+        await _orders().update_one({"id": order_id}, {"$set": sets})
+        updated = await _orders().find_one({"id": order_id})
+        await _publish("kitchen_order.updated", updated, user)
         return _order_out(updated)
 
     # ---------- p425: تأجيل الطلبية المجدولة (+1/+3 أيام — يصفّر التذكير ليُعاد حسابه على الموعد الجديد) ----------
