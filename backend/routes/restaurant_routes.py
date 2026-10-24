@@ -3586,6 +3586,44 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="neighbors.csv"'})
 
+    # ---------- p449: سجل تسديدات الجيران CSV (BOM لـ Excel) ----------
+    @router.get("/neighbor-settlements.csv")
+    async def neighbor_settlements_csv(days: int = 90, admin: dict = Depends(get_tenant_admin)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        dz = timezone(timedelta(hours=1))
+        nmap = {}
+        async for n in _neighbors().find({}, {"_id": 0, "id": 1, "name": 1, "phone": 1}):
+            nmap[n.get("id")] = n
+        rows = await db.neighbor_settlements.find(
+            {"created_at": {"$gte": since}}).sort("created_at", -1).to_list(2000)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["التاريخ,الجار,الهاتف,المبلغ,ملاحظة,المُدخِل"]
+        total = 0.0
+        for s in rows:
+            ca = s.get("created_at")
+            if ca and ca.tzinfo is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            dstr = ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else ""
+            n = nmap.get(s.get("neighbor_id")) or {}
+            amt = round(float(s.get("amount") or 0), 2)
+            total += amt
+            lines.append(",".join([
+                _cell(dstr), _cell(n.get("name") or "—"), _cell(n.get("phone") or ""),
+                _cell(amt), _cell(s.get("notes") or ""), _cell(s.get("created_by") or "")]))
+        lines.append(",".join(["", "المجموع ←", "", _cell(round(total, 2)), "", ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "neighbor-settlements-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p432: تقرير أعمار ديون الجيران CSV (FIFO للتسديدات — BOM لـ Excel) ----------
     @router.get("/neighbors-aging.csv")
     async def neighbors_aging_csv(admin: dict = Depends(get_tenant_admin)):
