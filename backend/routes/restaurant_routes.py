@@ -2194,6 +2194,59 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_revenue": round(sum(s["revenue"] for s in series), 2)}
 
     # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
+    # ---------- p437: المبيعات حسب الساعة CSV (توقيت الجزائر — BOM لـ Excel) ----------
+    @router.get("/sales-by-hour.csv")
+    async def sales_by_hour_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 90))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "scheduled"}}},
+            {"$addFields": {
+                "bill": _bill,
+                "cxl": {"$eq": ["$status", "cancelled"]},
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "hr": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
+                "paid_nd": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": "$hr",
+                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                        "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_nd"]}},
+                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}}}},
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(24)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الساعة,الطلبات,الإيراد المحصَّل,الملغاة"]
+        for r in rows:
+            lines.append(",".join([_cell(str(r["_id"]).zfill(2) + ":00"), _cell(r["orders"]),
+                                   _cell(round(float(r["revenue"]), 2)), _cell(r["cancelled"])]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "sales-by-hour-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     @router.get("/revenue-trend.csv")
     async def revenue_trend_csv(days: int = 7, user: dict = Depends(get_current_user)):
         d = await revenue_trend(days, user)
