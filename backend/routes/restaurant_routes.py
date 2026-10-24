@@ -2520,6 +2520,46 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p441: تقرير الخصومات CSV (رقابة على منح الخصم — BOM لـ Excel) ----------
+    @router.get("/discounts.csv")
+    async def discounts_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 90))
+        since = _now() - timedelta(days=days)
+        rows = await _orders().find(
+            {"created_at": {"$gte": since}, "discount.amount": {"$gt": 0}},
+            {"_id": 0, "code": 1, "table_name": 1, "status": 1, "created_at": 1, "discount": 1},
+        ).sort("created_at", -1).to_list(500)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        slbl = {"pending": "قيد الانتظار", "preparing": "قيد التحضير", "served": "قُدّم",
+                "cancelled": "ملغى", "scheduled": "مجدولة"}
+        tlbl = {"percent": "نسبة %", "amount": "مبلغ"}
+        lines = ["التاريخ,رمز الطلب,الطاولة,الحالة,نوع الخصم,القيمة,المبلغ,كود الكوبون,السبب,المطبِّق"]
+        tot_amt = 0.0
+        for o in rows:
+            d = o.get("discount") or {}
+            amt = round(float(d.get("amount") or 0), 2)
+            tot_amt += amt
+            ca = o.get("created_at")
+            lines.append(",".join([
+                _cell(ca.strftime("%Y-%m-%d %H:%M") if hasattr(ca, "strftime") else str(ca or "")),
+                _cell(o.get("code")), _cell(o.get("table_name")),
+                _cell(slbl.get(o.get("status"), o.get("status") or "")),
+                _cell(tlbl.get(d.get("type"), d.get("type") or "")),
+                _cell(d.get("value")), _cell(amt),
+                _cell(d.get("code")), _cell(d.get("reason")), _cell(d.get("by"))]))
+        lines.append(",,,,,," + _cell(round(tot_amt, 2)) + ",,,المجموع ←")
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "discounts-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p337: خصومات طلبات المطعم ----------
     @router.post("/kitchen-orders/{order_id}/discount")
     async def apply_discount(order_id: str, data: DiscountIn, user: dict = Depends(get_current_user)):
