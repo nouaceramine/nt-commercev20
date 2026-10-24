@@ -179,6 +179,20 @@ export default function KitchenDisplayPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error("تعذر تحميل CSV"); }
   };
+  // p426: أرشيف طلبات المطبخ CSV (BOM عربي لـ Excel — آخر 7 أيام)
+  const downloadOrdersCsv = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/kitchen-orders.csv?days=7", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "kitchen-orders-7d.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل CSV"); }
+  };
   return (
     <div className="min-h-screen bg-background p-4 space-y-4" dir="rtl" data-testid="kds-page">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -221,6 +235,9 @@ export default function KitchenDisplayPage() {
           </Button>
           <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-stats-csv" onClick={downloadStatsCsv} title="تصدير CSV (Excel)">
             CSV
+          </Button>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-orders-csv" onClick={downloadOrdersCsv} title="أرشيف الطلبات CSV (آخر 7 أيام)">
+            أرشيف
           </Button>
         </div>
       )}

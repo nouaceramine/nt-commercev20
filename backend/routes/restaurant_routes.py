@@ -1938,6 +1938,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "payments": pays,
         }
 
+    # ---------- p426: أرشيف طلبات المطبخ CSV (BOM لـ Excel — فترة + حالة اختيارية) ----------
+    @router.get("/kitchen-orders.csv")
+    async def kitchen_orders_csv(status: Optional[str] = None, days: int = 7,
+                                 user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 90))
+        since = _now() - timedelta(days=days)
+        q = {"created_at": {"$gte": since}}
+        if status:
+            q["status"] = status
+        rows = await _orders().find(q).sort("created_at", -1).to_list(500)
+        tnames = {}
+        async for t in _tables().find({}, {"_id": 0, "id": 1, "name": 1}):
+            tnames[t.get("id")] = t.get("name")
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _dt(v):
+            return v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
+
+        slbl = {"pending": "قيد الانتظار", "preparing": "قيد التحضير", "ready": "جاهز",
+                "served": "قُدّم", "cancelled": "ملغى", "scheduled": "مجدول"}
+        lines = ["الرمز,الطاولة,الحالة,الأصناف,الإجمالي,الخصم,الصافي,المدفوع,التاريخ"]
+        for o in rows:
+            oo = _order_out(o)
+            lines.append(",".join([
+                _cell(oo.get("code")),
+                _cell(tnames.get(oo.get("table_id")) or oo.get("table_name") or ""),
+                _cell(slbl.get(oo.get("status"), oo.get("status") or "")),
+                _cell(len(oo.get("items") or [])), _cell(oo.get("total")),
+                _cell(oo.get("discount_amount")), _cell(oo.get("final_total")),
+                _cell(oo.get("paid_amount")), _cell(_dt(o.get("created_at")))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "kitchen-orders-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     @router.get("/kitchen-orders/{order_id}/receipt")
     async def kitchen_order_receipt(order_id: str, user: dict = Depends(get_current_user)):
         return await _receipt_payload(order_id, user)
