@@ -3008,6 +3008,44 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
+    # ---------- p446: أفضل زبائن التوصيل CSV (BOM لـ Excel) ----------
+    @router.get("/delivery-customers.csv")
+    async def delivery_customers_csv(days: int = 90, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "cancelled"}}},
+            {"$group": {"_id": {"phone": {"$ifNull": ["$customer_phone", ""]},
+                                "name": {"$ifNull": ["$customer_name", ""]}},
+                        "orders": {"$sum": 1},
+                        "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+                        "spent": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]},
+                                                     {"$ifNull": ["$total", 0]}, 0]}},
+                        "fees": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]},
+                                                    {"$ifNull": ["$delivery_fee", 0]}, 0]}}}},
+            {"$sort": {"orders": -1}},
+            {"$limit": 100},
+        ]
+        rows = await _delivery().aggregate(pipeline).to_list(100)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الزبون,الهاتف,الطلبات,المُسلَّمة,إجمالي المنفق,رسوم التوصيل"]
+        for r in rows:
+            lines.append(",".join([
+                _cell((r["_id"] or {}).get("name")), _cell((r["_id"] or {}).get("phone")),
+                _cell(r["orders"]), _cell(r["delivered"]),
+                _cell(round(float(r["spent"]), 2)), _cell(round(float(r["fees"]), 2))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "delivery-customers-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p442: مساعد تجميع إحصائيات السائقين (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _driver_stats_rows(days: int):
         days = max(1, min(int(days), 365))
