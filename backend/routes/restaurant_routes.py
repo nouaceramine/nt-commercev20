@@ -2732,6 +2732,41 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
+    # ---------- p430: إحصائيات سائقي التوصيل CSV (BOM لـ Excel) ----------
+    @router.get("/delivery-drivers.csv")
+    async def delivery_drivers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        agg = {}
+        async for o in _delivery().find({"created_at": {"$gte": since}}):
+            drv = (o.get("driver_name") or "").strip() or "بدون سائق"
+            a = agg.setdefault(drv, {"total": 0, "delivered": 0, "cancelled": 0, "revenue": 0.0, "fees": 0.0})
+            a["total"] += 1
+            if o.get("status") == "delivered":
+                a["delivered"] += 1
+                a["revenue"] += float(o.get("total") or 0)
+                a["fees"] += float(o.get("delivery_fee") or 0)
+            elif o.get("status") == "cancelled":
+                a["cancelled"] += 1
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["السائق,الطلبات,المُسلَّمة,الملغاة,إيراد المُسلَّمة,رسوم التوصيل"]
+        for drv in sorted(agg, key=lambda k: -agg[k]["delivered"]):
+            a = agg[drv]
+            lines.append(",".join([_cell(drv), _cell(a["total"]), _cell(a["delivered"]),
+                                   _cell(a["cancelled"]), _cell(round(a["revenue"], 2)),
+                                   _cell(round(a["fees"], 2))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "delivery-drivers-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p421: ملخص التوصيل PDF (نفس بيانات البطاقات — صفر ازدواجية) ----------
     @router.get("/delivery-summary.pdf")
     async def delivery_summary_pdf(days: int = 30, user: dict = Depends(get_current_user)):
