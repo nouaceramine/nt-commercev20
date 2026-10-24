@@ -302,6 +302,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
+  // p448: أداء الطاولات CSV (BOM عربي لـ Excel — نفس فترة trendDays)
+  const downloadTablesPerfCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/tables-performance.csv?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tables-performance-${trendDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p444: المبيعات حسب يوم الأسبوع CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadWdaysCsv = async () => {
     try {
@@ -1037,6 +1051,10 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-pdf-btn" onClick={downloadTrendPdf}
                   title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}>
                   PDF
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="tperf-csv-btn" onClick={downloadTablesPerfCsv}
+                  title={isAr ? 'أداء الطاولات CSV' : 'Tables CSV'}>
+                  {isAr ? 'طاولات' : 'Tables'}
                 </Button>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="wdays-csv-btn" onClick={downloadWdaysCsv}
                   title={isAr ? 'المبيعات حسب يوم الأسبوع CSV' : 'Ventes par jour CSV'}>

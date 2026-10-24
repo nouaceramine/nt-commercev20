@@ -2194,6 +2194,62 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_revenue": round(sum(s["revenue"] for s in series), 2)}
 
     # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
+    # ---------- p448: أداء الطاولات CSV (طلبات/إيراد/متوسط/ملغاة — BOM لـ Excel) ----------
+    @router.get("/tables-performance.csv")
+    async def tables_performance_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "source": {"$ne": "delivery"}, "status": {"$ne": "scheduled"}}},
+            {"$addFields": {
+                "cxl": {"$eq": ["$status", "cancelled"]},
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "paid_amt": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": {"$ifNull": ["$table_name", "—"]},
+                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                        "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_amt"]}}}},
+            {"$sort": {"revenue": -1}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(500)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الطاولة,الطلبات,الإيراد المحصَّل,متوسط الطلب,الملغاة"]
+        for r in rows:
+            rev = round(float(r.get("revenue") or 0), 2)
+            n = int(r.get("orders") or 0)
+            avg = round(rev / n, 2) if n else 0
+            lines.append(",".join([
+                _cell(r.get("_id")), _cell(n), _cell(rev), _cell(avg),
+                _cell(int(r.get("cancelled") or 0))]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "tables-performance-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p444: المبيعات حسب يوم الأسبوع CSV (توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/sales-by-weekday.csv")
     async def sales_by_weekday_csv(days: int = 30, user: dict = Depends(get_current_user)):
