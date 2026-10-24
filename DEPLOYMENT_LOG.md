@@ -1,3 +1,8 @@
+## 2026-10-24 — p457: أفضل زبائن الصالة PDF + مساعد مشترك
+- **Backend** `routes/restaurant_routes.py`: مساعد مشترك `_top_customer_rows(days)` (صفر ازدواجية) — أُعيدت صياغة `top-customers.csv` لاستخدامه بمخرجات مطابقة، وجديد `GET /top-customers.pdf?days=90` بنفس البيانات (عدد الزبائن، إجمالي المنفق، سطر لكل زبون).
+- **Frontend** `RestaurantPOSPage.js`: زر «زبائن PDF» (pos-topcust-pdf-btn) بجوار زر CSV.
+- **E2E**: 18 فحصاً (تراجع CSV حرفي، استثناء الآجل من المنفق والملغى كليًا، PDF: التوقيع/الخط/الحجم/صفحة واحدة، اسم الملف، رفض بدون توثيق، تنظيف كامل).
+
 ## 2026-10-24 — p456: تقرير حمل المطبخ حسب الساعة (CSV)
 - **Backend** `routes/restaurant_routes.py`: `GET /kitchen-load.csv?days=30` — حمل المطبخ حسب الساعة (توقيت الجزائر): الطلبات، عدد الأصناف، متوسط زمن التحضير بالدقائق (من ختمَي preparing→served)؛ الملغاة والمجدوَلة مستثناة.
 - **Frontend** `KitchenDisplayPage.js`: زر «حمل» (kds-load-csv) بجوار زر «إلغاءات».
