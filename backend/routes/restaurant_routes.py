@@ -2630,6 +2630,67 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p450: توزيع طرق الدفع CSV (دفعات/مبالغ + صف الآجل — BOM لـ Excel) ----------
+    @router.get("/payment-methods.csv")
+    async def payment_methods_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "bill": _bill,
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$facet": {
+                "methods": [{"$unwind": "$pay_list"},
+                            {"$group": {"_id": "$pay_list.method",
+                                        "payments": {"$sum": 1},
+                                        "amount": {"$sum": {"$ifNull": ["$pay_list.amount", 0]}}}},
+                            {"$sort": {"amount": -1}}],
+                "debt": [{"$match": {"payment_status": "debt"}},
+                         {"$group": {"_id": None, "orders": {"$sum": 1},
+                                     "amount": {"$sum": "$bill"}}}],
+            }},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(1)
+        fac = rows[0] if rows else {}
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        mlbl = {"cash": "نقدًا", "card": "بطاقة", "transfer": "تحويل",
+                "debt": "آجل (دين)", "check": "شيك", "other": "أخرى"}
+        lines = ["طريقة الدفع,عدد الدفعات,المبلغ"]
+        for m in (fac.get("methods") or []):
+            lines.append(",".join([
+                _cell(mlbl.get(m.get("_id"), m.get("_id") or "أخرى")),
+                _cell(int(m.get("payments") or 0)),
+                _cell(round(float(m.get("amount") or 0), 2))]))
+        d = ((fac.get("debt") or [{}])[0]) or {}
+        if d.get("orders"):
+            lines.append(",".join([
+                _cell("آجل (دين)"), _cell(int(d.get("orders") or 0)),
+                _cell(round(float(d.get("amount") or 0), 2))]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "payment-methods-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p441: تقرير الخصومات CSV (رقابة على منح الخصم — BOM لـ Excel) ----------
     @router.get("/discounts.csv")
     async def discounts_csv(days: int = 30, user: dict = Depends(get_current_user)):

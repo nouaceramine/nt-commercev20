@@ -331,6 +331,20 @@ export default function TablesMapPage() {
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
+  // p450: توزيع طرق الدفع CSV (BOM عربي لـ Excel — نفس فترة trendDays)
+  const downloadPaymCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/payment-methods.csv?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payment-methods-${trendDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p441: تقرير الخصومات CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadDiscCsv = async () => {
     try {
@@ -1059,6 +1073,10 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="wdays-csv-btn" onClick={downloadWdaysCsv}
                   title={isAr ? 'المبيعات حسب يوم الأسبوع CSV' : 'Ventes par jour CSV'}>
                   {isAr ? 'أيام' : 'Jours'}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="paym-csv-btn" onClick={downloadPaymCsv}
+                  title={isAr ? 'توزيع طرق الدفع CSV' : 'Paiements CSV'}>
+                  {isAr ? 'دفع' : 'Paie.'}
                 </Button>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="disc-csv-btn" onClick={downloadDiscCsv}
                   title={isAr ? 'تقرير الخصومات CSV' : 'Remises CSV'}>
