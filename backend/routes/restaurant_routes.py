@@ -2194,6 +2194,53 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_revenue": round(sum(s["revenue"] for s in series), 2)}
 
     # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
+    # ---------- p452: ربحية الأصناف CSV (إيراد/تكلفة/ربح/هامش — BOM لـ Excel) ----------
+    @router.get("/items-profit.csv")
+    async def items_profit_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        cost = {}
+        async for pr in db.products.find({}, {"_id": 0, "id": 1, "purchase_price": 1}):
+            cost[pr.get("id")] = float(pr.get("purchase_price") or 0)
+        rows = await _orders().find(
+            {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}},
+            {"_id": 0, "items": 1}).to_list(5000)
+        agg = {}
+        for o in rows:
+            for it in (o.get("items") or []):
+                name = it.get("product_name") or "—"
+                q = float(it.get("quantity") or 0)
+                up = float(it.get("unit_price") or 0)
+                c = cost.get(it.get("product_id"), 0.0)
+                a = agg.setdefault(name, {"qty": 0.0, "rev": 0.0, "cost": 0.0})
+                a["qty"] += q
+                a["rev"] += q * up
+                a["cost"] += q * c
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الصنف,الكمية,الإيراد,التكلفة,الربح,الهامش %"]
+        tot_r = tot_c = 0.0
+        for name, a in sorted(agg.items(), key=lambda kv: kv[1]["rev"] - kv[1]["cost"], reverse=True):
+            rev = round(a["rev"], 2); cst = round(a["cost"], 2)
+            prof = round(rev - cst, 2)
+            margin = round(prof / rev * 100, 1) if rev else 0
+            tot_r += rev; tot_c += cst
+            lines.append(",".join([
+                _cell(name), _cell(round(a["qty"], 2)), _cell(rev),
+                _cell(cst), _cell(prof), _cell(margin)]))
+        lines.append(",".join([_cell("المجموع ←"), "", _cell(round(tot_r, 2)),
+                               _cell(round(tot_c, 2)), _cell(round(tot_r - tot_c, 2)), ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "items-profit-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p448: أداء الطاولات CSV (طلبات/إيراد/متوسط/ملغاة — BOM لـ Excel) ----------
     @router.get("/tables-performance.csv")
     async def tables_performance_csv(days: int = 30, user: dict = Depends(get_current_user)):

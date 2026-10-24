@@ -36,6 +36,21 @@ export default function RestaurantPOSPage() {
   const [discValue, setDiscValue] = useState('');
   const [custPhone, setCustPhone] = useState('');  // p356: ولاء
 
+  // p452: ربحية الأصناف CSV (BOM عربي لـ Excel — 30 يومًا)
+  const downloadProfitCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/items-profit.csv?days=30', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'items-profit-30d.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
+
   // p436: مبيعات الفئات CSV (BOM عربي لـ Excel — 30 يومًا)
   const downloadCatCsv = async () => {
     try {
@@ -222,6 +237,10 @@ export default function RestaurantPOSPage() {
                 <Zap className="h-4 w-4" />{isAr ? 'سريع' : 'Rapide'}
               </button>
             </div>
+            <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadProfitCsv} data-testid="pos-profitcsv-btn"
+              title={isAr ? 'ربحية الأصناف CSV (30 يوم)' : 'Marges CSV (30j)'}>
+              {isAr ? 'ربحية' : 'Marges'}
+            </Button>
             <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadCatCsv} data-testid="pos-catcsv-btn"
               title={isAr ? 'مبيعات الفئات CSV (30 يوم)' : 'Ventes par categorie CSV (30j)'}>
               {isAr ? 'فئات' : 'Cat.'}
