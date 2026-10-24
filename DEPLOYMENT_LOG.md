@@ -1,3 +1,8 @@
+## 2026-10-24 — p458: تقرير الإضافات modifiers (CSV)
+- **Backend** `routes/restaurant_routes.py`: `GET /modifiers.csv?days=30` — تقرير الإضافات: مرات الطلب، إجمالي الزيادة السعرية، الأصناف المرتبطة (حتى 3)؛ الملغاة والمجدوَلة مستثناة؛ ترتيب تنازلي + صف مجموع.
+- **Frontend** `RestaurantPOSPage.js`: زر «إضافات» (pos-modcsv-btn) ضمن أزرار التصدير.
+- **E2E**: 18 فحصاً (3 إضافات بالقيم الدقيقة بما فيها مفتاح option البديل، استثناء الملغى، صف المجموع 200.0، BOM/CRLF/اسم الملف، days=7، رفض بدون توثيق، تنظيف كامل). إصلاح سريع: `$unwind` لا يقبل تعبيرًا — `$addFields._mods` وسيط.
+
 ## 2026-10-24 — p457: أفضل زبائن الصالة PDF + مساعد مشترك
 - **Backend** `routes/restaurant_routes.py`: مساعد مشترك `_top_customer_rows(days)` (صفر ازدواجية) — أُعيدت صياغة `top-customers.csv` لاستخدامه بمخرجات مطابقة، وجديد `GET /top-customers.pdf?days=90` بنفس البيانات (عدد الزبائن، إجمالي المنفق، سطر لكل زبون).
 - **Frontend** `RestaurantPOSPage.js`: زر «زبائن PDF» (pos-topcust-pdf-btn) بجوار زر CSV.

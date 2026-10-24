@@ -51,6 +51,21 @@ export default function RestaurantPOSPage() {
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
+  // p458: تقرير الإضافات CSV (BOM عربي لـ Excel — 30 يومًا)
+  const downloadModCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/modifiers.csv?days=30', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'modifiers-30d.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
+
   // p454: أفضل زبائن الصالة CSV (BOM عربي لـ Excel — 90 يومًا)
   const downloadTopCustCsv = async () => {
     try {
@@ -270,6 +285,10 @@ export default function RestaurantPOSPage() {
             <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadTopCustPdf} data-testid="pos-topcust-pdf-btn"
               title={isAr ? 'أفضل الزبائن PDF (90 يوم)' : 'Top clients PDF (90j)'}>
               {isAr ? 'زبائن PDF' : 'Clients PDF'}
+            </Button>
+            <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadModCsv} data-testid="pos-modcsv-btn"
+              title={isAr ? 'تقرير الإضافات CSV (30 يوم)' : 'Modificateurs CSV (30j)'}>
+              {isAr ? 'إضافات' : 'Modif.'}
             </Button>
             <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadTopCustCsv} data-testid="pos-topcust-btn"
               title={isAr ? 'أفضل الزبائن CSV (90 يوم)' : 'Top clients CSV (90j)'}>

@@ -2194,6 +2194,49 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "total_revenue": round(sum(s["revenue"] for s in series), 2)}
 
     # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
+    # ---------- p458: تقرير الإضافات (modifiers) CSV (عدد/إجمالي الزيادة — BOM لـ Excel) ----------
+    @router.get("/modifiers.csv")
+    async def modifiers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$unwind": "$items"},
+            {"$addFields": {"_mods": {"$ifNull": ["$items.modifiers", []]}}},
+            {"$unwind": "$_mods"},
+            {"$group": {"_id": {"$ifNull": [
+                            {"$ifNull": ["$_mods.name", "$_mods.option"]}, "—"]},
+                        "count": {"$sum": 1},
+                        "extra": {"$sum": {"$ifNull": ["$_mods.price_delta", 0]}},
+                        "products": {"$addToSet": "$items.product_name"}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 200},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(200)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الإضافة,مرات الطلب,إجمالي الزيادة,أصناف مرتبطة"]
+        tot = 0.0
+        for r in rows:
+            ex = round(float(r.get("extra") or 0), 2)
+            tot += ex
+            prods = r.get("products") or []
+            lines.append(",".join([
+                _cell(r.get("_id")), _cell(int(r.get("count") or 0)), _cell(ex),
+                _cell(" | ".join(str(p) for p in prods[:3]))]))
+        lines.append(",".join([_cell("المجموع ←"), "", _cell(round(tot, 2)), ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "modifiers-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p457: مساعد جلب أفضل زبائن الصالة (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _top_customer_rows(days):
         days = max(1, min(int(days), 365))
