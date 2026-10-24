@@ -2375,6 +2375,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish("kitchen_order.created", updated, user)  # تدخل المطبخ فورًا (والطبع التلقائي p338)
         return _order_out(updated)
 
+    # ---------- p425: تأجيل الطلبية المجدولة (+1/+3 أيام — يصفّر التذكير ليُعاد حسابه على الموعد الجديد) ----------
+    @router.post("/scheduled-orders/{order_id}/postpone")
+    async def postpone_scheduled_order(order_id: str, data: dict = None, user: dict = Depends(get_current_user)):
+        try:
+            days = int((data or {}).get("days", 1))
+        except (TypeError, ValueError):
+            days = 1
+        if days not in (1, 3):
+            raise HTTPException(status_code=400, detail="التأجيل يومًا أو ثلاثة فقط")
+        o = await _orders().find_one({"id": order_id, "status": "scheduled"})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلبية المجدولة غير موجودة")
+        sched = o.get("scheduled_for") or _now()
+        if getattr(sched, "tzinfo", None) is None:
+            sched = sched.replace(tzinfo=timezone.utc)
+        await _orders().update_one({"id": order_id}, {"$set": {
+            "scheduled_for": sched + timedelta(days=days), "reminder_sent": False, "updated_at": _now()}})
+        updated = await _orders().find_one({"id": order_id})
+        await _publish("kitchen_order.updated", updated, user)
+        return _order_out(updated)
+
     # ---------- p424: إلغاء الطلبية المجدولة — نقطة مخصصة (العامة تحرر الطاولة وتدوّر QR خطأً لأن المجدولة لم تشغلها بعد) ----------
     @router.delete("/scheduled-orders/{order_id}")
     async def cancel_scheduled_order(order_id: str, user: dict = Depends(get_current_user)):
