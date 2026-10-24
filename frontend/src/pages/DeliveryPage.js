@@ -61,6 +61,21 @@ export default function DeliveryPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error("تعذر تحميل PDF"); }
   };
+  // p442: إحصائيات سائقي التوصيل PDF (نفس فترة CSV — 30 يومًا)
+  const downloadDriversPdf = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/delivery-drivers.pdf?days=30", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "delivery-drivers-30d.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل PDF"); }
+  };
+
   // p430: إحصائيات سائقي التوصيل CSV (BOM عربي لـ Excel — 30 يومًا)
   const downloadDriversCsv = async () => {
     try {
@@ -179,6 +194,7 @@ export default function DeliveryPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2"><Bike className="h-7 w-7" /> طلبات التوصيل</h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} data-testid="dlv-refresh"><RefreshCw className="h-4 w-4 ml-1" /> تحديث</Button>
+          <Button variant="outline" size="sm" onClick={downloadDriversPdf} data-testid="dlv-drivers-pdf-btn" title="إحصائيات السائقين PDF"><FileDown className="h-4 w-4 ml-1" /> سائقون PDF</Button>
           <Button variant="outline" size="sm" onClick={downloadDriversCsv} data-testid="dlv-drivers-csv-btn" title="إحصائيات السائقين CSV"><FileDown className="h-4 w-4 ml-1" /> سائقون</Button>
           <Button variant="outline" size="sm" onClick={downloadSummaryPdf} data-testid="dlv-summary-pdf-btn" title="تنزيل ملخص PDF"><FileDown className="h-4 w-4 ml-1" /> PDF</Button>
           <Button variant="outline" size="sm" onClick={downloadCsv} data-testid="dlv-csv-btn" title="تصدير CSV (Excel)"><FileDown className="h-4 w-4 ml-1" /> CSV</Button>

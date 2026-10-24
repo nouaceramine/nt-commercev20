@@ -2954,9 +2954,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
-    # ---------- p430: إحصائيات سائقي التوصيل CSV (BOM لـ Excel) ----------
-    @router.get("/delivery-drivers.csv")
-    async def delivery_drivers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    # ---------- p442: مساعد تجميع إحصائيات السائقين (مشترك بين CSV وPDF — صفر ازدواجية) ----------
+    async def _driver_stats_rows(days: int):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         agg = {}
@@ -2970,6 +2969,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 a["fees"] += float(o.get("delivery_fee") or 0)
             elif o.get("status") == "cancelled":
                 a["cancelled"] += 1
+        rows = [(drv, a["total"], a["delivered"], a["cancelled"], round(a["revenue"], 2), round(a["fees"], 2))
+                for drv, a in agg.items()]
+        rows.sort(key=lambda r: -r[2])
+        return days, rows
+
+    # ---------- p430: إحصائيات سائقي التوصيل CSV (BOM لـ Excel) ----------
+    @router.get("/delivery-drivers.csv")
+    async def delivery_drivers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _driver_stats_rows(days)  # p442: التجميع مشترك مع PDF
         from fastapi.responses import Response
 
         def _cell(v):
@@ -2979,15 +2987,101 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             return s
 
         lines = ["السائق,الطلبات,المُسلَّمة,الملغاة,إيراد المُسلَّمة,رسوم التوصيل"]
-        for drv in sorted(agg, key=lambda k: -agg[k]["delivered"]):
-            a = agg[drv]
-            lines.append(",".join([_cell(drv), _cell(a["total"]), _cell(a["delivered"]),
-                                   _cell(a["cancelled"]), _cell(round(a["revenue"], 2)),
-                                   _cell(round(a["fees"], 2))]))
+        for drv, tot, dlv, cxl, rev, fee in rows:
+            lines.append(",".join([_cell(drv), _cell(tot), _cell(dlv),
+                                   _cell(cxl), _cell(rev), _cell(fee)]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "delivery-drivers-" + str(days) + "d.csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p442: إحصائيات سائقي التوصيل PDF (نفس بيانات CSV عبر _driver_stats_rows) ----------
+    @router.get("/delivery-drivers.pdf")
+    async def delivery_drivers_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _driver_stats_rows(days)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0], W - MARGIN, y[0])
+            c.setDash()
+            y[0] -= 10
+
+        if store:
+            _center(store, 13)
+        _center("إحصائيات سائقي التوصيل", 12)
+        _center("آخر " + str(days) + " يومًا", 9)
+        y[0] -= 4
+        _row("عدد السائقين", len(rows))
+        _row("إجمالي الطلبات", sum(r[1] for r in rows))
+        _row("إجمالي المُسلَّمة", sum(r[2] for r in rows))
+        _dash()
+        if rows:
+            _center("السائق — الطلبات / المُسلَّمة / الملغاة — الإيراد — الرسوم", 10)
+            for drv, tot, dlv, cxl, rev, fee in rows:
+                _row(drv, str(tot) + " / " + str(dlv) + " / " + str(cxl) + " — " + str(rev) + " دج — " + str(fee) + " دج")
+        else:
+            _center("لا بيانات في الفترة", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "delivery-drivers-" + str(days) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p421: ملخص التوصيل PDF (نفس بيانات البطاقات — صفر ازدواجية) ----------
     @router.get("/delivery-summary.pdf")
