@@ -3057,6 +3057,69 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="neighbors.csv"'})
 
+    # ---------- p432: تقرير أعمار ديون الجيران CSV (FIFO للتسديدات — BOM لـ Excel) ----------
+    @router.get("/neighbors-aging.csv")
+    async def neighbors_aging_csv(admin: dict = Depends(get_tenant_admin)):
+        now = _now()
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _bucket(age_days):
+            if age_days <= 7:
+                return "b7"
+            if age_days <= 30:
+                return "b30"
+            if age_days <= 90:
+                return "b90"
+            return "b91"
+
+        lines = ["الجار,الهاتف,0-7 أيام,8-30 يوم,31-90 يوم,+90 يوم,الإجمالي غير المسدد,الرصيد الحالي"]
+        neighbors = await _neighbors().find({}).sort("created_at", 1).to_list(200)
+        rows = []
+        for n in neighbors:
+            nid = n.get("id")
+            orders = await _orders().find(
+                {"neighbor_id": nid, "status": {"$ne": "cancelled"}, "payment_status": "debt"},
+                {"_id": 0, "items": 1, "created_at": 1}).sort("created_at", 1).to_list(2000)
+            settled = 0.0
+            async for s in db.neighbor_settlements.find({"neighbor_id": nid}, {"_id": 0, "amount": 1}):
+                settled += float(s.get("amount") or 0)
+            if not orders and not settled and not n.get("balance"):
+                continue
+            b = {"b7": 0.0, "b30": 0.0, "b90": 0.0, "b91": 0.0}
+            credit = settled
+            unpaid_total = 0.0
+            for o in orders:
+                tot = round(sum(
+                    float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                    for i in (o.get("items") or [])), 2)
+                if tot > 0 and credit >= tot:
+                    credit -= tot
+                    continue
+                rem = tot - credit
+                credit = 0.0
+                ca = o.get("created_at")
+                if ca and ca.tzinfo is None:
+                    ca = ca.replace(tzinfo=timezone.utc)
+                age = (now - ca).days if ca else 0
+                b[_bucket(age)] += rem
+                unpaid_total += rem
+            rows.append((unpaid_total, n, b))
+        for unpaid_total, n, b in sorted(rows, key=lambda r: -r[0]):
+            lines.append(",".join([
+                _cell(n.get("name")), _cell(n.get("phone")),
+                _cell(round(b["b7"], 2)), _cell(round(b["b30"], 2)),
+                _cell(round(b["b90"], 2)), _cell(round(b["b91"], 2)),
+                _cell(round(unpaid_total, 2)), _cell(round(float(n.get("balance") or 0), 2))]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="neighbors-aging.csv"'})
+
     @router.post("/neighbors", status_code=201)
     async def create_neighbor(data: NeighborIn, admin: dict = Depends(get_tenant_admin)):
         if not data.name.strip():

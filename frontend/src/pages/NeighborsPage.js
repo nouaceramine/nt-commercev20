@@ -34,6 +34,18 @@ export default function NeighborsPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // p432: تقرير أعمار ديون الجيران CSV (FIFO — BOM عربي لـ Excel)
+  const downloadAgingCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/neighbors-aging.csv', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'neighbors-aging.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
+
   // p416: تصدير قائمة الجيران CSV (BOM عربي لـ Excel)
   const downloadCsv = async () => {
     try {
@@ -145,6 +157,10 @@ export default function NeighborsPage() {
             {ar ? 'الجيران B2B' : 'Voisins B2B'}
           </h1>
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadAgingCsv} data-testid="nbr-aging-csv-btn"
+              title={ar ? 'تقرير أعمار الديون CSV' : 'Aging CSV'}>
+              {ar ? 'أعمار' : 'Aging'}
+            </Button>
             <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadCsv} data-testid="nbr-csv-btn"
               title={ar ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
               CSV
