@@ -2360,6 +2360,48 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p438: تقرير الإلغاءات اليومي CSV (عدد وقيمة ونسبة — BOM لـ Excel) ----------
+    @router.get("/cancellations.csv")
+    async def cancellations_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 90))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "scheduled"}}},
+            {"$addFields": {
+                "day": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
+                                          "timezone": "Africa/Algiers"}},
+                "cxl": {"$eq": ["$status", "cancelled"]},
+                "bill": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                                     "in": {"$add": ["$$value",
+                                                     {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                                    {"$ifNull": ["$$this.unit_price", 0]}]}]}}}}},
+            {"$group": {"_id": "$day",
+                        "total": {"$sum": 1},
+                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                        "cxl_value": {"$sum": {"$cond": ["$cxl", "$bill", 0]}}}},
+            {"$sort": {"_id": -1}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(90)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["اليوم,إجمالي الطلبات,الملغاة,قيمة الملغاة,نسبة الإلغاء %"]
+        for r in rows:
+            tot = int(r["total"])
+            cx = int(r["cancelled"])
+            pct = round(100.0 * cx / tot, 1) if tot else 0.0
+            lines.append(",".join([_cell(r["_id"]), _cell(tot), _cell(cx),
+                                   _cell(round(float(r["cxl_value"]), 2)), _cell(pct)]))
+        body = "﻿" + "\r\n".join(lines) + "\r\n"
+        fname = "cancellations-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):
