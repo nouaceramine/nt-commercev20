@@ -3136,6 +3136,57 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish("delivery_order.created", doc, user)
         return _delivery_out(doc)
 
+    # ---------- p440: تعديل طلب التوصيل (قبل الانطلاق وقبل بدء المطبخ) ----------
+    @router.put("/delivery-orders/{order_id}")
+    async def update_delivery_order(order_id: str, data: DeliveryOrderCreate, user: dict = Depends(get_current_user)):
+        o = await _delivery().find_one({"id": order_id})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        if o.get("status") not in ("pending", "ready"):
+            raise HTTPException(status_code=400, detail="لا يمكن تعديل الطلب بعد الانطلاق")
+        if not (data.customer_name or "").strip():
+            raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+        if not data.items:
+            raise HTTPException(status_code=400, detail="لا توجد عناصر في الطلب")
+        kdoc = None
+        if o.get("kitchen_order_id"):
+            kdoc = await _orders().find_one({"id": o["kitchen_order_id"]})
+            if kdoc and kdoc.get("status") != "pending":
+                raise HTTPException(status_code=400, detail="بدأ المطبخ التحضير — لا يمكن التعديل")
+        items = []
+        subtotal = 0.0
+        for it in data.items:
+            if not (0 < float(it.quantity or 0) <= 100):
+                raise HTTPException(status_code=400, detail="كمية غير صالحة")
+            d = it.model_dump()
+            mod_extra = sum(float(m.get("price_delta") or 0) for m in (d.get("modifiers") or []))
+            d["unit_price"] = round(float(d.get("unit_price") or 0) + mod_extra, 2)
+            subtotal += d["unit_price"] * float(it.quantity)
+            items.append(d)
+        fee = max(0.0, float(data.delivery_fee or 0))
+        upd = {
+            "customer_name": data.customer_name.strip(),
+            "customer_phone": _clean_phone(data.customer_phone),
+            "address": (data.address or "").strip() or None,
+            "items": items,
+            "subtotal": round(subtotal, 2),
+            "delivery_fee": round(fee, 2),
+            "total": round(subtotal + fee, 2),
+            "driver_name": (data.driver_name or "").strip() or None,
+            "notes": data.notes,
+            "updated_at": _now(),
+        }
+        await _delivery().update_one({"id": order_id}, {"$set": upd})
+        if kdoc:
+            await _orders().update_one({"id": kdoc["id"]}, {"$set": {
+                "items": items, "notes": data.notes,
+                "customer_phone": upd["customer_phone"],
+                "table_name": "توصيل — " + upd["customer_name"],
+                "updated_at": _now()}})
+        updated = await _delivery().find_one({"id": order_id})
+        await _publish("delivery_order.updated", updated, user)
+        return _delivery_out(updated)
+
     @router.put("/delivery-orders/{order_id}/status")
     async def update_delivery_status(order_id: str, data: DeliveryStatusUpdate, user: dict = Depends(get_current_user)):
         if data.status not in _DLV_STATUSES:

@@ -24,6 +24,7 @@ export default function DeliveryPage() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
+  const [editId, setEditId] = useState(null);
   const [products, setProducts] = useState([]);
   const [cust, setCust] = useState({ name: "", phone: "", address: "", driver: "", fee: "", notes: "" });
   const [lines, setLines] = useState([]);
@@ -98,6 +99,9 @@ export default function DeliveryPage() {
   }, [fetchAll]);
 
   const openNew = async () => {
+    setEditId(null);
+    setLines([]);
+    setCust({ name: "", phone: "", address: "", driver: "", fee: "", notes: "" });
     setShowNew(true);
     if (!products.length) {
       try {
@@ -117,19 +121,41 @@ export default function DeliveryPage() {
   const subtotal = lines.reduce((s, l) => s + l.unit_price * l.quantity, 0);
   const total = subtotal + (parseFloat(cust.fee) || 0);
 
+  // p440: فتح الحوار معبأً لتعديل طلب قائم (قبل الانطلاق فقط)
+  const openEdit = async (o) => {
+    setEditId(o.id);
+    setCust({ name: o.customer_name || "", phone: o.customer_phone || "", address: o.address || "",
+              driver: o.driver_name || "", fee: String(o.delivery_fee ?? ""), notes: o.notes || "" });
+    setLines((o.items || []).map((it) => ({ product_id: it.product_id || null, product_name: it.product_name,
+      quantity: it.quantity, unit_price: it.unit_price, note: it.note || null, modifiers: it.modifiers || null })));
+    setShowNew(true);
+    if (!products.length) {
+      try {
+        const r = await apiClient.get("/products");
+        setProducts((r.data || []).filter((p) => p.is_active !== false));
+      } catch (e) { /* تُركت فارغة */ }
+    }
+  };
+
   const create = async () => {
     if (!cust.name.trim()) { toast.error("اسم الزبون مطلوب"); return; }
     if (!lines.length) { toast.error("أضف عنصرًا واحدًا على الأقل"); return; }
     try {
-      await apiClient.post("/restaurant/delivery-orders", {
+      const body = {
         customer_name: cust.name, customer_phone: cust.phone || null, address: cust.address || null,
         items: lines, delivery_fee: parseFloat(cust.fee) || 0,
         driver_name: cust.driver || null, notes: cust.notes || null,
-      });
-      toast.success("أُرسل الطلب للمطبخ");
-      setShowNew(false); setLines([]); setCust({ name: "", phone: "", address: "", driver: "", fee: "", notes: "" });
+      };
+      if (editId) {
+        await apiClient.put(`/restaurant/delivery-orders/${editId}`, body);
+        toast.success("حُفظت التعديلات");
+      } else {
+        await apiClient.post("/restaurant/delivery-orders", body);
+        toast.success("أُرسل الطلب للمطبخ");
+      }
+      setShowNew(false); setEditId(null); setLines([]); setCust({ name: "", phone: "", address: "", driver: "", fee: "", notes: "" });
       fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || "تعذر إنشاء الطلب"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "تعذر حفظ الطلب"); }
   };
 
   const setStatus = async (o, status, driver) => {
@@ -214,6 +240,9 @@ export default function DeliveryPage() {
                         <Button size="sm" variant="outline" className="min-h-[44px]" onClick={() => setStatus(o, "delivered")} data-testid={`dlv-done-${o.id}`}>تسليم دون فاتورة</Button>
                       </>
                     )}
+                    {["pending", "ready"].includes(o.status) && (
+                      <Button size="sm" variant="ghost" className="min-h-[44px] px-2" onClick={() => openEdit(o)} data-testid={`dlv-edit-${o.id}`} title="تعديل الطلب">✎</Button>
+                    )}
                     <Button size="sm" variant="outline" className="min-h-[44px]" onClick={() => setStatus(o, "cancelled")} data-testid={`dlv-cancel-${o.id}`}>إلغاء</Button>
                   </div>
                 )}
@@ -225,7 +254,7 @@ export default function DeliveryPage() {
 
       <Dialog open={showNew} onOpenChange={setShowNew}>
         <DialogContent className="max-w-lg" data-testid="dlv-new-dialog">
-          <DialogHeader><DialogTitle>طلب توصيل جديد</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editId ? "تعديل طلب التوصيل" : "طلب توصيل جديد"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input placeholder="اسم الزبون *" value={cust.name} onChange={(e) => setCust({ ...cust, name: e.target.value })} data-testid="dlv-cust-name" />
             <div className="grid grid-cols-2 gap-2">
@@ -251,7 +280,7 @@ export default function DeliveryPage() {
               </div>
             ))}
             <div className="flex justify-between font-bold border-t pt-2"><span>الإجمالي مع التوصيل</span><span data-testid="dlv-total">{fmt(total)} دج</span></div>
-            <Button className="w-full min-h-[48px]" onClick={create} data-testid="dlv-create-confirm">إرسال للمطبخ</Button>
+            <Button className="w-full min-h-[48px]" onClick={create} data-testid="dlv-create-confirm">{editId ? "حفظ التعديلات" : "إرسال للمطبخ"}</Button>
           </div>
         </DialogContent>
       </Dialog>
