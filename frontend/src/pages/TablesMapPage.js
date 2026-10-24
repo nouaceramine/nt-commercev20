@@ -567,6 +567,21 @@ export default function TablesMapPage() {
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
   };
+  // p424/p425: إلغاء الطلبية المجدولة + تأجيلها يومًا
+  const cancelSched = async (oid) => {
+    try {
+      await apiClient.delete(`/restaurant/scheduled-orders/${oid}`);
+      toast.success(isAr ? 'أُلغيت الطلبية' : 'Annulee');
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+  };
+  const postponeSched = async (oid) => {
+    try {
+      await apiClient.post(`/restaurant/scheduled-orders/${oid}/postpone`, { days: 1 });
+      toast.success(isAr ? 'أُجّلت يومًا كاملًا' : 'Reportee +1j');
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+  };
   const loadProducts = async () => {
     if (products.length) return;
     try {
@@ -1153,6 +1168,14 @@ export default function TablesMapPage() {
                       <Badge variant={o.due_soon ? 'destructive' : 'secondary'} data-testid={`sched-when-${o.id}`}>
                         {o.scheduled_for ? new Date(o.scheduled_for).toLocaleString('fr-DZ', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                       </Badge>
+                      <Button size="sm" variant="ghost" className="h-7 px-1.5 text-[10px]" onClick={() => postponeSched(o.id)}
+                        data-testid={`sched-postpone-${o.id}`} title={isAr ? 'تأجيل يومًا كاملًا' : 'Reporter +1j'}>
+                        +1ي
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 px-1.5 text-[10px] text-red-600" onClick={() => cancelSched(o.id)}
+                        data-testid={`sched-cancel-${o.id}`} title={isAr ? 'إلغاء الطلبية' : 'Annuler'}>
+                        ✕
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => activateSched(o.id)} data-testid={`sched-activate-${o.id}`}>
                         {isAr ? 'أرسل للمطبخ' : 'Cuisine'}
                       </Button>

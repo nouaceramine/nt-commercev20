@@ -2375,6 +2375,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish("kitchen_order.created", updated, user)  # تدخل المطبخ فورًا (والطبع التلقائي p338)
         return _order_out(updated)
 
+    # ---------- p424: إلغاء الطلبية المجدولة — نقطة مخصصة (العامة تحرر الطاولة وتدوّر QR خطأً لأن المجدولة لم تشغلها بعد) ----------
+    @router.delete("/scheduled-orders/{order_id}")
+    async def cancel_scheduled_order(order_id: str, user: dict = Depends(get_current_user)):
+        o = await _orders().find_one({"id": order_id, "status": "scheduled"})
+        if not o:
+            raise HTTPException(status_code=404, detail="الطلبية المجدولة غير موجودة")
+        await _orders().update_one({"id": order_id}, {"$set": {
+            "status": "cancelled", "updated_at": _now(), "timestamps.cancelled": _now()}})
+        updated = await _orders().find_one({"id": order_id})
+        await _publish("kitchen_order.updated", updated, user)
+        return _order_out(updated)
+
     @router.post("/kitchen-orders/{order_id}/pay")
     async def pay_kitchen_order(order_id: str, data: PayBody, user: dict = Depends(get_current_user)):
         """p336: تأكيد دفع الطلب — p366: item_indexes لدفع جزء من العناصر (تقسيم الفاتورة)"""
