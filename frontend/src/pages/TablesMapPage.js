@@ -461,6 +461,15 @@ export default function TablesMapPage() {
       fetchAll();
     } catch (e) { toast.error(errText(e)); }
   };
+  // p433: حذف الحجز نهائيًا (الملغى / لم يحضر فقط — الخادم يرفض القائم)
+  const deleteResv = async (r) => {
+    if (!window.confirm(isAr ? `حذف حجز «${r.customer_name}» نهائيًا؟` : `Supprimer definitivement ?`)) return;
+    try {
+      await apiClient.delete(`/restaurant/reservations/${r.id}`);
+      toast.success(isAr ? 'حُذف الحجز' : 'Supprime');
+      fetchAll();
+    } catch (e) { toast.error(errText(e)); }
+  };
 
   const saveSocial = async () => {
     setSavingSocial(true);
@@ -1151,9 +1160,17 @@ export default function TablesMapPage() {
                           <Button size="sm" variant="ghost" className="h-7" onClick={() => resvStatus(r.id, 'cancelled')} data-testid={`resv-cancel-${r.id}`}><Trash2 className="h-3.5 w-3.5 text-red-500" /></Button>
                         </>
                       ) : (
-                        <Badge variant={r.status === 'seated' ? 'default' : 'secondary'} data-testid={`resv-status-${r.id}`}>
-                          {r.status === 'seated' ? (isAr ? 'جلس' : 'Assis') : r.status === 'cancelled' ? (isAr ? 'ملغي' : 'Annule') : (isAr ? 'لم يحضر' : 'Absent')}
-                        </Badge>
+                        <>
+                          <Badge variant={r.status === 'seated' ? 'default' : 'secondary'} data-testid={`resv-status-${r.id}`}>
+                            {r.status === 'seated' ? (isAr ? 'جلس' : 'Assis') : r.status === 'cancelled' ? (isAr ? 'ملغي' : 'Annule') : (isAr ? 'لم يحضر' : 'Absent')}
+                          </Badge>
+                          {(r.status === 'cancelled' || r.status === 'no_show') && (
+                            <Button size="sm" variant="ghost" className="h-7 px-1.5" onClick={() => deleteResv(r)}
+                              data-testid={`resv-del-${r.id}`} title={isAr ? 'حذف نهائي' : 'Supprimer'}>
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

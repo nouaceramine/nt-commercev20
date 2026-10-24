@@ -1334,6 +1334,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish_resv("reservation.updated", upd, user)
         return _resv_out(upd)
 
+    # ---------- p433: حذف الحجز نهائيًا (الملغى / لم يحضر فقط) ----------
+    @router.delete("/reservations/{resv_id}")
+    async def delete_reservation(resv_id: str, user: dict = Depends(get_current_user)):
+        r = await _resv().find_one({"id": resv_id})
+        if not r:
+            raise HTTPException(status_code=404, detail="الحجز غير موجود")
+        if r.get("status") not in ("cancelled", "no_show"):
+            raise HTTPException(status_code=400, detail="ألغِ الحجز أو أنهِه قبل حذفه")
+        await _resv().delete_one({"id": resv_id})
+        await _publish_resv("reservation.deleted", r, user)
+        return {"deleted": True, "id": resv_id}
+
     # ---------- p388: تقرير الحجوزات PDF لفترة ----------
     @router.get("/reservations/report.pdf")
     async def reservations_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
