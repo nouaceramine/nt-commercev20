@@ -1,3 +1,8 @@
+## 2026-10-24 — p453: تقرير الخصومات PDF + مساعد مشترك
+- **Backend** `routes/restaurant_routes.py`: مساعد مشترك `_discount_rows(days)` (صفر ازدواجية) — أُعيدت صياغة `discounts.csv` لاستخدامه بمخرجات مطابقة تمامًا، وجديد `GET /discounts.pdf?days=30` بنفس البيانات (عدد الخصومات، الإجمالي، سطر لكل خصم).
+- **Frontend** `TablesMapPage.js`: زر «خصومات PDF» (disc-pdf-btn) بجوار زر CSV.
+- **E2E**: 19 فحصاً (تراجع CSV بعد إعادة الصياغة حرفيًا، PDF: التوقيع، الخط العربي، الحجم، صفحة واحدة عبر pypdf، اسم الملف، رفض بدون توثيق، تنظيف كامل).
+
 ## 2026-10-24 — p452: تقرير ربحية الأصناف (CSV)
 - **Backend** `routes/restaurant_routes.py`: `GET /items-profit.csv?days=30` — ربحية كل صنف: الكمية، الإيراد، التكلفة (purchase_price × الكمية، صفر لغير المعروف)، الربح، الهامش %؛ الملغاة والمجدوَلة مستثناة؛ ترتيب تنازلي بالربح + صف مجموع.
 - **Frontend** `RestaurantPOSPage.js`: زر «ربحية» (pos-profitcsv-btn) ضمن أزرار التصدير.

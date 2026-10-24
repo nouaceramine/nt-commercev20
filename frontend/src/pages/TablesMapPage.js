@@ -345,6 +345,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
+  // p453: تقرير الخصومات PDF (نفس فترة trendDays)
+  const downloadDiscPdf = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/discounts.pdf?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `discounts-${trendDays}d.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+  };
   // p441: تقرير الخصومات CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadDiscCsv = async () => {
     try {
@@ -1077,6 +1091,10 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="paym-csv-btn" onClick={downloadPaymCsv}
                   title={isAr ? 'توزيع طرق الدفع CSV' : 'Paiements CSV'}>
                   {isAr ? 'دفع' : 'Paie.'}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="disc-pdf-btn" onClick={downloadDiscPdf}
+                  title={isAr ? 'تقرير الخصومات PDF' : 'Remises PDF'}>
+                  {isAr ? 'خصومات PDF' : 'Remises PDF'}
                 </Button>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="disc-csv-btn" onClick={downloadDiscCsv}
                   title={isAr ? 'تقرير الخصومات CSV' : 'Remises CSV'}>

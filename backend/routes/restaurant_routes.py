@@ -2738,15 +2738,38 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
-    # ---------- p441: تقرير الخصومات CSV (رقابة على منح الخصم — BOM لـ Excel) ----------
-    @router.get("/discounts.csv")
-    async def discounts_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    # ---------- p453: مساعد جلب سطور الخصومات (مشترك بين CSV وPDF — صفر ازدواجية) ----------
+    async def _discount_rows(days):
         days = max(1, min(int(days), 90))
         since = _now() - timedelta(days=days)
         rows = await _orders().find(
             {"created_at": {"$gte": since}, "discount.amount": {"$gt": 0}},
             {"_id": 0, "code": 1, "table_name": 1, "status": 1, "created_at": 1, "discount": 1},
         ).sort("created_at", -1).to_list(500)
+        slbl = {"pending": "قيد الانتظار", "preparing": "قيد التحضير", "served": "قُدّم",
+                "cancelled": "ملغى", "scheduled": "مجدولة"}
+        tlbl = {"percent": "نسبة %", "amount": "مبلغ"}
+        out = []
+        tot = 0.0
+        for o in rows:
+            d = o.get("discount") or {}
+            amt = round(float(d.get("amount") or 0), 2)
+            tot += amt
+            ca = o.get("created_at")
+            out.append({
+                "date": ca.strftime("%Y-%m-%d %H:%M") if hasattr(ca, "strftime") else str(ca or ""),
+                "code": o.get("code") or "", "table": o.get("table_name") or "",
+                "status": slbl.get(o.get("status"), o.get("status") or ""),
+                "type": tlbl.get(d.get("type"), d.get("type") or ""),
+                "value": d.get("value"), "amount": amt,
+                "coupon": d.get("code") or "", "reason": d.get("reason") or "",
+                "by": d.get("by") or ""})
+        return days, out, round(tot, 2)
+
+    # ---------- p441: تقرير الخصومات CSV (رقابة على منح الخصم — BOM لـ Excel) ----------
+    @router.get("/discounts.csv")
+    async def discounts_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows, tot_amt = await _discount_rows(days)
         from fastapi.responses import Response
 
         def _cell(v):
@@ -2755,28 +2778,105 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 s = '"' + s.replace('"', '""') + '"'
             return s
 
-        slbl = {"pending": "قيد الانتظار", "preparing": "قيد التحضير", "served": "قُدّم",
-                "cancelled": "ملغى", "scheduled": "مجدولة"}
-        tlbl = {"percent": "نسبة %", "amount": "مبلغ"}
         lines = ["التاريخ,رمز الطلب,الطاولة,الحالة,نوع الخصم,القيمة,المبلغ,كود الكوبون,السبب,المطبِّق"]
-        tot_amt = 0.0
-        for o in rows:
-            d = o.get("discount") or {}
-            amt = round(float(d.get("amount") or 0), 2)
-            tot_amt += amt
-            ca = o.get("created_at")
+        for r in rows:
             lines.append(",".join([
-                _cell(ca.strftime("%Y-%m-%d %H:%M") if hasattr(ca, "strftime") else str(ca or "")),
-                _cell(o.get("code")), _cell(o.get("table_name")),
-                _cell(slbl.get(o.get("status"), o.get("status") or "")),
-                _cell(tlbl.get(d.get("type"), d.get("type") or "")),
-                _cell(d.get("value")), _cell(amt),
-                _cell(d.get("code")), _cell(d.get("reason")), _cell(d.get("by"))]))
-        lines.append(",,,,,," + _cell(round(tot_amt, 2)) + ",,,المجموع ←")
+                _cell(r["date"]), _cell(r["code"]), _cell(r["table"]), _cell(r["status"]),
+                _cell(r["type"]), _cell(r["value"]), _cell(r["amount"]),
+                _cell(r["coupon"]), _cell(r["reason"]), _cell(r["by"])]))
+        lines.append(",,,,,," + _cell(tot_amt) + ",,,المجموع ←")
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "discounts-" + str(days) + "d.csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p453: تقرير الخصومات PDF (نفس بيانات CSV عبر _discount_rows) ----------
+    @router.get("/discounts.pdf")
+    async def discounts_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows, tot_amt = await _discount_rows(days)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0], W - MARGIN, y[0])
+            c.setDash()
+            y[0] -= 10
+
+        if store:
+            _center(store, 13)
+        _center("تقرير الخصومات", 12)
+        _center("آخر " + str(days) + " يومًا", 9)
+        y[0] -= 4
+        _row("عدد الخصومات", len(rows))
+        _row("إجمالي مبالغ الخصم", str(tot_amt) + " دج")
+        _dash()
+        if rows:
+            _center("التاريخ — الطاولة — الحالة | المبلغ — النوع (القيمة)", 10)
+            for r in rows:
+                _row(r["date"] + " — " + (r["table"] or r["code"]) + " — " + r["status"],
+                     str(r["amount"]) + " دج — " + r["type"] + " (" + str(r["value"] or "") + ")")
+        else:
+            _center("لا خصومات في الفترة", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "discounts-" + str(days) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p337: خصومات طلبات المطعم ----------
     @router.post("/kitchen-orders/{order_id}/discount")
