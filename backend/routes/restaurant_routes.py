@@ -1342,6 +1342,148 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish_resv("reservation.updated", upd, user)
         return _resv_out(upd)
 
+    # ---------- p476: إشغال مقاعد الطاولات من الحجوزات — نواة CSV/PDF ----------
+    async def _reservation_table_occupancy_rows(days: int):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        tables = await _tables().find(
+            {}, {"_id": 0, "id": 1, "name": 1, "seats": 1}).to_list(1000)
+        stats = {}
+        for t in tables:
+            stats[t.get("id")] = {
+                "table_id": t.get("id"), "table": t.get("name") or "—",
+                "seats": max(0, int(t.get("seats") or 0)),
+                "total": 0, "seated": 0, "no_show": 0, "cancelled": 0, "guests": 0}
+        async for r in _resv().find(
+                {"reserved_for": {"$gte": since}},
+                {"_id": 0, "table_id": 1, "table_name": 1, "party_size": 1, "status": 1}):
+            tid = r.get("table_id")
+            if tid not in stats:
+                stats[tid] = {
+                    "table_id": tid, "table": r.get("table_name") or "طاولة محذوفة",
+                    "seats": 0, "total": 0, "seated": 0, "no_show": 0,
+                    "cancelled": 0, "guests": 0}
+            a = stats[tid]
+            a["total"] += 1
+            status = r.get("status") or "booked"
+            if status == "seated":
+                a["seated"] += 1
+                a["guests"] += max(0, int(r.get("party_size") or 0))
+            elif status == "no_show":
+                a["no_show"] += 1
+            elif status == "cancelled":
+                a["cancelled"] += 1
+        rows = []
+        for a in stats.values():
+            capacity = a["seated"] * a["seats"]
+            a["occupancy"] = round(100.0 * a["guests"] / capacity, 1) if capacity else 0.0
+            rows.append(a)
+        rows.sort(key=lambda a: (-a["seated"], -a["total"], str(a["table"])))
+        return days, rows
+
+    @router.get("/reservation-table-occupancy.csv")
+    async def reservation_table_occupancy_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _reservation_table_occupancy_rows(days)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الطاولة,المقاعد,الحجوزات,حضروا,لم يحضروا,أُلغيت,الضيوف الحاضرون,إشغال المقاعد %"]
+        for a in rows:
+            lines.append(",".join([
+                _cell(a["table"]), _cell(a["seats"]), _cell(a["total"]), _cell(a["seated"]),
+                _cell(a["no_show"]), _cell(a["cancelled"]), _cell(a["guests"]), _cell(a["occupancy"])]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "reservation-table-occupancy-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p476: إشغال مقاعد الطاولات من الحجوزات PDF ----------
+    @router.get("/reservation-table-occupancy.pdf")
+    async def reservation_table_occupancy_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _reservation_table_occupancy_rows(days)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        if store:
+            _center(store, 13)
+        _center("إشغال مقاعد الطاولات من الحجوزات", 12)
+        _center("آخر " + str(days) + " يومًا — الحضور الفعلي فقط", 9)
+        y[0] -= 4
+        _row("عدد الطاولات", len(rows))
+        _row("الحجوزات", sum(a["total"] for a in rows))
+        _row("الضيوف الحاضرون", sum(a["guests"] for a in rows))
+        y[0] -= 6
+        if rows:
+            _center("الطاولة | الحجوزات | حضروا | الضيوف | إشغال المقاعد", 10)
+            for a in rows:
+                value = "{} | {} | {} | {}%".format(a["total"], a["seated"], a["guests"], a["occupancy"])
+                _row(a["table"], value)
+        else:
+            _center("لا طاولات في الفترة", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "reservation-table-occupancy-" + str(days) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p465: اتجاه التغيّب عن الحجوزات اليومي CSV (توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/no-show-rate.csv")
     async def no_show_rate_csv(days: int = 30, user: dict = Depends(get_current_user)):
@@ -3172,9 +3314,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         rows = await _orders().aggregate(pipeline).to_list(50)
         return {"top": [{"product_id": r["_id"], "qty": r["qty"]} for r in rows]}
 
-    # ---------- p436: مبيعات الفئات CSV (تجميع الأصناف حسب العائلة — BOM لـ Excel) ----------
-    @router.get("/category-sales.csv")
-    async def category_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    # ---------- p436/p476: مبيعات الفئات — نواة مشتركة لـ CSV وPDF ----------
+    async def _category_sales_rows(days: int):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         fams = {}
@@ -3189,6 +3330,13 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 a = agg.setdefault(fam, [0.0, 0.0])
                 a[0] += float(i.get("quantity") or 0)
                 a[1] += float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+        rows = [(fam, a[0], round(a[1], 2)) for fam, a in agg.items()]
+        rows.sort(key=lambda r: -r[2])
+        return days, rows
+
+    @router.get("/category-sales.csv")
+    async def category_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _category_sales_rows(days)
         from fastapi.responses import Response
 
         def _cell(v):
@@ -3198,13 +3346,93 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             return s
 
         lines = ["الفئة,الكمية,الإيراد"]
-        for fam in sorted(agg, key=lambda k: -agg[k][1]):
-            a = agg[fam]
-            lines.append(",".join([_cell(fam), _cell(a[0]), _cell(round(a[1], 2))]))
+        for fam, qty, revenue in rows:
+            lines.append(",".join([_cell(fam), _cell(qty), _cell(revenue)]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "category-sales-" + str(days) + "d.csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p476: مبيعات الفئات PDF (نفس بيانات CSV عبر _category_sales_rows) ----------
+    @router.get("/category-sales.pdf")
+    async def category_sales_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _category_sales_rows(days)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        if store:
+            _center(store, 13)
+        _center("تقرير مبيعات الفئات", 12)
+        _center("آخر " + str(days) + " يومًا", 9)
+        y[0] -= 4
+        _row("عدد الفئات", len(rows))
+        _row("إجمالي الكمية", round(sum(r[1] for r in rows), 2))
+        _row("إجمالي الإيراد", str(round(sum(r[2] for r in rows), 2)) + " دج")
+        y[0] -= 6
+        if rows:
+            _center("الفئة | الكمية | الإيراد", 10)
+            for fam, qty, revenue in rows:
+                _row(fam, str(qty) + " | " + str(revenue) + " دج")
+        else:
+            _center("لا مبيعات في الفترة", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "category-sales-" + str(days) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p422: تصدير الأكثر مبيعًا CSV مع أسماء الأصناف (BOM لـ Excel) ----------
     @router.get("/top-sellers.csv")
