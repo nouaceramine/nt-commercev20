@@ -61,6 +61,21 @@ export default function DeliveryPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error("تعذر تحميل PDF"); }
   };
+  // p460: الإلغاءات حسب السبب CSV (BOM عربي لـ Excel — 30 يومًا)
+  const downloadReasonsCsv = async () => {
+    try {
+      const res = await apiClient.get("/restaurant/cancel-reasons.csv?days=30", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "cancel-reasons-30d.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error("تعذر تحميل CSV"); }
+  };
+
   // p446: أفضل زبائن التوصيل CSV (BOM عربي لـ Excel — 90 يومًا)
   const downloadCustCsv = async () => {
     try {
@@ -219,6 +234,7 @@ export default function DeliveryPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2"><Bike className="h-7 w-7" /> طلبات التوصيل</h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} data-testid="dlv-refresh"><RefreshCw className="h-4 w-4 ml-1" /> تحديث</Button>
+          <Button variant="outline" size="sm" onClick={downloadReasonsCsv} data-testid="dlv-reasons-csv-btn" title="الإلغاءات حسب السبب CSV (30 يومًا)"><FileDown className="h-4 w-4 ml-1" /> أسباب</Button>
           <Button variant="outline" size="sm" onClick={downloadCustCsv} data-testid="dlv-cust-csv-btn" title="أفضل الزبائن CSV (90 يومًا)"><FileDown className="h-4 w-4 ml-1" /> زبائن</Button>
           <Button variant="outline" size="sm" onClick={downloadDriversPdf} data-testid="dlv-drivers-pdf-btn" title="إحصائيات السائقين PDF"><FileDown className="h-4 w-4 ml-1" /> سائقون PDF</Button>
           <Button variant="outline" size="sm" onClick={downloadDriversCsv} data-testid="dlv-drivers-csv-btn" title="إحصائيات السائقين CSV"><FileDown className="h-4 w-4 ml-1" /> سائقون</Button>

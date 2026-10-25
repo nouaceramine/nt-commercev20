@@ -2758,6 +2758,57 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p460: الإلغاءات حسب السبب CSV (توصيل بأسبابه + صالة بلا سبب — BOM لـ Excel) ----------
+    @router.get("/cancel-reasons.csv")
+    async def cancel_reasons_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        dlv = await _delivery().aggregate([
+            {"$match": {"created_at": {"$gte": since}, "status": "cancelled"}},
+            {"$group": {"_id": {"$ifNull": ["$cancel_reason", ""]},
+                        "count": {"$sum": 1},
+                        "value": {"$sum": {"$ifNull": ["$total", 0]}}}},
+            {"$sort": {"count": -1}},
+        ]).to_list(100)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        k = await _orders().aggregate([
+            {"$match": {"created_at": {"$gte": since}, "status": "cancelled",
+                        "source": {"$ne": "delivery"}}},
+            {"$group": {"_id": None, "count": {"$sum": 1}, "value": {"$sum": _bill}}},
+        ]).to_list(1)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["السبب,القناة,العدد,القيمة"]
+        tot_n = 0; tot_v = 0.0
+        for r in dlv:
+            n = int(r.get("count") or 0); v = round(float(r.get("value") or 0), 2)
+            tot_n += n; tot_v += v
+            lines.append(",".join([
+                _cell((r.get("_id") or "").strip() or "بدون سبب"), _cell("توصيل"),
+                _cell(n), _cell(v)]))
+        if k:
+            n = int(k[0].get("count") or 0); v = round(float(k[0].get("value") or 0), 2)
+            if n:
+                tot_n += n; tot_v += v
+                lines.append(",".join([
+                    _cell("بدون تسجيل سبب"), _cell("صالة"), _cell(n), _cell(v)]))
+        lines.append(",".join([_cell("المجموع ←"), "", _cell(tot_n), _cell(round(tot_v, 2))]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "cancel-reasons-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p438: تقرير الإلغاءات اليومي CSV (عدد وقيمة ونسبة — BOM لـ Excel) ----------
     @router.get("/cancellations.csv")
     async def cancellations_csv(days: int = 30, user: dict = Depends(get_current_user)):
