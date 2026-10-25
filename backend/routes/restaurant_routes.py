@@ -3503,6 +3503,172 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p477: المبيعات مقابل المخزون — نواة مشتركة للتقارير ----------
+    async def _stock_sales_rows(days: int):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$unwind": "$items"},
+            {"$match": {"items.product_id": {"$ne": None}}},
+            {"$group": {"_id": "$items.product_id",
+                        "sold": {"$sum": {"$ifNull": ["$items.quantity", 0]}},
+                        "revenue": {"$sum": {"$multiply": [
+                            {"$ifNull": ["$items.quantity", 0]},
+                            {"$ifNull": ["$items.unit_price", 0]}]}}}},
+        ]
+        sales = {}
+        async for r in _orders().aggregate(pipeline):
+            sales[r["_id"]] = (float(r.get("sold") or 0), float(r.get("revenue") or 0))
+        rows = []
+        async for p in db.products.find(
+                {"is_non_stockable": {"$ne": True}, "is_blocked": {"$ne": True}},
+                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1,
+                 "family_name": 1, "quantity": 1, "min_quantity": 1, "purchase_price": 1}):
+            pid = p.get("id")
+            stock = float(p.get("quantity") or 0)
+            minimum = float(p.get("min_quantity") or 0)
+            sold, revenue = sales.get(pid, (0.0, 0.0))
+            rows.append({
+                "product_id": pid,
+                "name": p.get("name") or p.get("name_ar") or p.get("name_en") or "—",
+                "family": (p.get("family_name") or "").strip() or "بدون فئة",
+                "stock": stock, "minimum": minimum, "sold": sold,
+                "revenue": round(revenue, 2),
+                "stock_value": round(stock * float(p.get("purchase_price") or 0), 2),
+                "sell_stock": round(sold / stock, 2) if stock > 0 else None,
+            })
+        rows.sort(key=lambda a: (-a["revenue"], -a["sold"], str(a["name"])))
+        return days, rows
+
+    @router.get("/stock-sales.csv")
+    async def stock_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _stock_sales_rows(days)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد,قيمة المخزون,بيع/مخزون"]
+        for a in rows:
+            lines.append(",".join([
+                _cell(a["name"]), _cell(a["family"]), _cell(a["stock"]), _cell(a["minimum"]),
+                _cell(a["sold"]), _cell(a["revenue"]), _cell(a["stock_value"]), _cell(a["sell_stock"])]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "stock-sales-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p477: الأصناف منخفضة المخزون ذات المبيعات CSV ----------
+    @router.get("/low-stock-sales.csv")
+    async def low_stock_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _stock_sales_rows(days)
+        rows = [a for a in rows if a["stock"] <= a["minimum"] and a["sold"] > 0]
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد"]
+        for a in rows:
+            lines.append(",".join([
+                _cell(a["name"]), _cell(a["family"]), _cell(a["stock"]), _cell(a["minimum"]),
+                _cell(a["sold"]), _cell(a["revenue"])]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "low-stock-sales-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    # ---------- p477: المبيعات مقابل المخزون PDF ----------
+    @router.get("/stock-sales.pdf")
+    async def stock_sales_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows = await _stock_sales_rows(days)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        if store:
+            _center(store, 13)
+        _center("تقرير المبيعات مقابل المخزون", 12)
+        _center("آخر " + str(days) + " يومًا", 9)
+        y[0] -= 4
+        _row("عدد الأصناف", len(rows))
+        _row("إجمالي الكمية المباعة", round(sum(a["sold"] for a in rows), 2))
+        _row("إجمالي الإيراد", str(round(sum(a["revenue"] for a in rows), 2)) + " دج")
+        _row("قيمة المخزون الحالي", str(round(sum(a["stock_value"] for a in rows), 2)) + " دج")
+        y[0] -= 6
+        if rows:
+            _center("الصنف | المخزون | المبيعات | الإيراد", 10)
+            for a in rows:
+                value = "{} | {} | {} دج".format(a["stock"], a["sold"], a["revenue"])
+                _row(a["name"], value)
+        else:
+            _center("لا أصناف مخزون", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "stock-sales-" + str(days) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p450: توزيع طرق الدفع CSV (دفعات/مبالغ + صف الآجل — BOM لـ Excel) ----------
     @router.get("/payment-methods.csv")
     async def payment_methods_csv(days: int = 30, user: dict = Depends(get_current_user)):
