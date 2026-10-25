@@ -3834,6 +3834,51 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
+    # ---------- p468: زمن التوصيل لكل سائق CSV (متوسط/أقصر/أطول بالدقائق — BOM لـ Excel) ----------
+    @router.get("/delivery-time.csv")
+    async def delivery_time_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "status": "delivered",
+                        "delivered_at": {"$ne": None}}},
+            {"$addFields": {"mins": {"$divide": [
+                {"$subtract": ["$delivered_at", "$created_at"]}, 60000]}}},
+            {"$group": {"_id": {"$ifNull": ["$driver_name", "غير مُسنَد"]},
+                        "n": {"$sum": 1},
+                        "avg": {"$avg": "$mins"},
+                        "mn": {"$min": "$mins"},
+                        "mx": {"$max": "$mins"}}},
+            {"$sort": {"n": -1, "_id": 1}},
+        ]
+        rows = await _delivery().aggregate(pipeline).to_list(200)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["السائق,التوصيلات,متوسط الزمن (د),أقصر (د),أطول (د)"]
+        tn = 0
+        tot_avg_num = 0.0
+        for r in rows:
+            n = int(r.get("n") or 0)
+            tn += n
+            tot_avg_num += float(r.get("avg") or 0) * n
+            lines.append(",".join([_cell(r.get("_id")), _cell(n),
+                                   _cell(round(float(r.get("avg") or 0), 1)),
+                                   _cell(round(float(r.get("mn") or 0), 1)),
+                                   _cell(round(float(r.get("mx") or 0), 1))]))
+        tot_avg = round(tot_avg_num / tn, 1) if tn else 0
+        lines.append(",".join([_cell("المجموع ←"), _cell(tn), _cell(tot_avg), "", ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "delivery-time-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p446: أفضل زبائن التوصيل CSV (BOM لـ Excel) ----------
     @router.get("/delivery-customers.csv")
     async def delivery_customers_csv(days: int = 90, user: dict = Depends(get_current_user)):
