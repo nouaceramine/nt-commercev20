@@ -417,10 +417,11 @@ export default function TablesMapPage() {
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
-  // p462: متوسط قيمة الطلب اليومي CSV (BOM عربي لـ Excel — نفس فترة trendDays)
+  // p462: متوسط قيمة الطلب اليومي CSV (BOM عربي لـ Excel — نفس فترة trendDays أو مرشّح p472)
   const downloadAovCsv = async () => {
     try {
-      const res = await apiClient.get(`/restaurant/aov-trend.csv?days=${trendDays}`, { responseType: 'blob' });
+      const rng = (repFrom || repTo) ? `&date_from=${repFrom}&date_to=${repTo}` : '';
+      const res = await apiClient.get(`/restaurant/aov-trend.csv?days=${trendDays}${rng}`, { responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
@@ -434,7 +435,8 @@ export default function TablesMapPage() {
   // p408: تصدير منحنى الإيرادات CSV (BOM عربي لـ Excel — نفس فترة المنحنى trendDays)
   const downloadTrendCsv = async () => {
     try {
-      const res = await apiClient.get(`/restaurant/revenue-trend.csv?days=${trendDays}`, { responseType: 'blob' });
+      const rng = (repFrom || repTo) ? `&date_from=${repFrom}&date_to=${repTo}` : '';
+      const res = await apiClient.get(`/restaurant/revenue-trend.csv?days=${trendDays}${rng}`, { responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
@@ -536,6 +538,9 @@ export default function TablesMapPage() {
   // p374: منحنى الإيرادات متعدد الأيام — يُجلب عند تغيير الفترة فقط
   const [trend, setTrend] = useState(null);
   const [trendDays, setTrendDays] = useState(7);
+  // p472: مرشّحات من/إلى موحّدة للتقارير (عند تركهما فارغين يُعتمد trendDays كما كان)
+  const [repFrom, setRepFrom] = useState('');
+  const [repTo, setRepTo] = useState('');
   useEffect(() => {
     apiClient.get(`/restaurant/revenue-trend?days=${trendDays}`).then(r => setTrend(r.data)).catch(() => {});
   }, [trendDays]);
@@ -1150,6 +1155,10 @@ export default function TablesMapPage() {
                   title={isAr ? 'المبيعات حسب الساعة CSV' : 'Ventes par heure CSV'}>
                   {isAr ? 'ساعات' : 'Heures'}
                 </Button>
+                <input type="date" value={repFrom} onChange={(e) => setRepFrom(e.target.value)} data-testid="rep-from-input"
+                  className="h-8 px-1 text-[10px] border rounded-md bg-background" title={isAr ? 'من تاريخ (للتقارير)' : 'Du (rapports)'} />
+                <input type="date" value={repTo} onChange={(e) => setRepTo(e.target.value)} data-testid="rep-to-input"
+                  className="h-8 px-1 text-[10px] border rounded-md bg-background" title={isAr ? 'إلى تاريخ (للتقارير)' : 'Au (rapports)'} />
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="aov-csv-btn" onClick={downloadAovCsv}
                   title={isAr ? 'متوسط قيمة الطلب اليومي CSV' : 'Panier moyen CSV'}>
                   {isAr ? 'متوسط' : 'AOV'}

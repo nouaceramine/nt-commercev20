@@ -2177,12 +2177,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p374: منحنى إيرادات المطعم متعدد الأيام ----------
     @router.get("/revenue-trend")
-    async def revenue_trend(days: int = 7, user: dict = Depends(get_current_user)):
+    async def revenue_trend(days: int = 7, user: dict = Depends(get_current_user),
+                            date_from: str = None, date_to: str = None):
         days = max(1, min(int(days or 7), 90))  # days=0 → 7 (اتفاق p363)، سقف 90
         dz = timezone(timedelta(hours=1))
         today = _now().astimezone(dz).date()
         start_d = today - timedelta(days=days - 1)
         start = datetime(start_d.year, start_d.month, start_d.day, tzinfo=dz).astimezone(timezone.utc)
+        until = None
+        end_d = today
+        # p472: مرشّحات من/إلى اختيارية (YYYY-MM-DD) — عند غيابها يُعتمد days كما كان تمامًا
+        try:
+            if date_from:
+                _df = datetime.strptime(date_from, "%Y-%m-%d").date()
+                start_d = _df
+                start = datetime(_df.year, _df.month, _df.day, tzinfo=dz).astimezone(timezone.utc)
+            if date_to:
+                end_d = datetime.strptime(date_to, "%Y-%m-%d").date()
+                _dt = end_d + timedelta(days=1)
+                until = datetime(_dt.year, _dt.month, _dt.day, tzinfo=dz).astimezone(timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)")
         _bill = {"$max": [{"$subtract": [
             {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                          "in": {"$add": ["$$value",
@@ -2190,7 +2205,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                                                         {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
             {"$ifNull": ["$discount.amount", 0]}]}, 0]}
         pipeline = [
-            {"$match": {"created_at": {"$gte": start}}},
+            {"$match": {"created_at": ({"$gte": start, "$lt": until} if until else {"$gte": start})}},
             {"$addFields": {
                 "bill": _bill,
                 "cxl": {"$eq": ["$status", "cancelled"]},
@@ -2222,7 +2237,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         by_day = {r["_id"]: r for r in rows}
         series = []
         d = start_d
-        while d <= today:  # ملء الأيام الفارغة بأصفار — المنحنى متصل زمنيًا
+        while d <= end_d:  # ملء الأيام الفارغة بأصفار — المنحنى متصل زمنيًا
             k = d.isoformat()
             r = by_day.get(k) or {}
             series.append({"date": k,
@@ -2770,9 +2785,19 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p462: متوسط قيمة الطلب اليومي CSV (اتجاه AOV — توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/aov-trend.csv")
-    async def aov_trend_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def aov_trend_csv(days: int = 30, date_from: str = None, date_to: str = None,
+                            user: dict = Depends(get_current_user)):
+        # p472: مرشّحات من/إلى اختيارية (YYYY-MM-DD) — عند غيابها يُعتمد days كما كان تمامًا
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
+        until = None
+        try:
+            if date_from:
+                since = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if date_to:
+                until = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)")
         _bill = {"$max": [{"$subtract": [
             {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
                          "in": {"$add": ["$$value",
@@ -2780,7 +2805,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                                                         {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
             {"$ifNull": ["$discount.amount", 0]}]}, 0]}
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
+            {"$match": {"created_at": ({"$gte": since, "$lt": until} if until else {"$gte": since}),
                         "status": {"$nin": ["cancelled", "scheduled"]}}},
             {"$addFields": {
                 "pay_list": {"$cond": [
@@ -2817,7 +2842,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             avg = round(rev / n, 2) if n else 0
             lines.append(",".join([_cell(r.get("_id")), _cell(n), _cell(rev), _cell(avg)]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
-        fname = "aov-trend-" + str(days) + "d.csv"
+        fname = ("aov-trend-" + str(date_from or "") + "_" + str(date_to or "") + ".csv") \
+            if (date_from or date_to) else ("aov-trend-" + str(days) + "d.csv")
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
@@ -2916,8 +2942,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     @router.get("/revenue-trend.csv")
-    async def revenue_trend_csv(days: int = 7, user: dict = Depends(get_current_user)):
-        d = await revenue_trend(days, user)
+    async def revenue_trend_csv(days: int = 7, date_from: str = None, date_to: str = None,
+                                user: dict = Depends(get_current_user)):
+        d = await revenue_trend(days, user, date_from, date_to)
         from fastapi.responses import Response
 
         def _cell(v):
@@ -2934,7 +2961,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         lines.append(",".join([_cell("الإجمالي"), _cell(d.get("total_orders")),
                                _cell(d.get("total_revenue")), ""]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        fname = "revenue-trend-" + str(d.get("days") or 0) + "d.csv"
+        fname = ("revenue-trend-" + str(date_from or "") + "_" + str(date_to or "") + ".csv") \
+            if (date_from or date_to) else ("revenue-trend-" + str(d.get("days") or 0) + "d.csv")
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
