@@ -3917,6 +3917,115 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p469: مقارنة السائقين الأسبوعية (آخر 7 أيام مقابل 7 قبلها — مساعد مشترك) ----------
+    async def _drivers_weekly_rows():
+        now = _now()
+        cur_since = now - timedelta(days=7)
+        prev_since = now - timedelta(days=14)
+        agg = {}
+        async for o in _delivery().find({"created_at": {"$gte": prev_since}}):
+            if o.get("status") != "delivered":
+                continue
+            drv = (o.get("driver_name") or "").strip() or "بدون سائق"
+            a = agg.setdefault(drv, {"cd": 0, "cr": 0.0, "pd": 0, "pr": 0.0})
+            ca = o.get("created_at")
+            if ca is not None and getattr(ca, "tzinfo", None) is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            amt = float(o.get("total") or 0)
+            if ca is not None and ca >= cur_since:
+                a["cd"] += 1
+                a["cr"] += amt
+            else:
+                a["pd"] += 1
+                a["pr"] += amt
+        rows = [(d, a["cd"], round(a["cr"], 2), a["pd"], round(a["pr"], 2))
+                for d, a in agg.items()]
+        rows.sort(key=lambda r: (-r[1], r[0]))
+        return rows
+
+    # ---------- p469: مقارنة السائقين الأسبوعية PDF ----------
+    @router.get("/drivers-weekly.pdf")
+    async def drivers_weekly_pdf(user: dict = Depends(get_current_user)):
+        rows = await _drivers_weekly_rows()
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0], W - MARGIN, y[0])
+            c.setDash()
+            y[0] -= 8
+
+        def _row(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        _center(store or "—", 13)
+        _center("مقارنة السائقين الأسبوعية", 15)
+        _center("آخر 7 أيام مقابل 7 أيام قبلها (المُسلَّمة فقط)", 10)
+        _dash()
+        _row("السائق — مسلَّمة الأسبوع (إيراده) | مسلَّمة السابق (إيراده)", 10)
+        _dash()
+        tcd = tcr = tpd = tpr = 0
+        for drv, cd, cr, pd_, pr in rows:
+            tcd += cd; tcr += cr; tpd += pd_; tpr += pr
+            _row(drv + " — " + str(cd) + " (" + str(cr) + ") | " + str(pd_) + " (" + str(pr) + ")")
+        _dash()
+        _row("المجموع — " + str(tcd) + " (" + str(round(tcr, 2)) + ") | " + str(tpd) + " (" + str(round(tpr, 2)) + ")", 11)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="drivers-weekly.pdf"'})
+
     # ---------- p442: مساعد تجميع إحصائيات السائقين (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _driver_stats_rows(days: int):
         days = max(1, min(int(days), 365))

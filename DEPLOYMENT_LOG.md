@@ -1,3 +1,7 @@
+## 2026-10-25 — p469: مقارنة السائقين الأسبوعية (PDF)
+- **Backend** `routes/restaurant_routes.py`: مساعد `_drivers_weekly_rows()` + `GET /drivers-weekly.pdf` — مقارنة آخر 7 أيام بـ 7 أيام قبلها لكل سائق (المُسلَّمة وإيرادها)، ترتيب تنازلي + صف مجموع؛ PDF عربي (NotoNaskh) باسم المتجر.
+- **Frontend** `DeliveryPage.js`: زر «أسبوعي» (dlv-weekly-pdf-btn) ضمن أزرار التصدير.
+- **E2E**: 12 فحصاً (بذر أسبوعين متعاقبين مع ملغى مستثنى، PDF 200/نوع/توقيع %PDF/صفحة واحدة على الأقل/اسم الملف، رفض بدون توثيق، تنظيف كامل).
 ## 2026-10-25 — p468: زمن التوصيل لكل سائق (CSV)
 - **Backend** `routes/restaurant_routes.py`: `GET /delivery-time.csv?days=30` — زمن التوصيل بالدقائق (delivered_at − created_at) لكل سائق: عدد التوصيلات، المتوسط، الأقصر، الأطول؛ المُسلَّمة فقط؛ ترتيب تنازلي بعدد التوصيلات + صف مجموع بمتوسط مرجَّح.
 - **Frontend** `DeliveryPage.js`: زر «زمن» (dlv-time-csv-btn) ضمن أزرار التصدير.
