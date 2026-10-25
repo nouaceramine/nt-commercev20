@@ -66,6 +66,21 @@ export default function RestaurantPOSPage() {
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
+  // p466: توزيع تكرار الزبائن CSV (BOM عربي لـ Excel — 90 يومًا)
+  const downloadFreqCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/customer-frequency.csv?days=90', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'customer-frequency-90d.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
+
   // p464: الزبائن الخامدون CSV (BOM عربي لـ Excel — خمول 14+ يومًا)
   const downloadDormantCsv = async () => {
     try {
@@ -304,6 +319,10 @@ export default function RestaurantPOSPage() {
             <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadModCsv} data-testid="pos-modcsv-btn"
               title={isAr ? 'تقرير الإضافات CSV (30 يوم)' : 'Modificateurs CSV (30j)'}>
               {isAr ? 'إضافات' : 'Modif.'}
+            </Button>
+            <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadFreqCsv} data-testid="pos-freq-btn"
+              title={isAr ? 'توزيع تكرار الزبائن CSV (90 يوم)' : 'Frequence clients CSV'}>
+              {isAr ? 'تكرار' : 'Freq.'}
             </Button>
             <Button variant="outline" size="sm" className="px-2 text-[10px]" onClick={downloadDormantCsv} data-testid="pos-dormant-btn"
               title={isAr ? 'زبائن خامدون 14+ يوم CSV' : 'Clients dormants CSV'}>

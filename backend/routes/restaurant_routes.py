@@ -2341,6 +2341,74 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p466: توزيع الزبائن حسب تكرار الطلب CSV (فئات ولاء — BOM لـ Excel) ----------
+    @router.get("/customer-frequency.csv")
+    async def customer_frequency_csv(days: int = 90, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "customer_phone": {"$nin": [None, ""]},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "paid_amt": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": "$customer_phone",
+                        "orders": {"$sum": 1},
+                        "spent": {"$sum": "$paid_amt"}}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(5000)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _bucket(n):
+            if n <= 1:
+                return "طلب واحد"
+            if n <= 3:
+                return "2-3 طلبات"
+            if n <= 7:
+                return "4-7 طلبات"
+            return "8+ طلبات"
+
+        order_lbl = ["طلب واحد", "2-3 طلبات", "4-7 طلبات", "8+ طلبات"]
+        agg = {b: {"cust": 0, "spent": 0.0, "orders": 0} for b in order_lbl}
+        for r in rows:
+            b = _bucket(int(r.get("orders") or 0))
+            agg[b]["cust"] += 1
+            agg[b]["orders"] += int(r.get("orders") or 0)
+            agg[b]["spent"] += float(r.get("spent") or 0)
+        lines = ["فئة التكرار,عدد الزبائن,إجمالي الطلبات,إجمالي المنفق,متوسط المنفق للزبون"]
+        for b in order_lbl:
+            a = agg[b]
+            sp = round(a["spent"], 2)
+            avg = round(sp / a["cust"], 2) if a["cust"] else 0
+            lines.append(",".join([_cell(b), _cell(a["cust"]), _cell(a["orders"]), _cell(sp), _cell(avg)]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "customer-frequency-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p457: مساعد جلب أفضل زبائن الصالة (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _top_customer_rows(days):
         days = max(1, min(int(days), 365))
