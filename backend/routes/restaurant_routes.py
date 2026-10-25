@@ -2596,6 +2596,59 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p462: متوسط قيمة الطلب اليومي CSV (اتجاه AOV — توقيت الجزائر — BOM لـ Excel) ----------
+    @router.get("/aov-trend.csv")
+    async def aov_trend_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "paid_amt": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
+                                                  "timezone": "Africa/Algiers"}},
+                        "orders": {"$sum": 1},
+                        "revenue": {"$sum": "$paid_amt"}}},
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(400)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["اليوم,الطلبات,الإيراد المحصَّل,متوسط الطلب"]
+        for r in rows:
+            n = int(r.get("orders") or 0)
+            rev = round(float(r.get("revenue") or 0), 2)
+            avg = round(rev / n, 2) if n else 0
+            lines.append(",".join([_cell(r.get("_id")), _cell(n), _cell(rev), _cell(avg)]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "aov-trend-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p456: حمل المطبخ حسب الساعة CSV (طلبات/أصناف/زمن تحضير — BOM لـ Excel) ----------
     @router.get("/kitchen-load.csv")
     async def kitchen_load_csv(days: int = 30, user: dict = Depends(get_current_user)):

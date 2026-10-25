@@ -403,6 +403,20 @@ export default function TablesMapPage() {
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
+  // p462: متوسط قيمة الطلب اليومي CSV (BOM عربي لـ Excel — نفس فترة trendDays)
+  const downloadAovCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/aov-trend.csv?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `aov-trend-${trendDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p408: تصدير منحنى الإيرادات CSV (BOM عربي لـ Excel — نفس فترة المنحنى trendDays)
   const downloadTrendCsv = async () => {
     try {
@@ -1121,6 +1135,10 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="hours-csv-btn" onClick={downloadHoursCsv}
                   title={isAr ? 'المبيعات حسب الساعة CSV' : 'Ventes par heure CSV'}>
                   {isAr ? 'ساعات' : 'Heures'}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="aov-csv-btn" onClick={downloadAovCsv}
+                  title={isAr ? 'متوسط قيمة الطلب اليومي CSV' : 'Panier moyen CSV'}>
+                  {isAr ? 'متوسط' : 'AOV'}
                 </Button>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-csv-btn" onClick={downloadTrendCsv}
                   title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
