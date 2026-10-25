@@ -469,7 +469,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- Kitchen orders ----------
     @router.get("/kitchen-orders")
-    async def list_kitchen_orders(status: Optional[str] = None, all: bool = False, user: dict = Depends(get_current_user)):
+    async def list_kitchen_orders(status: Optional[str] = None, all: bool = False,
+                                  search: Optional[str] = None,
+                                  user: dict = Depends(get_current_user)):
         # p337: الطلبيات المجدولة التي حان موعدها تدخل المطبخ تلقائيًا
         # p400: التفعيل يبث kitchen_order.created لكل طلب — KDS يُنبّه ويطبع تلقائيًا كأي طلب جديد
         due = await _orders().find(
@@ -488,6 +490,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             q["status"] = {"$nin": ["pending_payment", "scheduled"]}
         else:
             q["status"] = {"$ne": "scheduled"}
+        # p473: بحث الأرشيف — بالرمز/الطاولة/الزبون/الهاتف (اختياري، لا أثر عند غيابه)
+        if search and search.strip():
+            import re as _re
+            rx = {"$regex": _re.escape(search.strip()), "$options": "i"}
+            q["$or"] = [{"code": rx}, {"table_name": rx},
+                        {"customer_name": rx}, {"customer_phone": rx}]
         cursor = _orders().find(q).sort("created_at", -1).limit(200)
         return [_order_out(o) async for o in cursor]
 

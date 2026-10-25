@@ -44,6 +44,9 @@ export default function KitchenDisplayPage() {
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem("kds_autoprint") === "1");
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("kds_sound") !== "0");  // p381
   const [srcFilter, setSrcFilter] = useState("all");
+  // p473: بحث أرشيف المطبخ
+  const [kdsQuery, setKdsQuery] = useState("");
+  const [searching, setSearching] = useState(false);
   const [stats, setStats] = useState(null);  // p363: شريط أداء المطبخ
   const [ticket, setTicket] = useState(null);
 
@@ -108,6 +111,17 @@ export default function KitchenDisplayPage() {
     } catch (e) { /* عرض خفيف: لا إزعاج عند فشل جلب دوري */ }
     finally { setLoading(false); }
   }, []);
+
+  // p473: بحث في أرشيف الطلبات (all=1) بالرمز/الطاولة/الزبون/الهاتف — المسح يعيد العرض الحي
+  const runKdsSearch = async () => {
+    if (!kdsQuery.trim()) { setSearching(false); fetchOrders(); return; }
+    try {
+      const res = await apiClient.get(`/restaurant/kitchen-orders?all=1&search=${encodeURIComponent(kdsQuery.trim())}`);
+      setOrders(res.data || []);
+      setSearching(true);
+    } catch (e) { toast.error("تعذر البحث"); }
+  };
+  const clearKdsSearch = () => { setKdsQuery(""); setSearching(false); fetchOrders(); };
   useEffect(() => {
     fetchOrders();
     startRealtime();
@@ -275,9 +289,29 @@ export default function KitchenDisplayPage() {
           <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-orders-csv" onClick={downloadOrdersCsv} title="أرشيف الطلبات CSV (آخر 7 أيام)">
             أرشيف
           </Button>
+          <input value={kdsQuery} onChange={(e) => setKdsQuery(e.target.value)} data-testid="kds-search-input"
+            onKeyDown={(e) => { if (e.key === 'Enter') runKdsSearch(); }}
+            className="h-6 px-2 text-[10px] border rounded-md bg-background w-28" placeholder="رمز/طاولة/زبون" title="بحث في أرشيف الطلبات" />
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-search-btn" onClick={runKdsSearch} title="بحث في الأرشيف">
+            بحث
+          </Button>
         </div>
       )}
-      {loading ? <p className="text-muted-foreground">جارٍ التحميل...</p> : (
+      {searching ? (
+        <div className="space-y-2" data-testid="kds-search-results">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold">نتائج البحث ({orders.length})</p>
+            <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-search-clear" onClick={clearKdsSearch}>مسح</Button>
+          </div>
+          {orders.length === 0 && <p className="text-xs text-muted-foreground">لا نتائج</p>}
+          {orders.map((o) => (
+            <div key={o.id} className="border rounded-md p-2 text-xs flex items-center justify-between" data-testid={`kds-sr-${o.id}`}>
+              <span>{o.code || o.id} — {o.table_name || o.customer_name || "—"}</span>
+              <Badge variant="secondary">{o.status}</Badge>
+            </div>
+          ))}
+        </div>
+      ) : loading ? <p className="text-muted-foreground">جارٍ التحميل...</p> : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {COLS.map((col) => {
             const list = orders.filter((o) => o.status === col.status && (srcFilter === 'all' || (o.source || 'pos') === srcFilter));  // p338

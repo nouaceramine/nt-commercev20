@@ -1,3 +1,7 @@
+## 2026-10-25 — p473: بحث أرشيف المطبخ (KDS)
+- **Backend** `routes/restaurant_routes.py`: معامل `search` اختياري في `GET /kitchen-orders` — بحث آمن (re.escape) غير حساس لحالة الأحرف في الرمز/الطاولة/الزبون/الهاتف؛ لا أثر إطلاقًا عند غيابه.
+- **Frontend** `KitchenDisplayPage.js`: حقل بحث + زر «بحث» (kds-search-input / kds-search-btn) في الترويسة؛ النتائج تعرض قائمة مسطحة (kds-search-results) مع زر «مسح» يعيد العرض الحي؛ Enter يُنفّذ البحث.
+- **E2E**: 15 فحصاً (مطابقة بالرمز/الطاولة/الهاتف/الاسم، بلا نتائج، القائمة الافتراضية سليمة، محارف regex خاصة آمنة، رفض بدون توثيق، تنظيف كامل).
 ## 2026-10-25 — p472: مرشّحات من/إلى موحّدة للتقارير (واجهة + خلفية)
 - **Backend** `routes/restaurant_routes.py`: `date_from`/`date_to` اختياريان (YYYY-MM-DD) في `aov-trend.csv` و`revenue-trend.csv` (عبر مساعد `revenue_trend`) — السلسلة الزمنية تُقتطع فعليًا للمدى، صيغة خاطئة → 400، وعند غيابهما السلوك السابق (days) كما هو تمامًا.
 - **Frontend** `TablesMapPage.js`: حقلا تاريخ «من/إلى» (rep-from-input / rep-to-input) قبل أزرار التصدير؛ زرا «متوسط» وCSV المنحنى يمرّران المدى عند ضبطه.
