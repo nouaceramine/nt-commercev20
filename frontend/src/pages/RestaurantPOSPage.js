@@ -35,6 +35,7 @@ export default function RestaurantPOSPage() {
   const [discType, setDiscType] = useState('percent');
   const [discValue, setDiscValue] = useState('');
   const [custPhone, setCustPhone] = useState('');  // p356: ولاء
+  const [exportOpen, setExportOpen] = useState(false);  // p478
 
   // p457: أفضل زبائن الصالة PDF (90 يومًا)
   const downloadTopCustPdf = async () => {
@@ -301,7 +302,39 @@ export default function RestaurantPOSPage() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <UtensilsCrossed className="h-6 w-6" />{isAr ? 'POS المطعم' : 'POS Restaurant'}
           </h1>
-          <div className="flex items-center gap-2">
+          {/* p478: أدوات الموبايل فقط — شريط الديسكتوب الأصلي محفوظ تحت lg */}
+          <div className="lg:hidden flex items-center gap-2 relative">
+            <div className="flex border rounded-lg overflow-hidden" data-testid="pos-mobile-mode">
+              <button onClick={() => setMode('tables')} data-testid="pos-mobile-mode-tables"
+                className={`px-3 py-2 text-xs font-semibold min-h-[44px] ${mode === 'tables' ? 'bg-primary text-primary-foreground' : 'bg-background'}`}>
+                {isAr ? 'طاولات' : 'Tables'}
+              </button>
+              <button onClick={() => { setMode('fast'); setSelTable(null); }} data-testid="pos-mobile-mode-fast"
+                className={`px-3 py-2 text-xs font-semibold min-h-[44px] ${mode === 'fast' ? 'bg-primary text-primary-foreground' : 'bg-background'}`}>
+                {isAr ? 'سريع' : 'Rapide'}
+              </button>
+            </div>
+            <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setExportOpen(!exportOpen)} data-testid="pos-export-menu-btn">
+              {isAr ? 'تصدير ▾' : 'Export ▾'}
+            </Button>
+            {exportOpen && (
+              <div className="absolute top-12 left-0 z-30 w-56 max-h-[70vh] overflow-y-auto rounded-lg border bg-background p-2 shadow-lg space-y-1" data-testid="pos-export-menu">
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadTopCsv(); }}>CSV — {isAr ? 'الأكثر مبيعًا' : 'Top ventes'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadBottomCsv(); }}>CSV — {isAr ? 'الأقل مبيعًا' : 'Flops'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadCatCsv(); }}>CSV — {isAr ? 'مبيعات الفئات' : 'Categories'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadProfitCsv(); }}>CSV — {isAr ? 'ربحية الأصناف' : 'Marges'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadTopCustCsv(); }}>CSV — {isAr ? 'أفضل الزبائن' : 'Top clients'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadTopCustPdf(); }}>PDF — {isAr ? 'أفضل الزبائن' : 'Top clients'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadDormantCsv(); }}>CSV — {isAr ? 'الزبائن الخامدون' : 'Clients dormants'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadFreqCsv(); }}>CSV — {isAr ? 'تكرار الزبائن' : 'Frequence'}</Button>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadModCsv(); }}>CSV — {isAr ? 'الإضافات' : 'Modificateurs'}</Button>
+                <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); fetchAll(); }} data-testid="pos-mobile-refresh">
+                  <RefreshCw className="h-4 w-4 ml-1" />{isAr ? 'تحديث' : 'Actualiser'}
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="hidden lg:flex items-center gap-2">
             <div className="flex border rounded-lg overflow-hidden" data-testid="resto-mode">
               <button onClick={() => setMode('tables')} data-testid="resto-mode-tables"
                 className={`px-4 py-2 text-sm font-semibold min-h-[44px] ${mode === 'tables' ? 'bg-primary text-primary-foreground' : 'bg-background'}`}>

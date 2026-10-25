@@ -33,6 +33,7 @@ export default function DeliveryPage() {
   const [driverName, setDriverName] = useState("");
   const [collectFor, setCollectFor] = useState(null);
   const [saleId, setSaleId] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);  // p478
 
   const fetchAll = useCallback(async () => {
     try {
@@ -274,7 +275,26 @@ export default function DeliveryPage() {
     <div className="p-4 space-y-4" dir="rtl" data-testid="delivery-page">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold flex items-center gap-2"><Bike className="h-7 w-7" /> طلبات التوصيل</h1>
-        <div className="flex gap-2">
+        {/* p478: قائمة إجراءات التوصيل للموبايل فقط */}
+        <div className="lg:hidden flex items-center gap-2 relative">
+          <Button size="sm" className="min-h-[44px]" onClick={openNew} data-testid="dlv-mobile-new-btn"><Plus className="h-4 w-4 ml-1" /> طلب توصيل</Button>
+          <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setExportOpen(!exportOpen)} data-testid="dlv-export-menu-btn">إجراءات ▾</Button>
+          {exportOpen && (
+            <div className="absolute top-12 left-0 z-30 w-56 max-h-[70vh] overflow-y-auto rounded-lg border bg-background p-2 shadow-lg space-y-1" data-testid="dlv-export-menu">
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); fetchAll(); }} data-testid="dlv-mobile-refresh"><RefreshCw className="h-4 w-4 ml-1" /> تحديث</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadCsv(); }}>CSV — طلبات التوصيل</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadSummaryPdf(); }}>PDF — ملخص التوصيل</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadDriversCsv(); }}>CSV — إحصائيات السائقين</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadDriversPdf(); }}>PDF — إحصائيات السائقين</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadWeeklyPdf(); }}>PDF — المقارنة الأسبوعية</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadCustCsv(); }}>CSV — أفضل الزبائن</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadReasonsCsv(); }}>CSV — أسباب الإلغاء</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadTimeCsv(); }}>CSV — زمن التوصيل</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); downloadFailedCsv(); }}>CSV — التوصيلات الفاشلة</Button>
+            </div>
+          )}
+        </div>
+        <div className="hidden lg:flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} data-testid="dlv-refresh"><RefreshCw className="h-4 w-4 ml-1" /> تحديث</Button>
           <Button variant="outline" size="sm" onClick={downloadFailedCsv} data-testid="dlv-failed-csv-btn" title="سجل التوصيلات الملغاة CSV (30 يومًا)"><FileDown className="h-4 w-4 ml-1" /> فاشلة</Button>
           <Button variant="outline" size="sm" onClick={downloadWeeklyPdf} data-testid="dlv-weekly-pdf-btn" title="مقارنة السائقين الأسبوعية PDF"><FileDown className="h-4 w-4 ml-1" /> أسبوعي</Button>

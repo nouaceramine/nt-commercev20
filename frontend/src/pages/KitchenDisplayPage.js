@@ -49,6 +49,8 @@ export default function KitchenDisplayPage() {
   const [searching, setSearching] = useState(false);
   const [stats, setStats] = useState(null);  // p363: شريط أداء المطبخ
   const [ticket, setTicket] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);  // p478
+  const [statsMenuOpen, setStatsMenuOpen] = useState(false);  // p478
 
   const printOrder = useCallback(async (orderId) => {
     try {
@@ -241,7 +243,7 @@ export default function KitchenDisplayPage() {
     <div className="min-h-screen bg-background p-4 space-y-4" dir="rtl" data-testid="kds-page">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold flex items-center gap-2"><ChefHat className="h-7 w-7" /> شاشة المطبخ</h1>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="hidden lg:flex items-center gap-2 flex-wrap">
           {/* p338: فلترة حسب مصدر الطلب */}
           <div className="flex gap-1">
             {SRC_FILTERS.map((f) => (
@@ -263,8 +265,29 @@ export default function KitchenDisplayPage() {
           </Button>
         </div>
       </div>
+      {/* p478: مصدر الطلب وإجراءات الشاشة للموبايل فقط */}
+      <div className="lg:hidden flex items-center gap-2 relative">
+        <select value={srcFilter} onChange={(e) => setSrcFilter(e.target.value)} data-testid="kds-mobile-src"
+          className="h-11 rounded-md border bg-background px-2 text-xs">
+          {SRC_FILTERS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+        </select>
+        <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setExportOpen(!exportOpen)} data-testid="kds-action-menu-btn">إجراءات ▾</Button>
+        {exportOpen && (
+          <div className="absolute top-12 left-0 z-30 w-56 rounded-lg border bg-background p-2 shadow-lg space-y-1" data-testid="kds-action-menu">
+            <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); toggleAutoPrint(); }}>
+              <Printer className="h-4 w-4 ml-1" />{autoPrint ? "إيقاف الطبع التلقائي" : "تفعيل الطبع التلقائي"}
+            </Button>
+            <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { const v = !soundOn; setSoundOn(v); localStorage.setItem("kds_sound", v ? "1" : "0"); setExportOpen(false); }}>
+              {soundOn ? <Volume2 className="h-4 w-4 ml-1" /> : <VolumeX className="h-4 w-4 ml-1" />}{soundOn ? "إيقاف الصوت" : "تفعيل الصوت"}
+            </Button>
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => { setExportOpen(false); fetchOrders(); }} data-testid="kds-mobile-refresh">
+              <RefreshCw className="h-4 w-4 ml-1" />تحديث
+            </Button>
+          </div>
+        )}
+      </div>
       {stats && stats.count > 0 && (
-        <div className="flex items-center gap-2 flex-wrap text-xs" data-testid="kds-stats">
+        <div className="hidden lg:flex items-center gap-2 flex-wrap text-xs" data-testid="kds-stats">
           <Badge variant="secondary">اليوم: {stats.count} طلب</Badge>
           <Badge variant="secondary" data-testid="kds-stat-wait">انتظار {stats.avg_wait_min} د</Badge>
           <Badge variant="secondary" data-testid="kds-stat-prep">تحضير {stats.avg_prep_min} د</Badge>
@@ -295,6 +318,29 @@ export default function KitchenDisplayPage() {
           <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" data-testid="kds-search-btn" onClick={runKdsSearch} title="بحث في الأرشيف">
             بحث
           </Button>
+        </div>
+      )}
+      {stats && stats.count > 0 && (
+        <div className="lg:hidden flex items-center gap-2 flex-wrap text-xs relative" data-testid="kds-mobile-stats">
+          <Badge variant="secondary">اليوم: {stats.count} طلب</Badge>
+          <Badge variant="secondary">انتظار {stats.avg_wait_min} د</Badge>
+          <Badge variant={stats.late_count > 0 ? "destructive" : "secondary"}>متأخر: {stats.late_count}</Badge>
+          <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setStatsMenuOpen(!statsMenuOpen)} data-testid="kds-export-menu-btn">تقارير/بحث ▾</Button>
+          {statsMenuOpen && (
+            <div className="absolute top-12 left-0 z-30 w-64 max-h-[70vh] overflow-y-auto rounded-lg border bg-background p-2 shadow-lg space-y-1" data-testid="kds-export-menu">
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setStatsMenuOpen(false); downloadStatsPdf(); }}>PDF — أداء المطبخ</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setStatsMenuOpen(false); downloadStatsCsv(); }}>CSV — أداء المطبخ</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setStatsMenuOpen(false); downloadLoadCsv(); }}>CSV — حمل المطبخ</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setStatsMenuOpen(false); downloadCxlCsv(); }}>CSV — الإلغاءات</Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setStatsMenuOpen(false); downloadOrdersCsv(); }}>CSV — أرشيف الطلبات</Button>
+              <div className="flex gap-1 border-t pt-2">
+                <input value={kdsQuery} onChange={(e) => setKdsQuery(e.target.value)} data-testid="kds-mobile-search-input"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { setStatsMenuOpen(false); runKdsSearch(); } }}
+                  className="h-9 min-w-0 flex-1 px-2 text-xs border rounded-md bg-background" placeholder="رمز/طاولة/زبون" />
+                <Button variant="outline" size="sm" onClick={() => { setStatsMenuOpen(false); runKdsSearch(); }} data-testid="kds-mobile-search-btn">بحث</Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {searching ? (

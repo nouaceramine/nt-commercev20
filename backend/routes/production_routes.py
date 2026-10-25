@@ -301,6 +301,121 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
         out.pop("_id", None)
         return out
 
+    # ---------- p478: تصدير الهدر والمهذورات CSV/PDF من waste_log ----------
+    async def _waste_export_rows(days: int):
+        days = max(1, min(int(days), 365))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        rows = await db.waste_log.find(
+            {"created_at": {"$gte": since}}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        total_qty = round(sum(float(w.get("quantity") or 0) for w in rows), 2)
+        total_cost = round(sum(float(w.get("total_cost") or 0) for w in rows), 2)
+        return days, rows, total_qty, total_cost
+
+    @router.get("/waste.csv")
+    async def waste_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows, total_qty, total_cost = await _waste_export_rows(days)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["التاريخ,الصنف,الكمية,تكلفة الوحدة,التكلفة الإجمالية,السبب,المسجل"]
+        for w in rows:
+            lines.append(",".join([
+                _cell(str(w.get("created_at") or "")[:19]), _cell(w.get("product_name")),
+                _cell(float(w.get("quantity") or 0)), _cell(float(w.get("unit_cost") or 0)),
+                _cell(float(w.get("total_cost") or 0)), _cell(w.get("reason")), _cell(w.get("created_by"))]))
+        lines.append(",".join([_cell("المجموع ←"), "", _cell(total_qty), "", _cell(total_cost), "", ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "waste-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
+    @router.get("/waste.pdf")
+    async def waste_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+        days, rows, total_qty, total_cost = await _waste_export_rows(days)
+        import os as _os
+        import io as _io
+        from reportlab.pdfgen import canvas as _canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.pagesizes import A4
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        from fastapi.responses import StreamingResponse
+
+        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
+
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
+
+        store = ""
+        try:
+            from config.database import main_db as _mdb
+            tdoc = await _mdb.saas_tenants.find_one(
+                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
+
+        W, H = A4
+        MARGIN = 40
+        buf = _io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
+
+        def _need():
+            if y[0] < MARGIN + 24:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, value, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], str(value))
+            y[0] -= size + 5
+
+        if store:
+            _center(store, 13)
+        _center("تقرير الهدر والمهذورات", 12)
+        _center("آخر " + str(days) + " يومًا", 9)
+        y[0] -= 4
+        _row("عدد السجلات", len(rows))
+        _row("إجمالي الكمية", total_qty)
+        _row("إجمالي التكلفة", str(total_cost) + " دج")
+        y[0] -= 6
+        if rows:
+            _center("الصنف | الكمية | التكلفة | السبب", 10)
+            for w in rows:
+                value = "{} | {} دج | {}".format(
+                    float(w.get("quantity") or 0), float(w.get("total_cost") or 0), w.get("reason") or "—")
+                _row(w.get("product_name") or "—", value)
+        else:
+            _center("لا هدر في الفترة", 10)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        fname = "waste-" + str(days) + "d.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     @router.get("/waste")
     async def list_waste(days: int = 30, user: dict = Depends(get_current_user)):
         since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()

@@ -1220,6 +1220,72 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         except Exception:
             return None
 
+    # ---------- p478: تذكيرات الحجوزات خلال 24 ساعة — داخلي + WhatsApp اختياري ----------
+    async def _send_reservation_reminder(r, user):
+        tenant_id = user.get("tenant_id")
+        when = r.get("reserved_for")
+        try:
+            if when is not None and getattr(when, "tzinfo", None) is None:
+                when = when.replace(tzinfo=timezone.utc)
+            when_txt = when.astimezone(timezone(timedelta(hours=1))).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            when_txt = str(when or "")
+        title = "تذكير: حجز طاولة يقترب"
+        msg = "حجز {} على طاولة {} لعدد {} أشخاص بتاريخ {}.".format(
+            r.get("customer_name") or "زبون", r.get("table_name") or "—",
+            r.get("party_size") or 0, when_txt)
+        admins = await db.users.find(
+            {"role": {"$in": ["admin", "tenant_admin"]}}, {"_id": 0, "id": 1}).to_list(20)
+        for a in admins:
+            await db.notifications.insert_one({
+                "id": str(uuid.uuid4()), "tenant_id": tenant_id, "user_id": a.get("id"),
+                "type": "reservation_reminder", "title": title, "message": msg,
+                "data": {"resv_id": r.get("id"), "table_name": r.get("table_name"),
+                         "reserved_for": when.isoformat() if hasattr(when, "isoformat") else str(when or "")},
+                "link": "/tables", "read": False, "created_at": _now().isoformat(),
+            })
+        wa_sent = False
+        wa_status = "no_phone"
+        if r.get("customer_phone"):
+            try:
+                from services.whatsapp_service import WhatsAppService
+                res = await WhatsAppService().send_message(r["customer_phone"], msg)
+                wa_sent = bool(res.get("sent"))
+                wa_status = "sent" if wa_sent else str(res.get("error") or res.get("status") or "failed")
+            except Exception as exc:
+                wa_status = str(exc)[:120]
+        await _resv().update_one({"id": r.get("id")}, {"$set": {
+            "reminder_sent": True,
+            "reminder_result": {"at": _now(), "admin_count": len(admins),
+                                "whatsapp_sent": wa_sent, "whatsapp_status": wa_status}}})
+        try:
+            from services.outbox import outbox_write
+            from config.database import main_db as _mdb
+            await outbox_write(_mdb, "reservation.reminder", {
+                "resv_id": r.get("id"), "customer_name": r.get("customer_name"),
+                "table_name": r.get("table_name"), "reserved_for": when.isoformat() if hasattr(when, "isoformat") else str(when or ""),
+                "whatsapp_sent": wa_sent}, tenant_id=tenant_id or "platform", source="restaurant")
+        except Exception:
+            pass
+        return {"admins": len(admins), "whatsapp_sent": wa_sent}
+
+    async def _run_reservation_reminders(user):
+        now = _now()
+        rows = await _resv().find({
+            "status": "booked", "reminder_sent": {"$ne": True},
+            "reserved_for": {"$gte": now, "$lte": now + timedelta(hours=24)},
+        }).sort("reserved_for", 1).to_list(100)
+        sent = 0
+        for r in rows:
+            # المطالبة الذرية تمنع تكرار الرسائل عند تزامن طلبين أو استطلاعين.
+            claimed = await _resv().find_one_and_update(
+                {"id": r.get("id"), "status": "booked", "reminder_sent": {"$ne": True}},
+                {"$set": {"reminder_sent": True, "reminder_claimed_at": now}})
+            if claimed:
+                await _send_reservation_reminder(claimed, user)
+                sent += 1
+        return sent
+
     @router.get("/reservations")
     async def list_reservations(days: int = 7, user: dict = Depends(get_current_user)):
         days = max(1, min(int(days or 7), 30))
@@ -1228,11 +1294,19 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _resv().update_many(
             {"status": "booked", "reserved_for": {"$lt": now - timedelta(hours=2)}},
             {"$set": {"status": "no_show", "auto_no_show": True, "updated_at": now}})
+        # p478: التذكير الكسول يعمل مع الاستطلاع الحالي لشاشة الطاولات.
+        await _run_reservation_reminders(user)
         rows = await _resv().find({
             "reserved_for": {"$gte": now - timedelta(hours=3),
                              "$lte": now + timedelta(days=days)},
         }).sort("reserved_for", 1).to_list(300)
         return [_resv_out(r) for r in rows]
+
+    # ---------- p478: تشغيل تذكيرات الحجوزات المستحقة يدويًا/من مجدول خارجي ----------
+    @router.post("/reservations/reminders/run")
+    async def run_reservation_reminders(user: dict = Depends(get_current_user)):
+        sent = await _run_reservation_reminders(user)
+        return {"sent": sent, "window_hours": 24}
 
     @router.post("/reservations")
     async def create_reservation(data: ReservationIn, user: dict = Depends(get_current_user)):
@@ -1265,7 +1339,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "reserved_for": when,
             "party_size": int(data.party_size or 1),
             "notes": (data.notes or "").strip() or None,
-            "status": "booked",
+            "status": "booked", "reminder_sent": False,
             "created_by": user.get("username") or user.get("email"),
             "created_at": _now(),
             "updated_at": _now(),
@@ -1326,6 +1400,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             sets["party_size"] = ps
         if "notes" in data:
             sets["notes"] = (data.get("notes") or "").strip() or None
+        if "reserved_for" in sets or "customer_phone" in sets:
+            sets["reminder_sent"] = False
+            sets["reminder_result"] = None
         # منع التعارض عند تغيير الطاولة/الموعد: حجز قائم آخر ضمن ±90 دقيقة
         new_table = sets.get("table_id", r.get("table_id"))
         new_when = sets.get("reserved_for", r.get("reserved_for"))
@@ -1343,9 +1420,16 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _resv_out(upd)
 
     # ---------- p476: إشغال مقاعد الطاولات من الحجوزات — نواة CSV/PDF ----------
-    async def _reservation_table_occupancy_rows(days: int):
-        days = max(1, min(int(days), 365))
-        since = _now() - timedelta(days=days)
+    async def _reservation_table_occupancy_rows(days: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+        d1 = d2 = None
+        if date_from or date_to:
+            d1, d2, start, end = await _period_bounds(date_from, date_to)
+            date_query = {"$gte": start, "$lt": end}
+            suffix = str(d1) + "_" + str(d2)
+        else:
+            days = max(1, min(int(days), 365))
+            date_query = {"$gte": _now() - timedelta(days=days)}
+            suffix = str(days) + "d"
         tables = await _tables().find(
             {}, {"_id": 0, "id": 1, "name": 1, "seats": 1}).to_list(1000)
         stats = {}
@@ -1355,7 +1439,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "seats": max(0, int(t.get("seats") or 0)),
                 "total": 0, "seated": 0, "no_show": 0, "cancelled": 0, "guests": 0}
         async for r in _resv().find(
-                {"reserved_for": {"$gte": since}},
+                {"reserved_for": date_query},
                 {"_id": 0, "table_id": 1, "table_name": 1, "party_size": 1, "status": 1}):
             tid = r.get("table_id")
             if tid not in stats:
@@ -1379,11 +1463,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             a["occupancy"] = round(100.0 * a["guests"] / capacity, 1) if capacity else 0.0
             rows.append(a)
         rows.sort(key=lambda a: (-a["seated"], -a["total"], str(a["table"])))
-        return days, rows
+        return days, rows, suffix, d1, d2
 
     @router.get("/reservation-table-occupancy.csv")
-    async def reservation_table_occupancy_csv(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _reservation_table_occupancy_rows(days)
+    async def reservation_table_occupancy_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                                    user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _reservation_table_occupancy_rows(days, date_from, date_to)
         from fastapi.responses import Response
 
         def _cell(v):
@@ -1398,14 +1483,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 _cell(a["table"]), _cell(a["seats"]), _cell(a["total"]), _cell(a["seated"]),
                 _cell(a["no_show"]), _cell(a["cancelled"]), _cell(a["guests"]), _cell(a["occupancy"])]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
-        fname = "reservation-table-occupancy-" + str(days) + "d.csv"
+        fname = "reservation-table-occupancy-" + suffix + ".csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p476: إشغال مقاعد الطاولات من الحجوزات PDF ----------
     @router.get("/reservation-table-occupancy.pdf")
-    async def reservation_table_occupancy_pdf(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _reservation_table_occupancy_rows(days)
+    async def reservation_table_occupancy_pdf(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                                    user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _reservation_table_occupancy_rows(days, date_from, date_to)
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -1464,7 +1550,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if store:
             _center(store, 13)
         _center("إشغال مقاعد الطاولات من الحجوزات", 12)
-        _center("آخر " + str(days) + " يومًا — الحضور الفعلي فقط", 9)
+        _center(((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا")) + " — الحضور الفعلي فقط", 9)
         y[0] -= 4
         _row("عدد الطاولات", len(rows))
         _row("الحجوزات", sum(a["total"] for a in rows))
@@ -1480,7 +1566,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.showPage()
         c.save()
         buf.seek(0)
-        fname = "reservation-table-occupancy-" + str(days) + "d.pdf"
+        fname = "reservation-table-occupancy-" + suffix + ".pdf"
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
@@ -3315,15 +3401,22 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return {"top": [{"product_id": r["_id"], "qty": r["qty"]} for r in rows]}
 
     # ---------- p436/p476: مبيعات الفئات — نواة مشتركة لـ CSV وPDF ----------
-    async def _category_sales_rows(days: int):
-        days = max(1, min(int(days), 365))
-        since = _now() - timedelta(days=days)
+    async def _category_sales_rows(days: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+        d1 = d2 = None
+        if date_from or date_to:
+            d1, d2, start, end = await _period_bounds(date_from, date_to)
+            date_query = {"$gte": start, "$lt": end}
+            suffix = str(d1) + "_" + str(d2)
+        else:
+            days = max(1, min(int(days), 365))
+            date_query = {"$gte": _now() - timedelta(days=days)}
+            suffix = str(days) + "d"
         fams = {}
         async for p in db.products.find({}, {"_id": 0, "id": 1, "family_name": 1}):
             fams[p.get("id")] = (p.get("family_name") or "").strip() or "بدون فئة"
         agg = {}
         async for o in _orders().find(
-                {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}},
+                {"created_at": date_query, "status": {"$nin": ["cancelled", "scheduled"]}},
                 {"_id": 0, "items": 1}):
             for i in (o.get("items") or []):
                 fam = fams.get(i.get("product_id"), "بدون فئة")
@@ -3332,11 +3425,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 a[1] += float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
         rows = [(fam, a[0], round(a[1], 2)) for fam, a in agg.items()]
         rows.sort(key=lambda r: -r[2])
-        return days, rows
+        return days, rows, suffix, d1, d2
 
     @router.get("/category-sales.csv")
-    async def category_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _category_sales_rows(days)
+    async def category_sales_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                       user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _category_sales_rows(days, date_from, date_to)
         from fastapi.responses import Response
 
         def _cell(v):
@@ -3349,14 +3443,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         for fam, qty, revenue in rows:
             lines.append(",".join([_cell(fam), _cell(qty), _cell(revenue)]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        fname = "category-sales-" + str(days) + "d.csv"
+        fname = "category-sales-" + suffix + ".csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p476: مبيعات الفئات PDF (نفس بيانات CSV عبر _category_sales_rows) ----------
     @router.get("/category-sales.pdf")
-    async def category_sales_pdf(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _category_sales_rows(days)
+    async def category_sales_pdf(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                       user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _category_sales_rows(days, date_from, date_to)
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -3415,7 +3510,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if store:
             _center(store, 13)
         _center("تقرير مبيعات الفئات", 12)
-        _center("آخر " + str(days) + " يومًا", 9)
+        _center((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"), 9)
         y[0] -= 4
         _row("عدد الفئات", len(rows))
         _row("إجمالي الكمية", round(sum(r[1] for r in rows), 2))
@@ -3430,7 +3525,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.showPage()
         c.save()
         buf.seek(0)
-        fname = "category-sales-" + str(days) + "d.pdf"
+        fname = "category-sales-" + suffix + ".pdf"
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
@@ -3504,11 +3599,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p477: المبيعات مقابل المخزون — نواة مشتركة للتقارير ----------
-    async def _stock_sales_rows(days: int):
-        days = max(1, min(int(days), 365))
-        since = _now() - timedelta(days=days)
+    async def _stock_sales_rows(days: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+        d1 = d2 = None
+        if date_from or date_to:
+            d1, d2, start, end = await _period_bounds(date_from, date_to)
+            date_query = {"$gte": start, "$lt": end}
+            suffix = str(d1) + "_" + str(d2)
+        else:
+            days = max(1, min(int(days), 365))
+            date_query = {"$gte": _now() - timedelta(days=days)}
+            suffix = str(days) + "d"
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
+            {"$match": {"created_at": date_query,
                         "status": {"$nin": ["cancelled", "scheduled"]}}},
             {"$unwind": "$items"},
             {"$match": {"items.product_id": {"$ne": None}}},
@@ -3540,11 +3642,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "sell_stock": round(sold / stock, 2) if stock > 0 else None,
             })
         rows.sort(key=lambda a: (-a["revenue"], -a["sold"], str(a["name"])))
-        return days, rows
+        return days, rows, suffix, d1, d2
 
     @router.get("/stock-sales.csv")
-    async def stock_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _stock_sales_rows(days)
+    async def stock_sales_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                    user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _stock_sales_rows(days, date_from, date_to)
         from fastapi.responses import Response
 
         def _cell(v):
@@ -3559,14 +3662,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 _cell(a["name"]), _cell(a["family"]), _cell(a["stock"]), _cell(a["minimum"]),
                 _cell(a["sold"]), _cell(a["revenue"]), _cell(a["stock_value"]), _cell(a["sell_stock"])]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
-        fname = "stock-sales-" + str(days) + "d.csv"
+        fname = "stock-sales-" + suffix + ".csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p477: الأصناف منخفضة المخزون ذات المبيعات CSV ----------
     @router.get("/low-stock-sales.csv")
-    async def low_stock_sales_csv(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _stock_sales_rows(days)
+    async def low_stock_sales_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                        user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _stock_sales_rows(days, date_from, date_to)
         rows = [a for a in rows if a["stock"] <= a["minimum"] and a["sold"] > 0]
         from fastapi.responses import Response
 
@@ -3582,14 +3686,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 _cell(a["name"]), _cell(a["family"]), _cell(a["stock"]), _cell(a["minimum"]),
                 _cell(a["sold"]), _cell(a["revenue"])]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
-        fname = "low-stock-sales-" + str(days) + "d.csv"
+        fname = "low-stock-sales-" + suffix + ".csv"
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
     # ---------- p477: المبيعات مقابل المخزون PDF ----------
     @router.get("/stock-sales.pdf")
-    async def stock_sales_pdf(days: int = 30, user: dict = Depends(get_current_user)):
-        days, rows = await _stock_sales_rows(days)
+    async def stock_sales_pdf(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                    user: dict = Depends(get_current_user)):
+        days, rows, suffix, d1, d2 = await _stock_sales_rows(days, date_from, date_to)
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -3648,7 +3753,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if store:
             _center(store, 13)
         _center("تقرير المبيعات مقابل المخزون", 12)
-        _center("آخر " + str(days) + " يومًا", 9)
+        _center((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"), 9)
         y[0] -= 4
         _row("عدد الأصناف", len(rows))
         _row("إجمالي الكمية المباعة", round(sum(a["sold"] for a in rows), 2))
@@ -3665,7 +3770,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.showPage()
         c.save()
         buf.seek(0)
-        fname = "stock-sales-" + str(days) + "d.pdf"
+        fname = "stock-sales-" + suffix + ".pdf"
         return StreamingResponse(buf, media_type="application/pdf",
                                  headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
