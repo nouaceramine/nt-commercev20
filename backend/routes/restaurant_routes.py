@@ -2237,6 +2237,69 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p464: الزبائن الخامدون CSV (لم يطلبوا منذ N يومًا — BOM لـ Excel) ----------
+    @router.get("/dormant-customers.csv")
+    async def dormant_customers_csv(min_idle: int = 14, user: dict = Depends(get_current_user)):
+        min_idle = max(1, min(int(min_idle), 180))
+        since = _now() - timedelta(days=365)
+        cutoff = _now() - timedelta(days=min_idle)
+        _bill = {"$max": [{"$subtract": [
+            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
+                         "in": {"$add": ["$$value",
+                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
+                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
+            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since},
+                        "customer_phone": {"$nin": [None, ""]},
+                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {"$addFields": {
+                "pay_list": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                    "$payments",
+                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
+                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
+                               []]}]}}},
+            {"$addFields": {
+                "paid_amt": {"$reduce": {
+                    "input": {"$filter": {"input": "$pay_list", "as": "p",
+                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
+            {"$group": {"_id": "$customer_phone",
+                        "orders": {"$sum": 1},
+                        "spent": {"$sum": "$paid_amt"},
+                        "last": {"$max": "$created_at"}}},
+            {"$match": {"last": {"$lt": cutoff}}},
+            {"$sort": {"last": 1}},
+            {"$limit": 200},
+        ]
+        rows = await _orders().aggregate(pipeline).to_list(200)
+        dz = timezone(timedelta(hours=1))
+        now = _now()
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["الهاتف,الطلبات,إجمالي المنفق,آخر زيارة,أيام الخمول"]
+        for r in rows:
+            ca = r.get("last")
+            if ca and ca.tzinfo is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            idle = (now - ca).days if ca else ""
+            dstr = ca.astimezone(dz).strftime("%Y-%m-%d") if ca else ""
+            lines.append(",".join([
+                _cell(r.get("_id")), _cell(int(r.get("orders") or 0)),
+                _cell(round(float(r.get("spent") or 0), 2)), _cell(dstr), _cell(idle)]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "dormant-customers-" + str(min_idle) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p457: مساعد جلب أفضل زبائن الصالة (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _top_customer_rows(days):
         days = max(1, min(int(days), 365))
