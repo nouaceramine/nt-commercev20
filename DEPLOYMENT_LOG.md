@@ -1,3 +1,8 @@
+## 2026-10-25 — p474/p475: قائمة تصدير مدمجة للموبايل + كنيس الدفعة p472–p474 + نشر
+- **p474 Frontend** `TablesMapPage.js`: قائمة «تصدير ▾» مدمجة (rep-export-menu) بكل أدوات التقارير + حقلا التاريخ ومحدد الأيام — تظهر للموبايل/التابلت فقط (`lg:hidden`)؛ شريط الديسكتوب يبقى كما هو حرفيًا (pixel-identical @1440px).
+- **كنيس شامل**: 80 حزمة E2E (78 سابقة + p472/p473) — **1570 نجاح / 0 فشل** في 1145 ثانية.
+- **التحقق النهائي**: health=200، الموقع 200، Redis PONG، residue=0.
+- **النشر**: release 20261025_175744 — rep-from-input/rep-to-input/kds-search-input/kds-search-btn/rep-export-menu مؤكدة في الحزمة المبنية.
 ## 2026-10-25 — p473: بحث أرشيف المطبخ (KDS)
 - **Backend** `routes/restaurant_routes.py`: معامل `search` اختياري في `GET /kitchen-orders` — بحث آمن (re.escape) غير حساس لحالة الأحرف في الرمز/الطاولة/الزبون/الهاتف؛ لا أثر إطلاقًا عند غيابه.
 - **Frontend** `KitchenDisplayPage.js`: حقل بحث + زر «بحث» (kds-search-input / kds-search-btn) في الترويسة؛ النتائج تعرض قائمة مسطحة (kds-search-results) مع زر «مسح» يعيد العرض الحي؛ Enter يُنفّذ البحث.

@@ -1122,7 +1122,39 @@ export default function TablesMapPage() {
                 <Banknote className="h-4 w-4" />{isAr ? 'منحنى الإيرادات المحصَّلة' : 'Tendance revenus'}
                 <span className="text-xs text-muted-foreground font-normal">(<span dir="ltr" data-testid="trend-total-revenue">{trend ? trend.total_revenue : '…'}</span> {isAr ? 'دج' : 'DA'})</span>
               </h2>
-              <div className="flex items-center gap-1">
+              {/* p474: قائمة تصدير مدمجة للموبايل/التابلت فقط — شريط الديسكتوب يبقى كما هو حرفيًا (lg وما فوق) */}
+              <details className="lg:hidden relative" data-testid="rep-export-menu">
+                <summary className="list-none cursor-pointer h-8 px-2 text-[10px] border rounded-md inline-flex items-center gap-1 select-none">
+                  {isAr ? 'تصدير ▾' : 'Exporter ▾'}
+                </summary>
+                <div className="absolute left-0 z-30 mt-1 w-56 bg-popover border rounded-md shadow-md p-2 space-y-1" data-testid="rep-export-panel">
+                  <div className="flex items-center gap-1">
+                    <input type="date" value={repFrom} onChange={(e) => setRepFrom(e.target.value)} data-testid="rep-from-input-m"
+                      className="h-8 px-1 text-[10px] border rounded-md bg-background w-full" title={isAr ? 'من تاريخ' : 'Du'} />
+                    <input type="date" value={repTo} onChange={(e) => setRepTo(e.target.value)} data-testid="rep-to-input-m"
+                      className="h-8 px-1 text-[10px] border rounded-md bg-background w-full" title={isAr ? 'إلى تاريخ' : 'Au'} />
+                  </div>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-pdf" onClick={downloadTrendPdf}>PDF</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-idle" onClick={downloadIdleCsv}>{isAr ? 'الطاولات الخاملة' : 'Inact.'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-tperf" onClick={downloadTablesPerfCsv}>{isAr ? 'أداء الطاولات' : 'Tables'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-wdays" onClick={downloadWdaysCsv}>{isAr ? 'أيام الأسبوع' : 'Jours'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-paym" onClick={downloadPaymCsv}>{isAr ? 'طرق الدفع' : 'Paie.'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-discpdf" onClick={downloadDiscPdf}>{isAr ? 'خصومات PDF' : 'Remises PDF'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-disc" onClick={downloadDiscCsv}>{isAr ? 'خصومات' : 'Remises'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-hours" onClick={downloadHoursCsv}>{isAr ? 'ساعات' : 'Heures'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-aov" onClick={downloadAovCsv}>{isAr ? 'متوسط الطلب' : 'AOV'}</Button>
+                  <Button size="sm" variant="outline" className="w-full justify-start h-8 px-2 text-[10px]" data-testid="rep-menu-trend" onClick={downloadTrendCsv}>CSV</Button>
+                  <Select value={String(trendDays)} onValueChange={v => setTrendDays(Number(v))}>
+                    <SelectTrigger className="w-full h-8" data-testid="rep-menu-days"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">7</SelectItem>
+                      <SelectItem value="14">14</SelectItem>
+                      <SelectItem value="30">30</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </details>
+              <div className="hidden lg:flex items-center gap-1">
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-pdf-btn" onClick={downloadTrendPdf}
                   title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}>
                   PDF
