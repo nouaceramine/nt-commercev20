@@ -3834,6 +3834,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "delivered_fees": round(fees, 2),
         }
 
+    # ---------- p470: سجل التوصيلات الفاشلة/الملغاة CSV (تفصيلي بالأسباب — BOM لـ Excel) ----------
+    @router.get("/failed-deliveries.csv")
+    async def failed_deliveries_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        cur = _delivery().find({"created_at": {"$gte": since}, "status": "cancelled"}).sort("created_at", -1).limit(300)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        def _d(ca):
+            if ca is None:
+                return "—"
+            if getattr(ca, "tzinfo", None) is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            return ca.astimezone(timezone(timedelta(hours=1))).strftime("%Y-%m-%d %H:%M")
+
+        lines = ["الرمز,الزبون,الهاتف,السائق,سبب الإلغاء,القيمة,التاريخ"]
+        n = 0
+        tot = 0.0
+        async for o in cur:
+            n += 1
+            tot += float(o.get("total") or 0)
+            lines.append(",".join([
+                _cell(o.get("code") or o.get("id")),
+                _cell(o.get("customer_name") or "—"),
+                _cell(o.get("customer_phone") or "—"),
+                _cell((o.get("driver_name") or "").strip() or "بدون سائق"),
+                _cell((o.get("cancel_reason") or "").strip() or "بدون سبب"),
+                _cell(round(float(o.get("total") or 0), 2)),
+                _cell(_d(o.get("created_at")))]))
+        lines.append(",".join([_cell("المجموع ←"), _cell(n), "", "", "", _cell(round(tot, 2)), ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "failed-deliveries-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p468: زمن التوصيل لكل سائق CSV (متوسط/أقصر/أطول بالدقائق — BOM لـ Excel) ----------
     @router.get("/delivery-time.csv")
     async def delivery_time_csv(days: int = 30, user: dict = Depends(get_current_user)):
