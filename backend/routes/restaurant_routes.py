@@ -2441,6 +2441,51 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
 
+    # ---------- p461: الطاولات الخاملة CSV (كل الطاولات مرتبة بالأقل استخدامًا — BOM لـ Excel) ----------
+    @router.get("/idle-tables.csv")
+    async def idle_tables_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        usage = await _orders().aggregate([
+            {"$match": {"created_at": {"$gte": since},
+                        "status": {"$nin": ["cancelled", "scheduled"]},
+                        "source": {"$ne": "delivery"}, "table_id": {"$nin": [None, ""]}}},
+            {"$group": {"_id": "$table_id", "orders": {"$sum": 1},
+                        "last": {"$max": "$created_at"}}},
+        ]).to_list(500)
+        umap = {u["_id"]: u for u in usage}
+        tables = await _tables().find({}, {"_id": 0}).to_list(500)
+        dz = timezone(timedelta(hours=1))
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        rows = []
+        for t in tables:
+            u = umap.get(t.get("id")) or {}
+            ca = u.get("last")
+            if ca and ca.tzinfo is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            rows.append((int(u.get("orders") or 0), t.get("name") or "",
+                         t.get("zone") or "", t.get("seats") or "",
+                         ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else "—"))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        lines = ["الطاولة,المنطقة,المقاعد,الطلبات في الفترة,آخر طلب"]
+        idle_n = 0
+        for n, name, zone, seats, last in rows:
+            if n == 0:
+                idle_n += 1
+            lines.append(",".join([_cell(name), _cell(zone), _cell(seats), _cell(n), _cell(last)]))
+        lines.append(",".join([_cell("خاملة تمامًا ←"), "", "", _cell(idle_n), ""]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "idle-tables-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p448: أداء الطاولات CSV (طلبات/إيراد/متوسط/ملغاة — BOM لـ Excel) ----------
     @router.get("/tables-performance.csv")
     async def tables_performance_csv(days: int = 30, user: dict = Depends(get_current_user)):

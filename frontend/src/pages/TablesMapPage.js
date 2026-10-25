@@ -302,6 +302,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
+  // p461: الطاولات الخاملة CSV (BOM عربي لـ Excel — نفس فترة trendDays)
+  const downloadIdleCsv = async () => {
+    try {
+      const res = await apiClient.get(`/restaurant/idle-tables.csv?days=${trendDays}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `idle-tables-${trendDays}d.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p448: أداء الطاولات CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadTablesPerfCsv = async () => {
     try {
@@ -1079,6 +1093,10 @@ export default function TablesMapPage() {
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="trend-pdf-btn" onClick={downloadTrendPdf}
                   title={isAr ? 'تنزيل PDF' : 'Telecharger PDF'}>
                   PDF
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="idle-csv-btn" onClick={downloadIdleCsv}
+                  title={isAr ? 'الطاولات الخاملة CSV' : 'Tables inactives CSV'}>
+                  {isAr ? 'خاملة' : 'Inact.'}
                 </Button>
                 <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]" data-testid="tperf-csv-btn" onClick={downloadTablesPerfCsv}
                   title={isAr ? 'أداء الطاولات CSV' : 'Tables CSV'}>
