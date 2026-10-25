@@ -1334,6 +1334,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         await _publish_resv("reservation.updated", upd, user)
         return _resv_out(upd)
 
+    # ---------- p465: اتجاه التغيّب عن الحجوزات اليومي CSV (توقيت الجزائر — BOM لـ Excel) ----------
+    @router.get("/no-show-rate.csv")
+    async def no_show_rate_csv(days: int = 30, user: dict = Depends(get_current_user)):
+        days = max(1, min(int(days), 365))
+        since = _now() - timedelta(days=days)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": since}}},
+            {"$group": {"_id": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
+                                                  "timezone": "Africa/Algiers"}},
+                        "total": {"$sum": 1},
+                        "seated": {"$sum": {"$cond": [{"$eq": ["$status", "seated"]}, 1, 0]}},
+                        "cancelled": {"$sum": {"$cond": [{"$eq": ["$status", "cancelled"]}, 1, 0]}},
+                        "no_show": {"$sum": {"$cond": [{"$eq": ["$status", "no_show"]}, 1, 0]}}}},
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await _resv().aggregate(pipeline).to_list(400)
+        from fastapi.responses import Response
+
+        def _cell(v):
+            s = str(v if v is not None else "")
+            if any(ch in s for ch in (",", '"', "\n")):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["اليوم,الحجوزات,حضروا,أُلغيت,لم يحضروا,نسبة التغيّب %"]
+        tn = ts = tc = tx = 0
+        for r in rows:
+            t = int(r.get("total") or 0); s = int(r.get("seated") or 0)
+            cx = int(r.get("cancelled") or 0); ns = int(r.get("no_show") or 0)
+            done = s + ns
+            rate = round(ns / done * 100, 1) if done else 0
+            tn += t; ts += s; tc += cx; tx += ns
+            lines.append(",".join([_cell(r.get("_id")), _cell(t), _cell(s), _cell(cx), _cell(ns), _cell(rate)]))
+        done_t = ts + tx
+        rate_t = round(tx / done_t * 100, 1) if done_t else 0
+        lines.append(",".join([_cell("المجموع ←"), _cell(tn), _cell(ts), _cell(tc), _cell(tx), _cell(rate_t)]))
+        body = "\ufeff" + "\r\n".join(lines) + "\r\n"
+        fname = "no-show-rate-" + str(days) + "d.csv"
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+
     # ---------- p433: حذف الحجز نهائيًا (الملغى / لم يحضر فقط) ----------
     @router.delete("/reservations/{resv_id}")
     async def delete_reservation(resv_id: str, user: dict = Depends(get_current_user)):

@@ -232,6 +232,20 @@ export default function TablesMapPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
+  // p465: اتجاه التغيّب عن الحجوزات CSV (BOM عربي لـ Excel — 30 يومًا)
+  const downloadNoshowCsv = async () => {
+    try {
+      const res = await apiClient.get('/restaurant/no-show-rate.csv?days=30', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'no-show-rate-30d.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+  };
   // p406: تصدير تقرير الحجوزات CSV (BOM عربي لـ Excel — نفس فترة تقرير PDF)
   const downloadResvCsv = async () => {
     try {
@@ -1264,6 +1278,9 @@ export default function TablesMapPage() {
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="outline" data-testid="resv-pdf-btn" onClick={downloadResvPdf} title={isAr ? 'تقرير الحجوزات PDF' : 'Reservations PDF'}>
                   <Download className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="outline" className="px-2 text-[10px]" data-testid="noshow-csv-btn" onClick={downloadNoshowCsv} title={isAr ? 'اتجاه التغيّب CSV (30 يوم)' : 'No-show CSV (30j)'}>
+                  {isAr ? 'تغيّب' : 'NS'}
                 </Button>
                 <Button size="sm" variant="outline" className="px-2 text-[10px]" data-testid="resv-csv-btn" onClick={downloadResvCsv} title={isAr ? 'تصدير CSV (Excel)' : 'Exporter CSV'}>
                   CSV
