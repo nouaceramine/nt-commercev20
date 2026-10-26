@@ -113,6 +113,54 @@ webpackConfig.devServer = (devServerConfig) => {
     devServerConfig = setupDevServer(devServerConfig);
   }
 
+  // webpack-dev-server 5 also replaced the legacy `https` option with `server`.
+  if (Object.prototype.hasOwnProperty.call(devServerConfig, 'https')) {
+    const https = devServerConfig.https;
+    delete devServerConfig.https;
+    if (https && !devServerConfig.server) {
+      devServerConfig.server = https === true
+        ? 'https'
+        : { type: 'https', options: https };
+    }
+  }
+
+  // webpack-dev-server 5 replaced the react-scripts 5 middleware hooks.
+  // Keep their ordering: before hooks register immediately, while after hooks
+  // are collected and appended to the built-in middleware list.
+  const onBeforeSetup = devServerConfig.onBeforeSetupMiddleware;
+  const onAfterSetup = devServerConfig.onAfterSetupMiddleware;
+  if (onBeforeSetup || onAfterSetup) {
+    const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
+    devServerConfig.setupMiddlewares = (middlewares, devServer) => {
+      if (originalSetupMiddlewares) {
+        middlewares = originalSetupMiddlewares(middlewares, devServer);
+      }
+      if (onBeforeSetup) {
+        onBeforeSetup(devServer);
+      }
+      if (onAfterSetup) {
+        const deferred = [];
+        const afterApp = Object.create(devServer.app);
+        afterApp.use = (...handlers) => {
+          deferred.push(...handlers);
+          return afterApp;
+        };
+        const afterDevServer = Object.create(devServer);
+        afterDevServer.app = afterApp;
+        onAfterSetup(afterDevServer);
+        for (const handler of deferred.flat()) {
+          if (typeof handler !== 'function') {
+            throw new Error('Unsupported path-based after middleware');
+          }
+          middlewares.push({ middleware: handler });
+        }
+      }
+      return middlewares;
+    };
+    delete devServerConfig.onBeforeSetupMiddleware;
+    delete devServerConfig.onAfterSetupMiddleware;
+  }
+
   // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
@@ -129,6 +177,19 @@ webpackConfig.devServer = (devServerConfig) => {
       return middlewares;
     };
   }
+
+  // react-scripts 5 calls close() on shutdown; webpack-dev-server 5 exposes
+  // stopCallback() instead. Install the compatibility alias only when needed.
+  const configuredSetupMiddlewares = devServerConfig.setupMiddlewares;
+  devServerConfig.setupMiddlewares = (middlewares, devServer) => {
+    if (configuredSetupMiddlewares) {
+      middlewares = configuredSetupMiddlewares(middlewares, devServer);
+    }
+    if (typeof devServer.close !== 'function' && typeof devServer.stopCallback === 'function') {
+      devServer.close = devServer.stopCallback.bind(devServer);
+    }
+    return middlewares;
+  };
 
   return devServerConfig;
 };
