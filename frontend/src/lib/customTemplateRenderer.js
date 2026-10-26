@@ -4,6 +4,7 @@
  * Works alongside buildPrintHTML from printDocuments.js.
  */
 import { formatCurrency, formatShortDate, formatDateTime } from '../utils/globalDateFormatter';
+import { safeCssColor, safeCssNumber, safeHtmlId } from './printSafety';
 
 const esc = (v) => {
   if (v === null || v === undefined) return '';
@@ -208,10 +209,11 @@ function resolveField(key, record, ar) {
 // ── Build outer wrapper for a block with width/alignment support ──────────────
 
 function blockWrap(inner, s, extraStyle = '') {
-  const wp = s.widthPercent || 100;
-  const mt = s.marginTop || 0;
-  const mb = s.marginBottom || 0;
-  const align = s.blockAlign || (s.textAlign === 'right' ? 'flex-end' : s.textAlign === 'left' ? 'flex-start' : 'center');
+  const wp = safeCssNumber(s.widthPercent, 100, 1, 100);
+  const mt = safeCssNumber(s.marginTop, 0, -1000, 1000);
+  const mb = safeCssNumber(s.marginBottom, 0, -1000, 1000);
+  const requestedAlign = s.blockAlign || (s.textAlign === 'right' ? 'flex-end' : s.textAlign === 'left' ? 'flex-start' : 'center');
+  const align = ['flex-start', 'center', 'flex-end'].includes(requestedAlign) ? requestedAlign : 'center';
   if (wp >= 100) {
     return `<div style="width:100%;margin-top:${mt}px;margin-bottom:${mb}px;${extraStyle}">${inner}</div>`;
   }
@@ -219,7 +221,10 @@ function blockWrap(inner, s, extraStyle = '') {
 }
 
 function innerStyle(s) {
-  return `font-size:${s.fontSize || 12}px;font-weight:${s.fontWeight || 'normal'};text-align:${s.textAlign || 'right'};color:${s.color || '#000'};`;
+  const fontSize = safeCssNumber(s.fontSize, 12, 6, 72);
+  const fontWeight = ['normal', 'bold', '100', '200', '300', '400', '500', '600', '700', '800', '900', 100, 200, 300, 400, 500, 600, 700, 800, 900].includes(s.fontWeight) ? s.fontWeight : 'normal';
+  const textAlign = ['left', 'right', 'center', 'justify'].includes(s.textAlign) ? s.textAlign : 'right';
+  return `font-size:${fontSize}px;font-weight:${fontWeight};text-align:${textAlign};color:${safeCssColor(s.color, '#000')};`;
 }
 
 // ── Render individual blocks to HTML ─────────────────────────────────────────
@@ -258,7 +263,7 @@ function renderBlock(block, record, branding, ar, accentColor, isA4) {
         const rows = items.map(it => `<tr><td>${esc(it.product_name)}</td><td style="text-align:center;">${esc(it.quantity)}</td><td style="text-align:${ar?'left':'right'};">${formatCurrency(it.unit_price)}</td><td style="text-align:${ar?'left':'right'};font-weight:bold;">${formatCurrency(it.total)}</td></tr>`).join('');
         return blockWrap(`<table style="width:100%;border-collapse:collapse;${innerStyle(s)}"><thead style="background:${accentColor};color:#fff;">${head}</thead><tbody>${rows}</tbody></table>`, s);
       }
-      const rows = items.map(it => `<div style="margin:4px 0;"><div style="font-weight:bold;">${esc(it.product_name)}</div><div style="display:flex;justify-content:space-between;font-size:${(s.fontSize||12)-1}px;"><span>${esc(it.quantity)} × ${formatCurrency(it.unit_price)}</span><span style="font-weight:bold;">${formatCurrency(it.total)}</span></div></div>`).join('');
+      const rows = items.map(it => `<div style="margin:4px 0;"><div style="font-weight:bold;">${esc(it.product_name)}</div><div style="display:flex;justify-content:space-between;font-size:${safeCssNumber(s.fontSize, 12, 6, 72) - 1}px;"><span>${esc(it.quantity)} × ${formatCurrency(it.unit_price)}</span><span style="font-weight:bold;">${formatCurrency(it.total)}</span></div></div>`).join('');
       return blockWrap(`<div style="${innerStyle(s)}">${rows}</div>`, s);
     }
     case 'totals': {
@@ -275,27 +280,29 @@ function renderBlock(block, record, branding, ar, accentColor, isA4) {
       const rem = record.remaining ?? record.debt_amount;
       if (rem != null) totals.push({ label: ar ? 'الباقي' : 'Reste', value: formatCurrency(rem), bold: false });
       if (record.amount != null && !record.total) totals.push({ label: ar ? 'المبلغ' : 'Montant', value: formatCurrency(record.amount), bold: true });
-      const rows = totals.map(t => `<div style="display:flex;justify-content:space-between;gap:8px;${t.bold ? `font-weight:bold;font-size:${(s.fontSize||12)+2}px;border-top:2px solid ${accentColor};padding-top:6px;margin-top:6px;color:${accentColor};` : innerStyle(s)}">${esc(t.label)}<span>${esc(t.value)}</span></div>`).join('');
+      const rows = totals.map(t => `<div style="display:flex;justify-content:space-between;gap:8px;${t.bold ? `font-weight:bold;font-size:${safeCssNumber(s.fontSize, 12, 6, 72) + 2}px;border-top:2px solid ${accentColor};padding-top:6px;margin-top:6px;color:${accentColor};` : innerStyle(s)}">${esc(t.label)}<span>${esc(t.value)}</span></div>`).join('');
       return blockWrap(rows, s);
     }
     case 'separator':
       return blockWrap(`<hr style="border:none;border-top:${block.separatorStyle === 'solid' ? '1px solid #999' : '1px dashed #999'};margin:0;"/>`, s);
     case 'spacer':
-      return `<div style="height:${block.height || 12}px;"></div>`;
+      return `<div style="height:${safeCssNumber(block.height, 12, 0, 500)}px;"></div>`;
     case 'barcode': {
       const val = record ? resolveField(block.fieldKey, record, ar) : '';
       if (!val) {
         return blockWrap(`<div style="color:#aaa;text-align:center;font-size:11px;">[${ar ? 'باركود' : 'Code-barres'}]</div>`, s);
       }
-      return blockWrap(`<div style="text-align:center;" class="barcode-placeholder" data-value="${esc(val)}" data-id="${block.id}"><svg id="bc-${block.id}"></svg></div>`, s);
+      const blockId = safeHtmlId(block.id);
+      return blockWrap(`<div style="text-align:center;" class="barcode-placeholder" data-value="${esc(val)}" data-id="${blockId}"><svg id="bc-${blockId}"></svg></div>`, s);
     }
     case 'qr': {
       const val = record ? resolveField(block.fieldKey, record, ar) : '';
-      const size = block.qrSize || 80;
+      const size = safeCssNumber(block.qrSize, 80, 16, 512);
+      const blockId = safeHtmlId(block.id);
       if (!val) {
         return blockWrap(`<div style="display:inline-block;width:${size}px;height:${size}px;border:1px dashed #aaa;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:10px;text-align:center;">[QR]</div>`, s);
       }
-      return blockWrap(`<div style="text-align:center;" class="qr-placeholder" data-value="${esc(val)}" data-size="${size}" data-id="${block.id}"><canvas id="qr-${block.id}"></canvas></div>`, s);
+      return blockWrap(`<div style="text-align:center;" class="qr-placeholder" data-value="${esc(val)}" data-size="${size}" data-id="${blockId}"><canvas id="qr-${blockId}"></canvas></div>`, s);
     }
     default:
       return '';
@@ -309,7 +316,7 @@ export function buildCustomTemplateHTML({ template, record, branding = {}, langu
   const dir = ar ? 'rtl' : 'ltr';
   const paperSize = template.paper_width === 58 ? '58mm' : template.paper_width === 210 ? 'A4' : '80mm';
   const isA4 = paperSize === 'A4';
-  const accentColor = template.accent_color || '#0f766e';
+  const accentColor = safeCssColor(template.accent_color);
 
   const blocksHtml = (template.blocks || [])
     .map(b => renderBlock(b, record, branding, ar, accentColor, isA4))

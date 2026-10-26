@@ -79,6 +79,46 @@ def is_tenant_db(name: str) -> bool:
     return bool(name) and name.startswith(TENANT_DB_PREFIXES)
 
 
+def _registered_tenant_query(db_name: str) -> dict:
+    """Match current names and legacy tenant docs that predate db_name."""
+    query = {"db_name": db_name}
+    if db_name.startswith("tenant_"):
+        tenant_id = db_name[len("tenant_"):].replace("_", "-")
+        query = {"$or": [
+            {"db_name": db_name},
+            {"id": tenant_id, "db_name": {"$exists": False}},
+        ]}
+    return query
+
+
+async def tenant_db_is_active(main_db, db_name: str) -> bool:
+    """Fail closed before a background write to a deleted/disabled tenant."""
+    if not is_tenant_db(db_name):
+        return False
+    tenant = await main_db.saas_tenants.find_one(
+        _registered_tenant_query(db_name), {"_id": 0, "is_active": 1},
+    )
+    return bool(tenant and tenant.get("is_active", True))
+
+
+async def drop_db_if_tenant_deleted(main_db, mongo_client, db_name: str) -> bool:
+    """Close the check/write/delete race without touching a registered DB.
+
+    A writer may pass the active check and then race with cascade deletion.  A
+    post-write check removes only a database that is still unregistered; a new
+    tenant that legitimately owns the name is never dropped.
+    """
+    if not is_tenant_db(db_name):
+        return False
+    tenant = await main_db.saas_tenants.find_one(
+        _registered_tenant_query(db_name), {"_id": 1},
+    )
+    if tenant:
+        return False
+    await mongo_client.drop_database(db_name)
+    return True
+
+
 def build_db_name(short_id: str, business_type: str | None) -> str:
     """nt_<code>_<seq> — e.g. NT-0029 + restaurant -> nt_rs_0029."""
     try:

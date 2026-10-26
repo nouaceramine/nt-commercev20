@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
 import uuid
-import random
 
 
 def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -43,9 +42,25 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
         "message_template": "السلام عليكم {customer_name}، نذكركم بأن لديكم مبلغ {debt_amount} دج مستحق. شكراً لتعاملكم معنا - NT"
     }
 
-    async def send_sms_mock(phone: str, message: str) -> None:
-        success = random.random() > 0.1
-        return {"success": success, "phone": phone, "message_length": len(message), "provider": "MOCKED", "message_id": str(uuid.uuid4()) if success else None, "error": None if success else "Simulated failure"}
+    async def send_sms_real(phone: str, message: str) -> dict:
+        from services.ecom.status_sms_service import get_settings
+        from services.ecom.sms_gateway import get_sms_provider
+        settings = await get_settings(db, for_send=True)
+        provider_cfg = settings.get("provider") or {}
+        if not settings.get("enabled") or provider_cfg.get("type") != "http" or not provider_cfg.get("url"):
+            return {"success": False, "provider": "unconfigured", "message_id": None,
+                    "error": "بوابة SMS غير مفعّلة أو غير مرتبطة بمزود حقيقي"}
+        return await get_sms_provider(provider_cfg).send(phone, message)
+
+    async def require_sms_gateway() -> None:
+        settings = await get_sms_settings_for_send()
+        provider = settings.get("provider") or {}
+        if not settings.get("enabled") or provider.get("type") != "http" or not provider.get("url"):
+            raise HTTPException(status_code=503, detail="أرسل SMS يتطلب بوابة حقيقية مفعّلة من مركز التكاملات")
+
+    async def get_sms_settings_for_send() -> dict:
+        from services.ecom.status_sms_service import get_settings
+        return await get_settings(db, for_send=True)
 
     # ── SMS Marketing Campaigns ──
 
@@ -67,9 +82,35 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
             customers = await db.customers.find({"id": {"$nin": active_customer_ids}, "phone": {"$ne": ""}}, {"_id": 0, "id": 1, "phone": 1, "name": 1}).to_list(1000)
         else:
             customers = await db.customers.find({"id": {"$in": campaign.customer_ids}, "phone": {"$ne": ""}}, {"_id": 0, "id": 1, "phone": 1, "name": 1}).to_list(1000)
-        campaign_doc = {"id": str(uuid.uuid4()), "name": campaign.name, "message": campaign.message, "target": campaign.target, "recipients_count": len(customers), "status": "pending" if campaign.scheduled_at else "sent", "scheduled_at": campaign.scheduled_at, "sent_at": now if not campaign.scheduled_at else None, "created_at": now, "created_by": admin.get("name", "")}
+        campaign_doc = {"id": str(uuid.uuid4()), "name": campaign.name, "message": campaign.message, "target": campaign.target, "recipients_count": len(customers), "status": "pending", "scheduled_at": campaign.scheduled_at, "sent_at": None, "created_at": now, "created_by": admin.get("name", "")}
+        if campaign.scheduled_at:
+            await db.sms_campaigns.insert_one(campaign_doc)
+            return {"success": True, "message": "تم حفظ الحملة المجدولة دون إرسال", "campaign_id": campaign_doc["id"], "recipients_count": len(customers), "sent_count": 0, "failed_count": 0}
+        await require_sms_gateway()
+        sent_count = 0
+        failed_count = 0
+        for customer in customers:
+            result = await send_sms_real(customer["phone"], campaign.message)
+            ok = bool(result.get("success"))
+            sent_count += int(ok)
+            failed_count += int(not ok)
+            await db.sms_logs.insert_one({
+                "id": str(uuid.uuid4()), "campaign_id": campaign_doc["id"],
+                "customer_id": customer.get("id"), "customer_name": customer.get("name", ""),
+                "phone": customer.get("phone"), "message": campaign.message,
+                "status": "sent" if ok else "failed", "provider_response": result,
+                "sent_by": admin.get("name", ""), "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        campaign_doc.update({
+            "status": "sent" if sent_count == len(customers) and customers else ("partial" if sent_count else "failed"),
+            "sent_count": sent_count, "failed_count": failed_count,
+            "sent_at": datetime.now(timezone.utc).isoformat() if sent_count else None,
+        })
         await db.sms_campaigns.insert_one(campaign_doc)
-        return {"success": True, "message": f"تم إنشاء الحملة وإرسالها لـ {len(customers)} عميل (وضع المحاكاة)", "campaign_id": campaign_doc["id"], "recipients_count": len(customers)}
+        return {"success": sent_count > 0 or not customers,
+                "message": f"اكتملت الحملة: {sent_count} ناجح و{failed_count} فاشل",
+                "campaign_id": campaign_doc["id"], "recipients_count": len(customers),
+                "sent_count": sent_count, "failed_count": failed_count}
 
     # ── SMS Settings ──
 
@@ -113,7 +154,7 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
                 results.append({"customer_id": customer_id, "success": False, "error": "No debt"})
                 continue
             message = template.format(customer_name=customer.get("name", ""), debt_amount=f"{total_debt:,.0f}", phone=customer.get("phone", ""))
-            sms_result = await send_sms_mock(customer["phone"], message)
+            sms_result = await send_sms_real(customer["phone"], message)
             sms_log = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "phone": customer.get("phone", ""), "message": message, "debt_amount": total_debt, "status": "sent" if sms_result["success"] else "failed", "provider_response": sms_result, "sent_by": user.get("name", ""), "created_at": datetime.now(timezone.utc).isoformat()}
             await db.sms_logs.insert_one(sms_log)
             results.append({"customer_id": customer_id, "customer_name": customer.get("name", ""), "phone": customer.get("phone", ""), "success": sms_result["success"], "error": sms_result.get("error")})

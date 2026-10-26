@@ -6,7 +6,11 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
-from core.db_naming import is_tenant_db  # p348
+from core.db_naming import (  # p348/p480
+    drop_db_if_tenant_deleted,
+    is_tenant_db,
+    tenant_db_is_active,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,8 @@ class ProfitRobot:
             day = now.strftime("%Y-%m-%d")
             cutoff = (now - timedelta(days=90)).isoformat()
             for tdb_name in tenant_dbs:
+                if not await tenant_db_is_active(self.db, tdb_name):
+                    continue
                 tdb = self.client[tdb_name]
                 await tdb.auto_reports.create_index(
                     [("report_type", 1), ("day", 1)],
@@ -91,6 +97,7 @@ class ProfitRobot:
                     upsert=True,
                 )
                 await tdb.auto_reports.delete_many({"created_at": {"$lt": cutoff}})
+                await drop_db_if_tenant_deleted(self.db, self.client, tdb_name)
         except Exception as e:
             logger.error(f"Error storing profit report: {e}")
 

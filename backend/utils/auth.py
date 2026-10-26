@@ -1,22 +1,29 @@
 """
 Authentication utilities for NT Commerce
 """
-import os
 import jwt
 import bcrypt
 from datetime import datetime, timezone, timedelta
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from config.database import db, main_db, get_tenant_db, set_tenant_context, _tenant_db_ctx
+from config.database import main_db, get_tenant_db, set_tenant_context
+from utils.jwt_config import SECRET_KEY, ALGORITHM
 
-# JWT Configuration
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    raise RuntimeError("JWT_SECRET_KEY environment variable is required (no fallback allowed)")
-ALGORITHM = "HS256"
+# JWT Configuration (central fail-fast resolver)
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 security = HTTPBearer()
+
+
+def ensure_active_account(user: dict, tenant: dict | None = None) -> dict:
+    """Reject disabled users/tenants on every request, not only at login."""
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.get("is_active") is False or user.get("active") is False:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+    if tenant is not None and (tenant.get("is_active") is False or tenant.get("active") is False):
+        raise HTTPException(status_code=403, detail="Tenant is deactivated")
+    return user
 
 def email_ci(email: str) -> dict:
     """Case-insensitive exact-match Mongo query value for an email field."""
@@ -65,24 +72,27 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             if user:
                 user["user_type"] = "super_admin"
                 user["role"] = "super_admin"
-                return user
+                return ensure_active_account(user)
         
         tenant_id = payload.get("tenant_id")
         if tenant_id:
+            tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
+            if not tenant:
+                raise HTTPException(status_code=401, detail="Tenant not found")
+            ensure_active_account({"id": tenant_id}, tenant)
             tenant_db = get_tenant_db(tenant_id)
             set_tenant_context(tenant_db)
             user = await tenant_db.users.find_one({"id": user_id})
             if user:
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
-                return user
+                return ensure_active_account(user, tenant)
             # Fallback: user_id might equal tenant_id (legacy tokens) -> build user from saas_tenants
-            tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
             # p293 security: هذا المسار البديل لرموز قديمة sub==tenant_id فقط —
             # أي رمز بـ sub آخر غير معروف كان يتحول لمدير المستأجر (ثغرة تصعيد صلاحيات)
             if tenant and user_id == tenant_id:
                 set_tenant_context(tenant_db)
-                return {
+                return ensure_active_account({
                     "id": tenant["id"],
                     "email": tenant.get("email", ""),
                     "name": tenant.get("name", ""),
@@ -90,7 +100,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     "tenant_id": tenant_id,
                     "user_type": "tenant",
                     "company_name": tenant.get("company_name", ""),
-                }
+                }, tenant)
 
         # Fallback: platform-level users (admin/demo/staff) whose tokens carry
         # no tenant_id and no super_admin role — they live in main_db.users.
@@ -100,7 +110,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user = await main_db.users.find_one({"id": user_id})
         if user:
             user["user_type"] = role if role in ("admin", "cashier", "agent") else (user_type or "admin")
-            return user
+            return ensure_active_account(user)
 
         raise HTTPException(status_code=401, detail="User not found")
     except jwt.ExpiredSignatureError:
@@ -124,20 +134,28 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             if user:
                 user["user_type"] = "super_admin"
                 user["role"] = "super_admin"
+                tenant = None
                 if tenant_id:
+                    tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
+                    if not tenant:
+                        raise HTTPException(status_code=401, detail="Tenant not found")
                     tenant_db = get_tenant_db(tenant_id)
                     set_tenant_context(tenant_db)
                     user["tenant_id"] = tenant_id
-                return user
+                return ensure_active_account(user, tenant)
         
         if tenant_id:
+            tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
+            if not tenant:
+                raise HTTPException(status_code=401, detail="Tenant not found")
+            ensure_active_account({"id": tenant_id}, tenant)
             tenant_db = get_tenant_db(tenant_id)
             set_tenant_context(tenant_db)
             user = await tenant_db.users.find_one({"id": user_id})
             if user:
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
-                return user
+                return ensure_active_account(user, tenant)
         
         # Fallback: platform-level users (admin/demo/staff) whose tokens carry
         # no tenant_id and no super_admin role — they live in main_db.users.
@@ -147,7 +165,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
         user = await main_db.users.find_one({"id": user_id})
         if user:
             user["user_type"] = role if role in ("admin", "cashier", "agent") else (user_type or "admin")
-            return user
+            return ensure_active_account(user)
 
         raise HTTPException(status_code=401, detail="User not found")
     except jwt.ExpiredSignatureError:
@@ -157,12 +175,14 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
     """Require admin role"""
+    ensure_active_account(current_user)
     if current_user.get("role") not in ["admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
 async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> dict:
     """Require tenant admin role"""
+    ensure_active_account(current_user)
     role = current_user.get("role", "")
     if role not in ["admin", "manager", "super_admin"]:
         raise HTTPException(status_code=403, detail="Admin or Manager access required")
@@ -170,6 +190,7 @@ async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> di
 
 async def require_tenant(current_user: dict = Depends(get_current_user)) -> dict:
     """Require valid tenant context"""
+    ensure_active_account(current_user)
     # Platform-level users (admin/cashier/agent in main_db) operate on the main DB
     if not current_user.get("tenant_id") and current_user.get("user_type") not in ("super_admin", "admin", "cashier", "agent"):
         raise HTTPException(status_code=403, detail="Tenant access required")
@@ -194,7 +215,7 @@ async def get_super_admin(credentials: HTTPAuthorizationCredentials = Depends(se
         
         user["user_type"] = "super_admin"
         user["role"] = "super_admin"
-        return user
+        return ensure_active_account(user)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:

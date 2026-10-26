@@ -5,6 +5,7 @@
  */
 
 import { docCodesHtml } from '../lib/docCodes';
+import { escapeHtml } from '../lib/escape';
 
 export class ReceiptService {
   constructor(settings, language, isRTL, cashierName) {
@@ -15,6 +16,8 @@ export class ReceiptService {
   }
 
   generateThermalReceiptHtml(sale, printerSize = '80mm') {
+    printerSize = printerSize === '58mm' ? '58mm' : '80mm';
+    const esc = escapeHtml;
     const storeName = this.settings?.store_name || 'NT Commerce';
     const storeAddress = this.settings?.store_address || '';
     const storePhone = this.settings?.store_phone || '';
@@ -32,15 +35,15 @@ body{font-family:'Courier New','Lucida Console',monospace;font-size:${fontSize};
 .items{margin:8px 0}.item{margin:4px 0;padding-bottom:2px}.total{font-size:${totalSize};font-weight:bold}
 .footer{margin-top:12px;font-size:9px}.cashier{font-size:9px;color:#666;margin-top:4px}
 </style></head><body>
-<div class="center bold" style="font-size:${titleSize}">${storeName}</div>
-${storeAddress ? `<div class="center" style="font-size:10px">${storeAddress}</div>` : ''}
-${storePhone ? `<div class="center" style="font-size:10px">${storePhone}</div>` : ''}
+<div class="center bold" style="font-size:${titleSize}">${esc(storeName)}</div>
+${storeAddress ? `<div class="center" style="font-size:10px">${esc(storeAddress)}</div>` : ''}
+${storePhone ? `<div class="center" style="font-size:10px">${esc(storePhone)}</div>` : ''}
 <div class="double-line"></div>
-<div class="row"><span>${this.language === 'ar' ? 'رقم:' : 'N°:'}</span><span class="bold">${sale.invoice_number || sale.code}</span></div>
+<div class="row"><span>${this.language === 'ar' ? 'رقم:' : 'N°:'}</span><span class="bold">${esc(sale.invoice_number || sale.code)}</span></div>
 <div class="row"><span>${this.language === 'ar' ? 'التاريخ:' : 'Date:'}</span><span>${new Date(sale.created_at).toLocaleString(this.language === 'ar' ? 'ar-DZ' : 'fr-FR')}</span></div>
-${sale.customer_name ? `<div class="row"><span>${this.language === 'ar' ? 'الزبون:' : 'Client:'}</span><span>${sale.customer_name}</span></div>` : ''}
+${sale.customer_name ? `<div class="row"><span>${this.language === 'ar' ? 'الزبون:' : 'Client:'}</span><span>${esc(sale.customer_name)}</span></div>` : ''}
 <div class="line"></div>
-<div class="items">${(sale.items || []).map(item => `<div class="item"><div class="bold">${item.product_name}</div><div class="row"><span>${item.quantity} x ${this.formatCurrency(item.unit_price)}</span><span class="bold">${this.formatCurrency(item.total)}</span></div></div>`).join('')}</div>
+<div class="items">${(sale.items || []).map(item => `<div class="item"><div class="bold">${esc(item.product_name)}</div><div class="row"><span>${esc(item.quantity)} x ${this.formatCurrency(item.unit_price)}</span><span class="bold">${this.formatCurrency(item.total)}</span></div></div>`).join('')}</div>
 <div class="line"></div>
 <div class="row"><span>${this.language === 'ar' ? 'المجموع الفرعي:' : 'Sous-total:'}</span><span>${this.formatCurrency(sale.subtotal)}</span></div>
 ${sale.discount > 0 ? `<div class="row"><span>${this.language === 'ar' ? 'الخصم:' : 'Remise:'}</span><span>-${this.formatCurrency(sale.discount)}</span></div>` : ''}
@@ -49,12 +52,13 @@ ${sale.delivery?.fee > 0 ? `<div class="row"><span>${this.language === 'ar' ? '�
 <div class="row total"><span>${this.language === 'ar' ? 'الإجمالي:' : 'TOTAL:'}</span><span>${this.formatCurrency(sale.total)} ${this.language === 'ar' ? 'دج' : 'DA'}</span></div>
 ${sale.paid_amount ? `<div class="row" style="margin-top:4px"><span>${this.language === 'ar' ? 'المدفوع:' : 'Paye:'}</span><span>${this.formatCurrency(sale.paid_amount)}</span></div>${sale.total - sale.paid_amount > 0 ? `<div class="row"><span>${this.language === 'ar' ? 'الباقي:' : 'Reste:'}</span><span>${this.formatCurrency(sale.total - sale.paid_amount)}</span></div>` : ''}` : ''}
 ${docCodesHtml(sale.invoice_number || sale.code || '', { qrSize: 80, barcodeHeight: 30, label: this.language === 'ar' ? 'امسح الرمز لعرض بيانات الفاتورة' : 'Scannez pour voir la facture' })}
-<div class="footer center"><div class="line"></div><div style="margin-top:6px">${this.language === 'ar' ? 'شكراً لزيارتكم' : 'Merci de votre visite'}</div><div class="cashier">${this.language === 'ar' ? 'البائع:' : 'Caissier:'} ${this.cashierName}</div></div>
+<div class="footer center"><div class="line"></div><div style="margin-top:6px">${this.language === 'ar' ? 'شكراً لزيارتكم' : 'Merci de votre visite'}</div><div class="cashier">${this.language === 'ar' ? 'البائع:' : 'Caissier:'} ${esc(this.cashierName)}</div></div>
 </body></html>`;
   }
 
   formatCurrency(amount) {
-    return new Intl.NumberFormat('ar-DZ', { minimumFractionDigits: 2 }).format(amount || 0);
+    const value = Number(amount);
+    return new Intl.NumberFormat('ar-DZ', { minimumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
   }
 
   printReceipt(sale, printerSize = '80mm') {

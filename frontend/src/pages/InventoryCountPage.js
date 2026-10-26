@@ -1,7 +1,7 @@
 import { errText } from '../lib/errorText';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
-import * as XLSX from 'xlsx';
+import { readFirstWorksheetRows, rowsToXlsxBlob } from '../lib/spreadsheet';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/button';
@@ -312,13 +312,9 @@ export default function InventoryCountPage() {
     setImportFileName(file.name);
     const reader = new FileReader();
     
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
-        const data = new Uint8Array(event.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        const jsonData = await readFirstWorksheetRows(event.target.result);
         
         if (jsonData.length < 2) {
           toast.error(language === 'ar' ? 'الملف فارغ أو لا يحتوي على بيانات' : 'Le fichier est vide');
@@ -447,21 +443,26 @@ export default function InventoryCountPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
     const templateData = [
       [language === 'ar' ? 'الباركود' : 'Barcode', language === 'ar' ? 'الكمية' : 'Quantité', language === 'ar' ? 'اسم المنتج (اختياري)' : 'Nom du produit (optionnel)'],
       ...products.slice(0, 10).map(p => [p.barcode || '', p.quantity, language === 'ar' ? p.name_ar : p.name_en])
     ];
     
-    const ws = XLSX.utils.aoa_to_sheet(templateData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
-    
-    // Set column widths
-    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 40 }];
-    
-    XLSX.writeFile(wb, `inventory_template_${new Date().toISOString().split('T')[0]}.xlsx`);
-    toast.success(language === 'ar' ? 'تم تحميل القالب' : 'Modèle téléchargé');
+    try {
+      const blob = await rowsToXlsxBlob(templateData, { sheetName: 'Inventory', widths: [20, 10, 40] });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `inventory_template_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      toast.success(language === 'ar' ? 'تم تحميل القالب' : 'Modèle téléchargé');
+    } catch (error) {
+      toast.error(language === 'ar' ? 'تعذر إنشاء القالب' : 'Erreur de création du modèle');
+    }
   };
 
   const resetImport = () => {

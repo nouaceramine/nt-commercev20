@@ -354,8 +354,7 @@ export default function StoreManagementPage() {
 
   const openLanding = async (product) => {
     try {
-      const headers = getAuthHeaders();
-      const res = await apiClient.get(`/store/landing/${product.id}`, { headers });
+      const res = await apiClient.get(`/store/landing/${product.id}`);
       setLandingCfg(res.data);
       setLandingDialog(product);
     } catch (e) {
@@ -367,7 +366,6 @@ export default function StoreManagementPage() {
     if (!landingDialog || !landingCfg) return;
     setLandingSaving(true);
     try {
-      const headers = getAuthHeaders();
       const payload = {
         enabled: !!landingCfg.enabled,
         headline: landingCfg.headline || '',
@@ -377,7 +375,7 @@ export default function StoreManagementPage() {
         fb_pixel_id: landingCfg.fb_pixel_id || '',
         tiktok_pixel_id: landingCfg.tiktok_pixel_id || '',
       };
-      await apiClient.put(`/store/landing/${landingDialog.id}`, payload, { headers });
+      await apiClient.put(`/store/landing/${landingDialog.id}`, payload);
       toast.success(language === 'ar' ? 'تم حفظ صفحة الهبوط' : 'Sauvegardé');
       setLandingDialog(null);
     } catch (e) {
@@ -391,8 +389,7 @@ export default function StoreManagementPage() {
     if (!landingDialog) return;
     setLandingAi(true);
     try {
-      const headers = getAuthHeaders();
-      const r = await apiClient.post(`/store/landing/${landingDialog.id}/ai-generate`, {}, { headers });
+      const r = await apiClient.post(`/store/landing/${landingDialog.id}/ai-generate`, {});
       setLandingCfg({ ...landingCfg, headline: r.data.headline, offer_text: r.data.offer_text, old_price: r.data.old_price });
       toast.success(language === 'ar' ? '✨ وُلّد المحتوى — راجعه ثم احفظ' : 'Généré');
     } catch (e) {

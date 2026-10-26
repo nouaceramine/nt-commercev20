@@ -717,7 +717,7 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         low_stock = len([p for p in products if p.get("quantity", 0) < 5])
 
         products = [_pub_product(store_slug, p) for p in products]
-        for fid, grp in products_by_family.items():
+        for grp in products_by_family.values():
             grp["products"] = [_pub_product(store_slug, p) for p in grp["products"]]
         uncategorized = [_pub_product(store_slug, p) for p in uncategorized]
         return {
@@ -1072,75 +1072,104 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.get("/woocommerce/settings")
     async def get_woocommerce_settings(admin: dict = Depends(get_tenant_admin)):
-        settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
+        settings = await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0})
         if not settings:
             settings = {"id": "global", "enabled": False, "store_url": "", "consumer_key": "", "consumer_secret": "", "sync_products": True, "sync_orders": True, "sync_customers": True, "last_sync": ""}
-            # نسخة منفصلة للإدراج — insert_one يلوّث القاموس بـ _id ويسبب 500 في أول استدعاء
             await db.woocommerce_settings.insert_one(dict(settings))
+        for key in ("consumer_key", "consumer_secret"):
+            if settings.get(key):
+                settings[key] = "••••••••"
         return settings
 
     @router.put("/woocommerce/settings")
     async def update_woocommerce_settings(settings: WooCommerceSettings, admin: dict = Depends(get_tenant_admin)):
         from utils.crypto import encrypt_field
+        existing = await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}) or {}
         data = settings.model_dump()
-        data["consumer_key"] = encrypt_field(data.get("consumer_key"))
-        data["consumer_secret"] = encrypt_field(data.get("consumer_secret"))
+        for key in ("consumer_key", "consumer_secret"):
+            if data.get(key) == "••••••••":
+                data[key] = existing.get(key) or ""
+            else:
+                data[key] = encrypt_field(data.get(key))
         await db.woocommerce_settings.update_one({"id": "global"}, {"$set": data}, upsert=True)
         return {"message": "تم حفظ إعدادات WooCommerce"}
 
+    async def _wc_settings():
+        settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
+        if not settings or not settings.get("enabled"):
+            raise HTTPException(status_code=400, detail="WooCommerce غير مفعل")
+        return settings
+
     @router.post("/woocommerce/test-connection")
     async def test_woocommerce_connection(admin: dict = Depends(get_tenant_admin)):
-        settings = await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0})
+        settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
         if not settings or not settings.get("store_url"):
             raise HTTPException(status_code=400, detail="يرجى إدخال رابط المتجر أولاً")
-        return {"success": True, "message": "تم الاتصال بالمتجر بنجاح (وضع المحاكاة)", "store_info": {"name": "متجرك", "url": settings.get("store_url"), "version": "8.0.0"}}
+        from services import woocommerce_service
+        info = await woocommerce_service.test_connection(settings)
+        await db.woocommerce_settings.update_one({"id": "global"}, {"$set": {"last_test_at": datetime.now(timezone.utc).isoformat(), "last_test_ok": True}}, upsert=True)
+        return {"success": True, "message": "تم الاتصال الفعلي بالمتجر بنجاح", "store_info": info}
+
+    async def _publish_one(wc_settings, product):
+        from services import woocommerce_service
+        result = await woocommerce_service.publish_product(wc_settings, product)
+        now = datetime.now(timezone.utc).isoformat()
+        await db.products.update_one({"id": product["id"]}, {"$set": {"woocommerce_id": str(result["id"]), "woocommerce_status": result["status"], "woocommerce_url": result["url"], "woocommerce_synced_at": now}})
+        return result
 
     @router.post("/woocommerce/publish-product/{product_id}")
     async def publish_product_to_woocommerce(product_id: str, admin: dict = Depends(get_tenant_admin)):
-        wc_settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
-        if not wc_settings or not wc_settings.get("enabled"):
-            raise HTTPException(status_code=400, detail="WooCommerce غير مفعل")
+        wc_settings = await _wc_settings()
         product = await db.products.find_one({"id": product_id}, {"_id": 0})
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        now = datetime.now(timezone.utc).isoformat()
-        wc_product_id = f"wc_{product_id[:8]}"
-        await db.products.update_one({"id": product_id}, {"$set": {"woocommerce_id": wc_product_id, "woocommerce_status": "published", "woocommerce_url": f"{wc_settings.get('store_url')}/product/{product.get('name_en', '').lower().replace(' ', '-')}", "woocommerce_synced_at": now}})
-        return {"success": True, "message": f"تم نشر المنتج '{product.get('name_en')}' على المتجر", "woocommerce_id": wc_product_id}
+        result = await _publish_one(wc_settings, product)
+        return {"success": True, "message": f"تم نشر المنتج '{product.get('name_en')}' فعليًا على المتجر", "woocommerce_id": result["id"], "woocommerce_url": result["url"]}
 
     @router.post("/woocommerce/publish-products")
     async def publish_multiple_products(product_ids: List[str], admin: dict = Depends(get_tenant_admin)):
-        wc_settings = _decrypt_wc(await db.woocommerce_settings.find_one({"id": "global"}, {"_id": 0}))
-        if not wc_settings or not wc_settings.get("enabled"):
-            raise HTTPException(status_code=400, detail="WooCommerce غير مفعل")
-        now = datetime.now(timezone.utc).isoformat()
+        wc_settings = await _wc_settings()
         published, failed = [], []
-        for pid in product_ids:
+        for pid in product_ids[:100]:
             product = await db.products.find_one({"id": pid}, {"_id": 0})
             if not product:
                 failed.append({"id": pid, "error": "المنتج غير موجود"})
                 continue
-            wc_pid = f"wc_{pid[:8]}"
-            await db.products.update_one({"id": pid}, {"$set": {"woocommerce_id": wc_pid, "woocommerce_status": "published", "woocommerce_synced_at": now}})
-            published.append({"id": pid, "name": product.get("name_en"), "woocommerce_id": wc_pid})
-        return {"success": True, "message": f"تم نشر {len(published)} منتج على المتجر", "published": published, "failed": failed}
+            try:
+                result = await _publish_one(wc_settings, product)
+                published.append({"id": pid, "name": product.get("name_en"), "woocommerce_id": result["id"]})
+            except HTTPException as exc:
+                failed.append({"id": pid, "error": exc.detail})
+        return {"success": bool(published) and not failed, "message": f"نُشر فعليًا {len(published)} وفشل {len(failed)}", "published": published, "failed": failed}
 
     @router.delete("/woocommerce/unpublish-product/{product_id}")
     async def unpublish_product(product_id: str, admin: dict = Depends(get_tenant_admin)):
+        wc_settings = await _wc_settings()
         product = await db.products.find_one({"id": product_id}, {"_id": 0})
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        from services import woocommerce_service
+        await woocommerce_service.unpublish_product(wc_settings, product)
         await db.products.update_one({"id": product_id}, {"$unset": {"woocommerce_id": "", "woocommerce_status": "", "woocommerce_url": "", "woocommerce_synced_at": ""}})
-        return {"success": True, "message": f"تم إلغاء نشر المنتج '{product.get('name_en')}' من المتجر"}
+        return {"success": True, "message": f"تم إلغاء نشر المنتج '{product.get('name_en')}' فعليًا من المتجر"}
 
     @router.post("/woocommerce/sync-inventory")
     async def sync_inventory(admin: dict = Depends(get_tenant_admin)):
+        wc_settings = await _wc_settings()
         products = await db.products.find({"woocommerce_id": {"$exists": True, "$ne": ""}}, {"_id": 0}).to_list(1000)
-        now = datetime.now(timezone.utc).isoformat()
+        from services import woocommerce_service
+        synced, failed = [], []
         for product in products:
-            await db.products.update_one({"id": product["id"]}, {"$set": {"woocommerce_synced_at": now}})
-        await db.woocommerce_settings.update_one({"id": "global"}, {"$set": {"last_sync": now}})
-        return {"success": True, "message": f"تم مزامنة {len(products)} منتج", "synced_at": now}
+            try:
+                await woocommerce_service.sync_inventory(wc_settings, product)
+                await db.products.update_one({"id": product["id"]}, {"$set": {"woocommerce_synced_at": datetime.now(timezone.utc).isoformat()}})
+                synced.append(product["id"])
+            except HTTPException as exc:
+                failed.append({"id": product["id"], "error": exc.detail})
+        now = datetime.now(timezone.utc).isoformat()
+        if synced and not failed:
+            await db.woocommerce_settings.update_one({"id": "global"}, {"$set": {"last_sync": now}})
+        return {"success": not failed, "message": f"تمت مزامنة {len(synced)} منتج وفشل {len(failed)}", "synced": len(synced), "failed": failed, "synced_at": now}
 
     # NEW: Store Slug Management
 

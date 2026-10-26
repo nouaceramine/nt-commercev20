@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { toast } from 'sonner';
+import { downloadCsv, safeSpreadsheetValue } from '../lib/csvExport';
 
 /**
  * ExportPrintButtons - Reusable component for export and print functionality
@@ -36,33 +37,13 @@ export function ExportPrintButtons({
   language = 'ar' 
 }) {
   
-  // Export to CSV
+  // Export to CSV (RFC-4180 and spreadsheet-formula safe)
   const exportToCSV = () => {
     if (!data.length) {
       toast.error(language === 'ar' ? 'لا توجد بيانات للتصدير' : 'Aucune donnée à exporter');
       return;
     }
-    
-    const headers = columns.map(c => c.label).join(',');
-    const rows = data.map(item => 
-      columns.map(c => {
-        let val = item[c.key];
-        if (typeof val === 'string' && val.includes(',')) {
-          val = `"${val}"`;
-        }
-        return val ?? '';
-      }).join(',')
-    );
-    
-    const csv = [headers, ...rows].join('\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${filename}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    
+    downloadCsv(`${filename}.csv`, columns.map(c => c.label), data.map(item => columns.map(c => item[c.key] ?? '')));
     toast.success(language === 'ar' ? 'تم التصدير بنجاح' : 'Export réussi');
   };
 
@@ -76,7 +57,7 @@ export function ExportPrintButtons({
     // Create HTML table for Excel — values are HTML-escaped to prevent XSS
     const headers = columns.map(c => `<th style="background:#4472C4;color:white;padding:8px;border:1px solid #ccc;">${escapeHtml(c.label)}</th>`).join('');
     const rows = data.map(item =>
-      `<tr>${columns.map(c => `<td style="padding:6px;border:1px solid #ccc;">${escapeHtml(item[c.key])}</td>`).join('')}</tr>`
+      `<tr>${columns.map(c => `<td style="padding:6px;border:1px solid #ccc;">${escapeHtml(safeSpreadsheetValue(item[c.key]))}</td>`).join('')}</tr>`
     ).join('');
     
     const table = `
@@ -105,9 +86,9 @@ export function ExportPrintButtons({
       return;
     }
 
-    const headers = columns.map(c => `<th style="background:#333;color:white;padding:10px;text-align:right;">${c.label}</th>`).join('');
+    const headers = columns.map(c => `<th style="background:#333;color:white;padding:10px;text-align:right;">${escapeHtml(c.label)}</th>`).join('');
     const rows = data.map(item => 
-      `<tr>${columns.map(c => `<td style="padding:8px;border-bottom:1px solid #ddd;text-align:right;">${item[c.key] ?? ''}</td>`).join('')}</tr>`
+      `<tr>${columns.map(c => `<td style="padding:8px;border-bottom:1px solid #ddd;text-align:right;">${escapeHtml(item[c.key])}</td>`).join('')}</tr>`
     ).join('');
 
     const printContent = `
@@ -115,7 +96,7 @@ export function ExportPrintButtons({
       <html dir="rtl">
       <head>
         <meta charset="UTF-8">
-        <title>${title}</title>
+        <title>${escapeHtml(title)}</title>
         <style>
           body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 20px; direction: rtl; }
           h1 { text-align: center; color: #333; margin-bottom: 20px; }
@@ -131,7 +112,7 @@ export function ExportPrintButtons({
         </style>
       </head>
       <body>
-        <h1>${title}</h1>
+        <h1>${escapeHtml(title)}</h1>
         <p style="text-align:center;color:#666;">${formatShortDate(new Date())}</p>
         <table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>
         <div class="footer">${language === 'ar' ? 'تم الطباعة من نظام NT' : 'Imprimé depuis NT System'}</div>
@@ -140,6 +121,7 @@ export function ExportPrintButtons({
     `;
 
     const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
     printWindow.document.write(printContent);
     printWindow.document.close();
     printWindow.focus();

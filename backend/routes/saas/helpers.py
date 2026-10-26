@@ -7,8 +7,8 @@ import os
 
 from config.database import db, main_db
 
-SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'nt_commerce_super_secure_jwt_secret_key_2024_v3_hardened')
-ALGORITHM = "HS256"
+from utils.jwt_config import SECRET_KEY, ALGORITHM
+from utils.auth import ensure_active_account
 
 security = HTTPBearer()
 
@@ -30,7 +30,7 @@ async def get_super_admin(credentials: HTTPAuthorizationCredentials = Depends(se
         user = await main_db.users.find_one({"id": user_id})
         if not user or user.get("role") not in ["super_admin", "saas_admin"]:
             raise HTTPException(status_code=403, detail="Super admin access required")
-        return user
+        return ensure_active_account(user)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:

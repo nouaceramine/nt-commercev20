@@ -2,13 +2,13 @@
 AI Routes — Google Gemini API Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
 import os
-import sys
+import asyncio
+import ipaddress
+import socket
 import urllib.parse
 import urllib.request as _urlreq
 import json as _json
-import google.generativeai as genai
 from services.ai_service import AIService
 
 from services.ai_service import ai_service
@@ -16,6 +16,46 @@ from services.ai_service import ai_service
 from main import get_tenant_admin
 
 router = APIRouter(prefix="/ai", tags=["AI"])
+MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+def _image_extension(content: bytes) -> str:
+    if not content or len(content) > MAX_GENERATED_IMAGE_BYTES:
+        raise ValueError("generated image is empty or exceeds the size limit")
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "webp"
+    raise ValueError("generated content is not a supported image")
+
+
+class _NoRedirect(_urlreq.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _read_remote_image(url: str) -> bytes:
+    parsed = urllib.parse.urlparse(str(url or ""))
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("image URL must be HTTPS without embedded credentials")
+    addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    if not addresses:
+        raise ValueError("image host did not resolve")
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global:
+            raise ValueError("image host resolves to a non-public address")
+    request = _urlreq.Request(parsed.geturl(), headers={"User-Agent": "NTCommerce/1.0"})
+    opener = _urlreq.build_opener(_NoRedirect)
+    with opener.open(request, timeout=60) as response:
+        content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+            raise ValueError("remote response is not a supported image")
+        content = response.read(MAX_GENERATED_IMAGE_BYTES + 1)
+    _image_extension(content)
+    return content
 
 @router.post("/generate-description")
 async def generate_description(data: dict, admin: dict = Depends(get_tenant_admin)):
@@ -41,8 +81,7 @@ async def product_images(data: dict, admin: dict = Depends(get_tenant_admin)):
 
     query = name
     try:
-        model = genai.GenerativeModel(AIService.MODEL)
-        r = await model.generate_content_async(
+        r = await AIService.generate_content(
             f'Product name (may be Arabic or French): "{name}"\n'
             'Write ONE short English image-search query (3-6 words) to find professional e-commerce product photos of this item. '
             'Reply with the query ONLY — no quotes, no punctuation, no explanation.'
@@ -62,7 +101,7 @@ async def product_images(data: dict, admin: dict = Depends(get_tenant_admin)):
             f"https://api.openverse.org/v1/images/?{params}",
             headers={"User-Agent": "NTCommerce/1.0 (product-image-search)"},
         )
-        with _urlreq.urlopen(req, timeout=12) as resp:
+        with _urlreq.urlopen(req, timeout=12) as resp:  # nosec B310 - fixed HTTPS Openverse endpoint
             payload = _json.loads(resp.read().decode("utf-8"))
         return [it for it in payload.get("results", []) if it.get("url") and it.get("thumbnail")]
 
@@ -77,7 +116,7 @@ async def product_images(data: dict, admin: dict = Depends(get_tenant_admin)):
             candidates.append(name)
         results = []
         for cand in candidates:
-            results = _search(cand)
+            results = await asyncio.to_thread(_search, cand)
             if results:
                 query = cand
                 break
@@ -150,8 +189,7 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
     if os.environ.get("GEMINI_API_KEY"):
         for mn in ("gemini-3.1-flash-lite-image", "gemini-2.5-flash-image"):
             try:
-                gm = genai.GenerativeModel(mn)
-                r = await gm.generate_content_async(prompt)
+                r = await AIService.generate_content(prompt, model=mn)
                 for part in r.candidates[0].content.parts:
                     idata = getattr(part, "inline_data", None)
                     if idata and idata.data:
@@ -178,9 +216,7 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
                 content = _b64.b64decode(item.b64_json)
                 used_model = 'gpt-image-1'  # p233
             elif getattr(item, "url", None):
-                req = _urlreq.Request(item.url, headers={"User-Agent": "NTCommerce/1.0"})
-                with _urlreq.urlopen(req, timeout=60) as rr:
-                    content = rr.read()
+                content = await asyncio.to_thread(_read_remote_image, item.url)
                 used_model = 'gpt-image-1'  # p233
         except Exception as e:
             errors.append(f"OpenAI: {str(e)[:60]}")
@@ -191,12 +227,17 @@ async def generate_product_image(data: dict, admin: dict = Depends(get_tenant_ad
             detail="حصة توليد الصور مستنفدة حالياً — فعّل الفوترة على مفتاح Gemini أو أضف مفتاح OpenAI مدفوعاً",
         )
 
+    try:
+        extension = _image_extension(content)
+    except ValueError:
+        raise HTTPException(status_code=502, detail="خدمة التوليد أعادت صورة غير صالحة أو كبيرة جداً")
+
     if used_model:  # p233: meter the successful generation
         await record_ai_image_usage(_main_db, model=used_model, count=1, feature="product_image")
 
     upload_dir = _Path(__file__).resolve().parent.parent / "static" / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"{_uuid.uuid4()}.png"
+    fname = f"{_uuid.uuid4()}.{extension}"
     with open(upload_dir / fname, "wb") as f:
         f.write(content)
     return {"success": True, "url": f"/api/static/uploads/{fname}", "filename": fname}
@@ -316,8 +357,7 @@ async def map_columns(data: dict, admin: dict = Depends(get_tenant_admin)):
                 + 'Return JSON object mapping EACH source header exactly as given to the best target field name, '
                 'or "" if no reasonable match. Example: {"source header": "retail_price", "other": ""}'
             )
-            model = genai.GenerativeModel(AIService.MODEL)
-            resp = await model.generate_content_async(prompt)
+            resp = await AIService.generate_content(prompt)
             text = (resp.text or "").strip()
             import re as _re3
             m = _re3.search(r"\{.*\}", text, _re3.S)

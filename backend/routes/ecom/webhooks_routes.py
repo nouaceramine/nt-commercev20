@@ -15,7 +15,12 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
 
 from config.database import client as mongo_client, main_db
+from services.crypto_fields import decrypt_field
+import hmac
 from core.db_naming import resolve_db_name  # p347
+from services.ecom.webhook_security import (
+    read_signed_body, decode_json_body, verify_ecom_webhook,
+)
 from services.ecom.shopify_service import (
     verify_shopify_hmac, parse_shopify_order, upsert_shopify_order,
 )
@@ -28,6 +33,20 @@ def _tenant_db(tenant_id: str):
     """Resolve tenant DB by id without going through the request middleware
     (webhooks are unauthenticated — the tenant_id comes from the URL path)."""
     return mongo_client[resolve_db_name(tenant_id)]
+
+
+async def _get_integration(tenant_id: str, integration_id: str, channels):
+    tenant = await main_db.saas_tenants.find_one(
+        {"id": tenant_id}, {"_id": 0, "id": 1, "is_active": 1})
+    if not tenant or tenant.get("is_active") is False:
+        raise HTTPException(status_code=404, detail="Tenant not found or disabled")
+    db = _tenant_db(tenant_id)
+    channel_query = {"$in": channels} if isinstance(channels, list) else channels
+    integration = await db.ecom_integrations.find_one(
+        {"id": integration_id, "channel": channel_query})
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    return db, integration
 
 
 @router.post("/ecom/webhooks/shopify/{tenant_id}/{integration_id}/orders")
@@ -44,17 +63,8 @@ async def shopify_order_webhook(
     Security: HMAC-SHA256 of the raw body, using the integration's `webhook_secret`.
     Returns 200 even on duplicates so Shopify stops retrying.
     """
-    # Verify tenant exists
-    tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "id": 1})
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "shopify"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="Shopify integration not found")
-
-    raw_body = await request.body()
+    db, integration = await _get_integration(tenant_id, integration_id, "shopify")
+    raw_body = await read_signed_body(request)
     from services.crypto_fields import decrypt_field as _df  # p272
     webhook_secret = _df((integration.get("credentials") or {}).get("webhook_secret", "")) or ""
     if not webhook_secret:
@@ -103,13 +113,10 @@ async def shopify_product_webhook(
     Accepts the payload and verifies HMAC so Shopify stops retrying, but does
     not yet sync stock. Will be implemented after the orders flow is stabilised.
     """
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "shopify"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="Shopify integration not found")
+    db, integration = await _get_integration(tenant_id, integration_id, "shopify")
     from services.crypto_fields import decrypt_field as _df2  # p272
     secret = _df2((integration.get("credentials") or {}).get("webhook_secret", "")) or ""
-    raw_body = await request.body()
+    raw_body = await read_signed_body(request)
     if not verify_shopify_hmac(raw_body, x_shopify_hmac_sha256 or "", secret):
         raise HTTPException(status_code=401, detail="HMAC verification failed")
 
@@ -155,16 +162,13 @@ async def whatsapp_webhook_verify(
 
     The verify_token is stored in integration.credentials.verify_token.
     """
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "whatsapp"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="WhatsApp integration not found")
+    db, integration = await _get_integration(tenant_id, integration_id, "whatsapp")
     params = dict(request.query_params)
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
-    expected = (integration.get("credentials") or {}).get("verify_token", "")
-    if mode == "subscribe" and token and token == expected:
+    expected = decrypt_field((integration.get("credentials") or {}).get("verify_token", "")) or ""
+    if mode == "subscribe" and token and hmac.compare_digest(token, expected):
         return int(challenge) if challenge and challenge.isdigit() else challenge
     raise HTTPException(status_code=403, detail="Verify token mismatch")
 
@@ -173,14 +177,10 @@ async def whatsapp_webhook_verify(
 async def whatsapp_webhook(tenant_id: str, integration_id: str, request: Request):
     """Receive incoming WhatsApp messages → create lead."""
     from services.ecom.whatsapp_service import parse_incoming_message
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "whatsapp"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="WhatsApp integration not found")
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"ok": True, "skipped": "invalid_json"}
+    db, integration = await _get_integration(tenant_id, integration_id, "whatsapp")
+    raw_body = await read_signed_body(request)
+    verify_ecom_webhook(integration, "whatsapp", raw_body, request.headers)
+    payload = decode_json_body(raw_body)
     parsed = parse_incoming_message(payload)
     if not parsed:
         return {"ok": True, "skipped": "not_a_message"}
@@ -240,13 +240,11 @@ async def whatsapp_webhook(tenant_id: str, integration_id: str, request: Request
 @router.get("/ecom/webhooks/meta/{tenant_id}/{integration_id}")
 async def meta_webhook_verify(tenant_id: str, integration_id: str, request: Request):
     """Meta GET handshake for FB/IG lead webhooks."""
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": {"$in": ["facebook", "instagram"]}})
-    if not integration:
-        raise HTTPException(status_code=404, detail="Meta integration not found")
+    db, integration = await _get_integration(tenant_id, integration_id, ["facebook", "instagram"])
     params = dict(request.query_params)
-    expected = (integration.get("credentials") or {}).get("verify_token", "")
-    if params.get("hub.mode") == "subscribe" and params.get("hub.verify_token") == expected:
+    expected = decrypt_field((integration.get("credentials") or {}).get("verify_token", "")) or ""
+    supplied = params.get("hub.verify_token") or ""
+    if params.get("hub.mode") == "subscribe" and supplied and expected and hmac.compare_digest(supplied, expected):
         ch = params.get("hub.challenge", "")
         return int(ch) if ch.isdigit() else ch
     raise HTTPException(status_code=403, detail="Verify token mismatch")
@@ -256,14 +254,10 @@ async def meta_webhook_verify(tenant_id: str, integration_id: str, request: Requ
 async def meta_lead_webhook(tenant_id: str, integration_id: str, request: Request):
     """Receive FB/Instagram lead-gen submissions → create lead."""
     from services.ecom.whatsapp_service import parse_meta_lead
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": {"$in": ["facebook", "instagram"]}})
-    if not integration:
-        raise HTTPException(status_code=404, detail="Meta integration not found")
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"ok": True, "skipped": "invalid_json"}
+    db, integration = await _get_integration(tenant_id, integration_id, ["facebook", "instagram"])
+    raw_body = await read_signed_body(request)
+    verify_ecom_webhook(integration, "meta", raw_body, request.headers)
+    payload = decode_json_body(raw_body)
     parsed = parse_meta_lead(payload)
     if not parsed:
         return {"ok": True, "skipped": "not_a_lead"}
@@ -278,11 +272,10 @@ async def meta_lead_webhook(tenant_id: str, integration_id: str, request: Reques
 @router.post("/ecom/webhooks/telegram/{tenant_id}/{integration_id}")
 async def telegram_webhook(tenant_id: str, integration_id: str, request: Request):
     from services.ecom.messaging_services import parse_telegram_update
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "telegram"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="Telegram integration not found")
-    payload = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    db, integration = await _get_integration(tenant_id, integration_id, "telegram")
+    raw_body = await read_signed_body(request)
+    verify_ecom_webhook(integration, "telegram", raw_body, request.headers)
+    payload = decode_json_body(raw_body)
     parsed = parse_telegram_update(payload)
     if not parsed:
         return {"ok": True, "skipped": "not_a_message"}
@@ -293,11 +286,10 @@ async def telegram_webhook(tenant_id: str, integration_id: str, request: Request
 @router.post("/ecom/webhooks/viber/{tenant_id}/{integration_id}")
 async def viber_webhook(tenant_id: str, integration_id: str, request: Request):
     from services.ecom.messaging_services import parse_viber_event
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "viber"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="Viber integration not found")
-    payload = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    db, integration = await _get_integration(tenant_id, integration_id, "viber")
+    raw_body = await read_signed_body(request)
+    verify_ecom_webhook(integration, "viber", raw_body, request.headers)
+    payload = decode_json_body(raw_body)
     parsed = parse_viber_event(payload)
     if not parsed:
         return {"ok": True, "skipped": "not_an_event"}
@@ -311,14 +303,10 @@ async def tiktok_webhook(tenant_id: str, integration_id: str, request: Request):
     import uuid as _uuid
     from datetime import datetime as _dt, timezone as _tz
     from services.ecom.messaging_services import parse_tiktok_order
-    db = _tenant_db(tenant_id)
-    integration = await db.ecom_integrations.find_one({"id": integration_id, "channel": "tiktok"})
-    if not integration:
-        raise HTTPException(status_code=404, detail="TikTok integration not found")
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"ok": True, "skipped": "invalid_json"}
+    db, integration = await _get_integration(tenant_id, integration_id, "tiktok")
+    raw_body = await read_signed_body(request)
+    verify_ecom_webhook(integration, "tiktok", raw_body, request.headers)
+    payload = decode_json_body(raw_body)
     parsed = parse_tiktok_order(payload, integration_id)
     if not parsed:
         return {"ok": True, "skipped": "not_an_order"}
@@ -337,7 +325,7 @@ async def tiktok_webhook(tenant_id: str, integration_id: str, request: Request):
         "external_id": parsed["external_id"],
         "integration_id": integration_id,
         "status": "new",
-        "payment_status": "paid",
+        "payment_status": parsed.get("payment_status") or "unpaid",
         "customer": {
             "name": parsed["customer_name"], "phone": parsed["customer_phone"],
             "address": parsed["address"], "city": parsed["city"], "wilaya": parsed["wilaya"],

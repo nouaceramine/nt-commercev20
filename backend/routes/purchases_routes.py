@@ -274,7 +274,6 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             mime = "image/webp"
 
         from services.ai_service import AIService
-        import google.generativeai as genai
         if not AIService.is_configured():
             raise HTTPException(status_code=503, detail="ميزة المسح غير مفعّلة — مفتاح Gemini غير مهيأ")
 
@@ -287,8 +286,11 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             'Unreadable values become empty string or 0. Plain numbers only, no currency symbols.'
         )
         try:
-            model = genai.GenerativeModel(AIService.MODEL)
-            resp = await model.generate_content_async([prompt, {"mime_type": mime, "data": img_bytes}])
+            from google.genai import types
+            resp = await AIService.generate_content([
+                prompt,
+                types.Part.from_bytes(data=img_bytes, mime_type=mime),
+            ])
             text = (resp.text or "").strip()
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"فشل تحليل الصورة: {str(e)[:120]}")

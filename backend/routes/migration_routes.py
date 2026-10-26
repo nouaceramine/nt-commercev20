@@ -32,6 +32,9 @@ router = APIRouter(prefix="/migration", tags=["legacy-migration"])
 UPLOAD_ROOT = os.environ.get("LEGACY_UPLOAD_ROOT", "/legacy_uploads")
 ALLOWED_EXT = (".dblx", ".mdb", ".accdb", ".zip")  # p351: .zip = canonical bundle (agent --dump)
 MAX_BYTES = 300 * 1024 * 1024  # 300MB hard cap per legacy DB file
+MAX_ZIP_MEMBERS = 256
+MAX_ZIP_MEMBER_BYTES = 150 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 600 * 1024 * 1024
 JOBS_COLL = "migration_jobs"
 
 
@@ -82,6 +85,54 @@ def _run_job(job_id: str, tenant_id: str, dblx_path: str, work_dir: str,
             {"id": job_id},
             {"$set": {"status": "failed", "error": str(e)[:500],
                       "finished_at": _now(), "step_label": "فشل الاستيراد"}})
+
+
+def _extract_bundle_zip(dblx_path: str, bundle_dir: str) -> None:
+    """Extract only flat canonical JSON with compressed/uncompressed limits."""
+    import shutil
+    import zipfile
+    try:
+        with zipfile.ZipFile(dblx_path) as zf:
+            infos = zf.infolist()
+            if len(infos) > MAX_ZIP_MEMBERS:
+                raise HTTPException(status_code=413, detail="حزمة ZIP تحتوي ملفات أكثر من الحد المسموح")
+            extracted_total = 0
+            seen_names = set()
+            for info in infos:
+                member = info.filename
+                base = os.path.basename(member)
+                if member != base or not base.endswith(".json") or ".." in member or base in seen_names:
+                    continue
+                if info.flag_bits & 0x1:
+                    raise HTTPException(status_code=400, detail="حزم ZIP المشفرة غير مدعومة")
+                if info.file_size > MAX_ZIP_MEMBER_BYTES or extracted_total + info.file_size > MAX_ZIP_TOTAL_BYTES:
+                    raise HTTPException(status_code=413, detail="محتوى ZIP بعد فك الضغط يتجاوز الحد المسموح")
+                seen_names.add(base)
+                written = 0
+                with zf.open(info) as src_fh, open(os.path.join(bundle_dir, base), "wb") as dst_fh:
+                    while True:
+                        chunk = src_fh.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        extracted_total += len(chunk)
+                        if written > MAX_ZIP_MEMBER_BYTES or extracted_total > MAX_ZIP_TOTAL_BYTES:
+                            raise HTTPException(status_code=413, detail="محتوى ZIP بعد فك الضغط يتجاوز الحد المسموح")
+                        dst_fh.write(chunk)
+    except HTTPException:
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+        try:
+            os.remove(dblx_path)
+        except OSError:
+            pass
+        raise
+    except zipfile.BadZipFile:
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+        try:
+            os.remove(dblx_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="ملف ZIP تالف أو غير قابل للقراءة")
 
 
 @router.post("/legacy/jobs")
@@ -140,27 +191,17 @@ async def create_legacy_import_job(
     bundle_dir = None
     if fname.endswith(".zip"):
         # p351: canonical bundle (sync agent --dump) — {Table}.json files
-        import zipfile
         bundle_dir = os.path.join(job_dir, "bundle")
         os.makedirs(bundle_dir, exist_ok=True)
-        try:
-            with zipfile.ZipFile(dblx_path) as zf:
-                for member in zf.namelist():
-                    # zip-slip guard: flat names only
-                    base = os.path.basename(member)
-                    if not base.endswith(".json") or ".." in member:
-                        continue
-                    with zf.open(member) as src_fh, \
-                            open(os.path.join(bundle_dir, base), "wb") as dst_fh:
-                        dst_fh.write(src_fh.read())
-        except zipfile.BadZipFile:
+        _extract_bundle_zip(dblx_path, bundle_dir)
+        ok, missing = bdv_service.validate_bundle_dir(bundle_dir)
+        if not ok:
+            import shutil
+            shutil.rmtree(bundle_dir, ignore_errors=True)
             try:
                 os.remove(dblx_path)
             except OSError:
                 pass
-            raise HTTPException(status_code=400, detail="ملف ZIP تالف أو غير قابل للقراءة")
-        ok, missing = bdv_service.validate_bundle_dir(bundle_dir)
-        if not ok:
             raise HTTPException(
                 status_code=400,
                 detail="حزمة غير صالحة — أنتجها بأمر --dump من وكيل المزامنة "

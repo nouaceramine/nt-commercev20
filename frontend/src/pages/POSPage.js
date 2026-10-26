@@ -5,6 +5,7 @@
  * Following Martin Fowler's Refactoring patterns
  */
 import { errText } from '../lib/errorText';
+import { escapeHtml } from '../lib/escape';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { nextTier, tierLabel } from '../lib/priceTiers';
 import apiClient from '../lib/apiClient';
@@ -558,19 +559,19 @@ export default function POSPage() {
       const w = window.open('', '_blank', 'width=320,height=500');
       if (!w) return;
       const rows = (order.items || []).map(it =>
-        '<tr><td style="padding:4px;font-weight:bold;vertical-align:top">' + it.quantity + 'x</td><td style="padding:4px">' +
-        it.product_name +
-        (it.variant ? ' (' + [it.variant.color, it.variant.size].filter(Boolean).join('/') + ')' : '') +
-        (it.note ? '<br/><small>-- ' + it.note + '</small>' : '') + '</td></tr>'
+        '<tr><td style="padding:4px;font-weight:bold;vertical-align:top">' + escapeHtml(it.quantity) + 'x</td><td style="padding:4px">' +
+        escapeHtml(it.product_name) +
+        (it.variant ? ' (' + [it.variant.color, it.variant.size].filter(Boolean).map(escapeHtml).join('/') + ')' : '') +
+        (it.note ? '<br/><small>-- ' + escapeHtml(it.note) + '</small>' : '') + '</td></tr>'
       ).join('');
       w.document.write(
-        '<html dir="rtl"><head><meta charset="utf-8"><title>' + order.code + '</title></head>' +
+        '<html dir="rtl"><head><meta charset="utf-8"><title>' + escapeHtml(order.code) + '</title></head>' +
         '<body style="font-family:monospace;font-size:14px">' +
         '<h2 style="text-align:center;margin:4px">' + (language === 'ar' ? 'طلب مطبخ' : 'Ticket cuisine') + '</h2>' +
-        '<div style="text-align:center">' + order.code + ' — ' + new Date().toLocaleTimeString() + '</div>' +
-        '<div style="text-align:center;font-size:20px;font-weight:bold">' + (order.table_name || (language === 'ar' ? 'سفري' : 'A emporter')) + '</div>' +
+        '<div style="text-align:center">' + escapeHtml(order.code) + ' — ' + new Date().toLocaleTimeString() + '</div>' +
+        '<div style="text-align:center;font-size:20px;font-weight:bold">' + escapeHtml(order.table_name || (language === 'ar' ? 'سفري' : 'A emporter')) + '</div>' +
         '<hr/><table style="width:100%">' + rows + '</table>' +
-        (order.notes ? '<hr/><div>' + order.notes + '</div>' : '') +
+        (order.notes ? '<hr/><div>' + escapeHtml(order.notes) + '</div>' : '') +
         '<scr' + 'ipt>window.print();setTimeout(function(){window.close();},400);</scr' + 'ipt></body></html>'
       );
       w.document.close();

@@ -34,15 +34,15 @@ DEFAULT_SETTINGS = {
     "id": "global",
     "enabled": False,
     "sender_name": "",
-    "provider": {"type": "mock"},
+    "provider": {"type": "unconfigured"},
     "per_status": {k: {"enabled": False, "template": v} for k, v in DEFAULT_TEMPLATES.items()},
 }
 
 
-async def get_settings(db) -> dict:
+async def get_settings(db, *, for_send: bool = False) -> dict:
     doc = await db.ecom_sms_settings.find_one({"id": "global"}, {"_id": 0})
     merged = {"id": "global", "enabled": DEFAULT_SETTINGS["enabled"],
-              "sender_name": "", "provider": {"type": "mock"}, "per_status": {}}
+              "sender_name": "", "provider": {"type": "unconfigured"}, "per_status": {}}
     for st, tpl in DEFAULT_TEMPLATES.items():
         merged["per_status"][st] = {"enabled": False, "template": tpl}
     if doc:
@@ -56,6 +56,19 @@ async def get_settings(db) -> dict:
                     "enabled": bool(cfg.get("enabled")),
                     "template": cfg.get("template") or DEFAULT_TEMPLATES.get(st, ""),
                 }
+    provider = dict(merged.get("provider") or {})
+    legacy_key = provider.pop("api_key", None)
+    if legacy_key and not provider.get("token"):
+        provider["token"] = legacy_key
+    if for_send:
+        from services.crypto_fields import decrypt_field
+        provider["token"] = decrypt_field(provider.get("token") or "") or ""
+    else:
+        from services.crypto_fields import decrypt_field
+        plain_token = decrypt_field(provider.get("token") or "") or ""
+        provider["token"] = ("••••" + plain_token[-4:]) if plain_token else ""
+        provider.pop("headers", None)
+    merged["provider"] = provider
     return merged
 
 
@@ -79,7 +92,7 @@ def render_template(template: str, order: dict, store_name: str = "") -> str:
 
 async def maybe_send_status_sms(db, order: dict, new_status: str, *, tenant_id: str = "") -> dict | None:
     """Send the per-status SMS if enabled; returns the log doc or None when not applicable."""
-    settings = await get_settings(db)
+    settings = await get_settings(db, for_send=True)
     if not settings["enabled"]:
         return None
     st_cfg = (settings.get("per_status") or {}).get(new_status)
@@ -92,7 +105,7 @@ async def maybe_send_status_sms(db, order: dict, new_status: str, *, tenant_id: 
     order_id = order.get("id")
     # dedup: a previous non-failed send for this order+status → skip
     existing = await db[COLLECTION].find_one(
-        {"order_id": order_id, "status": new_status, "result": {"$in": ["sent", "mocked"]}},
+        {"order_id": order_id, "status": new_status, "result": "sent"},
         {"_id": 0, "id": 1})
     if existing:
         return None
@@ -135,7 +148,7 @@ async def maybe_send_status_sms(db, order: dict, new_status: str, *, tenant_id: 
     provider = get_sms_provider(settings.get("provider"))
     res = await provider.send(phone, message)
     if res.get("success"):
-        log_doc.update({"result": "mocked" if res.get("simulated") else "sent",
+        log_doc.update({"result": "sent",
                         "provider": res.get("provider"), "message_id": res.get("message_id"),
                         "error": None})
     else:

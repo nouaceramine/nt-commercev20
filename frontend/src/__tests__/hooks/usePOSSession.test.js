@@ -2,7 +2,7 @@
  * usePOSSession Hook Tests
  * Phase 4c: Unit Tests for Session Management Hook
  */
-import { renderHook, act } from '@testing-library/react-hooks';
+import { renderHook, act } from '@testing-library/react';
 import { usePOSSession } from '../../hooks/usePOSSession';
 import { createMockSession, createMockToast, createMockApiClient } from '../testUtils';
 
@@ -31,10 +31,8 @@ describe('usePOSSession', () => {
       const session = createMockSession();
       mockApi.get.mockResolvedValue({ data: session });
 
-      const { result, waitForNextUpdate } = renderHook(() => usePOSSession(defaultProps));
-      
-      act(() => { result.current.checkOpenSession(); });
-      await waitForNextUpdate();
+      const { result } = renderHook(() => usePOSSession(defaultProps));
+      await act(async () => { await result.current.checkOpenSession(); });
 
       expect(result.current.hasOpenSession).toBe(true);
       expect(result.current.currentSession).toEqual(session);
@@ -44,10 +42,8 @@ describe('usePOSSession', () => {
     it('should handle no open session', async () => {
       mockApi.get.mockRejectedValue(new Error('No session'));
 
-      const { result, waitForNextUpdate } = renderHook(() => usePOSSession(defaultProps));
-      
-      act(() => { result.current.checkOpenSession(); });
-      await waitForNextUpdate();
+      const { result } = renderHook(() => usePOSSession(defaultProps));
+      await act(async () => { await result.current.checkOpenSession(); });
 
       expect(result.current.hasOpenSession).toBe(false);
       expect(result.current.currentSession).toBeNull();
@@ -59,10 +55,8 @@ describe('usePOSSession', () => {
       const session = createMockSession({ opened_at: yesterday.toISOString() });
       mockApi.get.mockResolvedValue({ data: session });
 
-      const { result, waitForNextUpdate } = renderHook(() => usePOSSession(defaultProps));
-      
-      act(() => { result.current.checkOpenSession(); });
-      await waitForNextUpdate();
+      const { result } = renderHook(() => usePOSSession(defaultProps));
+      await act(async () => { await result.current.checkOpenSession(); });
 
       expect(result.current.isStaleSession).toBe(true);
     });

@@ -3,10 +3,10 @@ WhatsApp Notification Service
 إشعارات تلقائية عبر WhatsApp للطلبات
 """
 import requests
+import asyncio
 import os
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,11 @@ class WhatsAppService:
                 "api_key": self.api_key
             }
 
-            response = requests.post(
+            response = await asyncio.to_thread(
+                requests.post,
                 self.api_url,
                 json=payload,
-                timeout=15
+                timeout=15,
             )
 
             result = {

@@ -3,7 +3,7 @@
  * Phase 4b: Unit Tests for Shopping Cart Hook
  * Following Arrange-Act-Assert pattern
  */
-import { renderHook, act } from '@testing-library/react-hooks';
+import { renderHook, act } from '@testing-library/react';
 import { usePOSCart } from '../../hooks/usePOSCart';
 import { createMockProduct, createMockToast } from '../testUtils';
 

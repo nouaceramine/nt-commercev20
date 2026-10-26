@@ -2,7 +2,6 @@
  * Test Utilities - Shared helpers for all tests
  * Phase 4: Testing Infrastructure
  */
-import { renderHook } from '@testing-library/react-hooks';
 
 /**
  * Creates a mock product for cart testing

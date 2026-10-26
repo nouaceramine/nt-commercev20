@@ -5,8 +5,11 @@ import asyncio
 import json
 import logging
 import os
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import jwt
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 
 log = logging.getLogger("events_sse")
@@ -20,16 +23,19 @@ def create_events_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.get("/stream")
     async def stream(token: str = Query(...)):
-        # Manual token check (EventSource has no headers)
+        # EventSource cannot send Authorization headers; still run the full auth dependency.
         try:
-            from utils.auth import SECRET_KEY, ALGORITHM
-            import jwt
+            from utils.auth import SECRET_KEY, ALGORITHM, get_current_user as authenticate
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        except Exception:
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
             raise HTTPException(status_code=401, detail="Invalid token")
-        tenant_id = payload.get("tenant_id") or "platform"
-        if not payload.get("sub"):
+        if not payload.get("sub") or payload.get("type") not in (None, "tenant", "super_admin", "admin", "cashier", "agent"):
             raise HTTPException(status_code=401, detail="Invalid token")
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        user = await authenticate(credentials)
+        tenant_id = user.get("tenant_id") or "platform"
+        expires_at = float(payload["exp"])
+        can_receive_platform = user.get("role") == "super_admin" or user.get("user_type") == "super_admin"
 
         async def gen():
             url = os.environ.get("REDIS_URL")
@@ -42,9 +48,15 @@ def create_events_routes(db, get_current_user, get_tenant_admin) -> dict:
                 await pubsub.subscribe(FEED_CHANNEL)
                 yield f"data: {json.dumps({'type': 'connected'})}\n\n"
                 while True:
+                    if time.time() >= expires_at:
+                        break
                     try:
                         msg = await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=True), timeout=HEARTBEAT_S)
                     except asyncio.TimeoutError:
+                        try:
+                            await authenticate(credentials)  # revoked users/tenants are disconnected too
+                        except HTTPException:
+                            break
                         yield ": hb\n\n"  # heartbeat keeps proxies alive
                         continue
                     if not msg or msg.get("type") != "message":
@@ -53,8 +65,8 @@ def create_events_routes(db, get_current_user, get_tenant_admin) -> dict:
                         data = json.loads(msg["data"])
                     except Exception:
                         continue
-                    # tenant isolation: only same-tenant or platform-wide events
-                    if data.get("tenant_id") not in (tenant_id, "platform"):
+                    event_tenant = data.get("tenant_id")
+                    if event_tenant != tenant_id and not (event_tenant == "platform" and can_receive_platform):
                         continue
                     yield f"data: {json.dumps(data, default=str)}\n\n"
             except asyncio.CancelledError:

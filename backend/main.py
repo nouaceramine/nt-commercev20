@@ -12,6 +12,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextvars import ContextVar
 import os
 import logging
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Literal
@@ -45,12 +47,7 @@ try:
 except ImportError:
     SENDGRID_AVAILABLE = False
 
-# Import Stripe via emergentintegrations
-try:
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
-    STRIPE_AVAILABLE = True
-except ImportError:
-    STRIPE_AVAILABLE = False
+# Stripe is implemented with the official SDK in routes.stripe_routes.
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -72,6 +69,7 @@ from config.database import (
 
 # JWT Settings
 from utils.jwt_config import SECRET_KEY, ALGORITHM
+from utils.auth import ensure_active_account
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 # Currency
@@ -297,6 +295,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             tenant_db = get_tenant_db(tenant_id)
             user = await tenant_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
+            if not tenant:
+                raise HTTPException(status_code=401, detail="Tenant not found")
+            ensure_active_account({"id": tenant_id}, tenant)
 
             if user is None:
                 # p293 security: البديل لرموز قديمة sub==tenant_id فقط — كان أي sub
@@ -331,7 +332,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     user["features"] = features_map
                     user["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
                 user["company_name"] = tenant.get("company_name", "")
-            return user
+            return ensure_active_account(user, tenant)
 
         if user_type == "agent" or role == "agent":
             agent = await main_db.saas_agents.find_one(
@@ -341,7 +342,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 raise HTTPException(status_code=401, detail="Agent not found")
             agent["user_type"] = "agent"
             agent["role"] = "agent"
-            return agent
+            return ensure_active_account(agent)
 
         user = await main_db.users.find_one(
             {"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0}
@@ -353,9 +354,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         user["user_type"] = user_type or "admin"
+        tenant = None
         if tenant_id:
+            tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
+            if not tenant:
+                raise HTTPException(status_code=401, detail="Tenant not found")
             user["tenant_id"] = tenant_id
-        return user
+        return ensure_active_account(user, tenant)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
@@ -375,14 +380,20 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             tenant_db = main_db
             tenant_id = None
         user = await tenant_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
-        if user is None and tenant_id:
+        tenant = None
+        if tenant_id:
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
-            if tenant:
+            if not tenant:
+                raise HTTPException(status_code=401, detail="Tenant not found")
+            ensure_active_account({"id": tenant_id}, tenant)
+        if user is None and tenant_id:
+            if tenant and user_id == tenant_id:
                 user = {"id": tenant["id"], "email": tenant["email"], "name": tenant["name"], "role": "admin"}
         if user is None:
             user = await main_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
+        ensure_active_account(user, tenant)
         return {"user": user, "db": tenant_db, "tenant_id": tenant_id}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -399,6 +410,7 @@ async def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict
     return current_user
 
 async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    ensure_active_account(current_user)
     # Platform-level admins (main_db users) act on the main DB
     if not current_user.get("tenant_id") and current_user.get("role") not in ["admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
@@ -407,6 +419,7 @@ async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> di
     return current_user
 
 async def require_tenant(current_user: dict = Depends(get_current_user)) -> dict:
+    ensure_active_account(current_user)
     # Platform-level users (admin/cashier/agent in main_db) operate on the main DB
     if not current_user.get("tenant_id") and current_user.get("user_type") not in ("super_admin", "admin", "cashier", "agent"):
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
@@ -461,6 +474,7 @@ async def health_check():
 @app.on_event("startup")
 async def startup_event():
     logger.info("NT Commerce 16.0 starting up...")
+    from core.db_naming import drop_db_if_tenant_deleted
     try:
         await init_cash_boxes()
     except Exception as e:
@@ -487,6 +501,7 @@ async def startup_event():
                 _idx_ok += 1
             except Exception as _ie:
                 logger.warning("Enhanced indexes on %s: %s", getattr(_d, "name", "?"), _ie)
+            await drop_db_if_tenant_deleted(_main_db, client, _d.name)
         logger.info("Enhanced indexes created on %d/%d databases", _idx_ok, len(_idx_dbs))
     except Exception as e:
         logger.warning("Enhanced indexes: %s", e)
@@ -514,6 +529,7 @@ async def startup_event():
                 [("reference_id", 1), ("source_tag", 1)],
                 unique=True, sparse=True, name="auto_entry_unique",
             )
+            await drop_db_if_tenant_deleted(_main_db, client, _d.name)
         logger.info("Barcode unique partial indexes ensured on %d databases", len(_dbs))
     except Exception as e:
         logger.warning("Barcode index ensure: %s", e)
@@ -580,6 +596,7 @@ async def startup_event():
                         name="p260_invoice_number")
                 except Exception:
                     pass
+            await drop_db_if_tenant_deleted(_main_db2, client, _d.name)
         logger.info("p257 unique code indexes ensured on %d tenant databases", len(_dbs2))
     except Exception as e:
         logger.warning("p257 index ensure: %s", e)
@@ -981,24 +998,7 @@ except Exception as e:
 
 # recharge_fallback removed: it shadowed the real auto-registered GET /recharge list
 
-try:
-    from fastapi import APIRouter
-    gateways_router = APIRouter(prefix="/payments/gateways", tags=["Payments"])
-
-    @gateways_router.get("")
-    async def list_gateways():
-        return {
-            "gateways": [
-                {"id": "cod", "name": "Cash on Delivery", "name_ar": "الدفع عند الاستلام", "enabled": True},
-                {"id": "ccp", "name": "CCP", "name_ar": "بريد الجزائر", "enabled": True},
-                {"id": "bank", "name": "Bank Transfer", "name_ar": "حوالة بنكية", "enabled": True},
-            ]
-        }
-
-    app.include_router(gateways_router, prefix="/api", tags=["Payments"])
-    print("[INIT] Payment gateways registered")
-except Exception as e:
-    print(f"[INIT] Payment gateways error: {e}")
+# Payment gateways are owned by routes.shipping_loyalty_routes (authenticated).
 
 print("[INIT] All fixes applied successfully")
 
@@ -1217,7 +1217,6 @@ _AUTO_REG_MODULES = [
     'routes.tax_routes',
     'routes.whatsapp_routes',
     'routes.performance_routes',
-    'routes.ecom_routes',
     'routes.ecom.analytics_routes',
     'routes.ecom.integrations_routes',
     'routes.ecom.leads_routes',

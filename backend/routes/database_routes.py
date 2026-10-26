@@ -3,18 +3,17 @@ Database Import/Export Routes
 Handles database backup, restore, and data import from external sources
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional, List
 from datetime import datetime, timezone
 from pydantic import BaseModel
 import os
 import json
 import gzip
+import io
 import shutil
 import uuid
 import subprocess
-import asyncio
 import logging
 from pathlib import Path
 
@@ -26,10 +25,11 @@ router = APIRouter(prefix="/database", tags=["Database Management"])
 security = HTTPBearer()
 
 # Import from main server
-from config.database import main_db, client, get_tenant_db
+from config.database import main_db, get_tenant_db
 
 # JWT Settings
-SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'nt_commerce_super_secure_jwt_secret_key_2024_v3_hardened')
+from utils.jwt_config import SECRET_KEY
+from utils.auth import ensure_active_account
 ALGORITHM = "HS256"
 import jwt
 
@@ -41,6 +41,8 @@ EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 # Uploads directory for imports
 IMPORTS_DIR = _BASE_DIR / "imports"
 IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
+MAX_IMPORT_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_IMPORT_JSON_BYTES = 512 * 1024 * 1024
 
 # ============ PYDANTIC MODELS ============
 
@@ -74,9 +76,9 @@ async def verify_super_admin(credentials: HTTPAuthorizationCredentials = Depends
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        if user.get("role") not in ["super_admin", "saas_admin"]:
+            raise HTTPException(status_code=403, detail="Super admin access required")
+        return ensure_active_account(user)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
@@ -157,7 +159,7 @@ async def import_to_tenant(
     - clear_existing: If True, clears existing data before import
     """
     # Verify tenant exists
-    tenant = await main_db.tenants.find_one({"id": tenant_id})
+    tenant = await main_db.saas_tenants.find_one({"id": tenant_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
@@ -165,12 +167,32 @@ async def import_to_tenant(
     temp_path = IMPORTS_DIR / f"temp_{uuid.uuid4()}.json"
     
     try:
-        # Read and decompress if needed
-        content = await file.read()
-        
+        # Read and decompress with hard compressed/uncompressed caps.
+        chunks = []
+        size = 0
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_IMPORT_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="Import file exceeds the upload limit")
+            chunks.append(chunk)
+        content = b"".join(chunks)
         if file.filename.endswith(".gz"):
-            content = gzip.decompress(content)
-        
+            raw_chunks = []
+            raw_size = 0
+            with gzip.GzipFile(fileobj=io.BytesIO(content), mode="rb") as gz:
+                while True:
+                    chunk = gz.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    raw_size += len(chunk)
+                    if raw_size > MAX_IMPORT_JSON_BYTES:
+                        raise HTTPException(status_code=413, detail="Decompressed import exceeds the safety limit")
+                    raw_chunks.append(chunk)
+            content = b"".join(raw_chunks)
+
         # Parse JSON
         try:
             data = json.loads(content.decode('utf-8'))

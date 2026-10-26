@@ -16,13 +16,15 @@ import uuid
 import logging
 import traceback
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from config.database import main_db
+from middleware.rate_limit import rate_limit
+from utils.jwt_config import SECRET_KEY
 from routes.saas.helpers import get_super_admin
 
 logger = logging.getLogger(__name__)
@@ -32,14 +34,14 @@ router = APIRouter(prefix="/system-logs", tags=["system-logs"])
 # ---- Models ------------------------------------------------------------------
 
 class LogEntryIn(BaseModel):
-    level: str = Field(default="error", description="error|warn|info")
-    source: str = Field(default="frontend", description="frontend|backend|api")
-    type: Optional[str] = Field(default=None, description="js_error|unhandled_rejection|api_error|console_error|exception")
-    message: str
-    stack: Optional[str] = None
-    url: Optional[str] = None
+    level: Literal["error", "warn", "info"] = Field(default="error")
+    source: Literal["frontend", "backend", "api"] = Field(default="frontend")
+    type: Optional[str] = Field(default=None, max_length=64)
+    message: str = Field(min_length=1, max_length=4000)
+    stack: Optional[str] = Field(default=None, max_length=8000)
+    url: Optional[str] = Field(default=None, max_length=2048)
     status_code: Optional[int] = None
-    user_email: Optional[str] = None
+    user_email: Optional[str] = Field(default=None, max_length=320)
     metadata: Optional[dict] = None
 
 
@@ -86,10 +88,13 @@ async def log_backend_exception(exc: Exception, request: Optional[Request] = Non
 # ---- Routes ------------------------------------------------------------------
 
 @router.post("")
+@rate_limit("30/minute")
 async def ingest_log(entry: LogEntryIn, request: Request) -> dict:
     """Public ingest endpoint. Anyone (incl. unauth visitors) can post an error
-    so we capture pre-login crashes too. Rate-limited by reverse proxy."""
+    so we capture pre-login crashes too. SlowAPI limit: 30/minute/client."""
     data = entry.model_dump()
+    if len(json.dumps(data.get("metadata") or {}, ensure_ascii=False)) > 16384:
+        raise HTTPException(status_code=413, detail="metadata too large")
     # Pull user email from JWT cookie/header if present (best-effort, no hard requirement)
     try:
         auth = request.headers.get("authorization", "")
@@ -97,7 +102,7 @@ async def ingest_log(entry: LogEntryIn, request: Request) -> dict:
             import jwt
             payload = jwt.decode(
                 auth[7:],
-                os.environ.get("JWT_SECRET_KEY", "nt_commerce_super_secure_jwt_secret_key_2024_v3_hardened"),
+                SECRET_KEY,
                 algorithms=["HS256"],
                 options={"verify_exp": False},
             )

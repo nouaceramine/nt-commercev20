@@ -69,7 +69,7 @@ export function buildEcomOrderInvoice({ storeName, order }) {
       <td class="num">${i + 1}</td>
       <td>${escapeHtml(it.name || '—')}</td>
       <td class="sku">${escapeHtml(it.sku || '—')}</td>
-      <td class="num">${it.qty || 0}</td>
+      <td class="num">${escapeHtml(it.qty || 0)}</td>
       <td class="num">${_fmtAmount(it.price)} دج</td>
       <td class="num"><strong>${_fmtAmount(it.total)} دج</strong></td>
     </tr>

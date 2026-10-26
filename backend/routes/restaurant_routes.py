@@ -810,10 +810,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = []
         lines.append("البند,القيمة")
@@ -1010,10 +1008,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = []
         lines.append("الطاولة,المقاعد,الطلبات,طلبات/يوم,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل")
@@ -1084,10 +1080,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["النادل,الطلبات,الملغاة,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل"]
         for w in (d.get("waiters") or []):
@@ -1472,10 +1466,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الطاولة,المقاعد,الحجوزات,حضروا,لم يحضروا,أُلغيت,الضيوف الحاضرون,إشغال المقاعد %"]
         for a in rows:
@@ -1589,10 +1581,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["اليوم,الحجوزات,حضروا,أُلغيت,لم يحضروا,نسبة التغيّب %"]
         tn = ts = tc = tx = 0
@@ -1756,10 +1746,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = []
         lines.append("البند,القيمة")
@@ -1978,10 +1966,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = []
         lines.append("البند,القيمة")
@@ -2075,10 +2061,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = []
         lines.append("البند,القيمة")
@@ -2295,10 +2279,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         def _dt(v):
             return v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
@@ -2509,10 +2491,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الإضافة,مرات الطلب,إجمالي الزيادة,أصناف مرتبطة"]
         tot = 0.0
@@ -2572,10 +2552,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الهاتف,الطلبات,إجمالي المنفق,آخر زيارة,أيام الخمول"]
         for r in rows:
@@ -2628,10 +2606,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         def _bucket(n):
             if n <= 1:
@@ -2715,10 +2691,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الهاتف,الطلبات,إجمالي المنفق,آخر زيارة"]
         for r in rows:
@@ -2842,10 +2816,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الصنف,الكمية,الإيراد,التكلفة,الربح,الهامش %"]
         tot_r = tot_c = 0.0
@@ -2882,10 +2854,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         rows = []
         for t in tables:
@@ -2947,10 +2917,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الطاولة,الطلبات,الإيراد المحصَّل,متوسط الطلب,الملغاة"]
         for r in rows:
@@ -3000,10 +2968,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         wdnames = {1: "الأحد", 2: "الاثنين", 3: "الثلاثاء", 4: "الأربعاء",
                    5: "الخميس", 6: "الجمعة", 7: "السبت"}
@@ -3066,10 +3032,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["اليوم,الطلبات,الإيراد المحصَّل,متوسط الطلب"]
         for r in rows:
@@ -3107,10 +3071,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الساعة,الطلبات,الأصناف,متوسط التحضير (د)"]
         for r in rows:
@@ -3163,10 +3125,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الساعة,الطلبات,الإيراد المحصَّل,الملغاة"]
         for r in rows:
@@ -3184,10 +3144,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = []
         lines.append("التاريخ,الطلبات (بلا الملغاة),الإيراد المحصَّل,الخصومات")
@@ -3318,10 +3276,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["السبب,القناة,العدد,القيمة"]
         tot_n = 0; tot_v = 0.0
@@ -3368,10 +3324,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["اليوم,إجمالي الطلبات,الملغاة,قيمة الملغاة,نسبة الإلغاء %"]
         for r in rows:
@@ -3434,10 +3388,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الفئة,الكمية,الإيراد"]
         for fam, qty, revenue in rows:
@@ -3543,10 +3495,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الترتيب,الصنف,الكمية"]
         for i, t in enumerate(top, 1):
@@ -3585,10 +3535,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الترتيب,الصنف,الكمية,الإيراد"]
         for i, (qty, name, rev) in enumerate(rows, 1):
@@ -3651,10 +3599,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد,قيمة المخزون,بيع/مخزون"]
         for a in rows:
@@ -3675,10 +3621,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد"]
         for a in rows:
@@ -3812,10 +3756,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         mlbl = {"cash": "نقدًا", "card": "بطاقة", "transfer": "تحويل",
                 "debt": "آجل (دين)", "check": "شيك", "other": "أخرى"}
@@ -3870,10 +3812,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["التاريخ,رمز الطلب,الطاولة,الحالة,نوع الخصم,القيمة,المبلغ,كود الكوبون,السبب,المطبِّق"]
         for r in rows:
@@ -4072,10 +4012,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         def _yn(v):
             return "نعم" if v else "لا"
@@ -4378,10 +4316,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         def _d(ca):
             if ca is None:
@@ -4432,10 +4368,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["السائق,التوصيلات,متوسط الزمن (د),أقصر (د),أطول (د)"]
         tn = 0
@@ -4477,10 +4411,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["الزبون,الهاتف,الطلبات,المُسلَّمة,إجمالي المنفق,رسوم التوصيل"]
         for r in rows:
@@ -4629,10 +4561,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["السائق,الطلبات,المُسلَّمة,الملغاة,إيراد المُسلَّمة,رسوم التوصيل"]
         for drv, tot, dlv, cxl, rev, fee in rows:
@@ -4830,10 +4760,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         dz = timezone(timedelta(hours=1))
         lbl = {"pending": "قيد التحضير", "ready": "جاهز", "out_for_delivery": "في الطريق",
@@ -5069,10 +4997,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         plabel = {"debt": "آجل", "cash": "كاش"}
         lines = ["الاسم,المدير,الهاتف,نمط الحساب,نسبة الخصم %,الرصيد,ملاحظات"]
@@ -5100,10 +5026,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["التاريخ,الجار,الهاتف,المبلغ,ملاحظة,المُدخِل"]
         total = 0.0
@@ -5131,10 +5055,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         def _bucket(age_days):
             if age_days <= 7:
@@ -5295,10 +5217,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         def _dt(v):
             return v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")

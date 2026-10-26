@@ -3,7 +3,7 @@ Data Import/Export Routes - CSV and Excel support
 """
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
-from typing import Optional
+from typing import Literal, Optional
 import csv
 import io
 import json
@@ -86,7 +86,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
     @router.get("/export/{collection}")
     async def export_data(
         collection: str,
-        format: str = Query("csv", enum=["csv", "xlsx", "txt", "pdf", "docx"]),
+        format: Literal["csv", "xlsx", "txt", "pdf", "docx"] = "csv",
         tenant_id: Optional[str] = None,
         user: dict = Depends(get_current_user)
     ):
@@ -100,6 +100,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
         docs = await cursor.to_list(length=50000)
 
         if format == "csv":
+            from utils.csv_safe import sanitize_csv_value
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=["id"] + fields, extrasaction='ignore')
             writer.writeheader()
@@ -113,7 +114,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
                         val = val.isoformat()
                     elif isinstance(val, (dict, list)):
                         val = json.dumps(val, ensure_ascii=False)
-                    row[f] = val or ""
+                    row[f] = sanitize_csv_value(val) if isinstance(val, str) else ("" if val is None else val)
                 writer.writerow(row)
 
             output.seek(0)
@@ -125,6 +126,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
             )
 
         elif format == "xlsx":  # xlsx
+            from utils.csv_safe import sanitize_csv_value
             wb = Workbook()
             ws = wb.active
             ws.title = collection
@@ -141,7 +143,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
                         val = val.isoformat()
                     elif isinstance(val, (dict, list)):
                         val = json.dumps(val, ensure_ascii=False)
-                    row.append(val or "")
+                    row.append(sanitize_csv_value(val) if isinstance(val, str) else ("" if val is None else val))
                 ws.append(row)
 
             # Auto-width columns
@@ -160,6 +162,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
             )
 
         elif format == "txt":
+            from utils.csv_safe import sanitize_csv_value
             # Tab-separated UTF-8 text (opens cleanly in Excel/notepad)
             def _txt_row(doc):
                 vals = [str(doc.get("_id", ""))]
@@ -171,7 +174,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
                         val = val.isoformat()
                     elif isinstance(val, (dict, list)):
                         val = json.dumps(val, ensure_ascii=False)
-                    vals.append(str(val).replace("\t", " ").replace("\n", " ") if val is not None else "")
+                    vals.append(sanitize_csv_value(str(val)).replace("\t", " ").replace("\n", " ") if val is not None else "")
                 return vals
 
             lines = ["\t".join(["id"] + fields)]
@@ -276,7 +279,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
     async def import_data(
         collection: str,
         file: UploadFile = File(...),
-        mode: str = Query("append", enum=["append", "replace"]),
+        mode: Literal["append", "replace"] = "append",
         tenant_id: Optional[str] = Query(None),
         user: dict = Depends(get_current_user)
     ):
@@ -481,7 +484,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
     @router.get("/template/{collection}")
     async def download_template(
         collection: str,
-        format: str = Query("csv", enum=["csv", "xlsx"]),
+        format: Literal["csv", "xlsx"] = "csv",
         user: dict = Depends(get_current_user)
     ):
         """Download empty template for import"""

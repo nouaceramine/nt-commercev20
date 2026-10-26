@@ -72,10 +72,26 @@ async def update_sms_settings(body: StatusSmsSettingsIn, user: dict = Depends(ge
         "updated_by": user.get("id"),
     }
     if body.provider is not None:
-        ptype = (body.provider.get("type") or "mock").strip().lower()
-        if ptype not in ("mock", "http"):
+        ptype = (body.provider.get("type") or "unconfigured").strip().lower()
+        if ptype not in ("unconfigured", "http"):
             raise HTTPException(status_code=400, detail="مزوّد SMS غير مدعوم")
-        update["provider"] = body.provider
+        current = await db.ecom_sms_settings.find_one({"id": "global"}, {"_id": 0, "provider": 1}) or {}
+        old_provider = (current.get("provider") or {}) if isinstance(current.get("provider"), dict) else {}
+        provider = {k: v for k, v in body.provider.items() if k in {"type", "url", "phone_field", "message_field", "extra"}}
+        provider["type"] = ptype
+        from services.crypto_fields import encrypt_field
+        supplied_token = str(body.provider.get("token") or body.provider.get("api_key") or "").strip()
+        if supplied_token.startswith("••••"):
+            provider["token"] = old_provider.get("token") or old_provider.get("api_key") or ""
+        elif supplied_token:
+            provider["token"] = encrypt_field(supplied_token)
+        else:
+            provider["token"] = old_provider.get("token") or old_provider.get("api_key") or ""
+        update["provider"] = provider
+    if body.enabled:
+        candidate = update.get("provider") or ((await db.ecom_sms_settings.find_one({"id": "global"}, {"_id": 0, "provider": 1})) or {}).get("provider") or {}
+        if candidate.get("type") != "http" or not candidate.get("url"):
+            raise HTTPException(status_code=400, detail="لا يمكن تفعيل SMS دون بوابة HTTPS حقيقية")
     if body.per_status is not None:
         clean = {}
         for st, cfg in body.per_status.items():
@@ -100,11 +116,11 @@ async def sms_overview(user: dict = Depends(require_tenant)):
         w = await main_db.wallets.find_one({"entity_id": tenant_id}, {"_id": 0, "sms_credits": 1})
         credits = int((w or {}).get("sms_credits") or 0)
     cfg = await main_db.platform_config.find_one({"id": "global"}, {"_id": 0, "sms_credit_price": 1})
-    sent = await db.ecom_sms_logs.count_documents({"result": {"$in": ["sent", "mocked"]}})
+    sent = await db.ecom_sms_logs.count_documents({"result": "sent"})
     return {
         "enabled": settings["enabled"],
         "per_status": {k: v["enabled"] for k, v in settings["per_status"].items()},
-        "provider": (settings.get("provider") or {}).get("type", "mock"),
+        "provider": (settings.get("provider") or {}).get("type", "unconfigured"),
         "credits": credits,
         "credit_price": float((cfg or {}).get("sms_credit_price") or 8.0),
         "sent_total": sent,
@@ -149,7 +165,7 @@ async def send_test_sms(body: TestSmsIn, user: dict = Depends(get_tenant_admin))
     else:
         charged = 0
 
-    settings = await get_settings(db)
+    settings = await get_settings(db, for_send=True)
     provider = get_sms_provider(settings.get("provider"))
     message = (body.message or "").strip() or "رسالة تجريبية من نظامك — إعدادات SMS تعمل بنجاح ✅"
     res = await provider.send(phone, message)
@@ -163,7 +179,7 @@ async def send_test_sms(body: TestSmsIn, user: dict = Depends(get_tenant_admin))
         "status": "test",
         "phone": phone,
         "message": message,
-        "result": ("mocked" if res.get("simulated") else "sent") if res.get("success") else "failed",
+        "result": "sent" if res.get("success") else "failed",
         "provider": res.get("provider"),
         "error": res.get("error"),
         "credit_charged": charged,

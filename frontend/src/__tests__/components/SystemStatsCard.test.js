@@ -19,7 +19,7 @@ describe('SystemStatsCard', () => {
 
     expect(screen.getByText('150')).toBeInTheDocument();
     expect(screen.getByText('45')).toBeInTheDocument();
-    expect(screen.getByText('1,250')).toBeInTheDocument();
+    expect(screen.getByText('1250')).toBeInTheDocument();
     expect(screen.getByText('8')).toBeInTheDocument();
   });
 

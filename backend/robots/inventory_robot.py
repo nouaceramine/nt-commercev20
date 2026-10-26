@@ -22,7 +22,7 @@ def _linreg_slope_intercept(xs: list[float], ys: list[float]) -> tuple[float, fl
         return 0.0, 0.0
     sx = sum(xs); sy = sum(ys)
     sxx = sum(x * x for x in xs)
-    sxy = sum(x * y for x, y in zip(xs, ys))
+    sxy = sum(x * y for x, y in zip(xs, ys, strict=True))
     denom = (n * sxx) - (sx * sx)
     if denom == 0:
         return 0.0, sy / n

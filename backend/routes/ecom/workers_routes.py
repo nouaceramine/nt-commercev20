@@ -22,9 +22,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from config.database import db, main_db, get_tenant_db, set_tenant_context
-from utils.auth import require_tenant
+from utils.auth import require_tenant, ensure_active_account
 from utils.jwt_config import SECRET_KEY, ALGORITHM
-from .constants import ORDER_STATUS_KEYS, require_ecom_feature
+from .constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,10 @@ async def get_ecom_worker(credentials: HTTPAuthorizationCredentials = Depends(_s
         raise HTTPException(status_code=401, detail="رمز غير صالح")
     if payload.get("type") != "ecom_worker" or not payload.get("tenant_id"):
         raise HTTPException(status_code=403, detail="هذا المسار لعمال المتجر فقط")
+    tenant = await main_db.saas_tenants.find_one({"id": payload["tenant_id"]}, {"_id": 0, "password": 0})
+    if not tenant:
+        raise HTTPException(status_code=401, detail="المستأجر غير موجود")
+    ensure_active_account({"id": payload["tenant_id"]}, tenant)
     set_tenant_context(get_tenant_db(payload["tenant_id"]))
     worker = await db.ecom_workers.find_one({"id": payload.get("sub")}, {"_id": 0, "pin_hash": 0})
     if not worker:
@@ -140,6 +144,10 @@ async def worker_login(body: WorkerLogin):
     idx = await main_db.ecom_worker_index.find_one({"phone": phone}, {"_id": 0})
     if not idx:
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+    tenant = await main_db.saas_tenants.find_one({"id": idx["tenant_id"]}, {"_id": 0, "password": 0})
+    if not tenant:
+        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+    ensure_active_account({"id": idx["tenant_id"]}, tenant)
     set_tenant_context(get_tenant_db(idx["tenant_id"]))
     worker = await db.ecom_workers.find_one({"id": idx["worker_id"]})
     if not worker or not _verify_pin(pin, worker.get("pin_hash", "")):

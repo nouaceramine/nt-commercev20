@@ -2,18 +2,17 @@
 Families Permissions Routes
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Literal
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 import uuid
-import os
 import logging
+import asyncio
 import requests as http_requests
 
 from config.database import db
-from utils.auth import get_current_user as require_tenant, get_tenant_admin, get_admin_user
+from utils.auth import get_current_user as require_tenant, get_tenant_admin
 from models.schemas import (
     DEFAULT_PERMISSIONS, ROLE_DESCRIPTIONS, PERMISSION_CATEGORIES,
     ProductFamilyCreate, ProductFamilyUpdate, ProductFamilyResponse, ProductResponse
@@ -812,7 +811,13 @@ async def send_whatsapp_message_v2(message: WhatsAppMessage, user: dict = Depend
     }
 
     try:
-        response = http_requests.post(url, json=payload, headers=headers)
+        response = await asyncio.to_thread(
+            http_requests.post,
+            url,
+            json=payload,
+            headers=headers,
+            timeout=20,
+        )
 
         # Log the message
         await db.whatsapp_logs.insert_one({

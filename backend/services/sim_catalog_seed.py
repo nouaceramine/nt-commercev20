@@ -9,6 +9,7 @@ any time from /saas-admin/supplier → tab "شرائح SIM".
 from datetime import datetime, timezone
 import uuid
 import logging
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,22 @@ async def seed_sim_catalog(main_db) -> dict:
     inserted = 0
     skipped = 0
     now = datetime.now(timezone.utc).isoformat()
+
+    # Create the uniqueness guard before inserting. Several uvicorn workers start
+    # together; a check-then-insert without this guard can create duplicate rows.
+    try:
+        await main_db.platform_sim_catalog.create_index(
+            [("operator", 1), ("tier", 1)],
+            unique=True,
+            name="sim_operator_tier_unique",
+        )
+        await main_db.platform_sim_stock.create_index(
+            [("catalog_id", 1), ("status", 1)],
+            name="sim_stock_catalog_status",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("sim catalog index create failed (likely pre-existing): %s", exc)
+
     for entry in _SIM_SEED:
         exists = await main_db.platform_sim_catalog.find_one(
             {"operator": entry["operator"], "tier": entry["tier"]},
@@ -47,22 +64,12 @@ async def seed_sim_catalog(main_db) -> dict:
             "is_active": True,
             "created_at": now,
         }
-        await main_db.platform_sim_catalog.insert_one(doc)
-        inserted += 1
-
-    # Ensure index on (operator, tier) for the unique check + sorted listing
-    try:
-        await main_db.platform_sim_catalog.create_index(
-            [("operator", 1), ("tier", 1)],
-            unique=True,
-            name="sim_operator_tier_unique",
-        )
-        await main_db.platform_sim_stock.create_index(
-            [("catalog_id", 1), ("status", 1)],
-            name="sim_stock_catalog_status",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("sim catalog index create failed (likely pre-existing): %s", exc)
+        try:
+            await main_db.platform_sim_catalog.insert_one(doc)
+            inserted += 1
+        except DuplicateKeyError:
+            # Another worker won the race after our read; its row is canonical.
+            skipped += 1
 
     logger.info("SIM catalog seed: inserted=%d, skipped=%d", inserted, skipped)
     return {"inserted": inserted, "skipped": skipped}

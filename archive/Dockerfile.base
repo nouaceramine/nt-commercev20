@@ -5,7 +5,7 @@
 #   • Node 20 + Yarn for building the React frontend (served via nginx)
 #   • Redis 7 (local, on the same container — for low-latency @cached_json)
 #   • Supervisor (orchestrates: backend, nginx, redis-server)
-#   • All Python deps including `resend` (email), `emergentintegrations` (LLM)
+#   • All Python deps including `resend` (email), official provider SDKs
 #
 # Build:
 #   docker build -f Dockerfile.base -t ntcommerce/v16:latest .
@@ -38,7 +38,6 @@ WORKDIR /app
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --upgrade pip \
     && pip install -r /app/backend/requirements.txt \
-    && pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
 
 # ── Build the frontend ─────────────────────────────────────────────────────
 COPY frontend/package.json frontend/yarn.lock /app/frontend/

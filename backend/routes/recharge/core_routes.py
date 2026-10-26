@@ -137,41 +137,11 @@ def build_core_router(db, main_db, require_tenant, get_tenant_admin, RECHARGE_CO
 
         operator = operator_map[prefix]
 
-        # Find the appropriate SIM slot
-        slot = await db.sim_slots.find_one({"prefix": prefix}, {"_id": 0})
-
-        if not slot or not slot.get("phone"):
-            raise HTTPException(status_code=400, detail=f"شريحة {operator['name']} غير مفعلة")
-
-        if slot.get("balance", 0) < amount:
-            raise HTTPException(status_code=400, detail=f"رصيد شريحة {operator['name']} غير كافي")
-
-        # Log the recharge (MOCKED)
-        now = datetime.now(timezone.utc).isoformat()
-        recharge_log = {
-            "id": str(uuid.uuid4()),
-            "phone": clean_phone,
-            "amount": amount,
-            "operator": operator["name"],
-            "slot_id": slot["slot_id"],
-            "status": "success",  # MOCKED
-            "created_at": now,
-            "created_by": user.get("name", "")
-        }
-        await db.recharge_logs.insert_one(recharge_log)
-
-        # Deduct from SIM balance
-        await db.sim_slots.update_one(
-            {"slot_id": slot["slot_id"]},
-            {"$inc": {"balance": -amount}, "$set": {"last_updated": now}}
+        # No real carrier adapter is configured for this legacy endpoint.
+        # Fail closed: never log success or deduct SIM balance without a carrier response.
+        raise HTTPException(
+            status_code=501,
+            detail="التعبئة التلقائية غير مرتبطة بمزود حقيقي؛ استخدم مسار /recharges المرتبط بالجسر بعد تهيئته",
         )
-
-        return {
-            "success": True,
-            "phone": clean_phone,
-            "amount": amount,
-            "operator": operator["name"],
-            "message": f"تم شحن {amount} دج لـ {clean_phone} عبر {operator['name']}"
-        }
 
     return router

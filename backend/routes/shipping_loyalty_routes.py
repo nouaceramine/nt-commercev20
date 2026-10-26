@@ -497,7 +497,7 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
 
         return invoice_data
 
-    # ============ PAYMENT GATEWAYS (MOCKED) ============
+    # ============ PAYMENT GATEWAY CONFIGURATION ============
 
     class PaymentGatewaySettings(BaseModel):
         gateway: str  # cib, dahabia, baridimob
@@ -523,7 +523,8 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
             result.append({
                 **gateway,
                 "enabled": setting.get("enabled", False) if setting else False,
-                "configured": bool(setting.get("merchant_id")) if setting else False
+                "configured": bool(setting.get("merchant_id")) if setting else False,
+                "mode": (setting or {}).get("mode", "unavailable")
             })
 
         return result
@@ -531,12 +532,16 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     @router.put("/payments/gateways/{gateway_id}")
     async def update_payment_gateway(gateway_id: str, settings: PaymentGatewaySettings, admin: dict = Depends(get_tenant_admin)):
         """Update payment gateway settings"""
-        await db.payment_gateways.update_one(
-            {"gateway": gateway_id},
-            {"$set": settings.model_dump()},
-            upsert=True
-        )
-        return {"message": "تم تحديث إعدادات بوابة الدفع"}
+        if gateway_id not in {g["id"] for g in ALGERIAN_PAYMENT_GATEWAYS}:
+            raise HTTPException(status_code=404, detail="بوابة غير معروفة")
+        data = settings.model_dump()
+        from services.crypto_fields import encrypt_field
+        data["api_key"] = encrypt_field(data.get("api_key") or "")
+        data["enabled"] = False
+        data["mode"] = "unavailable"
+        data["status_message"] = "حُفظت الإعدادات، لكن التفعيل متوقف حتى ربط محوّل دفع حقيقي والتحقق منه"
+        await db.payment_gateways.update_one({"gateway": gateway_id}, {"$set": data}, upsert=True)
+        return {"success": False, "enabled": False, "mode": "unavailable", "message": data["status_message"]}
 
     # ============ SMS REMINDER -> routes/sms_marketing_routes.py ============
 

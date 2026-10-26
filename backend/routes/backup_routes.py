@@ -15,13 +15,13 @@ import gzip
 import json
 import io
 import os
-import glob
 import logging
 from core.db_naming import is_tenant_db  # p348
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,22 @@ BACKUP_DIR = os.environ.get("BACKUP_DIR", os.path.join(
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 SCHEMA_VERSION = "2.0.0"
+MAX_BACKUP_UPLOAD_BYTES = int(os.environ.get("BACKUP_MAX_UPLOAD_BYTES", 100 * 1024 * 1024))
+MAX_BACKUP_JSON_BYTES = int(os.environ.get("BACKUP_MAX_JSON_BYTES", 512 * 1024 * 1024))
+
+
+def _read_limited(stream, limit: int) -> bytes:
+    chunks = []
+    total = 0
+    while True:
+        chunk = stream.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="حجم المحتوى بعد فك الضغط يتجاوز الحد المسموح")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _count_records(db_data: dict) -> int:
@@ -55,8 +71,21 @@ async def _dump_db(database) -> dict:
     return result
 
 
+def _backup_path(filename: str) -> Path:
+    """Resolve a stored backup name without ever leaving BACKUP_DIR."""
+    if not filename or Path(filename).name != filename:
+        raise HTTPException(status_code=404, detail="ملف النسخة الاحتياطية غير موجود")
+    root = Path(BACKUP_DIR).resolve()
+    path = (root / filename).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="ملف النسخة الاحتياطية غير موجود")
+    return path
+
+
 async def _write_to_disk(filename: str, data: dict) -> int:
-    path = os.path.join(BACKUP_DIR, filename)
+    path = _backup_path(filename)
     content = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
     with gzip.open(path, "wb", compresslevel=6) as f:
         f.write(content)
@@ -64,15 +93,17 @@ async def _write_to_disk(filename: str, data: dict) -> int:
 
 
 async def _read_from_disk(filename: str) -> dict:
-    path = os.path.join(BACKUP_DIR, filename)
-    if not os.path.exists(path):
+    path = _backup_path(filename)
+    if not path.is_file():
         raise HTTPException(
             status_code=404,
             detail="ملف النسخة الاحتياطية غير موجود على القرص — ربما تم حذفه يدوياً"
         )
     try:
         with gzip.open(path, "rb") as f:
-            return json.loads(f.read().decode("utf-8"))
+            return json.loads(_read_limited(f, MAX_BACKUP_JSON_BYTES).decode("utf-8"))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ في قراءة ملف النسخة الاحتياطية: {str(e)}")
 
@@ -140,6 +171,30 @@ async def _do_restore(db, restore_data: dict) -> tuple:
 def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_super_admin) -> dict:
     router = APIRouter(prefix="/backup", tags=["backup"])
 
+    def _is_super_admin(user: dict) -> bool:
+        return user.get("role") == "super_admin" or user.get("user_type") == "super_admin"
+
+    def _entity_id(user: dict) -> str:
+        return user.get("tenant_id") or user.get("id") or ""
+
+    def _owner_query(user: dict, **extra) -> dict:
+        """Super-admins may administer all records; everyone else only their own tenant records."""
+        if _is_super_admin(user):
+            return dict(extra)
+        return {**extra, "entity_type": "tenant", "entity_id": _entity_id(user)}
+
+    async def _owned_backup(backup_id: str, user: dict) -> dict:
+        backup = await main_db.backups.find_one(_owner_query(user, id=backup_id), {"_id": 0})
+        if not backup:
+            raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
+        return backup
+
+    def _file_exists(filename: str) -> bool:
+        try:
+            return _backup_path(filename).is_file()
+        except HTTPException:
+            return False
+
     # ────────────────────────────────────────────────
     # Schema Version Tracking
     # ────────────────────────────────────────────────
@@ -172,14 +227,17 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.get("/stats/summary")
     async def get_backup_stats(user: dict = Depends(get_current_user)):
-        total = await main_db.backups.count_documents({})
+        owner = _owner_query(user)
+        total = await main_db.backups.count_documents(owner)
         size_agg = await main_db.backups.aggregate([
+            {"$match": owner},
             {"$group": {"_id": None, "total_size": {"$sum": "$file_size"}, "total_records": {"$sum": "$records_count"}}}
         ]).to_list(1)
-        schedules_active = await main_db.backup_schedules.count_documents({"is_active": True})
+        schedules_active = await main_db.backup_schedules.count_documents(_owner_query(user, is_active=True))
         meta = await main_db.system_meta.find_one({"key": "schema_version"}, {"_id": 0})
-        disk_files = glob.glob(os.path.join(BACKUP_DIR, "*.json.gz"))
-        disk_size = sum(os.path.getsize(f) for f in disk_files if os.path.exists(f))
+        owned_files = await main_db.backups.find(owner, {"_id": 0, "file_name": 1}).to_list(5000)
+        disk_files = [_backup_path(b.get("file_name", "")) for b in owned_files if _file_exists(b.get("file_name", ""))]
+        disk_size = sum(f.stat().st_size for f in disk_files)
         return {
             "total_backups": total,
             "total_size": size_agg[0]["total_size"] if size_agg else 0,
@@ -198,15 +256,14 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.get("/list")
     async def get_backups(user: dict = Depends(get_current_user)):
-        backups = await main_db.backups.find({}, {"_id": 0}).sort("created_at", -1).to_list(300)
+        backups = await main_db.backups.find(_owner_query(user), {"_id": 0}).sort("created_at", -1).to_list(300)
         for b in backups:
-            fname = b.get("file_name", "")
-            b["file_exists"] = bool(fname) and os.path.exists(os.path.join(BACKUP_DIR, fname))
+            b["file_exists"] = _file_exists(b.get("file_name", ""))
         return backups
 
     @router.get("/schedules/list")
     async def get_schedules(user: dict = Depends(get_current_user)):
-        return await main_db.backup_schedules.find({}, {"_id": 0}).to_list(50)
+        return await main_db.backup_schedules.find(_owner_query(user), {"_id": 0}).to_list(50)
 
     # ── Auto-backup settings (singleton per tenant) ──
     @router.get("/auto-settings")
@@ -248,11 +305,8 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.get("/{backup_id}")
     async def get_backup(backup_id: str, user: dict = Depends(get_current_user)):
-        b = await main_db.backups.find_one({"id": backup_id}, {"_id": 0})
-        if not b:
-            raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
-        fname = b.get("file_name", "")
-        b["file_exists"] = bool(fname) and os.path.exists(os.path.join(BACKUP_DIR, fname))
+        b = await _owned_backup(backup_id, user)
+        b["file_exists"] = _file_exists(b.get("file_name", ""))
         return b
 
     # ────────────────────────────────────────────────
@@ -388,35 +442,26 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.get("/{backup_id}/download")
     async def download_backup(backup_id: str, user: dict = Depends(get_current_user)):
-        backup = await main_db.backups.find_one({"id": backup_id}, {"_id": 0})
-        if not backup:
-            raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
-
+        backup = await _owned_backup(backup_id, user)
         fname = backup.get("file_name", "")
-        fpath = os.path.join(BACKUP_DIR, fname)
-        if not os.path.exists(fpath):
+        fpath = _backup_path(fname)
+        if not fpath.is_file():
             raise HTTPException(
                 status_code=404,
                 detail="ملف النسخة الاحتياطية غير موجود على القرص — تم حذفه أو لم يُنشأ بعد"
             )
-
-        with open(fpath, "rb") as f:
-            content = f.read()
 
         await main_db.backup_downloads.insert_one({
             "id": str(uuid.uuid4()),
             "backup_id": backup_id,
             "entity_type": "user",
             "entity_id": user.get("id", ""),
+            "tenant_id": user.get("tenant_id"),
             "downloaded_by": user.get("name", user.get("email", "")),
             "downloaded_at": datetime.now(timezone.utc).isoformat(),
         })
 
-        return StreamingResponse(
-            io.BytesIO(content),
-            media_type="application/gzip",
-            headers={"Content-Disposition": f"attachment; filename={fname}"}
-        )
+        return FileResponse(fpath, media_type="application/gzip", filename=fname)
 
     # ────────────────────────────────────────────────
     # Safe Restore — from stored backup
@@ -425,10 +470,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.post("/{backup_id}/restore")
     async def restore_backup(backup_id: str, admin: dict = Depends(get_tenant_admin)):
-        backup = await main_db.backups.find_one({"id": backup_id}, {"_id": 0})
-        if not backup:
-            raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
-
+        backup = await _owned_backup(backup_id, admin)
         fname = backup.get("file_name", "")
         envelope = await _read_from_disk(fname)
         restore_data = envelope.get("data", {})
@@ -509,13 +551,26 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         if not (file.filename.endswith('.json') or file.filename.endswith('.json.gz') or file.filename.endswith('.gz')):
             raise HTTPException(status_code=400, detail="الملف يجب أن يكون بصيغة .json أو .json.gz")
 
-        content = await file.read()
+        chunks = []
+        size = 0
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_BACKUP_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="ملف النسخة الاحتياطية أكبر من الحد المسموح")
+            chunks.append(chunk)
+        content = b"".join(chunks)
         try:
             if file.filename.endswith('.gz'):
-                raw = gzip.decompress(content)
+                with gzip.GzipFile(fileobj=io.BytesIO(content), mode="rb") as gz:
+                    raw = _read_limited(gz, MAX_BACKUP_JSON_BYTES)
             else:
                 raw = content
             envelope = json.loads(raw.decode("utf-8"))
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"ملف غير صالح أو تالف: {str(e)}")
 
@@ -552,19 +607,19 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.delete("/{backup_id}")
     async def delete_backup(backup_id: str, admin: dict = Depends(get_tenant_admin)):
-        b = await main_db.backups.find_one({"id": backup_id}, {"_id": 0})
-        if b:
-            fname = b.get("file_name", "")
-            # Don't delete pre_restore snapshots without explicit flag
-            if b.get("backup_type") == "pre_restore_snapshot":
-                pass  # allow deletion
-            fpath = os.path.join(BACKUP_DIR, fname)
-            if fname and os.path.exists(fpath):
-                try:
-                    os.remove(fpath)
-                except Exception as e:
-                    logger.warning(f"Could not delete disk file {fname}: {e}")
-        await main_db.backups.delete_one({"id": backup_id})
+        b = await _owned_backup(backup_id, admin)
+        fname = b.get("file_name", "")
+        if fname:
+            try:
+                fpath = _backup_path(fname)
+                if fpath.is_file():
+                    fpath.unlink()
+            except HTTPException:
+                raise
+            except OSError as e:
+                logger.warning("Could not delete owned backup file: %s", type(e).__name__)
+                raise HTTPException(status_code=500, detail="تعذر حذف ملف النسخة الاحتياطية")
+        await main_db.backups.delete_one(_owner_query(admin, id=backup_id))
         return {"message": "تم حذف النسخة الاحتياطية من القاعدة والقرص"}
 
     # ────────────────────────────────────────────────
@@ -592,14 +647,21 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.put("/schedules/{schedule_id}")
     async def update_schedule(schedule_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
-        data.pop("id", None)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        await main_db.backup_schedules.update_one({"id": schedule_id}, {"$set": data})
-        return await main_db.backup_schedules.find_one({"id": schedule_id}, {"_id": 0})
+        query = _owner_query(admin, id=schedule_id)
+        existing = await main_db.backup_schedules.find_one(query, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="جدول النسخ الاحتياطي غير موجود")
+        allowed = {"frequency", "time", "format", "auto_email", "email_to", "keep_last", "is_active"}
+        update = {key: value for key, value in data.items() if key in allowed}
+        update["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await main_db.backup_schedules.update_one(query, {"$set": update})
+        return await main_db.backup_schedules.find_one(query, {"_id": 0})
 
     @router.delete("/schedules/{schedule_id}")
     async def delete_schedule(schedule_id: str, admin: dict = Depends(get_tenant_admin)):
-        await main_db.backup_schedules.delete_one({"id": schedule_id})
+        result = await main_db.backup_schedules.delete_one(_owner_query(admin, id=schedule_id))
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="جدول النسخ الاحتياطي غير موجود")
         return {"message": "تم حذف الجدول"}
 
     return router

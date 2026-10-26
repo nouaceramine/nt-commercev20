@@ -43,7 +43,10 @@ class FeatureGateMiddleware(BaseHTTPMiddleware):
         try:
             feats = await get_effective_features(main_db, payload["tenant_id"])
         except Exception:
-            return await call_next(request)  # fail-open on resolver errors
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "feature_resolution_unavailable"},
+            )
 
         enabled = feats.get(comp.gate)
         if enabled is None:

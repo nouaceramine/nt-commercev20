@@ -198,7 +198,7 @@ async def remind_customer(order_id: str, body: dict, user: dict = Depends(requir
     if channel == "sms":
         from services.ecom.status_sms_service import get_settings
         from services.ecom.sms_gateway import get_sms_provider
-        settings = await get_settings(db)
+        settings = await get_settings(db, for_send=True)
         prov_cfg = settings.get("provider") or {}
         if prov_cfg.get("type") != "http" or not prov_cfg.get("url"):
             raise HTTPException(
@@ -224,6 +224,9 @@ async def remind_customer(order_id: str, body: dict, user: dict = Depends(requir
         ok = bool(res.get("success"))
         log_doc.update({"result": "sent" if ok else "failed",
                         "provider": res.get("provider"), "error": res.get("error")})
+        if not ok:
+            await main_db.wallets.update_one({"entity_id": tenant_id}, {"$inc": {"sms_credits": 1}})
+            log_doc["credit_charged"] = 0
         await db.ecom_sms_logs.insert_one(log_doc)
         result = {"ok": ok,
                   "message": "✅ أُرسل تذكير SMS للزبون" if ok else f"❌ فشل الإرسال: {res.get('error') or 'خطأ غير معروف'}"}

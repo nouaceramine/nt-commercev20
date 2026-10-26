@@ -75,7 +75,7 @@ describe('UsersTable', () => {
     render(<UsersTable {...defaultProps} />);
 
     const permButtons = screen.getAllByTitle(mockT.permissions);
-    fireEvent.click(permButtons[0]); // Click seller's permissions
+    fireEvent.click(permButtons[1]); // Click seller's permissions
 
     expect(defaultProps.onPermissions).toHaveBeenCalledWith('2');
   });
@@ -92,7 +92,7 @@ describe('UsersTable', () => {
     render(<UsersTable {...defaultProps} />);
 
     const deleteButtons = screen.getAllByTitle('حذف');
-    fireEvent.click(deleteButtons[0]); // Delete seller
+    fireEvent.click(deleteButtons[1]); // Delete seller
 
     expect(defaultProps.onDelete).toHaveBeenCalledWith('2');
   });

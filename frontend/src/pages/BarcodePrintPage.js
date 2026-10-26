@@ -23,6 +23,7 @@ import {
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import JsBarcode from 'jsbarcode';
+import { escapeHtml } from '../lib/escape';
 import { 
   Barcode, 
   Search,
@@ -203,15 +204,16 @@ export default function BarcodePrintPage() {
       for (let i = 0; i < qty; i++) {
         labelsHtml += `
           <div class="label" style="width:${templateConfig.width}px; height:${templateConfig.height}px; border:1px solid #ddd; padding:4px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; margin:2px; page-break-inside:avoid;">
-            ${customSettings.showName ? `<div style="font-size:${templateConfig.fontSize}px; font-weight:bold; text-align:center; overflow:hidden; max-height:20px;">${language === 'ar' ? product.name_ar : product.name_en}</div>` : ''}
+            ${customSettings.showName ? `<div style="font-size:${templateConfig.fontSize}px; font-weight:bold; text-align:center; overflow:hidden; max-height:20px;">${escapeHtml(language === 'ar' ? product.name_ar : product.name_en)}</div>` : ''}
             ${customSettings.showBarcode ? `<div style="margin:4px 0;">${generateBarcodeSVG(product.barcode)}</div>` : ''}
-            ${customSettings.showPrice ? `<div style="font-size:${templateConfig.fontSize + 2}px; font-weight:bold;">${(product.price || 0).toFixed(2)} ${t.currency}</div>` : ''}
+            ${customSettings.showPrice ? `<div style="font-size:${templateConfig.fontSize + 2}px; font-weight:bold;">${(Number(product.price) || 0).toFixed(2)} ${escapeHtml(t.currency)}</div>` : ''}
           </div>
         `;
       }
     });
 
     const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
     printWindow.document.write(`
       <!DOCTYPE html>
       <html dir="${language === 'ar' ? 'rtl' : 'ltr'}">

@@ -31,6 +31,10 @@ services:
     image: mongo:7.0
     container_name: ntcommerce-staging-mongodb
     command: ["mongod", "--replSet", "rsStaging", "--bind_ip_all"]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - staging_mongodb_data:/data/db
     restart: unless-stopped

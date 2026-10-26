@@ -33,6 +33,17 @@ if (config.enableHealthCheck) {
 }
 
 const webpackConfig = {
+  jest: {
+    configure: {
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/src/$1',
+        '^@radix-ui/primitive/is-development$': '<rootDir>/node_modules/@radix-ui/primitive/dist/internal/is-development.true.js',
+      },
+      testPathIgnorePatterns: [
+        '<rootDir>/src/__tests__/testUtils.js',
+      ],
+    },
+  },
   eslint: {
     configure: {
       extends: ["plugin:react-hooks/recommended"],

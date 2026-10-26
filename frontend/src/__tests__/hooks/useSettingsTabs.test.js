@@ -2,20 +2,20 @@
  * useSettingsTabs Hook Tests
  * Phase 4g: Hook Unit Tests
  */
-import { renderHook } from '@testing-library/react-hooks';
+import { renderHook } from '@testing-library/react';
 import { useSettingsTabs, getVisibleTabs, getGridCols } from '../../hooks/useSettingsTabs';
 
 describe('useSettingsTabs', () => {
   describe('getVisibleTabs', () => {
     it('should return all tabs except bridge when not self-bridge', () => {
       const tabs = getVisibleTabs(false, 'ar', {});
-      expect(tabs.length).toBe(9); // 10 total - bridge excluded
+      expect(tabs.length).toBe(10); // bridge excluded
       expect(tabs.find(t => t.id === 'bridge')).toBeUndefined();
     });
 
     it('should include bridge tab when self-bridge is enabled', () => {
       const tabs = getVisibleTabs(true, 'ar', {});
-      expect(tabs.length).toBe(10);
+      expect(tabs.length).toBe(11);
       expect(tabs.find(t => t.id === 'bridge')).toBeDefined();
     });
 

@@ -2,7 +2,7 @@
  * useErrorHandler Hook Tests
  * Phase 4e: Unit Tests
  */
-import { renderHook } from '@testing-library/react-hooks';
+import { renderHook } from '@testing-library/react';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
 
 describe('useErrorHandler', () => {

@@ -1,5 +1,8 @@
 """SIM slot management — slots, balances, balance logs."""
 from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone

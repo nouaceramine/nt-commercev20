@@ -3,13 +3,12 @@ AI Service — Google Gemini API
 كتابة وصف منتج + ترجمة تلقائية
 """
 import os
-import google.generativeai as genai
+from google import genai
 from typing import Optional
 
-# Configure with free API key (user needs to set this)
+# Configure with the tenant owner's API key; no provider call is made at import.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+_CLIENT = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 class AIService:
     """خدمة AI للمتجر"""
@@ -22,6 +21,15 @@ class AIService:
         return bool(GEMINI_API_KEY)
 
     @staticmethod
+    async def generate_content(contents, model: str | None = None):
+        if not _CLIENT:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        return await _CLIENT.aio.models.generate_content(
+            model=model or AIService.MODEL,
+            contents=contents,
+        )
+
+    @staticmethod
     async def generate_product_description(name: str, category: str = "", features: str = "") -> dict:
         """
         يولد وصفاً تسويقياً للمنتج بالعربية
@@ -30,7 +38,6 @@ class AIService:
             return {"success": False, "error": "لم يتم ضبط مفتاح Gemini. أضف GEMINI_API_KEY في .env"}
 
         try:
-            model = genai.GenerativeModel(AIService.MODEL)
 
             prompt = f"""
             أنت كاتب محتوى تسويقي متخصص في التجارة الإلكترونية في الجزائر.
@@ -51,7 +58,7 @@ class AIService:
             الوصف:
             """
 
-            response = await model.generate_content_async(prompt)
+            response = await AIService.generate_content(prompt)
             description = response.text.strip()
 
             return {
@@ -72,7 +79,6 @@ class AIService:
             return {"success": False, "error": "لم يتم ضبط مفتاح Gemini"}
 
         try:
-            model = genai.GenerativeModel(AIService.MODEL)
 
             prompt = f"""
             ترجم النص التالي إلى الفرنسية (اللهجة الجزائرية/الفرنسية القياسية):
@@ -87,7 +93,7 @@ class AIService:
             الترجمة:
             """
 
-            response = await model.generate_content_async(prompt)
+            response = await AIService.generate_content(prompt)
             translation = response.text.strip()
 
             return {
@@ -108,7 +114,6 @@ class AIService:
             return {"success": False, "error": "لم يتم ضبط مفتاح Gemini"}
 
         try:
-            model = genai.GenerativeModel(AIService.MODEL)
 
             prompt = f"""
             اكتب منشوراً تسويقياً قصيراً لمتجر "{store_name}" في الجزائر:
@@ -124,7 +129,7 @@ class AIService:
             المنشور:
             """
 
-            response = await model.generate_content_async(prompt)
+            response = await AIService.generate_content(prompt)
             post = response.text.strip()
 
             return {

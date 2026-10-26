@@ -7,10 +7,27 @@ import time
 
 import httpx
 import pytest
+import hashlib
+import hmac
 
 BASE_URL = "http://localhost:8001/api"
 SUPER_EMAIL = "admin@ntcommerce.com"
 SUPER_PASS = "Admin@2024"
+
+
+def _signed_args(payload: dict, secret: str, channel: str) -> dict:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    headers = {"Content-Type": "application/json"}
+    digest = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if channel in ("whatsapp", "meta"):
+        headers["X-Hub-Signature-256"] = "sha256=" + digest
+    elif channel == "telegram":
+        headers["X-Telegram-Bot-Api-Secret-Token"] = secret
+    elif channel == "viber":
+        headers["X-Viber-Content-Signature"] = digest
+    elif channel == "tiktok":
+        headers["X-Tt-Signature"] = digest
+    return {"content": raw, "headers": headers}
 
 
 async def _login(email: str, password: str) -> str:
@@ -47,6 +64,7 @@ async def test_whatsapp_webhook_verify_and_create_lead():
                     "phone_number_id": "PHONE_ID_X",
                     "access_token": "EAA_FAKE_TOKEN",
                     "verify_token": "secret_verify_18_3",
+                    "app_secret": "wa_app_secret_18_3",
                 },
             },
         )).json()
@@ -85,7 +103,9 @@ async def test_whatsapp_webhook_verify_and_create_lead():
                 }],
             }],
         }
-        r = await c.post(f"{BASE_URL}{webhook_path}", json=wa_payload)
+        unsigned = await c.post(f"{BASE_URL}{webhook_path}", json=wa_payload)
+        assert unsigned.status_code == 401
+        r = await c.post(f"{BASE_URL}{webhook_path}", **_signed_args(wa_payload, "wa_app_secret_18_3", "whatsapp"))
         assert r.status_code == 200, r.text
         assert r.json()["lead_created"] is True
 
@@ -95,7 +115,7 @@ async def test_whatsapp_webhook_verify_and_create_lead():
         assert "هل المنتج متوفر" in wa_lead["message"]
 
         # 4) Idempotent — same external_id (msg id) won't duplicate
-        r2 = await c.post(f"{BASE_URL}{webhook_path}", json=wa_payload)
+        r2 = await c.post(f"{BASE_URL}{webhook_path}", **_signed_args(wa_payload, "wa_app_secret_18_3", "whatsapp"))
         assert r2.status_code == 200
         leads2 = (await c.get(f"{BASE_URL}/ecom/leads?channel=whatsapp", headers=th)).json()
         assert leads2["total"] == leads["total"]
@@ -114,7 +134,7 @@ async def test_telegram_and_viber_webhooks():
         tg_integ = (await c.post(
             f"{BASE_URL}/ecom/integrations",
             headers=th,
-            json={"channel": "telegram", "name": "TG Test", "credentials": {"bot_token": "FAKE:TOKEN"}},
+            json={"channel": "telegram", "name": "TG Test", "credentials": {"bot_token": "FAKE:TOKEN", "secret_token": "tg_webhook_secret"}},
         )).json()
         tg_id = tg_integ["id"]
         msg_id = int(time.time() * 1000)
@@ -125,7 +145,9 @@ async def test_telegram_and_viber_webhooks():
                 "text": "أريد الطلب رقم 5",
             }
         }
-        r = await c.post(f"{BASE_URL}/ecom/webhooks/telegram/{tenant_id}/{tg_id}", json=tg_payload)
+        unsigned = await c.post(f"{BASE_URL}/ecom/webhooks/telegram/{tenant_id}/{tg_id}", json=tg_payload)
+        assert unsigned.status_code == 401
+        r = await c.post(f"{BASE_URL}/ecom/webhooks/telegram/{tenant_id}/{tg_id}", **_signed_args(tg_payload, "tg_webhook_secret", "telegram"))
         assert r.status_code == 200 and r.json()["lead_created"] is True
         leads = (await c.get(f"{BASE_URL}/ecom/leads?channel=telegram", headers=th)).json()
         assert any("يوسف كريم" in l.get("name", "") for l in leads["items"])
@@ -143,7 +165,7 @@ async def test_telegram_and_viber_webhooks():
             "sender": {"id": "vb1", "name": "Viber User"},
             "message": {"text": "السلام عليكم"},
         }
-        r = await c.post(f"{BASE_URL}/ecom/webhooks/viber/{tenant_id}/{vb_id}", json=vb_payload)
+        r = await c.post(f"{BASE_URL}/ecom/webhooks/viber/{tenant_id}/{vb_id}", **_signed_args(vb_payload, "FAKE_VIBER", "viber"))
         assert r.status_code == 200 and r.json()["lead_created"] is True
 
         # Cleanup integrations
@@ -162,7 +184,7 @@ async def test_meta_lead_webhook():
             json={
                 "channel": "facebook",
                 "name": "FB Test",
-                "credentials": {"page_id": "PG1", "access_token": "FAKE", "verify_token": "vt_18_3"},
+                "credentials": {"page_id": "PG1", "access_token": "FAKE", "verify_token": "vt_18_3", "app_secret": "meta_app_secret_18_3"},
             },
         )).json()
         integration_id = integ["id"]
@@ -192,7 +214,7 @@ async def test_meta_lead_webhook():
                 }],
             }],
         }
-        r = await c.post(f"{BASE_URL}/ecom/webhooks/meta/{tenant_id}/{integration_id}", json=meta_payload)
+        r = await c.post(f"{BASE_URL}/ecom/webhooks/meta/{tenant_id}/{integration_id}", **_signed_args(meta_payload, "meta_app_secret_18_3", "meta"))
         assert r.status_code == 200 and r.json()["lead_created"] is True
 
         await c.delete(f"{BASE_URL}/ecom/integrations/{integration_id}", headers=th)
@@ -206,7 +228,7 @@ async def test_tiktok_order_webhook():
         integ = (await c.post(
             f"{BASE_URL}/ecom/integrations",
             headers=th,
-            json={"channel": "tiktok", "name": "TT", "credentials": {"shop_id": "S1", "access_token": "FAKE"}},
+            json={"channel": "tiktok", "name": "TT", "credentials": {"shop_id": "S1", "access_token": "FAKE", "app_secret": "tt_app_secret_18_3"}},
         )).json()
         integration_id = integ["id"]
 
@@ -224,11 +246,13 @@ async def test_tiktok_order_webhook():
                 },
             },
         }
-        r = await c.post(f"{BASE_URL}/ecom/webhooks/tiktok/{tenant_id}/{integration_id}", json=tt_payload)
+        unsigned = await c.post(f"{BASE_URL}/ecom/webhooks/tiktok/{tenant_id}/{integration_id}", json=tt_payload)
+        assert unsigned.status_code == 401
+        r = await c.post(f"{BASE_URL}/ecom/webhooks/tiktok/{tenant_id}/{integration_id}", **_signed_args(tt_payload, "tt_app_secret_18_3", "tiktok"))
         assert r.status_code == 200, r.text
         assert r.json()["created"] is True
         # idempotent
-        r2 = await c.post(f"{BASE_URL}/ecom/webhooks/tiktok/{tenant_id}/{integration_id}", json=tt_payload)
+        r2 = await c.post(f"{BASE_URL}/ecom/webhooks/tiktok/{tenant_id}/{integration_id}", **_signed_args(tt_payload, "tt_app_secret_18_3", "tiktok"))
         assert r2.json().get("duplicate") is True
 
         orders = (await c.get(f"{BASE_URL}/ecom/orders?channel=tiktok", headers=th)).json()

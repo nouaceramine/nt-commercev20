@@ -94,9 +94,9 @@ describe('ReceiptService', () => {
   describe('formatCurrency', () => {
     it('should format currency correctly', () => {
       const service = new ReceiptService(settings, language, isRTL, cashierName);
-      expect(service.formatCurrency(1500)).toBe('1,500.00');
-      expect(service.formatCurrency(0)).toBe('0.00');
-      expect(service.formatCurrency(null)).toBe('0.00');
+      expect(service.formatCurrency(1500)).toBe(new Intl.NumberFormat('ar-DZ', { minimumFractionDigits: 2 }).format(1500));
+      expect(service.formatCurrency(0)).toBe(new Intl.NumberFormat('ar-DZ', { minimumFractionDigits: 2 }).format(0));
+      expect(service.formatCurrency(null)).toBe(new Intl.NumberFormat('ar-DZ', { minimumFractionDigits: 2 }).format(0));
     });
   });
 

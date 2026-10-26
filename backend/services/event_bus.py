@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 from models.events import Event, ProcessedEvent
+from core.db_naming import drop_db_if_tenant_deleted, resolve_db_name
 
 log = logging.getLogger("event_bus")
 
@@ -239,8 +240,27 @@ class RedisEventBus:
 
         # Run handlers sequentially — if any raises we retry the whole event.
         try:
+            tenant_db_name = ""
+            if event.tenant_id and event.tenant_id != "platform" and self._db is not None:
+                tenant = await self._db.saas_tenants.find_one(
+                    {"id": event.tenant_id}, {"_id": 0, "is_active": 1, "db_name": 1},
+                )
+                if tenant:
+                    tenant_db_name = tenant.get("db_name") or resolve_db_name(event.tenant_id)
+                if not tenant:
+                    # A queued event must never recreate a tenant DB after cascade
+                    # deletion (accounting consumers otherwise create default rows).
+                    await self._mark_finished(event, status="ok", consumer="<tenant_deleted>")
+                    await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
+                    return
             for h in handlers:
                 await h(event)
+            if tenant_db_name:
+                # The tenant may have been deleted while its handler was writing.
+                # Drop only a still-unregistered DB; never a re-registered one.
+                await drop_db_if_tenant_deleted(
+                    self._db, self._db.client, tenant_db_name,
+                )
             await self._mark_finished(event, status="ok", consumer=",".join(h.__name__ for h in handlers))
             await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
         except Exception as exc:

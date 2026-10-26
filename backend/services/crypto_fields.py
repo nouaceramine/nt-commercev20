@@ -55,9 +55,7 @@ def key_fingerprint() -> str:
 
 
 def encrypt_field(plain):
-    """Encrypt a secret for at-rest storage. When the key is unavailable the
-    value is stored unchanged (logged once) — availability is reported via the
-    security status endpoint so ops notices immediately."""
+    """Encrypt a secret for at-rest storage; never silently persist plaintext."""
     global _warned
     if plain is None:
         return plain
@@ -66,10 +64,7 @@ def encrypt_field(plain):
     if not plain or plain.startswith(_PREFIX):
         return plain
     if not is_crypto_available():
-        if not _warned:
-            logger.warning("FIELD_ENCRYPTION_KEY not set — storing secret unencrypted")
-            _warned = True
-        return plain
+        raise RuntimeError("FIELD_ENCRYPTION_KEY is required to store secrets")
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     nonce = os.urandom(12)
     ct = AESGCM(_key).encrypt(nonce, plain.encode(), None)
@@ -93,6 +88,7 @@ SENSITIVE_CRED_KEYS = frozenset({
     "api_key", "api_token", "api_secret", "access_token", "refresh_token",
     "app_secret", "client_secret", "consumer_key", "consumer_secret",
     "webhook_secret", "bot_token", "auth_token", "private_key", "token",
+    "verify_token", "secret_token",
 })
 
 

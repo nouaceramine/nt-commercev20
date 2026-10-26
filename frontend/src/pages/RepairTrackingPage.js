@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { buildCustomTemplateHTML } from '../lib/customTemplateRenderer';
+import { escapeHtml } from '../lib/escape';
+import { toSafeJsString as jsString } from '../lib/printSafety';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -398,6 +400,9 @@ export default function RepairTrackingPage() {
   // Print repair receipt (p122: uses default custom repair template if one exists)
   const printRepairReceipt = async (repair) => {
     const statusInfo = getStatusInfo(repair.status);
+    const esc = escapeHtml;
+    const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const statusClass = REPAIR_STATUSES.some((item) => item.id === repair.status) ? repair.status : 'received';
     try {
       const [tmplRes, brandRes] = await Promise.all([
         apiClient.get('/printing/templates?type=repair').catch(() => ({ data: [] })),
@@ -420,7 +425,7 @@ export default function RepairTrackingPage() {
       <html dir="rtl" lang="ar">
       <head>
         <meta charset="UTF-8">
-        <title>إيصال الصيانة - ${repair.ticket_number}</title>
+        <title>إيصال الصيانة - ${esc(repair.ticket_number)}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; max-width: 80mm; margin: 0 auto; }
@@ -452,61 +457,61 @@ export default function RepairTrackingPage() {
         </div>
         
         <div class="ticket-number">
-          ${repair.ticket_number}
+          ${esc(repair.ticket_number)}
         </div>
         
         <div class="section">
           <div class="section-title">معلومات العميل</div>
-          <div class="row"><span class="label">الاسم:</span><span class="value">${repair.customer_name}</span></div>
-          <div class="row"><span class="label">الهاتف:</span><span class="value">${repair.customer_phone}</span></div>
-          ${repair.customer_phone2 ? `<div class="row"><span class="label">هاتف 2:</span><span class="value">${repair.customer_phone2}</span></div>` : ''}
+          <div class="row"><span class="label">الاسم:</span><span class="value">${esc(repair.customer_name)}</span></div>
+          <div class="row"><span class="label">الهاتف:</span><span class="value">${esc(repair.customer_phone)}</span></div>
+          ${repair.customer_phone2 ? `<div class="row"><span class="label">هاتف 2:</span><span class="value">${esc(repair.customer_phone2)}</span></div>` : ''}
         </div>
         
         <div class="section">
           <div class="section-title">معلومات الجهاز</div>
           <div class="device-info">
-            <div class="row"><span class="label">الماركة:</span><span class="value">${repair.device_brand}</span></div>
-            <div class="row"><span class="label">الموديل:</span><span class="value">${repair.device_model}</span></div>
-            ${repair.device_color ? `<div class="row"><span class="label">اللون:</span><span class="value">${repair.device_color}</span></div>` : ''}
-            ${repair.device_imei ? `<div class="row"><span class="label">IMEI:</span><span class="value">${repair.device_imei}</span></div>` : ''}
+            <div class="row"><span class="label">الماركة:</span><span class="value">${esc(repair.device_brand)}</span></div>
+            <div class="row"><span class="label">الموديل:</span><span class="value">${esc(repair.device_model)}</span></div>
+            ${repair.device_color ? `<div class="row"><span class="label">اللون:</span><span class="value">${esc(repair.device_color)}</span></div>` : ''}
+            ${repair.device_imei ? `<div class="row"><span class="label">IMEI:</span><span class="value">${esc(repair.device_imei)}</span></div>` : ''}
           </div>
         </div>
         
         <div class="section">
           <div class="section-title">المشكلة</div>
-          <p style="font-size: 12px; line-height: 1.5;">${repair.problem_description || (repair.problems || []).join('، ') || 'غير محدد'}</p>
+          <p style="font-size: 12px; line-height: 1.5;">${esc(repair.problem_description || (repair.problems || []).join('، ') || 'غير محدد')}</p>
         </div>
         
         ${repair.device_condition ? `
         <div class="section">
           <div class="section-title">حالة الجهاز عند الاستلام</div>
-          <p style="font-size: 11px; color: #666;">${repair.device_condition}</p>
+          <p style="font-size: 11px; color: #666;">${esc(repair.device_condition)}</p>
         </div>
         ` : ''}
         
         ${repair.accessories ? `
         <div class="section">
           <div class="section-title">الملحقات المستلمة</div>
-          <p style="font-size: 11px;">${repair.accessories}</p>
+          <p style="font-size: 11px;">${esc(repair.accessories)}</p>
         </div>
         ` : ''}
         
         <div style="text-align: center;">
-          <div class="status status-${repair.status}">${statusInfo?.label || repair.status}</div>
+          <div class="status status-${statusClass}">${esc(statusInfo?.label || repair.status)}</div>
         </div>
         
         <div class="costs">
           <div class="section-title" style="color: #991b1b;">التكلفة والدفع</div>
-          <div class="row"><span class="label">التكلفة المقدرة:</span><span class="value">${repair.estimated_cost || 0} دج</span></div>
-          <div class="row"><span class="label">الدفعة المقدمة:</span><span class="value">${repair.advance_payment || 0} دج</span></div>
-          ${repair.final_cost ? `<div class="row"><span class="label">التكلفة النهائية:</span><span class="value">${repair.final_cost} دج</span></div>` : ''}
+          <div class="row"><span class="label">التكلفة المقدرة:</span><span class="value">${num(repair.estimated_cost)} دج</span></div>
+          <div class="row"><span class="label">الدفعة المقدمة:</span><span class="value">${num(repair.advance_payment)} دج</span></div>
+          ${repair.final_cost ? `<div class="row"><span class="label">التكلفة النهائية:</span><span class="value">${num(repair.final_cost)} دج</span></div>` : ''}
           <div class="total-row">
-            <div class="row"><span class="label">المتبقي:</span><span class="value">${(repair.final_cost || repair.estimated_cost || 0) - (repair.advance_payment || 0)} دج</span></div>
+            <div class="row"><span class="label">المتبقي:</span><span class="value">${num(repair.final_cost ?? repair.estimated_cost) - num(repair.advance_payment)} دج</span></div>
           </div>
         </div>
         
         <div class="section">
-          <div class="row"><span class="label">المدة المتوقعة:</span><span class="value">${repair.estimated_days || 1} أيام</span></div>
+          <div class="row"><span class="label">المدة المتوقعة:</span><span class="value">${num(repair.estimated_days || 1)} أيام</span></div>
           <div class="row"><span class="label">تاريخ الاستلام:</span><span class="value">${new Date(repair.created_at).toLocaleDateString('ar-DZ')}</span></div>
         </div>
         
@@ -524,7 +529,7 @@ export default function RepairTrackingPage() {
             function go(){ if (done) return; done = true; window.print(); }
             try {
               if (window.QRCode) {
-                QRCode.toCanvas(document.getElementById('qr-ticket'), "${repair.ticket_number}", { width: 80, margin: 1 }, function(){ setTimeout(go, 250); });
+                QRCode.toCanvas(document.getElementById('qr-ticket'), ${jsString(repair.ticket_number)}, { width: 80, margin: 1 }, function(){ setTimeout(go, 250); });
               } else { go(); }
             } catch(e) { go(); }
             setTimeout(go, 3000);
@@ -648,6 +653,9 @@ export default function RepairTrackingPage() {
                 ) : (
                   filteredRepairs.map(repair => {
                     const statusInfo = getStatusInfo(repair.status);
+    const esc = escapeHtml;
+    const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const statusClass = REPAIR_STATUSES.some((item) => item.id === repair.status) ? repair.status : 'received';
                     const StatusIcon = statusInfo.icon;
                     return (
                       <TableRow key={repair.id}>

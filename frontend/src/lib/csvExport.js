@@ -6,9 +6,14 @@
  * - Triggers a download by injecting a hidden <a download="..."> element.
  */
 
-function escapeCell(value) {
+export function safeSpreadsheetValue(value) {
   if (value === null || value === undefined) return '';
-  const s = String(value);
+  const text = String(value);
+  return /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+export function escapeCell(value) {
+  const s = safeSpreadsheetValue(value);
   if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

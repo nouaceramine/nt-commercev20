@@ -3,6 +3,7 @@ Conversions API Service — Facebook + TikTok
 إرسال أحداث المبيعات والتفاعلات إلى منصات الإعلانات
 """
 import hashlib
+import asyncio
 import requests
 import os
 import logging
@@ -64,7 +65,7 @@ class ConversionsAPIService:
                         "user_data": {
                             "em": self._hash(user_data.get("email", "")),
                             "ph": self._hash(user_data.get("phone", "")),
-                            "client_ip_address": event_data.get("client_ip", "0.0.0.0"),
+                            "client_ip_address": event_data.get("client_ip", "0.0.0.0"),  # nosec B104 - metadata fallback, not a bind address
                             "client_user_agent": event_data.get("user_agent", "")
                         },
                         "custom_data": {
@@ -80,11 +81,12 @@ class ConversionsAPIService:
 
                 if event_id:
                     fb_payload["data"][0]["event_id"] = event_id
-                fb_response = requests.post(
+                fb_response = await asyncio.to_thread(
+                    requests.post,
                     f"https://graph.facebook.com/v18.0/{fb_pixel_id}/events",
                     params={"access_token": fb_access_token},
                     json=fb_payload,
-                    timeout=10
+                    timeout=10,
                 )
                 results["facebook"] = {
                     "status": fb_response.status_code,
@@ -119,11 +121,12 @@ class ConversionsAPIService:
                     }]
                 }
 
-                tiktok_response = requests.post(
+                tiktok_response = await asyncio.to_thread(
+                    requests.post,
                     self._get_tiktok_url(),
                     headers={"Access-Token": tiktok_access_token, "Content-Type": "application/json"},
                     json=tiktok_payload,
-                    timeout=10
+                    timeout=10,
                 )
                 results["tiktok"] = {
                     "status": tiktok_response.status_code,

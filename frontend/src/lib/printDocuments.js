@@ -5,6 +5,7 @@
  */
 import { formatCurrency, formatShortDate, formatDateTime } from '../utils/globalDateFormatter';
 import { docCodesHtml } from './docCodes';
+import { safeCssColor } from './printSafety';
 
 export const PRINT_DOC_TYPES = ['customer', 'product', 'purchase', 'sale', 'expense'];
 
@@ -244,7 +245,7 @@ export function buildPrintHTML({ docType, record, options = {}, branding = {}, l
   const dir = ar ? 'rtl' : 'ltr';
   const opt = { ...(DEFAULT_DOC_OPTIONS[docType] || DEFAULT_DOC_OPTIONS.sale), ...options };
   const p = PAPER[opt.paperSize] || PAPER['80mm'];
-  const accent = opt.accentColor || '#0f766e';
+  const accent = safeCssColor(opt.accentColor);
   const showLogo = opt.showLogo !== false;
   const showHeader = opt.showHeader !== false;
   const showFooter = opt.showFooter !== false;

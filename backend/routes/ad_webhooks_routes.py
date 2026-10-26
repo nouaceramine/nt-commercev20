@@ -3,7 +3,7 @@
 Public endpoints (no JWT). Signature verification via env secrets:
   FB_APP_SECRET     -> X-Hub-Signature-256 (facebook)
   TIKTOK_APP_SECRET -> X-Tt-Signature / X-Signature (tiktok)
-If the secret env var is not set, verification is skipped (dev mode).
+Missing secrets fail closed with 503; verification is never skipped.
 """
 import hashlib
 import hmac
@@ -41,10 +41,11 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
         tdb = target_db if target_db is not None else db  # p95b: tenant-scoped writes
         raw = await request.body()
         secret = os.environ.get(secret_env, "")
-        if secret:
-            sig = request.headers.get(sig_header, "")
-            if not sig or not _verify_signature(raw, sig, secret, prefix):
-                raise HTTPException(status_code=401, detail="توقيع غير صالح")
+        if not secret:
+            raise HTTPException(status_code=503, detail=f"{secret_env} غير مضبوط")
+        sig = request.headers.get(sig_header, "")
+        if not sig or not _verify_signature(raw, sig, secret, prefix):
+            raise HTTPException(status_code=401, detail="توقيع غير صالح")
         try:
             payload = await request.json()
         except Exception:
@@ -171,10 +172,11 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
         tdb = get_tenant_db(tenant_id) if get_tenant_db else db
         raw = await request.body()
         secret = os.environ.get("FB_APP_SECRET", "")
-        if secret:
-            sig = request.headers.get("X-Hub-Signature-256", "")
-            if not sig or not _verify_signature(raw, sig, secret):
-                raise HTTPException(status_code=401, detail="توقيع غير صالح")
+        if not secret:
+            raise HTTPException(status_code=503, detail="FB_APP_SECRET غير مضبوط")
+        sig = request.headers.get("X-Hub-Signature-256", "")
+        if not sig or not _verify_signature(raw, sig, secret):
+            raise HTTPException(status_code=401, detail="توقيع غير صالح")
         try:
             payload = json.loads(raw)
         except Exception:
@@ -208,7 +210,7 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
             "facebook_verify_token": os.environ.get("FB_VERIFY_TOKEN", ""),
             "facebook_app_secret_set": bool(os.environ.get("FB_APP_SECRET")),
             "tiktok_app_secret_set": bool(os.environ.get("TIKTOK_APP_SECRET")),
-            "hmac_note": "إن لم تُضبط الأسرار (APP_SECRET) يعمل الويبهوك في وضع التطوير بدون تحقق HMAC",
+            "hmac_note": "الويبهوك يتوقف بأمان حتى تُضبط أسرار APP_SECRET؛ لا يوجد تجاوز للتوقيع",
         }
 
     return router

@@ -12,6 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table';
 import { toast } from 'sonner';
+import { readFirstWorksheetRows } from '../lib/spreadsheet';
 import {
   Upload, FileSpreadsheet, Sparkles, CheckCircle2, AlertTriangle,
   ArrowRight, ArrowLeft, Database, Loader2, Download,
@@ -83,14 +84,13 @@ export default function ImportDataPage() {
     try {
       const lower = file.name.toLowerCase();
       let parsed = { headers: [], rows: [] };
-      if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-        const XLSX = await import('xlsx');
+      if (lower.endsWith('.xlsx')) {
         const buf = await file.arrayBuffer();
-        const wb = XLSX.read(buf, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+        const aoa = await readFirstWorksheetRows(buf);
         const clean = aoa.filter(r => Array.isArray(r) && r.some(v => String(v).trim() !== ''));
         parsed = { headers: (clean[0] || []).map(h => String(h).trim()), rows: clean.slice(1) };
+      } else if (lower.endsWith('.xls')) {
+        throw new Error('Legacy XLS is not supported; save as XLSX or CSV');
       } else {
         const text = await file.text();
         parsed = parseCsvText(text);
@@ -257,7 +257,7 @@ export default function ImportDataPage() {
               <input
                 ref={fileRef}
                 type="file"
-                accept=".csv,.txt,.xlsx,.xls"
+                accept=".csv,.txt,.xlsx"
                 className="hidden"
                 onChange={(e) => handleFile(e.target.files?.[0])}
                 data-testid="iw-file-input"

@@ -6,7 +6,11 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
-from core.db_naming import is_tenant_db  # p348
+from core.db_naming import (  # p348/p480
+    drop_db_if_tenant_deleted,
+    is_tenant_db,
+    tenant_db_is_active,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,8 @@ class PredictionRobot:
             day = now.strftime("%Y-%m-%d")
             cutoff = (now - timedelta(days=90)).isoformat()
             for db_name in [d for d in dbs if is_tenant_db(d)]:
+                if not await tenant_db_is_active(self.db, db_name):
+                    continue
                 tdb = self.client[db_name]
                 await tdb.auto_reports.create_index(
                     [("report_type", 1), ("day", 1)],
@@ -87,6 +93,7 @@ class PredictionRobot:
                     upsert=True,
                 )
                 await tdb.auto_reports.delete_many({"created_at": {"$lt": cutoff}})
+                await drop_db_if_tenant_deleted(self.db, self.client, db_name)
         except Exception:
             pass
 

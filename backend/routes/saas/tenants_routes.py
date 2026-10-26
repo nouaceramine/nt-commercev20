@@ -591,9 +591,13 @@ async def _cascade_delete_tenant(tenant: dict, admin: dict) -> dict:
             logger.warning(f"cascade clean skip {col}: {exc}")
     steps["refs_cleaned"] = cleaned
 
-    # 6) Remove the tenant record itself
+    # 6) Remove the tenant record itself, then drop once more. Consumers reject
+    # events whose tenant record is missing; this second drop also removes any
+    # rows written by an event that raced the earlier cleanup phase.
     await main_db.saas_tenants.delete_one({"id": tenant_id})
     steps["tenant_record_deleted"] = True
+    await client.drop_database(db_name)
+    steps["final_drop_db"] = db_name
 
     # 7) Audit log
     await main_db.platform_audit_log.insert_one({

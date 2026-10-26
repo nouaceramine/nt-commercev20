@@ -172,7 +172,15 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
 
     @router.post("/webhook")
     async def whatsapp_webhook(request: Request):
-        body = await request.json()
+        from services.ecom.webhook_security import read_signed_body, decode_json_body, verify_meta_signature
+        raw_body = await read_signed_body(request)
+        import os
+        app_secret = os.environ.get("WHATSAPP_APP_SECRET", "")
+        if not app_secret:
+            raise HTTPException(status_code=503, detail="WHATSAPP_APP_SECRET is not configured")
+        if not verify_meta_signature(raw_body, request.headers.get("X-Hub-Signature-256", ""), app_secret):
+            raise HTTPException(status_code=401, detail="Webhook signature verification failed")
+        body = decode_json_body(raw_body)
         if body.get("object") == "whatsapp_business_account":
             for entry in body.get("entry", []):
                 for change in entry.get("changes", []):

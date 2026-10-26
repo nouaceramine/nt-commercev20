@@ -85,7 +85,7 @@ def create_margin_rules_routes(main_db, get_tenant_admin, get_super_admin):
         if clash:
             raise HTTPException(status_code=409, detail="توجد قاعدة أخرى لهذه الفئة")
         await main_db.margin_rules.update_one(
-            {"id": rule_id},
+            {"id": rule_id, "tenant_id": tid},
             {"$set": {
                 "service_category": cat,
                 "margin_type": data.margin_type,
@@ -94,7 +94,7 @@ def create_margin_rules_routes(main_db, get_tenant_admin, get_super_admin):
                 "updated_at": now_iso(),
             }},
         )
-        return await main_db.margin_rules.find_one({"id": rule_id}, {"_id": 0})
+        return await main_db.margin_rules.find_one({"id": rule_id, "tenant_id": tid}, {"_id": 0})
 
     @router.delete("/margin-rules/{rule_id}")
     async def delete_rule(rule_id: str, user: dict = Depends(get_tenant_admin)):

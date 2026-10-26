@@ -143,7 +143,7 @@ export default function WorkerWorkspacePage() {
                   {/* المنتجات */}
                   <div className="text-xs bg-muted/40 rounded-lg p-2 space-y-0.5">
                     {(o.items || []).map((it, i) => (
-                      <div key={i} className="flex justify-between"><span>{it.name} × {it.qty}</span><span>{Number(it.total ?? (it.price * it.qty) ?? 0).toLocaleString()}</span></div>
+                      <div key={i} className="flex justify-between"><span>{it.name} × {it.qty}</span><span>{(Number(it.total) || (Number(it.price) || 0) * (Number(it.qty) || 0)).toLocaleString()}</span></div>
                     ))}
                   </div>
                   {/* اتصال */}

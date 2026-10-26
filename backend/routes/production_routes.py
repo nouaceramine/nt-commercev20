@@ -317,10 +317,8 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import Response
 
         def _cell(v):
-            s = str(v if v is not None else "")
-            if any(ch in s for ch in (",", '"', "\n")):
-                s = '"' + s.replace('"', '""') + '"'
-            return s
+            from utils.csv_safe import csv_cell
+            return csv_cell(v)
 
         lines = ["التاريخ,الصنف,الكمية,تكلفة الوحدة,التكلفة الإجمالية,السبب,المسجل"]
         for w in rows:

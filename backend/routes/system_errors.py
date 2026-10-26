@@ -2,20 +2,21 @@
 System Errors Routes
 Handles system error logging, monitoring, and auto-fixing for SaaS admin
 """
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Depends, Header, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
+import json
 
 router = APIRouter(prefix="/saas/system-errors", tags=["System Errors"])
 
 # Will be set from server.py
 main_db = None
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "nt_commerce_super_secure_jwt_secret_key_2024_v3_hardened")
-ALGORITHM = "HS256"
+from utils.jwt_config import SECRET_KEY, ALGORITHM
+from middleware.rate_limit import rate_limit
 
 def init_routes(db, super_admin_dep=None) -> dict:
     """Initialize routes with dependencies from main server"""
@@ -33,7 +34,10 @@ async def verify_super_admin(authorization: str = Header(None)) -> dict:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("role") != "super_admin":
             raise HTTPException(status_code=403, detail="يجب أن تكون مدير أعلى")
-        return payload
+        user = await main_db.users.find_one({"id": payload.get("sub")}, {"_id": 0, "password": 0, "hashed_password": 0})
+        if not user or user.get("role") not in ("super_admin", "saas_admin") or user.get("is_active") is False:
+            raise HTTPException(status_code=403, detail="الحساب غير متاح أو صلاحيته موقوفة")
+        return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="انتهت صلاحية الجلسة")
     except jwt.InvalidTokenError:
@@ -44,12 +48,12 @@ async def verify_super_admin(authorization: str = Header(None)) -> dict:
 class SystemErrorCreate(BaseModel):
     type: Literal["api", "database", "payment", "auth", "system", "integration"]
     severity: Literal["critical", "warning", "info"]
-    message: str
-    tenant_id: Optional[str] = None
-    tenant_name: Optional[str] = None
+    message: str = Field(min_length=1, max_length=4000)
+    tenant_id: Optional[str] = Field(default=None, max_length=128)
+    tenant_name: Optional[str] = Field(default=None, max_length=200)
     details: Optional[dict] = None
     auto_fixable: bool = False
-    fix_action: Optional[str] = None
+    fix_action: Optional[str] = Field(default=None, max_length=100)
 
 class SystemErrorResponse(BaseModel):
     id: str
@@ -120,8 +124,11 @@ async def get_system_errors(
     )
 
 @router.post("", response_model=SystemErrorResponse)
-async def create_system_error(error: SystemErrorCreate):
+@rate_limit("20/minute")
+async def create_system_error(request: Request, error: SystemErrorCreate):
     """Log a new system error (can be called by system or manually)"""
+    if len(json.dumps(error.details or {}, ensure_ascii=False)) > 16384:
+        raise HTTPException(status_code=413, detail="details too large")
     error_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
@@ -174,25 +181,8 @@ async def auto_fix_error(
     return {"success": True, "message": f"تم تنفيذ الإصلاح: {fix_action}", "result": fix_result}
 
 async def execute_fix_action(action: str, error: dict) -> dict:
-    """Execute various auto-fix actions"""
-    result = {"action": action, "status": "completed"}
-    
-    if action == "reconnect_db":
-        result["details"] = "تم إعادة الاتصال بقاعدة البيانات بنجاح"
-    elif action == "clear_cache":
-        result["details"] = "تم مسح ذاكرة التخزين المؤقت"
-    elif action == "clear_sessions":
-        tenant_id = error.get("tenant_id")
-        if tenant_id:
-            result["details"] = f"تم مسح جلسات المستأجر {tenant_id}"
-    elif action == "restart_service":
-        result["details"] = "تم إعادة تشغيل الخدمة"
-    elif action == "retry_payment":
-        result["details"] = "تم إعادة محاولة الدفع"
-    else:
-        result["details"] = "تم تنفيذ الإجراء"
-    
-    return result
+    """No privileged action is executed unless a real executor is configured."""
+    raise HTTPException(status_code=501, detail=f"التنفيذ الآلي غير مهيأ للإجراء: {action or 'غير محدد'}")
 
 @router.post("/{error_id}/resolve")
 async def resolve_error(
@@ -238,82 +228,5 @@ async def run_maintenance_action(
     action: Literal["clear_cache", "reconnect_db", "restart_services", "system_check"],
     admin: dict = Depends(verify_super_admin)
 ):
-    """Run system maintenance actions"""
-    now = datetime.now(timezone.utc).isoformat()
-    result = {"action": action, "status": "completed", "timestamp": now}
-    
-    if action == "clear_cache":
-        result["message"] = "تم مسح ذاكرة التخزين المؤقت بنجاح"
-        result["details"] = {"cleared_items": 156, "freed_memory": "45MB"}
-    elif action == "reconnect_db":
-        result["message"] = "تم إعادة الاتصال بقاعدة البيانات"
-        result["details"] = {"connections_reset": 12, "new_pool_size": 10}
-    elif action == "restart_services":
-        result["message"] = "تم إعادة تشغيل الخدمات"
-        result["details"] = {"services_restarted": ["api", "worker", "scheduler"]}
-    elif action == "system_check":
-        result["message"] = "تم فحص النظام"
-        result["details"] = {
-            "cpu_usage": "23%",
-            "memory_usage": "45%",
-            "disk_usage": "67%",
-            "db_connections": 8,
-            "active_tenants": 5,
-            "status": "healthy"
-        }
-    
-    # Log the maintenance action as a system event
-    await main_db.system_errors.insert_one({
-        "id": str(uuid.uuid4()),
-        "type": "system",
-        "severity": "info",
-        "message": f"تم تنفيذ إجراء الصيانة: {result['message']}",
-        "tenant_id": None,
-        "tenant_name": "النظام",
-        "timestamp": now,
-        "status": "resolved",
-        "auto_fixable": False,
-        "details": result["details"],
-        "resolved_at": now,
-        "resolved_by": admin.get("sub", "admin")
-    })
-    
-    return result
-
-# ============ HELPER FUNCTION FOR LOGGING ERRORS ============
-
-async def log_system_error(
-    error_type: str,
-    severity: str,
-    message: str,
-    tenant_id: str = None,
-    tenant_name: str = None,
-    details: dict = None,
-    auto_fixable: bool = False,
-    fix_action: str = None
-):
-    """Helper function to log system errors from anywhere in the codebase"""
-    if main_db is None:
-        return None
-    
-    error_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    error_doc = {
-        "id": error_id,
-        "type": error_type,
-        "severity": severity,
-        "message": message,
-        "tenant_id": tenant_id,
-        "tenant_name": tenant_name or "النظام",
-        "timestamp": now,
-        "status": "active",
-        "auto_fixable": auto_fixable,
-        "fix_action": fix_action,
-        "details": details or {},
-        "resolved_at": None,
-        "resolved_by": None
-    }
-    
-    await main_db.system_errors.insert_one(error_doc)
-    return error_id
+    """Fail honestly instead of returning fabricated maintenance results."""
+    raise HTTPException(status_code=501, detail=f"إجراء الصيانة {action} غير مرتبط بمنفّذ حقيقي")

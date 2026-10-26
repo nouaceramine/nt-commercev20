@@ -429,7 +429,7 @@ async def _status_for(iid: str, entry: dict, tenant_id: str) -> dict:
             "mode": "",
             "masked": {
                 "url": prov.get("url") or "",
-                "api_key": _mask(prov.get("api_key")),
+                "api_key": _mask(prov.get("token") or prov.get("api_key")),
                 "sender_name": doc.get("sender_name") or "",
             },
             "last_test": doc.get("hub_last_test"),
@@ -528,13 +528,14 @@ async def _run_test(iid: str, entry: dict, doc: Optional[dict]) -> dict:
         if not url or not ck:
             return {"ok": False, "message": "❌ أدخل رابط المتجر والمفاتيح أولاً"}
         try:
-            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as cl:
-                r = await cl.get(f"{url}/wp-json/wc/v3/products", params={"per_page": 1}, auth=(ck, cs))
-            if r.status_code == 200:
-                return {"ok": True, "message": "✅ متصل بمتجر WooCommerce بنجاح"}
-            if r.status_code in (401, 403):
-                return {"ok": False, "message": "❌ رفض المتجر المفاتيح (401/403) — تحقق من Consumer Key/Secret"}
-            return {"ok": False, "message": f"❌ استجابة غير متوقعة (HTTP {r.status_code}) — تحقق من رابط المتجر"}
+            from services.woocommerce_service import request as woo_request
+            await woo_request(
+                {"store_url": url, "consumer_key": ck, "consumer_secret": cs},
+                "GET", "/wp-json/wc/v3/products", params={"per_page": 1},
+            )
+            return {"ok": True, "message": "✅ متصل بمتجر WooCommerce بنجاح"}
+        except HTTPException as exc:
+            return {"ok": False, "message": f"❌ {exc.detail}"}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "message": f"❌ تعذّر الوصول للمتجر: {str(exc)[:120]}"}
     return {"ok": True, "message": "حُفظ بنجاح — لا يوجد فحص اتصال مباشر لهذا المزوّد؛ سيُتحقق عند أول استخدام"}
@@ -717,18 +718,30 @@ async def hub_connect(iid: str, body: dict, admin: dict = Depends(get_tenant_adm
             upsert=True)
 
     elif entry["adapter"] == "sms":
-        provider = {"type": "http",
-                    "url": str(fields.get("url") or "").strip(),
-                    "api_key": str(fields.get("api_key") or "").strip()}
+        existing = await db.ecom_sms_settings.find_one({"id": "global"}, {"_id": 0, "provider": 1}) or {}
+        old_provider = existing.get("provider") or {}
+        supplied_key = str(fields.get("api_key") or "").strip()
+        if supplied_key.startswith("••••"):
+            token = old_provider.get("token") or old_provider.get("api_key") or ""
+        elif supplied_key:
+            token = _ef(supplied_key)
+        else:
+            token = old_provider.get("token") or old_provider.get("api_key") or ""
+        provider = {"type": "http", "url": str(fields.get("url") or "").strip(), "token": token}
+        from services.ecom.sms_gateway import HTTPGatewayProvider
+        try:
+            HTTPGatewayProvider({**provider, "token": _df(token) or ""})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"إعداد بوابة SMS غير صالح: {exc}")
         await db.ecom_sms_settings.update_one(
             {"id": "global"},
             {"$set": {"provider": provider, "enabled": True,
                       "sender_name": (fields.get("sender_name") or "").strip()[:60],
                       "updated_at": _now(), "updated_by": admin.get("id"),
                       "hub_last_test": {"ok": True,
-                                        "message": "حُفظ — سيُتحقق عند أول إرسال", "at": _now()}}},
+                                        "message": "حُفظت البوابة — سيُتحقق من التسليم عند الإرسال", "at": _now()}}},
             upsert=True)
-        test_result = {"ok": True, "message": "✅ حُفظت البوابة وفعّلت — سيُتحقق عند أول إرسال"}
+        test_result = {"ok": True, "message": "✅ حُفظت بوابة HTTPS — لم يُرسل أي SMS تجريبي"}
 
     await _audit(admin, "connect", iid)
     return {"ok": test_result["ok"], "message": test_result["message"],

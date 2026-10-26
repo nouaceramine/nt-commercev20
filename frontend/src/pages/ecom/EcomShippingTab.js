@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
 import { toast } from 'sonner';
+import { escapeHtml } from '../../lib/escape';
+import { safeLabelUrl } from '../../lib/printSafety';
 
 // p255: generic courier sync (p248 backend) — one card for all registered
 // couriers: config status + one-click status sync through the real pipeline.
@@ -216,16 +218,16 @@ export default function EcomShippingTab() {
       const w = window.open('', '_blank');
       if (!w) { toast.error(ar ? 'اسمح بالنوافذ المنبثقة' : 'Autorisez les popups'); return; }
       const rows = labels.map(l => `<tr>
-        <td style="padding:8px;border:1px solid #ddd;font-family:monospace">${l.tracking_number || '—'}</td>
-        <td style="padding:8px;border:1px solid #ddd">${l.provider || ''}</td>
-        <td style="padding:8px;border:1px solid #ddd">${l.real ? `<a href="${l.label_url}" target="_blank">فتح البوليصة ⬇</a>` : '<span style="color:#999">تجريبية — بلا ملف</span>'}</td>
+        <td style="padding:8px;border:1px solid #ddd;font-family:monospace">${escapeHtml(l.tracking_number || '—')}</td>
+        <td style="padding:8px;border:1px solid #ddd">${escapeHtml(l.provider || '')}</td>
+        <td style="padding:8px;border:1px solid #ddd">${l.real && safeLabelUrl(l.label_url) ? `<a data-pdf href="${escapeHtml(safeLabelUrl(l.label_url))}" target="_blank" rel="noopener noreferrer">فتح البوليصة ⬇</a>` : '<span style="color:#999">بلا ملف</span>'}</td>
       </tr>`).join('');
-      w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>بوليصات ${bulkDate}</title></head>
+      w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>بوليصات ${escapeHtml(bulkDate)}</title></head>
         <body style="font-family:sans-serif;padding:20px">
-        <h2>🖨 بوليصات الشحن — ${bulkDate} (${labels.length})</h2>
+        <h2>🖨 بوليصات الشحن — ${escapeHtml(bulkDate)} (${labels.length})</h2>
         ${labels.length === 0 ? '<p>لا بوليصات في هذا اليوم.</p>' : `
         <p style="color:#666;font-size:13px">اضغط «فتح الكل» ثم اطبع من كل تبويب (Ctrl+P). إن حجب المتصفح النوافذ، اسمح بها لهذا الموقع.</p>
-        <button onclick="document.querySelectorAll('a[data-pdf]').forEach((a,i)=>setTimeout(()=>window.open(a.href,'_blank'),i*400))" style="padding:8px 16px;font-size:14px;cursor:pointer">⬇ فتح الكل (${labels.filter(l=>l.real).length})</button>
+        <button onclick="document.querySelectorAll('a[data-pdf]').forEach((a,i)=>setTimeout(()=>window.open(a.href,'_blank','noopener,noreferrer'),i*400))" style="padding:8px 16px;font-size:14px;cursor:pointer">⬇ فتح الكل (${labels.filter(l=>l.real).length})</button>
         <table style="border-collapse:collapse;margin-top:12px;width:100%">
           <tr style="background:#f5f5f5"><th style="padding:8px;border:1px solid #ddd">التتبع</th><th style="padding:8px;border:1px solid #ddd">الناقل</th><th style="padding:8px;border:1px solid #ddd">البوليصة</th></tr>
           ${rows}

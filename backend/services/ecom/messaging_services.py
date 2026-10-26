@@ -68,6 +68,7 @@ def parse_tiktok_order(payload: dict, integration_id: str) -> Optional[dict]:
             "wilaya": receiver.get("region", "") or receiver.get("state", ""),
             "items": items,
             "total": float(data.get("payment_amount") or data.get("total") or 0),
+            "payment_status": "paid" if str(data.get("payment_status") or "").lower() in {"paid", "completed", "settled"} else "unpaid",
         }
     except (KeyError, ValueError, TypeError):
         return None

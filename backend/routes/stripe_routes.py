@@ -4,21 +4,37 @@ Extracted from server.py
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import io
 import logging
+import asyncio
+import html
+import re
+from urllib.parse import urlparse
+import stripe
 
 logger = logging.getLogger(__name__)
 
-try:
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
-    STRIPE_AVAILABLE = True
-except ImportError:
-    STRIPE_AVAILABLE = False
+STRIPE_AVAILABLE = True
+
+
+def _stripe_client() -> stripe.StripeClient:
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Stripe غير مهيأ على الخادم")
+    return stripe.StripeClient(api_key)
+
+
+def _safe_origin(value: str) -> str:
+    origin = (value or "").strip().rstrip("/")
+    parsed = urlparse(origin)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise HTTPException(status_code=400, detail="origin_url يجب أن يكون عنوان HTTPS صالحًا")
+    return origin
 
 SUBSCRIPTION_PACKAGES = {
     "basic_monthly": {"name": "الباقة الأساسية - شهري", "amount": 2500.0, "duration_days": 30, "currency": "dzd"},
@@ -47,7 +63,7 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
         description: str = ""
         invoice_number: str = ""
         status: str = "pending"
-        metadata: dict = {}
+        metadata: dict = Field(default_factory=dict)
 
     class PaymentUpdateRequest(BaseModel):
         status: Optional[str] = None
@@ -64,68 +80,131 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
         return packages
 
     @router.post("/payments/create-checkout")
-    async def create_checkout_session(request: CreateCheckoutRequest, http_request: Request):
-        if not STRIPE_AVAILABLE:
-            raise HTTPException(status_code=500, detail="Stripe غير متوفر")
+    async def create_checkout_session(request: CreateCheckoutRequest, user: dict = Depends(get_current_user)):
         package = SUBSCRIPTION_PACKAGES.get(request.package_id)
         if not package:
             raise HTTPException(status_code=400, detail="الباقة غير موجودة")
-        api_key = os.environ.get("STRIPE_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="مفتاح Stripe غير موجود")
+        client = _stripe_client()
+        origin = _safe_origin(request.origin_url)
+        transaction_id = str(uuid.uuid4())
+        tenant_id = user.get("tenant_id")
+        user_id = user.get("id")
+        metadata = {
+            "transaction_id": transaction_id,
+            "package_id": request.package_id,
+            "package_name": package["name"],
+            "duration_days": str(package["duration_days"]),
+            "source": "nt_commerce",
+            "created_by": str(user_id or ""),
+        }
+        if tenant_id:
+            metadata["tenant_id"] = tenant_id
         try:
-            success_url = f"{request.origin_url}/payment-success?session_id={{CHECKOUT_SESSION_ID}}"
-            cancel_url = f"{request.origin_url}/payment-cancel"
-            host_url = str(http_request.base_url)
-            webhook_url = f"{host_url}api/webhook/stripe"
-            stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
-            checkout_request = CheckoutSessionRequest(amount=package["amount"], currency="usd", success_url=success_url, cancel_url=cancel_url, metadata={"package_id": request.package_id, "package_name": package["name"], "duration_days": str(package["duration_days"]), "source": "nt_commerce"})
-            session: CheckoutSessionResponse = await stripe_checkout.create_checkout_session(checkout_request)
-            transaction_id = str(uuid.uuid4())
-            await main_db.payment_transactions.insert_one({"id": transaction_id, "session_id": session.session_id, "package_id": request.package_id, "package_name": package["name"], "amount": package["amount"], "currency": package["currency"], "payment_status": "pending", "created_at": datetime.now(timezone.utc).isoformat(), "metadata": {"package_id": request.package_id, "duration_days": package["duration_days"]}})
-            return {"url": session.url, "session_id": session.session_id, "transaction_id": transaction_id}
-        except Exception as e:
-            logger.error(f"Stripe checkout error: {str(e)}")
-            raise HTTPException(status_code=500, detail="Internal server error")
+            session = await asyncio.to_thread(
+                client.v1.checkout.sessions.create,
+                params={
+                    "mode": "payment",
+                    "success_url": f"{origin}/payment-success?session_id={{CHECKOUT_SESSION_ID}}",
+                    "cancel_url": f"{origin}/payment-cancel",
+                    "line_items": [{
+                        "quantity": 1,
+                        "price_data": {
+                            "currency": package["currency"],
+                            "unit_amount": int(round(package["amount"] * 100)),
+                            "product_data": {"name": package["name"]},
+                        },
+                    }],
+                    "metadata": metadata,
+                    "payment_intent_data": {"metadata": metadata},
+                },
+            )
+            await main_db.payment_transactions.insert_one({
+                "id": transaction_id, "session_id": session.id,
+                "tenant_id": tenant_id, "created_by": user_id,
+                "package_id": request.package_id, "package_name": package["name"],
+                "amount": package["amount"], "currency": package["currency"],
+                "payment_status": "pending", "status": session.status,
+                "created_at": datetime.now(timezone.utc).isoformat(), "metadata": metadata,
+            })
+            return {"url": session.url, "session_id": session.id, "transaction_id": transaction_id}
+        except stripe.StripeError as exc:
+            logger.error("Stripe checkout failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=502, detail="تعذر إنشاء جلسة الدفع لدى Stripe")
 
     @router.get("/payments/status/{session_id}")
-    async def get_payment_status(session_id: str, http_request: Request):
-        if not STRIPE_AVAILABLE:
-            raise HTTPException(status_code=500, detail="Stripe غير متوفر")
-        api_key = os.environ.get("STRIPE_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="مفتاح Stripe غير موجود")
+    async def get_payment_status(session_id: str, user: dict = Depends(get_current_user)):
+        if not session_id.startswith("cs_") or len(session_id) > 255:
+            raise HTTPException(status_code=400, detail="معرّف جلسة غير صالح")
+        record = await main_db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+        if not record:
+            raise HTTPException(status_code=404, detail="جلسة الدفع غير موجودة")
+        is_super = user.get("role") == "super_admin" or user.get("user_type") == "super_admin"
+        if not is_super:
+            if user.get("tenant_id"):
+                owns_record = record.get("tenant_id") == user.get("tenant_id")
+            else:
+                owns_record = bool(user.get("id")) and record.get("created_by") == user.get("id")
+            if not owns_record:
+                raise HTTPException(status_code=404, detail="جلسة الدفع غير موجودة")
+        client = _stripe_client()
         try:
-            host_url = str(http_request.base_url)
-            webhook_url = f"{host_url}api/webhook/stripe"
-            stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
-            status: CheckoutStatusResponse = await stripe_checkout.get_checkout_status(session_id)
-            await main_db.payment_transactions.update_one({"session_id": session_id}, {"$set": {"payment_status": status.payment_status, "status": status.status, "updated_at": datetime.now(timezone.utc).isoformat()}})
-            return {"status": status.status, "payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency, "metadata": status.metadata}
-        except Exception as e:
-            logger.error(f"Stripe status error: {str(e)}")
-            raise HTTPException(status_code=500, detail="Internal server error")
+            session = await asyncio.to_thread(client.v1.checkout.sessions.retrieve, session_id)
+            metadata = dict(session.metadata or {})
+            if session.id != session_id or metadata.get("transaction_id") != record.get("id"):
+                logger.error("Stripe session ownership metadata mismatch")
+                raise HTTPException(status_code=502, detail="تعذر التحقق من ملكية جلسة الدفع")
+            await main_db.payment_transactions.update_one(
+                {"id": record["id"], "session_id": session_id},
+                {"$set": {
+                    "payment_status": session.payment_status,
+                    "status": session.status,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+            return {
+                "status": session.status, "payment_status": session.payment_status,
+                "amount_total": session.amount_total, "currency": session.currency,
+                "transaction_id": record["id"], "package_id": record.get("package_id"),
+            }
+        except stripe.StripeError as exc:
+            logger.error("Stripe status failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=502, detail="تعذر الاستعلام عن جلسة الدفع")
 
     @router.post("/webhook/stripe")
     async def stripe_webhook(request: Request):
-        if not STRIPE_AVAILABLE:
-            raise HTTPException(status_code=500, detail="Stripe غير متوفر")
-        api_key = os.environ.get("STRIPE_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="مفتاح Stripe غير موجود")
+        from services.ecom.webhook_security import read_signed_body
+        webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+        if not webhook_secret:
+            raise HTTPException(status_code=503, detail="STRIPE_WEBHOOK_SECRET غير مضبوط")
+        body = await read_signed_body(request)
+        signature = request.headers.get("Stripe-Signature")
+        if not signature:
+            raise HTTPException(status_code=401, detail="توقيع Stripe مفقود")
         try:
-            body = await request.body()
-            signature = request.headers.get("Stripe-Signature")
-            host_url = str(request.base_url)
-            webhook_url = f"{host_url}api/webhook/stripe"
-            stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
-            webhook_response = await stripe_checkout.handle_webhook(body, signature)
-            if webhook_response.session_id:
-                await main_db.payment_transactions.update_one({"session_id": webhook_response.session_id}, {"$set": {"payment_status": webhook_response.payment_status, "event_type": webhook_response.event_type, "event_id": webhook_response.event_id, "webhook_received_at": datetime.now(timezone.utc).isoformat()}})
-            return {"received": True}
-        except Exception as e:
-            logger.error(f"Stripe webhook error: {str(e)}")
-            raise HTTPException(status_code=400, detail=str(e))
+            event = stripe.Webhook.construct_event(body, signature, webhook_secret)
+        except (stripe.SignatureVerificationError, ValueError):
+            raise HTTPException(status_code=401, detail="توقيع Stripe غير صالح")
+        event_type = event.get("type", "")
+        session = (event.get("data") or {}).get("object") or {}
+        session_id = session.get("id")
+        if session_id and event_type in {
+            "checkout.session.completed", "checkout.session.async_payment_succeeded",
+            "checkout.session.async_payment_failed", "checkout.session.expired",
+        }:
+            payment_status = session.get("payment_status") or (
+                "paid" if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded")
+                else "failed"
+            )
+            await main_db.payment_transactions.update_one(
+                {"session_id": session_id},
+                {"$set": {
+                    "payment_status": payment_status,
+                    "status": session.get("status"),
+                    "event_type": event_type, "event_id": event.get("id"),
+                    "webhook_received_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+        return {"received": True}
 
     # Payment Records Management (manual/offline)
     @router.get("/payments/records")
@@ -189,7 +268,16 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
         tenant = None
         if record.get("tenant_id"):
             tenant = await main_db.saas_tenants.find_one({"id": record["tenant_id"]}, {"_id": 0})
-        invoice_html = f"""<html dir="rtl"><head><style>body{{font-family:Arial;padding:40px;}}.header{{text-align:center;border-bottom:2px solid #333;padding-bottom:20px;margin-bottom:30px;}}.total{{font-size:1.2em;font-weight:bold;text-align:left;margin-top:20px;}}</style></head><body><div class="header"><h1>فاتورة</h1><p>NT Commerce</p></div><p><strong>رقم الفاتورة:</strong> {record.get('invoice_number','N/A')}</p><p><strong>التاريخ:</strong> {record.get('created_at','')[:10]}</p><p><strong>العميل:</strong> {tenant.get('business_name','N/A') if tenant else 'N/A'}</p><div class="total">الإجمالي: {record.get('amount',0):,.2f} {record.get('currency','دج').upper()}</div></body></html>"""
-        return StreamingResponse(io.BytesIO(invoice_html.encode('utf-8')), media_type="text/html", headers={"Content-Disposition": f"inline; filename=invoice_{record.get('invoice_number', record_id)}.html"})
+        invoice_number = html.escape(str(record.get("invoice_number") or "N/A"))
+        created_at = html.escape(str(record.get("created_at") or "")[:10])
+        business_name = html.escape(str(tenant.get("business_name") or "N/A") if tenant else "N/A")
+        currency = html.escape(str(record.get("currency") or "دج").upper())
+        try:
+            amount = float(record.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        invoice_html = f"""<html dir="rtl"><head><meta charset="utf-8"><style>body{{font-family:Arial;padding:40px;}}.header{{text-align:center;border-bottom:2px solid #333;padding-bottom:20px;margin-bottom:30px;}}.total{{font-size:1.2em;font-weight:bold;text-align:left;margin-top:20px;}}</style></head><body><div class="header"><h1>فاتورة</h1><p>NT Commerce</p></div><p><strong>رقم الفاتورة:</strong> {invoice_number}</p><p><strong>التاريخ:</strong> {created_at}</p><p><strong>العميل:</strong> {business_name}</p><div class="total">الإجمالي: {amount:,.2f} {currency}</div></body></html>"""
+        safe_filename = re.sub(r"[^A-Za-z0-9_.-]", "_", str(record.get("invoice_number") or record_id))[:100]
+        return StreamingResponse(io.BytesIO(invoice_html.encode('utf-8')), media_type="text/html", headers={"Content-Disposition": f"inline; filename=invoice_{safe_filename}.html"})
 
     return router

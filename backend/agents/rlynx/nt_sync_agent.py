@@ -58,11 +58,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import traceback
 import urllib.request
 import urllib.error
+import urllib.parse
 import zipfile
 
 AGENT_VERSION = "2.2"
@@ -127,6 +129,14 @@ def connect(cfg):
     return pyodbc.connect(conn_str, autocommit=True)
 
 
+def _identifier(value):
+    """SQL identifiers come from the local mapping profile, never from row data."""
+    value = str(value or "")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+        raise RuntimeError(f"unsafe SQL identifier in sync profile: {value!r}")
+    return value
+
+
 def profile(cfg):
     """canonical → {table, columns}. Access uses the built-in identity profile."""
     if cfg.get("engine", "access") == "access":
@@ -134,18 +144,26 @@ def profile(cfg):
     prof = cfg.get("profile") or {}
     if "Receipt" not in prof or "Item" not in prof:
         raise RuntimeError("mssql engine needs a profile with at least Receipt + Item")
-    merged = dict(prof)
-    return merged
+    for spec in prof.values():
+        _identifier(spec.get("table"))
+        columns = spec.get("columns")
+        if columns is not None:
+            if not isinstance(columns, dict):
+                raise RuntimeError("sync profile columns must be a mapping")
+            for destination, source in columns.items():
+                _identifier(destination)
+                _identifier(source)
+    return dict(prof)
 
 
 def select_rows(cur, prof, canon, where=None, params=()):
     """SELECT canonical columns (renamed per profile) from the source table."""
     spec = prof[canon]
     if spec["columns"] is None:
-        sql = f"SELECT * FROM [{spec['table']}]"
+        sql = f"SELECT * FROM [{spec['table']}]"  # nosec B608 - identifiers validated by profile()
     else:
         cols = ", ".join(f"[{src}] AS [{dst}]" for dst, src in spec["columns"].items())
-        sql = f"SELECT {cols} FROM [{spec['table']}]"
+        sql = f"SELECT {cols} FROM [{spec['table']}]"  # nosec B608 - identifiers validated by profile()
     if where:
         sql += f" WHERE {where}"
     sql += f" ORDER BY [{spec['columns']['ID'] if spec['columns'] else 'ID'}]" \
@@ -155,7 +173,7 @@ def select_rows(cur, prof, canon, where=None, params=()):
     out = []
     for rec in cur.fetchall():
         row = {}
-        for c, v in zip(cols, rec):
+        for c, v in zip(cols, rec, strict=True):
             if v is None:
                 row[c] = ""
             elif hasattr(v, "strftime"):
@@ -167,7 +185,7 @@ def select_rows(cur, prof, canon, where=None, params=()):
 
 
 def row_hash(row):
-    return hashlib.sha1(
+    return hashlib.sha256(
         json.dumps(row, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
 
@@ -180,15 +198,19 @@ def num(x):
 
 
 def push(cfg, tables):
+    server = str(cfg["server"] or "").rstrip("/")
+    parsed = urllib.parse.urlparse(server)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise RuntimeError("sync server must be a valid HTTPS origin")
     body = json.dumps({"tables": tables,
                        "agent_version": AGENT_VERSION}).encode()
     req = urllib.request.Request(
-        cfg["server"].rstrip("/") + "/api/migration/live/push",
+        server + "/api/migration/live/push",
         data=body,
         headers={"Content-Type": "application/json",
                  "X-Sync-Token": cfg["token"]},
         method="POST")
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=120) as resp:  # nosec B310 - HTTPS origin enforced above
         return json.loads(resp.read() or b"{}")
 
 
@@ -326,7 +348,7 @@ def baseline(cfg, state):
             continue
         spec = prof[canon]
         id_col = spec["columns"]["ID"] if spec["columns"] else "ID"
-        cur.execute(f"SELECT MAX([{id_col}]) FROM [{spec['table']}]")
+        cur.execute(f"SELECT MAX([{id_col}]) FROM [{spec['table']}]")  # nosec B608 - identifiers validated by profile()
         val = cur.fetchone()[0]
         state[key] = float(val) if val is not None else 0
     if "Batch" in prof:

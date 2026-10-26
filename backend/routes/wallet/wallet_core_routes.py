@@ -4,12 +4,11 @@ Extracted from wallet_routes.py (Refactoring: Extract Class)
 Following Martin Fowler's Large Class -> Extract Class pattern
 """
 from fastapi import APIRouter, HTTPException, Depends
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 
 from services.code_generator import generate_code
 from services.wallet_service import PLATFORM_WALLET_ID
-from utils.permissions import create_cashier_block
 
 DEFAULT_LOW_BALANCE = 1000.0
 
@@ -110,6 +109,7 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
             "id": str(uuid.uuid4()),
             "code": code,
             "wallet_id": wallet["id"],
+            "entity_id": entity_id,
             "transaction_type": "credit",
             "payment_method": payment_method,
             "amount": amount,
@@ -150,6 +150,7 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
             "id": str(uuid.uuid4()),
             "code": code,
             "wallet_id": wallet["id"],
+            "entity_id": entity_id,
             "transaction_type": "debit",
             "amount": amount,
             "balance_before": old_balance,
@@ -171,12 +172,28 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
 
     @router.get("/stats")
     async def get_wallet_stats(user: dict = Depends(block_cashier)):
-        total_wallets = await main_db.wallets.count_documents({})
-        balance_agg = await main_db.wallets.aggregate([
+        is_super = user.get("role") == "super_admin" or user.get("user_type") == "super_admin"
+        entity_id = _entity_ref(user)[0]
+        wallet_query = {} if is_super else {"entity_id": entity_id}
+        transfer_query = {} if is_super else {"$or": [{"from_entity_id": entity_id}, {"to_entity_id": entity_id}]}
+        total_wallets = await main_db.wallets.count_documents(wallet_query)
+        balance_pipeline = ([] if is_super else [{"$match": wallet_query}]) + [
             {"$group": {"_id": None, "total": {"$sum": "$balance"}}}
-        ]).to_list(1)
-        total_txns = await main_db.wallet_transactions.count_documents({})
-        total_transfers = await main_db.wallet_transfers.count_documents({})
+        ]
+        balance_agg = await main_db.wallets.aggregate(balance_pipeline).to_list(1)
+        if is_super:
+            transaction_query = {}
+        else:
+            owned_wallets = await main_db.wallets.find(
+                wallet_query, {"_id": 0, "id": 1}
+            ).to_list(2)
+            # Older admin credit/debit records have wallet_id but no entity_id.
+            transaction_query = {"$or": [
+                {"entity_id": entity_id},
+                {"wallet_id": {"$in": [wallet["id"] for wallet in owned_wallets]}},
+            ]}
+        total_txns = await main_db.wallet_transactions.count_documents(transaction_query)
+        total_transfers = await main_db.wallet_transfers.count_documents(transfer_query)
         return {
             "total_wallets": total_wallets,
             "total_balance": balance_agg[0]["total"] if balance_agg else 0,

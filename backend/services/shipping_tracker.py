@@ -3,6 +3,7 @@ Shipping Tracker Service
 تتبع الشحن لشركات التوصيل الجزائرية
 """
 import requests
+import asyncio
 import os
 import logging
 from datetime import datetime, timezone
@@ -166,10 +167,11 @@ class ShippingTracker:
 
         try:
             # Placeholder - actual implementation depends on carrier API
-            response = requests.get(
+            response = await asyncio.to_thread(
+                requests.get,
                 f"{carrier_info['track_url']}/{tracking_number}",
                 headers={"Authorization": f"Bearer {api_key}"},
-                timeout=10
+                timeout=10,
             )
             return {
                 "success": response.status_code == 200,
