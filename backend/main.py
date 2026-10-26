@@ -1325,6 +1325,8 @@ _AUTO_REG_MODULES = [
 
 for _mod_path in _AUTO_REG_MODULES:
     try:
+        # _AUTO_REG_MODULES is a static source allowlist, never request-controlled.
+        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
         _m = _importlib.import_module(_mod_path)
         if _mod_path == 'routes.system_errors' and hasattr(_m, 'init_routes'):
             _m.init_routes(main_db)

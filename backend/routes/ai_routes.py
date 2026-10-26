@@ -101,6 +101,8 @@ async def product_images(data: dict, admin: dict = Depends(get_tenant_admin)):
             f"https://api.openverse.org/v1/images/?{params}",
             headers={"User-Agent": "NTCommerce/1.0 (product-image-search)"},
         )
+        # The request target is a fixed HTTPS Openverse endpoint; only the query varies.
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         with _urlreq.urlopen(req, timeout=12) as resp:  # nosec B310 - fixed HTTPS Openverse endpoint
             payload = _json.loads(resp.read().decode("utf-8"))
         return [it for it in payload.get("results", []) if it.get("url") and it.get("thumbnail")]

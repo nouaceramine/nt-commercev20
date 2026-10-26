@@ -544,7 +544,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             if delivered:
                 await main_db.password_reset_requests.update_one({"email": email}, {"$set": {"delivered": True}})
         except Exception as exc:  # noqa: BLE001 — best effort, never leak
-            logger.warning("forgot-password email send failed: %s", exc)
+            # Provider exception messages can contain sensitive details; log only the type.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            logger.warning("forgot-password email send failed: %s", type(exc).__name__)
         return generic
 
     @router.post("/auth/reset-password")

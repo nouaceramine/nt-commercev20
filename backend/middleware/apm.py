@@ -31,6 +31,8 @@ def _route_key(request) -> str:
     for seg in path.split("/"):
         if len(seg) > 24 or seg.isdigit():
             path = path.replace(seg, "{id}")
+    # Internal aggregation key; this is not an HTTP response or template rendering.
+    # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
     return f"{request.method} {path}"
 
 

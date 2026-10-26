@@ -18,7 +18,7 @@ export function useErrorHandler({ language, toast } = {}) {
       || (language === 'ar' ? 'حدث خطأ' : 'Une erreur s\'est produite');
 
     if (context) {
-      console.error(`[${context}] Error:`, error);
+      console.error('[%s] Error:', context, error);
     } else {
       console.error('Error:', error);
     }

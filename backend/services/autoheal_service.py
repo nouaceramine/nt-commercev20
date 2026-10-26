@@ -104,6 +104,8 @@ def _iso(dt: datetime) -> str:
 
 
 def _sig(module: str, key: str) -> str:
+    # Non-cryptographic finding identifier; collision resistance is not a security boundary.
+    # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
     return hashlib.sha1(f"{module}:{key}".encode(), usedforsecurity=False).hexdigest()[:16]
 
 

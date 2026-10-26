@@ -39,7 +39,7 @@ describe('useErrorHandler', () => {
       const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
       const { result } = renderHook(() => useErrorHandler({ language: 'ar', toast: mockToast }));
       result.current.handleError(new Error('Test'), { context: 'CartOperations' });
-      expect(consoleSpy).toHaveBeenCalledWith('[CartOperations] Error:', expect.any(Error));
+      expect(consoleSpy).toHaveBeenCalledWith('[%s] Error:', 'CartOperations', expect.any(Error));
       consoleSpy.mockRestore();
     });
   });

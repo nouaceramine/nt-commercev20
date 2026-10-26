@@ -44,6 +44,8 @@ async def run_migrations() -> dict:
         for name in mods:
             if name in applied:
                 continue
+            # _discover() returns numeric-prefixed modules from the local migrations package only.
+            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             mod = importlib.import_module(f"migrations.{name}")
             try:
                 await mod.up(tdb)
@@ -76,6 +78,8 @@ async def migrate_database(dbname: str) -> list:
     for name in _discover():
         if name in applied:
             continue
+        # _discover() returns numeric-prefixed modules from the local migrations package only.
+        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
         mod = importlib.import_module(f"migrations.{name}")
         try:
             await mod.up(tdb)

@@ -121,6 +121,8 @@ async def encrypt_secrets_now(admin: dict = Depends(get_super_admin)):
                 )
                 migrated["bridge_secrets"] += 1
         except Exception:  # noqa: BLE001
+            # Only the tenant identifier is logged; no bridge secret value is included.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             logger.exception("bridge secret migration failed for %s", t["id"])
     async for t in main_db.saas_tenants.find(
         {"self_bridge_api_key": {"$nin": ["", None]}}, {"_id": 0, "id": 1, "self_bridge_api_key": 1}):
@@ -206,5 +208,7 @@ async def encrypt_secrets_now(admin: dict = Depends(get_super_admin)):
             {"_id": "alert_settings"},
             {"$set": {"telegram_bot_token": encrypt_field(doc["telegram_bot_token"])}})
         migrated["platform_alert_telegram"] += 1
+    # The final value contains migration counts only, never credential material.
+    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
     logger.info("p226/p272 secret migration by %s: %s", admin.get("email"), migrated)
     return {"ok": True, "migrated": migrated}

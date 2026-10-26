@@ -210,6 +210,8 @@ def push(cfg, tables):
         headers={"Content-Type": "application/json",
                  "X-Sync-Token": cfg["token"]},
         method="POST")
+    # The HTTPS origin is strictly validated above; only a fixed path is appended.
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
     with urllib.request.urlopen(req, timeout=120) as resp:  # nosec B310 - HTTPS origin enforced above
         return json.loads(resp.read() or b"{}")
 
@@ -348,6 +350,8 @@ def baseline(cfg, state):
             continue
         spec = prof[canon]
         id_col = spec["columns"]["ID"] if spec["columns"] else "ID"
+        # Table and column identifiers are validated by profile(); row values are never interpolated.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         cur.execute(f"SELECT MAX([{id_col}]) FROM [{spec['table']}]")  # nosec B608 - identifiers validated by profile()
         val = cur.fetchone()[0]
         state[key] = float(val) if val is not None else 0

@@ -12,6 +12,7 @@ services:
       - MONGO_URL=mongodb://mongodb:27017/ntcommerce?replicaSet=rs0
       - DB_NAME=ntcommerce
       - REDIS_URL=redis://redis:6379/0
+      - BACKUP_DIR=/backups
       - SECRET_KEY=${SECRET_KEY}
     volumes:
       - ./backend:/app

@@ -14,6 +14,7 @@ services:
       - MONGO_URL=mongodb://mongodb-staging:27017/ntcommerce_staging?replicaSet=rsStaging
       - DB_NAME=ntcommerce_staging
       - REDIS_URL=redis://redis-staging:6379/0
+      - BACKUP_DIR=/backups
       - APP_ENV=staging
     volumes:
       - /opt/ntcommerce-staging/backend:/app

@@ -12,7 +12,12 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir --upgrade pip==26.2.2 setuptools==84.1.0 \
     && python -m pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app
+
+COPY --chown=app:app . .
+
+USER app
 
 EXPOSE 8001
 
