@@ -2,13 +2,50 @@
  * ReceiptService Tests
  * Phase 4f: Unit Tests for Receipt Generation Service
  */
+import JsBarcode from 'jsbarcode';
 import { ReceiptService } from '../../services/ReceiptService';
 
 describe('ReceiptService', () => {
   const settings = { store_name: 'Test Store', store_address: '123 Main St', store_phone: '0555123456' };
+  const canvasContext = {
+    save: jest.fn(),
+    clearRect: jest.fn(),
+    fillRect: jest.fn(),
+    translate: jest.fn(),
+    restore: jest.fn(),
+    fillText: jest.fn(),
+    measureText: jest.fn(text => ({ width: text.length * 7 })),
+  };
+  let canvasContextSpy;
+  let canvasDataUrlSpy;
+
+  beforeEach(() => {
+    canvasContextSpy = jest.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockImplementation(() => canvasContext);
+    canvasDataUrlSpy = jest.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,dGVzdA==');
+  });
+
+  afterEach(() => {
+    canvasContextSpy.mockRestore();
+    canvasDataUrlSpy.mockRestore();
+  });
   const language = 'ar';
   const isRTL = true;
   const cashierName = 'John Doe';
+
+  it('should render a CODE128 barcode through the canvas test adapter', () => {
+    const canvas = document.createElement('canvas');
+    expect(canvas.getContext('2d')).toBe(canvasContext);
+    JsBarcode(canvas, 'INV-001', {
+      format: 'CODE128',
+      displayValue: true,
+      margin: 2,
+    });
+
+    expect(canvas.toDataURL('image/png')).toBe('data:image/png;base64,dGVzdA==');
+    expect(canvasContext.fillRect).toHaveBeenCalled();
+  });
 
   // ── generateThermalReceiptHtml ──────────────────────────────────
   describe('generateThermalReceiptHtml', () => {
@@ -36,6 +73,8 @@ describe('ReceiptService', () => {
       expect(html).toContain('Product A');
       expect(html).toContain('200');
       expect(html).toContain('80mm'); // paper width in style
+      expect(html).toContain('src="data:image/png;base64,dGVzdA=="');
+      expect(html).toContain('alt="barcode"');
     });
 
     it('should include store details when available', () => {

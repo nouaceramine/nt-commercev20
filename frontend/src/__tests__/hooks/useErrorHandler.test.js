@@ -7,9 +7,15 @@ import { useErrorHandler } from '../../hooks/useErrorHandler';
 
 describe('useErrorHandler', () => {
   const mockToast = { error: jest.fn(), success: jest.fn() };
+  let consoleErrorSpy;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   // ── handleError ─────────────────────────────────────────────────
@@ -36,11 +42,9 @@ describe('useErrorHandler', () => {
     });
 
     it('should log to console with context', () => {
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
       const { result } = renderHook(() => useErrorHandler({ language: 'ar', toast: mockToast }));
       result.current.handleError(new Error('Test'), { context: 'CartOperations' });
-      expect(consoleSpy).toHaveBeenCalledWith('[%s] Error:', 'CartOperations', expect.any(Error));
-      consoleSpy.mockRestore();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('[%s] Error:', 'CartOperations', expect.any(Error));
     });
   });
 

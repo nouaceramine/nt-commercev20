@@ -73,4 +73,12 @@ export default [
       'react/no-unescaped-entities': 'off',
     },
   },
+  {
+    files: ['src/setupTests.js', 'src/__tests__/**/*.{js,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
+    },
+  },
 ];
