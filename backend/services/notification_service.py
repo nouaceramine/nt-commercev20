@@ -12,7 +12,7 @@ Merged (v16): the class supports BOTH usage styles:
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 logger = logging.getLogger(__name__)
 

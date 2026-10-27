@@ -43,7 +43,7 @@ export default function NeighborsPage() {
       a.href = url; a.download = 'neighbor-settlements.csv';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p432: تقرير أعمار ديون الجيران CSV (FIFO — BOM عربي لـ Excel)
@@ -55,7 +55,7 @@ export default function NeighborsPage() {
       a.href = url; a.download = 'neighbors-aging.csv';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p416: تصدير قائمة الجيران CSV (BOM عربي لـ Excel)
@@ -67,7 +67,7 @@ export default function NeighborsPage() {
       a.href = url; a.download = 'neighbors.csv';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   const save = async () => {
@@ -120,7 +120,7 @@ export default function NeighborsPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(ar ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(ar ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
   // p420: كشف حساب الجار CSV (BOM عربي لـ Excel)
@@ -135,7 +135,7 @@ export default function NeighborsPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(ar ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   const settle = async () => {

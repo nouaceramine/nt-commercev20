@@ -1,8 +1,6 @@
 """
 Unified Pagination Utility
 """
-from fastapi import Query
-from typing import List, Any
 
 
 async def paginate(collection, query: dict, page: int = 1, per_page: int = 20, sort_field: str = "created_at", sort_dir: int = -1, projection: dict = None) -> dict:

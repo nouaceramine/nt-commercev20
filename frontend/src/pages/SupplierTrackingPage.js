@@ -6,10 +6,10 @@ import { Badge } from '../components/ui/badge';
 import { Card, CardContent } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Select as _Select, SelectContent as _SelectContent, SelectItem as _SelectItem, SelectTrigger as _SelectTrigger, SelectValue as _SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import apiClient from '../lib/apiClient';
-import { Truck, Package, Plus, Star, DollarSign, Clock, ShoppingCart } from 'lucide-react';
+import { Truck as _Truck, Package, Plus, Star, DollarSign as _DollarSign, Clock, ShoppingCart } from 'lucide-react';
 
 export default function SupplierTrackingPage() {
   const { language } = useLanguage();
@@ -51,7 +51,7 @@ export default function SupplierTrackingPage() {
       toast.success(isAr ? 'تم الإضافة' : 'Ajouté');
       setShowAddGoods(false);
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const addOrderItem = () => {
@@ -67,7 +67,7 @@ export default function SupplierTrackingPage() {
       setShowCreateOrder(false);
       setOrderForm({ supplier_id: '', items: [], notes: '' });
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const statusColor = (s) => ({ pending: 'bg-amber-500/10 text-amber-400', shipped: 'bg-blue-500/10 text-blue-400', delivered: 'bg-emerald-500/10 text-emerald-400', cancelled: 'bg-red-500/10 text-red-400' }[s] || 'bg-gray-500/10 text-muted-foreground');

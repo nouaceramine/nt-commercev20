@@ -1,10 +1,9 @@
 """
 Auth Users Routes - Extracted from legacy_inline_routes.py
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Literal
+from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel
+from typing import List
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
@@ -15,7 +14,6 @@ import qrcode
 import io
 import base64
 import bcrypt
-import jwt
 import secrets
 
 from utils.auth import email_ci

@@ -23,7 +23,7 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── CRUD ──
     @router.post("")
     async def create_employee(employee: dict, admin: dict = Depends(require_permission("employees.edit"))):
-        from models.schemas import EmployeeCreate, EmployeeResponse
+        from models.schemas import EmployeeCreate
         e = EmployeeCreate(**employee)
         eid = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()

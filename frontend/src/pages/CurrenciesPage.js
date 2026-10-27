@@ -8,17 +8,17 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter as _DialogFooter } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import { formatLargeNumber } from '../utils/globalDateFormatter';
 import {
-  Coins, ArrowRightLeft, Settings, TrendingUp, DollarSign,
-  Edit, RefreshCw, Save
+  Coins, ArrowRightLeft, Settings as _Settings, TrendingUp as _TrendingUp, DollarSign as _DollarSign,
+  Edit, RefreshCw as _RefreshCw, Save
 } from 'lucide-react';
 
 export default function CurrenciesPage() {
-  const { t, language } = useLanguage();
+  const { t: _t, language: _language } = useLanguage();
   const [currencies, setCurrencies] = useState([]);
   const [settings, setSettings] = useState({ default_currency: 'DZD', show_multi_currency: false, auto_convert: true });
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,7 @@ export default function CurrenciesPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       setConvertResult(res.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في التحويل');
     }
   };
@@ -71,19 +71,19 @@ export default function CurrenciesPage() {
       setEditingRates(false);
       setRateEdits({});
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في التحديث');
     }
   };
 
-  const saveSettings = async () => {
+  const _saveSettings = async () => {
     try {
       const token = localStorage.getItem('token');
       await apiClient.put(`/currencies/settings`, settings, {
         headers: { Authorization: `Bearer ${token}` },
       });
       toast.success('تم حفظ الإعدادات');
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في الحفظ');
     }
   };

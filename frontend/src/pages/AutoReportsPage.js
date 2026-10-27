@@ -8,17 +8,17 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import {
   FileText,
-  Calendar,
+  Calendar as _Calendar,
   TrendingUp,
   TrendingDown,
   DollarSign,
   Package,
   Users,
   RefreshCw,
-  Download,
+  Download as _Download,
   BarChart3,
   Clock,
-  Filter,
+  Filter as _Filter,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -181,13 +181,13 @@ export default function AutoReportsPage() {
     fetchReports();
   }, [fetchReports]);
 
-  const handleGenerate = async (type) => {
+  const handleGenerate = async (_type) => {
     setGenerating(true);
     try {
       await apiClient.post(`/robots/run/report`);
       toast.success(isAr ? 'تم إنشاء التقرير بنجاح' : 'Rapport généré avec succès');
       setTimeout(fetchReports, 2000);
-    } catch (err) {
+    } catch (_err) {
       toast.error(isAr ? 'فشل إنشاء التقرير' : 'Échec de la génération');
     } finally {
       setGenerating(false);

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
-import { Search, Plus, Package, ArrowUp, ArrowDown, FolderTree, UserPlus, Printer, CalendarDays, Pencil } from 'lucide-react';
+import { Search, Plus, Package as _Package, ArrowUp, ArrowDown, FolderTree, UserPlus as _UserPlus, Printer, CalendarDays, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import CameraBarcodeScanner from '../../components/forms/CameraBarcodeScanner';
 import SaleDetailDialog from '../../components/sales/SaleDetailDialog';
@@ -15,14 +15,14 @@ import apiClient from '../../lib/apiClient';
  */
 export default function POSSidebar({
   searchInputRef, searchQuery, setSearchQuery,
-  showSearchResults, setShowSearchResults, searchResults,
-  products, addToCart, setShowProductsDialog,
+  showSearchResults: _showSearchResults, setShowSearchResults, searchResults,
+  products, addToCart, setShowProductsDialog: _setShowProductsDialog,
   taskMenuItems, activeTask, handleTaskClick, returnMode,
   language, formatCurrency, isRTL,
   inlineTask, setInlineTask,
   families = [], customers = [], customerFamilies = [],
   selectedCustomer, setSelectedCustomer,
-  salesHistory = [], historyLoading = false,
+  salesHistory: _salesHistory = [], historyLoading: _historyLoading = false,
   currentSession, sessionStats,
   printThermalReceipt, thermalSize = '80mm',
   lastSaleId, debtsMap = {}, onProductUpdated,

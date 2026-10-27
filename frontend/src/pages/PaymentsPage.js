@@ -6,7 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import {
   Dialog,
@@ -46,8 +46,8 @@ import {
   Clock,
   XCircle,
   DollarSign,
-  TrendingUp,
-  Calendar,
+  TrendingUp as _TrendingUp,
+  Calendar as _Calendar,
   ExternalLink
 } from 'lucide-react';
 
@@ -88,7 +88,7 @@ export default function PaymentsPage() {
 
   const fetchRecords = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const params = new URLSearchParams({ page, limit: 20 });
       if (statusFilter) params.append('status', statusFilter);
       
@@ -119,7 +119,7 @@ export default function PaymentsPage() {
     
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/payments/records`, {
         ...formData,
         amount: parseFloat(formData.amount)
@@ -149,7 +149,7 @@ export default function PaymentsPage() {
     
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/payments/records/${selectedRecord.id}`, {
         status: formData.status,
         notes: formData.notes,
@@ -172,7 +172,7 @@ export default function PaymentsPage() {
     }
     
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.delete(`/payments/records/${recordId}`);
       toast.success(language === 'ar' ? 'تم الحذف' : 'Deleted');
       fetchRecords();

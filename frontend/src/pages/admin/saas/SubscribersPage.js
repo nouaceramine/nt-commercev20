@@ -165,7 +165,7 @@ export default function SubscribersPage() {
       ]);
       if (t.status === 'fulfilled') setTenants(t.value.data || []);
       if (p.status === 'fulfilled') setPlans(p.value.data || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error('فشل تحميل بيانات المشتركين');
     } finally {
       setLoading(false);

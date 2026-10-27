@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
-import { Layout } from '../components/Layout';
+import { Layout as _Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -35,8 +35,8 @@ import {
   Copy, 
   Eye, 
   EyeOff,
-  ToggleLeft,
-  ToggleRight,
+  ToggleLeft as _ToggleLeft,
+  ToggleRight as _ToggleRight,
   Globe,
   Lock,
   CheckCircle,
@@ -44,7 +44,7 @@ import {
 } from 'lucide-react';
 
 export default function ApiKeysPage() {
-  const { t, language, isRTL } = useLanguage();
+  const { t, language, isRTL: _isRTL } = useLanguage();
   const [apiKeys, setApiKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -65,7 +65,7 @@ export default function ApiKeysPage() {
 
   const fetchApiKeys = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/api-keys`);
       setApiKeys(response.data);
     } catch (error) {
@@ -83,7 +83,7 @@ export default function ApiKeysPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/api-keys`, newKey);
       toast.success(t.apiKeyAdded);
       setShowDialog(false);
@@ -105,7 +105,7 @@ export default function ApiKeysPage() {
 
   const handleToggle = async (keyId) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/api-keys/${keyId}/toggle`, {});
       fetchApiKeys();
     } catch (error) {

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import apiClient from '../lib/apiClient';
-import { Shield, Ban, Key, Activity, Users, AlertTriangle, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Shield, Ban, Key, Activity, Users, AlertTriangle, Plus, Trash2, Eye as _Eye, EyeOff as _EyeOff } from 'lucide-react';
 
 export default function SecurityDashboardPage() {
   const { language } = useLanguage();
@@ -19,8 +19,8 @@ export default function SecurityDashboardPage() {
   const [blockedIPs, setBlockedIPs] = useState([]);
   const [apiKeys, setApiKeys] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [_auditLogs, _setAuditLogs] = useState([]);
+  const [_loading, setLoading] = useState(true);
   const [showBlockIP, setShowBlockIP] = useState(false);
   const [showCreateKey, setShowCreateKey] = useState(false);
   const [ipForm, setIpForm] = useState({ ip_address: '', reason: '', duration_hours: 24 });
@@ -63,16 +63,16 @@ export default function SecurityDashboardPage() {
       await apiClient.delete(`/security/blocked-ips/${id}`, { headers });
       toast.success(isAr ? 'تم رفع الحظر' : 'IP débloqué');
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const createAPIKey = async () => {
     try {
-      const res = await apiClient.post(`/security/api-keys`, keyForm, { headers });
+      const _res = await apiClient.post(`/security/api-keys`, keyForm, { headers });
       toast.success(isAr ? 'تم إنشاء المفتاح' : 'Clé créée');
       setShowCreateKey(false);
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const deleteAPIKey = async (id) => {
@@ -80,7 +80,7 @@ export default function SecurityDashboardPage() {
       await apiClient.delete(`/security/api-keys/${id}`, { headers });
       toast.success(isAr ? 'تم الحذف' : 'Supprimé');
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const tabs = [

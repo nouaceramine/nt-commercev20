@@ -1,7 +1,6 @@
 """Analytics Routes - Complete analytics dashboard data"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -62,7 +61,7 @@ def create_analytics_routes(db, get_current_user, require_tenant):
             # Leads to orders conversion
             leads_to_orders = 0
             if leads_count > 0:
-                converted = len([l for l in leads if l.get("converted_to_order")])
+                converted = len([lead for lead in leads if lead.get("converted_to_order")])
                 leads_to_orders = (converted / leads_count * 100)
 
             # Top products

@@ -5,7 +5,6 @@ Analyzes daily/monthly/yearly profit, detects trends, generates recommendations
 import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
-import uuid
 from core.db_naming import (  # p348/p480
     drop_db_if_tenant_deleted,
     is_tenant_db,

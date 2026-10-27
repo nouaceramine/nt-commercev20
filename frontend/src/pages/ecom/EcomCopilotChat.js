@@ -50,7 +50,7 @@ export function EcomCopilotChat({ days = 30 }) {
         text: res.data?.answer || 'لا توجد إجابة.',
         source: res.data?.source,
       }]);
-    } catch (err) {
+    } catch (_err) {
       setMessages((m) => [...m, {
         role: 'assistant',
         text: 'تعذّر الوصول للخدمة مؤقتاً. حاول مجدداً بعد قليل.',

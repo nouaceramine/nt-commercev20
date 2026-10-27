@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import _React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { useLanguage } from "../contexts/LanguageContext";
 import { Layout } from "../components/Layout";
@@ -43,7 +43,7 @@ export default function MarginRulesPage() {
       const res = await axios.get(`${API}/margin-rules`, { headers });
       setRules(res.data.rules || []);
       setKnownCats(res.data.known_categories || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? "فشل تحميل قواعد الهامش" : "Échec du chargement");
     } finally {
       setLoading(false);
@@ -98,7 +98,7 @@ export default function MarginRulesPage() {
         value: r.value, active: r.active === false,
       }, { headers });
       fetchRules();
-    } catch (e) { toast.error(ar ? "فشل التحديث" : "Échec"); }
+    } catch (_e) { toast.error(ar ? "فشل التحديث" : "Échec"); }
   };
 
   const handleDelete = async (r) => {
@@ -107,7 +107,7 @@ export default function MarginRulesPage() {
       await axios.delete(`${API}/margin-rules/${r.id}`, { headers });
       toast.success(ar ? "تم الحذف" : "Supprimée");
       fetchRules();
-    } catch (e) { toast.error(ar ? "فشل الحذف" : "Échec"); }
+    } catch (_e) { toast.error(ar ? "فشل الحذف" : "Échec"); }
   };
 
   const handleQuote = async () => {
@@ -116,7 +116,7 @@ export default function MarginRulesPage() {
     try {
       const res = await axios.get(`${API}/margin-rules/quote?service_category=${quoteCat}&cost=${c}`, { headers });
       setQuoteResult(res.data);
-    } catch (e) { toast.error(ar ? "فشل الحساب" : "Échec du calcul"); }
+    } catch (_e) { toast.error(ar ? "فشل الحساب" : "Échec du calcul"); }
   };
 
   const fmt = (n) => new Intl.NumberFormat(ar ? "ar-DZ" : "fr-FR", { maximumFractionDigits: 2 }).format(n);

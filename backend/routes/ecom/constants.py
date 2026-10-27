@@ -4,7 +4,6 @@ Channel keys, order statuses, shipping providers — single source of truth shar
 across integrations / orders / leads / shipping routes.
 """
 from fastapi import HTTPException
-from typing import Optional
 
 from config.database import main_db
 

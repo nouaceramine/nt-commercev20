@@ -4,10 +4,10 @@ import apiClient from '../../../lib/apiClient';
 import { Card, CardContent } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import {
-  Users, Building, CreditCard, TrendingUp, Package,
+  Users, Building as _Building, CreditCard, TrendingUp, Package,
   Clock, AlertTriangle, DollarSign, Truck, Bot, BarChart3,
-  Database, Activity, Bell, ShieldCheck, Banknote, Boxes, HeartPulse,
-  Smartphone, Receipt, LayoutDashboard, Bug, FileText, Server
+  Database, Activity, Bell as _Bell, ShieldCheck, Banknote, Boxes, HeartPulse,
+  Smartphone, Receipt, LayoutDashboard, Bug, FileText as _FileText, Server
 } from 'lucide-react';
 import PlatformCapacityCard from './PlatformCapacityCard';
 import { ServiceStatusMap } from './ServiceStatusMap';

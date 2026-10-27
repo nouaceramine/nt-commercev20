@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Badge } from '../components/ui/badge';
+import { Badge as _Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import {
   Select,
@@ -21,24 +21,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
-import { toast } from 'sonner';
+import { toast as _toast } from 'sonner';
 import JsBarcode from 'jsbarcode';
 import { escapeHtml } from '../lib/escape';
 import { 
-  Barcode, 
+  Barcode as _Barcode,
   Search,
   Printer,
-  Package,
+  Package as _Package,
   Settings,
-  Grid3X3,
+  Grid3X3 as _Grid3X3,
   LayoutGrid,
   Tag,
   Check,
   Plus,
   Minus,
-  X,
-  Download,
-  Eye
+  X as _X,
+  Download as _Download,
+  Eye as _Eye
 } from 'lucide-react';
 
 // Label templates
@@ -91,7 +91,7 @@ const TEMPLATES = {
 
 export default function BarcodePrintPage() {
   const { t, language } = useLanguage();
-  const printRef = useRef(null);
+  const _printRef = useRef(null);
   
   const [products, setProducts] = useState([]);
   const [families, setFamilies] = useState([]);
@@ -102,7 +102,7 @@ export default function BarcodePrintPage() {
   const [selectedFamily, setSelectedFamily] = useState('all');
   const [template, setTemplate] = useState('medium');
   
-  const [showPreview, setShowPreview] = useState(false);
+  const [_showPreview, _setShowPreview] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
   const [customSettings, setCustomSettings] = useState({
@@ -188,7 +188,7 @@ export default function BarcodePrintPage() {
         margin: 2
       });
       return svg.outerHTML;
-    } catch (e) {
+    } catch (_e) {
       return '';
     }
   };

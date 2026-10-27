@@ -16,7 +16,6 @@ a metering bug must never take down AI features, but a real cap breach must.
 """
 from datetime import datetime, timezone
 import logging
-import os
 import uuid
 
 from fastapi import HTTPException

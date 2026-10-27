@@ -72,7 +72,7 @@ export default function DailySessionsPage() {
   const [allSessions, setAllSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [todaySales, setTodaySales] = useState([]);
-  const [cashBoxes, setCashBoxes] = useState([]);
+  const [_cashBoxes, setCashBoxes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState(null);
   const [summaryDays, setSummaryDays] = useState('7');

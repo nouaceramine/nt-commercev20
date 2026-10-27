@@ -11,7 +11,7 @@ export default function POSSessionBar({
   setShowSessionDialog, setShowSessionDetailsDialog,
   setClosingCash, cashBoxBalance, setShowCloseSessionDialog,
   fetchSessionStats,
-  language, formatCurrency, t, isStaleSession, compact = false,
+  language, formatCurrency, t: _t, isStaleSession, compact = false,
 }) {
   if (checkingSession) return null;
 

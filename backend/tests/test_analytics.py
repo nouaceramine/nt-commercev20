@@ -1,6 +1,5 @@
 import pytest
 from routes.analytics_routes import create_analytics_routes
-from fastapi import HTTPException
 
 @pytest.fixture
 def analytics_router(mock_db):
@@ -10,7 +9,6 @@ def analytics_router(mock_db):
 
 @pytest.mark.asyncio
 async def test_analytics_overview(analytics_router, mock_db):
-    from unittest.mock import AsyncMock
     router = analytics_router
     # Test that the route exists
     assert router is not None

@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import { Slider } from '../components/ui/slider';
 import {
   Dialog,
@@ -30,12 +30,12 @@ import {
 import { toast } from 'sonner';
 import { 
   Users, Bell, AlertTriangle, Settings2, Shield, 
-  User, Percent, DollarSign, Clock, TrendingUp,
-  ChevronRight, Edit, Save, CheckCircle, XCircle
+  User, Percent, DollarSign, Clock as _Clock, TrendingUp as _TrendingUp,
+  ChevronRight as _ChevronRight, Edit as _Edit, Save, CheckCircle, XCircle as _XCircle
 } from 'lucide-react';
 
 export default function EmployeeAlertsPage() {
-  const { t, language, isRTL } = useLanguage();
+  const { t, language, isRTL: _isRTL } = useLanguage();
   
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
@@ -55,7 +55,7 @@ export default function EmployeeAlertsPage() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       
       // Fetch employees
       const empRes = await apiClient.get(`/employees`);
@@ -79,10 +79,10 @@ export default function EmployeeAlertsPage() {
     });
     
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const res = await apiClient.get(`/employees/${employee.id}/alert-settings`);
       setAlertSettings(res.data);
-    } catch (error) {
+    } catch (_error) {
       setAlertSettings({
         enable_discount_alert: true,
         discount_threshold_percent: 80,

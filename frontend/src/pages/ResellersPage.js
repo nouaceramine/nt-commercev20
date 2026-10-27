@@ -14,7 +14,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../components/ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Select as _Select, SelectContent as _SelectContent, SelectItem as _SelectItem, SelectTrigger as _SelectTrigger, SelectValue as _SelectValue } from '../components/ui/select';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { formatCurrency, formatDateTime } from '../utils/globalDateFormatter';
@@ -45,7 +45,7 @@ export default function ResellersPage() {
     try {
       const r = await apiClient.get('/digital-panel/resellers');
       setResellers(r.data || []);
-    } catch (err) {
+    } catch (_err) {
       // interceptor
     } finally {
       setLoading(false);
@@ -121,7 +121,7 @@ export default function ResellersPage() {
     try {
       const res = await apiClient.get(`/digital-panel/resellers/${r.id}/transactions`);
       setTxns(res.data || []);
-    } catch (err) {
+    } catch (_err) {
       // interceptor
     }
   };

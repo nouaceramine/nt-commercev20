@@ -6,15 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from '../../components/ui/badge';
 import { useDocumentMeta } from '../../hooks/useDocumentMeta';
 import { 
-  Check, Star, Zap, Shield, BarChart3, Users, Package, 
-  ShoppingCart, Globe, Clock, Headphones, ChevronRight,
-  Smartphone, Cloud, Lock, TrendingUp, Award, Sparkles,
-  Menu, X, AlertCircle, XCircle, MessageCircle, Mail, Phone, Send,
-  FileText, Truck, Wallet, CreditCard
+  Check, Star, Zap as _Zap, Shield, BarChart3, Users, Package,
+  ShoppingCart, Globe as _Globe, Clock as _Clock, Headphones as _Headphones, ChevronRight,
+  Smartphone as _Smartphone, Cloud, Lock as _Lock, TrendingUp as _TrendingUp, Award as _Award, Sparkles,
+  Menu, X, AlertCircle as _AlertCircle, XCircle, MessageCircle, Mail, Phone, Send,
+  FileText as _FileText, Truck, Wallet as _Wallet, CreditCard
 } from 'lucide-react';
 
 export default function LandingPage() {
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const [plans, setPlans] = useState([]);
   const [billingCycle, setBillingCycle] = useState('monthly');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -515,7 +515,7 @@ export default function LandingPage() {
                     </div>
 
                     <ul className="space-y-3 text-right mb-6">
-                      {Object.entries(plan.features || {}).filter(([k, v]) => v === true && typeof v === 'boolean').slice(0, 6).map(([key], i) => (
+                      {Object.entries(plan.features || {}).filter(([_k, v]) => v === true && typeof v === 'boolean').slice(0, 6).map(([key], i) => (
                         <li key={`item-${i}`} className="flex items-center gap-2">
                           <Check className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-gray-700">

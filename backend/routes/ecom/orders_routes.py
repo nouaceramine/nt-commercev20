@@ -29,8 +29,7 @@ logger = logging.getLogger(__name__)
 from config.database import db
 from utils.auth import require_tenant
 from .constants import (
-    CHANNELS, CHANNEL_KEYS, ORDER_STATUS_KEYS, ORDER_STATUSES,
-    STATUS_TRANSITIONS, require_ecom_feature,
+    CHANNEL_KEYS, ORDER_STATUS_KEYS, require_ecom_feature,
 )
 
 router = APIRouter(tags=["E-Commerce Orders"])

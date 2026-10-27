@@ -58,7 +58,7 @@ export default function PrintDocumentDialog({ open, onOpenChange, docType, recor
         } else {
           setSelectedTemplateId('__builtin__');
         }
-      } catch (e) {
+      } catch (_e) {
         setOptions(DEFAULT_DOC_OPTIONS[docType] || {});
       } finally {
         if (active) setLoading(false);
@@ -92,7 +92,7 @@ export default function PrintDocumentDialog({ open, onOpenChange, docType, recor
     try {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
-    } catch (e) {
+    } catch (_e) {
       // ignore print errors (user cancel)
     }
     try {
@@ -102,7 +102,7 @@ export default function PrintDocumentDialog({ open, onOpenChange, docType, recor
         printer_type: paperSize === 'A4' ? 'a4' : 'thermal',
         copies: 1,
       });
-    } catch (e) {
+    } catch (_e) {
       // logging is best-effort
     }
   }, [docType, documentId, record, paperSize, iframeReady]);

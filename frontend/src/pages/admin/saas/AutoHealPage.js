@@ -13,7 +13,7 @@ import {
 } from '../../../components/ui/table';
 import { toast } from 'sonner';
 import {
-  Activity, RefreshCw, Play, CheckCircle, XCircle, Clock,
+  Activity, RefreshCw, Play, CheckCircle, XCircle as _XCircle, Clock,
   AlertTriangle, ShieldCheck, Bug, Zap, FileText, Wrench
 } from 'lucide-react';
 
@@ -106,7 +106,7 @@ export default function AutoHealPage() {
       const res = await apiClient.post('/saas/autoheal/scan');
       toast.success(`اكتمل المسح — نقاط الصحة: ${res.data.health_score}`);
       await fetchAll();
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل تشغيل المسح');
     } finally {
       setScanning(false);
@@ -132,7 +132,7 @@ export default function AutoHealPage() {
       await apiClient.post(`/saas/autoheal/findings/${id}/dismiss`);
       toast.success('تم تجاهل النتيجة');
       await fetchAll();
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل التجاهل');
     } finally {
       setBusyId(null);
@@ -145,7 +145,7 @@ export default function AutoHealPage() {
       const res = await apiClient.post('/saas/autoheal/morning-report/generate');
       setMorningReport(res.data);
       toast.success('تم توليد التقرير الصباحي');
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل توليد التقرير');
     } finally {
       setGeneratingReport(false);

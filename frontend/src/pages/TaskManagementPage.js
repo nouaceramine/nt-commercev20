@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import apiClient from '../lib/apiClient';
-import { CheckSquare, Plus, Clock, AlertCircle, CheckCircle2, ListTodo, MessageSquare } from 'lucide-react';
+import { CheckSquare as _CheckSquare, Plus, Clock, AlertCircle, CheckCircle2, ListTodo, MessageSquare } from 'lucide-react';
 
 export default function TaskManagementPage() {
   const { language } = useLanguage();
@@ -53,7 +53,7 @@ export default function TaskManagementPage() {
       setShowCreate(false);
       setForm({ title_ar: '', description_ar: '', priority: 'medium', task_type: 'general' });
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const updateTaskStatus = async (id, status) => {
@@ -62,7 +62,7 @@ export default function TaskManagementPage() {
       toast.success(isAr ? 'تم التحديث' : 'Mis à jour');
       fetchData();
       if (showDetail?.id === id) openDetail({ ...showDetail, status });
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const openDetail = async (task) => {
@@ -70,7 +70,7 @@ export default function TaskManagementPage() {
       const res = await apiClient.get(`/tasks/${task.id}`, { headers });
       setShowDetail(res.data);
       setComments(res.data.comments || []);
-    } catch (e) { setShowDetail(task); setComments([]); }
+    } catch (_e) { setShowDetail(task); setComments([]); }
   };
 
   const addComment = async () => {
@@ -79,7 +79,7 @@ export default function TaskManagementPage() {
       await apiClient.post(`/tasks/${showDetail.id}/comments`, { content: newComment }, { headers });
       setNewComment('');
       openDetail(showDetail);
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const priorityColor = (p) => ({ high: 'bg-red-500/10 text-red-400 border-red-500/30', medium: 'bg-amber-500/10 text-amber-400 border-amber-500/30', low: 'bg-blue-500/10 text-blue-400 border-blue-500/30' }[p] || 'bg-gray-500/10 text-muted-foreground');

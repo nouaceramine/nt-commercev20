@@ -37,7 +37,7 @@ export const MonitoringSection = () => {
     try {
       const res = await apiClient.get(`/saas/monitoring`);
       setMonitoringData(res.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل تحميل بيانات المراقبة');
     }
     setLoading(false);

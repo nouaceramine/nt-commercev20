@@ -6,7 +6,7 @@ import { startRealtime, onEvent } from '../lib/realtime';
 import { useLanguage } from '../contexts/LanguageContext';
 import PrintButton from '../components/print/PrintButton';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -29,7 +29,7 @@ import {
 import { toast } from 'sonner';
 import { 
   Users, Plus, Search, Edit, Trash2, Phone, Mail, MapPin, PlusCircle, Save, Ban, Shield, ShieldOff,
-  Grid3X3, List, ArrowUpDown, SortAsc, SortDesc, Calendar, DollarSign, ShoppingCart, Eye, Radar, MessageSquare, Wrench, Smartphone, Tv, Store
+  Grid3X3, List, ArrowUpDown, SortAsc, SortDesc, Calendar as _Calendar, DollarSign as _DollarSign, ShoppingCart, Eye, Radar, MessageSquare, Wrench, Smartphone, Tv, Store
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import { Pagination } from '../components/Pagination';
@@ -185,7 +185,7 @@ export default function CustomersPage() {
 
   const fetchBlacklist = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/blacklist`);
       setBlacklist(response.data);
     } catch (error) {
@@ -200,7 +200,7 @@ export default function CustomersPage() {
     }
     
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/blacklist`, {
         phone: blacklistCustomer.phone,
         reason: blacklistReason,
@@ -222,7 +222,7 @@ export default function CustomersPage() {
     if (!entry) return;
     
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.delete(`/blacklist/${entry.id}`);
       toast.success(language === 'ar' ? 'تمت إزالة الزبون من القائمة السوداء' : 'Client retiré de la liste noire');
       fetchBlacklist();
@@ -244,7 +244,7 @@ export default function CustomersPage() {
     try {
       const res = await apiClient.get(`/customers/${customer.id}/overview`);
       setOverview(res.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في جلب ملف الزبون' : 'Erreur de chargement');
     } finally {
       setOverviewLoading(false);
@@ -258,7 +258,7 @@ export default function CustomersPage() {
     try {
       const res = await apiClient.get(`/customers/cross-sell?have=${radarHave}&missing=${radarMissing}&limit=200`);
       setRadarData(res.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في جلب الرادار' : 'Erreur radar');
     } finally {
       setRadarLoading(false);
@@ -316,7 +316,7 @@ export default function CustomersPage() {
       setFamilyDialogOpen(false);
       setNewFamilyName('');
       fetchCustomerFamilies();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue');
     } finally {
       setSavingFamily(false);
@@ -359,7 +359,7 @@ export default function CustomersPage() {
         }
       }
       fetchCustomers();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     } finally {
       setSaving(false);
@@ -373,7 +373,7 @@ export default function CustomersPage() {
       setDeleteDialogOpen(false);
       setSelectedCustomer(null);
       fetchCustomers();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
   };
@@ -420,7 +420,7 @@ export default function CustomersPage() {
         max_debt_limit: '',
         special_discount: ''
       });
-    } catch (error) {
+    } catch (_error) {
       setFormData({ 
         name: '', phone: '', email: '', address: '', notes: '', family_id: '', code: '',
         national_id: '', commercial_register: '', birthdate: '', customer_type: 'regular',
@@ -511,7 +511,7 @@ export default function CustomersPage() {
                         gainNode.gain.value = 0.3;
                         oscillator.start();
                         setTimeout(() => oscillator.stop(), 100);
-                      } catch (e) {}
+                      } catch (_e) {}
                     }
                   }}
                   className={`h-11 ${isRTL ? 'pr-10' : 'pl-10'}`}

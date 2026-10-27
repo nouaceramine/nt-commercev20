@@ -5,7 +5,7 @@ Requires YALIDINE_API_ID and YALIDINE_API_TOKEN.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 import os
 import uuid
@@ -84,7 +84,7 @@ def create_yalidine_integration_routes(db, get_current_user, get_tenant_admin, r
 
     @router.put("/settings")
     async def update_settings(settings: YalidineSettingsUpdate, admin: dict = Depends(get_tenant_admin)):
-        tenant_id = admin.get("tenant_id")
+        _tenant_id = admin.get("tenant_id")
         # p301: mirror into ecom_integrations (channel="yalidine") — one store,
         # encrypted at rest, same schema the hub / dispatch flow uses.
         from services.crypto_fields import encrypt_credentials as _ec, decrypt_credentials as _dc

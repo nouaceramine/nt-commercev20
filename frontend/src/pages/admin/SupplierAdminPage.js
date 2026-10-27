@@ -74,7 +74,7 @@ export default function SupplierAdminPage() {
       });
       setStockSims(aggSims);
       setOrders(o.data || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل التحميل");
     } finally {
       setLoading(false);
@@ -470,7 +470,7 @@ function UploadCodesDialog({ info, onClose, onDone }) {
       });
       toast.success(`تم رفع ${res.data?.inserted || 0} كود (تم تخطي ${res.data?.skipped || 0} مكرر)`);
       onDone();
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل الرفع");
     } finally { setBusy(false); }
   };

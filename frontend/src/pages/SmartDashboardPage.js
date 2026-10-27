@@ -7,53 +7,53 @@ import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Progress } from '../components/ui/progress';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Progress as _Progress } from '../components/ui/progress';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import {
   TrendingUp,
   TrendingDown,
   DollarSign,
-  CreditCard,
+  CreditCard as _CreditCard,
   AlertTriangle,
   Clock,
   CheckCircle,
   XCircle,
-  ArrowUpRight,
-  ArrowDownRight,
+  ArrowUpRight as _ArrowUpRight,
+  ArrowDownRight as _ArrowDownRight,
   Wallet,
-  Receipt,
-  PieChart,
+  Receipt as _Receipt,
+  PieChart as _PieChart,
   BarChart3,
   Brain,
   Sparkles,
   RefreshCw,
-  ChevronRight
+  ChevronRight as _ChevronRight
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
+  LineChart as _LineChart,
+  Line as _Line,
   AreaChart,
   Area,
-  BarChart,
-  Bar,
-  PieChart as RechartsPie,
-  Pie,
-  Cell,
+  BarChart as _BarChart,
+  Bar as _Bar,
+  PieChart as _RechartsPie,
+  Pie as _Pie,
+  Cell as _Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
+  Legend as _Legend,
   ResponsiveContainer
 } from 'recharts';
 
-const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+const _COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 // p160: content extracted so it can be embedded in the unified DashboardPage (/)
 export function SmartDashboardContent() {
-  const { t, isRTL, language } = useLanguage();
-  const { user } = useAuth();
-  const { formatCurrency, formatNumber, formatDate, formatPercent } = useDateFormat();
+  const { t: _t, isRTL, language } = useLanguage();
+  const { user: _user } = useAuth();
+  const { formatCurrency, formatNumber: _formatNumber, formatDate: _formatDate, formatPercent: _formatPercent } = useDateFormat();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
@@ -64,7 +64,7 @@ export function SmartDashboardContent() {
   const [dailySummary, setDailySummary] = useState(null);
   const [forecast, setForecast] = useState(null);
   const [revenueData, setRevenueData] = useState([]);
-  const [expenseData, setExpenseData] = useState([]);
+  const [_expenseData, _setExpenseData] = useState([]);
   
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -106,7 +106,7 @@ export function SmartDashboardContent() {
     fetchDashboardData();
   };
   
-  const getScoreColor = (score) => {
+  const _getScoreColor = (score) => {
     if (score >= 80) return 'text-emerald-500';
     if (score >= 60) return 'text-yellow-500';
     if (score >= 40) return 'text-orange-500';

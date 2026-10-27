@@ -13,7 +13,6 @@ Verifies:
   • Regression: /api/saas/platform-stats still shows tenants.max=500.
 """
 import os
-import re
 import requests
 import pytest
 from datetime import datetime

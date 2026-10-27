@@ -2,7 +2,7 @@
  * SystemStatsCard Component Tests
  * Phase 4g: UI Component Unit Tests
  */
-import React from 'react';
+import _React from 'react';
 import { render, screen } from '@testing-library/react';
 import SystemStatsCard from '../../components/system/SystemStatsCard';
 

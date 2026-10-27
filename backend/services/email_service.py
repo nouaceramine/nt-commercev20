@@ -15,7 +15,6 @@ import asyncio
 import logging
 import os
 import time
-from typing import Optional
 
 import httpx
 

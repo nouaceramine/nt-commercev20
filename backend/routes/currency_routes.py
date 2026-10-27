@@ -3,8 +3,8 @@ Multi-Currency Support Routes
 Exchange rates, currency settings, conversions
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel
+from typing import List
 from datetime import datetime, timezone
 import uuid
 import logging

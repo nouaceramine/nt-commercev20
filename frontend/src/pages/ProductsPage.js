@@ -95,7 +95,7 @@ export default function ProductsPage() {
         setStoreProductIds(prev => new Set(prev).add(product.id));
         toast.success(language === 'ar' ? 'فُعّل على المتجر' : 'Activé sur la boutique');
       }
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'فشل تغيير حالة المتجر' : 'Échec boutique');
     }
   };
@@ -105,7 +105,7 @@ export default function ProductsPage() {
       await apiClient.post(`/products/${product.id}/clone`);
       toast.success(language === 'ar' ? 'تم استنساخ المنتج' : 'Produit cloné');
       fetchProducts();
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'فشل استنساخ المنتج' : 'Échec du clonage');
     }
   };
@@ -198,7 +198,7 @@ export default function ProductsPage() {
       
       // Delete products one by one
       const deletePromises = Array.from(selectedProducts).map(id =>
-        apiClient.delete(`/products/${id}`, { headers }).catch(err => ({ error: true, id }))
+        apiClient.delete(`/products/${id}`, { headers }).catch(_err => ({ error: true, id }))
       );
       
       const results = await Promise.all(deletePromises);
@@ -218,7 +218,7 @@ export default function ProductsPage() {
       setSelectMode(false);
       setShowDeleteDialog(false);
       fetchProducts();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'حدث خطأ أثناء الحذف' : 'Erreur lors de la suppression');
     } finally {
       setDeleting(false);

@@ -1,13 +1,11 @@
 """
 Utility Routes - Extracted from legacy_inline_routes.py
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Literal
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import uuid
-import os
 import logging
 
 
@@ -132,7 +130,7 @@ def create_utility_routes(db, require_tenant, get_tenant_admin, PriceHistoryResp
                 result.append({
                     "id": sale.get("id"),
                     "date": sale.get("created_at"),
-                    "customer_name": customer.get("name") if customer else (language_ar := "زبون عابر"),
+                    "customer_name": customer.get("name") if customer else (_language_ar := "زبون عابر"),
                     "quantity": item_data.get("quantity", 0),
                     "unit_price": item_data.get("unit_price", 0),
                     "discount": item_data.get("discount", 0),

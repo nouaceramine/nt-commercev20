@@ -7,7 +7,7 @@ POST /installments/{id}/pay     — mark an installment as paid
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 
 

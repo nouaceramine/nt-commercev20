@@ -207,7 +207,6 @@ class RobotManager:
                         if restarted:
                             logger.info(f"Watchdog: '{name}' restarted successfully")
                         try:
-                            from services.notification_service import NotificationService
                             await self.notification.send_to_admins(
                                 "system",
                                 "تنبيه: روبوت تعطّل وأُعيد تشغيله",

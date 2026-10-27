@@ -2,9 +2,8 @@
 Accounting Models for NT Commerce AI-Powered Accounting Platform
 All data models for accounting, invoices, journal entries, and financial reports
 """
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import List, Optional, Literal
-from datetime import datetime
 from enum import Enum
 
 

@@ -65,7 +65,7 @@ export function AgentPermissionsDialog({ open, onOpenChange, agent, onSaved }) {
     try {
       const res = await apiClient.get(`/saas/agents/${agent.id}/permissions`);
       setPermissions(res.data.permissions || {});
-    } catch (err) {
+    } catch (_err) {
       // Use agent's existing permissions as fallback
       setPermissions(agent.permissions || {});
     }

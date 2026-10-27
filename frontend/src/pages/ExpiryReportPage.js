@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
@@ -77,7 +77,7 @@ export default function ExpiryReportPage() {
         : `Remise ${pct}% appliquée — nouveau prix: ${newPrice.toFixed(2)}`);
       setDiscountRow(null);
       fetchReport();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل تطبيق الخصم' : 'Échec de la remise');
     } finally {
       setApplying(false);

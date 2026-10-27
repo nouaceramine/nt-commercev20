@@ -96,7 +96,7 @@ const ProductionPage = () => {
       ]);
       setFcReport(rep.data || null);
       setWasteList(Array.isArray(ws.data) ? ws.data : []);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   }, []);
 
   const doWaste = async () => {
@@ -115,7 +115,7 @@ const ProductionPage = () => {
     try {
       const r = await apiClient.get(`/production/demand-forecast?days=${d}&cover=7`);
       setForecast(r.data || null);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   }, []);
   useEffect(() => { fetchFcst(fcstDays); }, [fetchFcst, fcstDays]);
 
@@ -146,7 +146,7 @@ const ProductionPage = () => {
     try {
       const r = await apiClient.get(`/production/menu-engineering?days=${d}`);
       setMeReport(r.data || null);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   }, []);
   useEffect(() => { fetchMe(meDays); }, [fetchMe, meDays]);
 
@@ -280,7 +280,7 @@ const ProductionPage = () => {
     } catch (e) { toast.error(errText(e)); }
   };
 
-  const pName = (pid) => {
+  const _pName = (pid) => {
     const p = products.find(x => x.id === pid);
     return p ? (p.name_ar || p.name_en || p.name) : pid;
   };

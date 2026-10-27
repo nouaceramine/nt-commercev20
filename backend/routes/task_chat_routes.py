@@ -4,7 +4,7 @@ Collections: tasks, task_comments, chat_rooms, chat_messages
 """
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 import uuid
 

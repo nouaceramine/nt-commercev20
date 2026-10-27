@@ -7,7 +7,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
 import { Textarea } from '../components/ui/textarea';
@@ -33,10 +33,10 @@ import {
   TableRow,
 } from '../components/ui/table';
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
+  Tabs as _Tabs,
+  TabsContent as _TabsContent,
+  TabsList as _TabsList,
+  TabsTrigger as _TabsTrigger,
 } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import { 
@@ -50,11 +50,11 @@ import {
   CheckCircle,
   FileSpreadsheet,
   Eye,
-  Wallet,
+  Wallet as _Wallet,
   MessageSquare,
   Send,
   Settings,
-  Clock,
+  Clock as _Clock,
   History
 } from 'lucide-react';
 
@@ -104,7 +104,7 @@ export default function CustomerDebtsPage() {
 
   const fetchDebtsSummary = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/debts/summary`);
       setDebtsSummary(response.data);
     } catch (error) {
@@ -130,7 +130,7 @@ export default function CustomerDebtsPage() {
 
   const fetchSmsSettings = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/sms/settings`);
       setSmsSettings(response.data);
     } catch (error) {
@@ -140,7 +140,7 @@ export default function CustomerDebtsPage() {
 
   const fetchSmsLogs = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/sms/logs`);
       setSmsLogs(response.data.logs);
     } catch (error) {
@@ -150,7 +150,7 @@ export default function CustomerDebtsPage() {
 
   const fetchCustomerDebtDetails = async (customerId) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/customers/${customerId}/debt`);
       setCustomerDebtDetails(response.data);
       setShowDetailsDialog(true);
@@ -168,7 +168,7 @@ export default function CustomerDebtsPage() {
 
     setSubmitting(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const res = await apiClient.post(`/customers/${selectedCustomer.customer_id}/debt/pay`, {
         customer_id: selectedCustomer.customer_id,
         amount: paymentAmount,
@@ -243,7 +243,7 @@ export default function CustomerDebtsPage() {
 
     setSubmitting(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.post(`/sms/send-reminder`, {
         customer_ids: selectedCustomers,
         message_template: customMessage
@@ -263,7 +263,7 @@ export default function CustomerDebtsPage() {
   const sendBulkReminder = async () => {
     setSendingBulk(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.post(`/sms/send-bulk-reminder`, {});
       
       toast.success(`${t.remindersSent}: ${response.data.success}/${response.data.total}`);

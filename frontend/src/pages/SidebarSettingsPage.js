@@ -6,9 +6,9 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  DragOverlay,
-  pointerWithin,
-  rectIntersection,
+  DragOverlay as _DragOverlay,
+  pointerWithin as _pointerWithin,
+  rectIntersection as _rectIntersection,
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -27,7 +27,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Select as _Select, SelectContent as _SelectContent, SelectItem as _SelectItem, SelectTrigger as _SelectTrigger, SelectValue as _SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import {
   GripVertical,
@@ -45,8 +45,8 @@ import {
   Save,
   RotateCcw,
   RefreshCw,
-  Eye,
-  EyeOff,
+  Eye as _Eye,
+  EyeOff as _EyeOff,
   ChevronDown,
   ChevronRight,
   Receipt,
@@ -184,7 +184,7 @@ function DroppableSection({
   onMoveItem,
   onDeleteSection,
   onEditSection,
-  menuSections
+  menuSections: _menuSections
 }) {
   const {
     attributes,
@@ -315,7 +315,7 @@ function DroppableSection({
 }
 
 export default function SidebarSettingsPage() {
-  const { language, isRTL } = useLanguage();
+  const { language, isRTL: _isRTL } = useLanguage();
   const [menuSections, setMenuSections] = useState(defaultMenuSections);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -336,7 +336,7 @@ export default function SidebarSettingsPage() {
     icon: 'Folder'
   });
 
-  const [activeId, setActiveId] = useState(null);
+  const [_activeId, setActiveId] = useState(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -433,7 +433,7 @@ export default function SidebarSettingsPage() {
 
   const fetchSidebarOrder = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/settings/sidebar-order`);
       
       if (response.data.sidebar_order && Array.isArray(response.data.sidebar_order) && response.data.sidebar_order.length > 0) {
@@ -699,7 +699,7 @@ export default function SidebarSettingsPage() {
       toast.success(texts.saved);
       setHasChanges(false);
       window.dispatchEvent(new CustomEvent('sidebarOrderChanged'));
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue');
     } finally {
       setSaving(false);

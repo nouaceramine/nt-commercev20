@@ -12,8 +12,6 @@ When credentials are missing/blank, the service raises a typed exception that
 the caller catches to fall back to mock mode. This keeps the P1 mock path alive
 while P2 real integration is opt-in per tenant.
 """
-import asyncio
-import json
 import logging
 from typing import Optional
 import httpx

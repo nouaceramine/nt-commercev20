@@ -18,7 +18,7 @@ import {
   Plus, Undo2, Users, Barcode,
   List, FolderTree, FileText, ArrowDownToLine,
   ArrowUpFromLine, BarChart3, ScrollText, CalendarDays,
-  Tag, Printer, PackagePlus, History, CreditCard, PauseCircle, Undo2 as UndoIcon,
+  Tag, Printer, PackagePlus, History as _History, CreditCard, PauseCircle, Undo2 as UndoIcon,
   UtensilsCrossed, ChefHat, Scissors,
 } from 'lucide-react';
 import {
@@ -83,7 +83,7 @@ export default function POSPage() {
   const [selectedFamily, setSelectedFamily] = useState('all');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerDebt, setCustomerDebt] = useState(0);
-  const [blacklist, setBlacklist] = useState([]);
+  const [_blacklist, setBlacklist] = useState([]);
   const [priceType, setPriceType] = useState('retail');
 
   // تطبيق فئة سعر الزبون تلقائياً عند اختياره (الافتراضي: تجزئة)
@@ -142,7 +142,7 @@ export default function POSPage() {
   const [showTableDialog, setShowTableDialog] = useState(false);
   const [newTableName, setNewTableName] = useState('');
   const [newTableSeats, setNewTableSeats] = useState('4');
-  const [showCalculator, setShowCalculator] = useState(false);
+  const [_showCalculator, _setShowCalculator] = useState(false);
   const flexyPanelRef = useRef(null);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
@@ -233,9 +233,9 @@ export default function POSPage() {
   const [editingShortcutsMode, setEditingShortcutsMode] = useState(false);
 
   // Product entry dialog
-  const [productEntryDialog, setProductEntryDialog] = useState(null);
-  const [entryQty, setEntryQty] = useState('1');
-  const [entryPrice, setEntryPrice] = useState('');
+  const [_productEntryDialog, _setProductEntryDialog] = useState(null);
+  const [_entryQty, _setEntryQty] = useState('1');
+  const [_entryPrice, _setEntryPrice] = useState('');
   const [entrySerial, setEntrySerial] = useState('');
   const [serialProduct, setSerialProduct] = useState(null);  // p187
 
@@ -303,13 +303,13 @@ export default function POSPage() {
     setProducts(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
   };
 
-  const fetchSalesHistory = async () => {
+  const _fetchSalesHistory = async () => {
     setHistoryLoading(true);
     try { const res = await apiClient.get('/sales?limit=20'); setSalesHistory(res.data.sales || res.data || []); } catch (e) { console.error(e); }
     finally { setHistoryLoading(false); }
   };
   const fetchCustomerDebt = async (customerId) => {
-    try { const res = await apiClient.get(`/customers/${customerId}/debt`); setCustomerDebt(res.data.total_debt || 0); } catch (e) { setCustomerDebt(0); }
+    try { const res = await apiClient.get(`/customers/${customerId}/debt`); setCustomerDebt(res.data.total_debt || 0); } catch (_e) { setCustomerDebt(0); }
   };
   const fetchWarehouses = async () => {
     try {
@@ -359,7 +359,7 @@ export default function POSPage() {
             setSearchResults(res.data.results);
             setShowSearchResults(true);
           }
-        } catch (e) { /* keep local results on error */ }
+        } catch (_e) { /* keep local results on error */ }
       }, 250);
       return () => clearTimeout(timer);
     } else {
@@ -478,7 +478,7 @@ export default function POSPage() {
                 const p2 = (res.data?.results || []).find(matchPlu);
                 if (p2) addWeighted(p2);
                 else toast.error(language === 'ar' ? `منتج الميزان غير موجود (PLU: ${plu})` : `PLU introuvable: ${plu}`);
-              } catch (err) {
+              } catch (_err) {
                 toast.error(language === 'ar' ? `منتج الميزان غير موجود (PLU: ${plu})` : `PLU introuvable: ${plu}`);
               }
             })();
@@ -506,7 +506,7 @@ export default function POSPage() {
               ) || list[0];
               if (p2) { addProductSmart(p2); toast.success(`${p2.name_ar || p2.name_en}`); }
               else { toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`); }
-            } catch (err) {
+            } catch (_err) {
               toast.error(language === 'ar' ? `المنتج غير موجود: ${barcode}` : `Produit introuvable: ${barcode}`);
             }
           })();
@@ -531,7 +531,7 @@ export default function POSPage() {
   // === p186: Restaurant mode ===
   const fetchTables = useCallback(async () => {
     if (!restaurantOn) return;
-    try { const r = await apiClient.get('/restaurant/tables'); setRestTables(r.data || []); } catch (e) { /* silent */ }
+    try { const r = await apiClient.get('/restaurant/tables'); setRestTables(r.data || []); } catch (_e) { /* silent */ }
   }, [restaurantOn]);
 
   useEffect(() => { if (restaurantOn) fetchTables(); }, [restaurantOn, fetchTables]);
@@ -576,7 +576,7 @@ export default function POSPage() {
         '<scr' + 'ipt>window.print();setTimeout(function(){window.close();},400);</scr' + 'ipt></body></html>'
       );
       w.document.close();
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   };
 
   const sendToKitchen = async () => {
@@ -655,7 +655,7 @@ export default function POSPage() {
         let partCode = saleCode;
         if (k > 0) {
           try { partCode = (await apiClient.get('/sales/generate-code')).data.code; }
-          catch (e2) { partCode = saleCode + '-S' + (k + 1) + '-' + (Date.now() % 10000); }
+          catch (_e2) { partCode = saleCode + '-S' + (k + 1) + '-' + (Date.now() % 10000); }
         }
         const payload = {
           code: partCode,

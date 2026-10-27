@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -236,7 +236,7 @@ export default function EcomShippingTab() {
       // mark real links for the open-all button
       w.document.querySelectorAll('a').forEach(a => a.setAttribute('data-pdf', '1'));
       w.document.close();
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل جلب البوليصات' : 'Erreur étiquettes');
     } finally { setBulkLoading(false); }
   };
@@ -246,11 +246,11 @@ export default function EcomShippingTab() {
       const res = await apiClient.get('/ecom/shipping/settlements');
       setSettlements(res.data?.settlements || []);
       setSettleTargets(res.data?.targets || []);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
     try {  // p103: cash-flow forecast
       const fc = await apiClient.get('/ecom/shipping/cash-forecast');
       setForecast(fc.data?.forecast || []);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   };
 
   const fcOf = (c) => forecast.find(x => x.courier === c);  // p103
@@ -352,7 +352,7 @@ export default function EcomShippingTab() {
     try {
       const r = await apiClient.get(`/ecom/shipping/webhook-info/${ch}`);
       setWebhookInfo(r.data);
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل جلب معلومات الإشعار اللحظي' : 'Erreur webhook');
       setWebhookDlg(null);
     } finally { setWebhookBusy(false); }
@@ -366,7 +366,7 @@ export default function EcomShippingTab() {
       const r = await apiClient.post(`/ecom/shipping/webhook-rotate/${webhookDlg}`);
       setWebhookInfo(prev => ({ ...prev, webhook_url: r.data.webhook_url }));
       toast.success(ar ? 'وُلّد رابط جديد — حدّثه في لوحة شركة الشحن' : 'Nouveau lien genere');
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل توليد الرابط' : 'Echec');
     } finally { setWebhookBusy(false); }
   };
@@ -382,7 +382,7 @@ export default function EcomShippingTab() {
       const map = {};
       (r.data?.items || []).forEach(i => { if (i.kind === 'shipping' && !map[i.channel]) map[i.channel] = i; });
       setCourierIntg(map);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   };
   useEffect(() => { fetchCouriers(); }, []);  // p94
 

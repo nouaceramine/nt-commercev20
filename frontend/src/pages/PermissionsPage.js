@@ -8,16 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
-import { Input } from '../components/ui/input';
+import { Input as _Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { 
-  Shield, Users, Save, RefreshCw, Eye, EyeOff, Plus, Edit, Trash2,
-  Check, X, ChevronDown, ChevronUp, Settings, Lock, Unlock, Copy
+  Shield, Users, Save, RefreshCw, Eye as _Eye, EyeOff as _EyeOff, Plus as _Plus, Edit as _Edit, Trash2 as _Trash2,
+  Check as _Check, X as _X, ChevronDown, ChevronUp, Settings, Lock as _Lock, Unlock as _Unlock, Copy as _Copy
 } from 'lucide-react';
 
 export default function PermissionsPage() {
@@ -26,7 +26,7 @@ export default function PermissionsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [users, setUsers] = useState([]);
-  const [roles, setRoles] = useState([]);
+  const [_roles, setRoles] = useState([]);
   const [defaultPermissions, setDefaultPermissions] = useState({});
   const [selectedUser, setSelectedUser] = useState(null);
   const [userPermissions, setUserPermissions] = useState({});

@@ -27,7 +27,6 @@ import base64
 import binascii
 import json
 import logging
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional

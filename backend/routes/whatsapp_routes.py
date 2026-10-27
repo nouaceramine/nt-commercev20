@@ -3,13 +3,12 @@ WhatsApp Business API Integration Routes
 Handles incoming/outgoing WhatsApp messages for accounting tasks
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
 import logging
 import os
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +149,6 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         """Process incoming WhatsApp messages"""
         from services.ecom.webhook_security import read_signed_body, decode_json_body, verify_meta_signature
         raw_body = await read_signed_body(request)
-        import os
         app_secret = os.environ.get("WHATSAPP_APP_SECRET", "")
         if not app_secret:
             raise HTTPException(status_code=503, detail="WHATSAPP_APP_SECRET is not configured")

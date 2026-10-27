@@ -10,6 +10,7 @@ Flow (report §3.4):
   3. Insufficient wallet balance → invoice status "failed" (retriable on the
      next run); "billed" invoices are skipped — idempotent per (tenant, month).
 """
+
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -20,7 +21,7 @@ import uuid
 
 from config.database import main_db
 from .helpers import get_super_admin
-from services.ai.usage_meter import get_billing_config, DEFAULT_BILLING_CONFIG, month_key
+from services.ai.usage_meter import get_billing_config, month_key
 
 logger = logging.getLogger(__name__)
 
@@ -45,16 +46,20 @@ class RunIn(BaseModel):
 
 
 async def _usage_by_tenant(month: str) -> list:
-    return await main_db.usage_records.aggregate([
-        {"$match": {"month": month, "tenant_id": {"$nin": ["platform", "-", ""]}}},
-        {"$group": {
-            "_id": "$tenant_id",
-            "tokens_in": {"$sum": "$tokens_in"},
-            "tokens_out": {"$sum": "$tokens_out"},
-            "cost_usd": {"$sum": "$cost_usd"},
-            "calls": {"$sum": 1},
-        }},
-    ]).to_list(1000)
+    return await main_db.usage_records.aggregate(
+        [
+            {"$match": {"month": month, "tenant_id": {"$nin": ["platform", "-", ""]}}},
+            {
+                "$group": {
+                    "_id": "$tenant_id",
+                    "tokens_in": {"$sum": "$tokens_in"},
+                    "tokens_out": {"$sum": "$tokens_out"},
+                    "cost_usd": {"$sum": "$cost_usd"},
+                    "calls": {"$sum": 1},
+                }
+            },
+        ]
+    ).to_list(1000)
 
 
 async def _tenant_names(tids: list) -> dict:
@@ -87,7 +92,9 @@ async def put_config(data: BillingConfigIn, admin: dict = Depends(get_super_admi
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": admin.get("email", ""),
     }
-    await main_db.ai_billing_config.update_one({"id": "global"}, {"$set": doc}, upsert=True)
+    await main_db.ai_billing_config.update_one(
+        {"id": "global"}, {"$set": doc}, upsert=True
+    )
     return doc
 
 
@@ -101,11 +108,17 @@ async def set_cap(data: CapIn, admin: dict = Depends(get_super_admin)):
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="المستأجر غير موجود")
-    return {"ok": True, "tenant_id": data.tenant_id, "monthly_cap_usd": data.monthly_cap_usd}
+    return {
+        "ok": True,
+        "tenant_id": data.tenant_id,
+        "monthly_cap_usd": data.monthly_cap_usd,
+    }
 
 
 @router.get("/saas/ai-usage/summary")
-async def usage_summary(month: Optional[str] = None, admin: dict = Depends(get_super_admin)):
+async def usage_summary(
+    month: Optional[str] = None, admin: dict = Depends(get_super_admin)
+):
     month = month or month_key()
     if not MONTH_RE.match(month):
         raise HTTPException(status_code=400, detail="صيغة الشهر: YYYY-MM")
@@ -114,30 +127,32 @@ async def usage_summary(month: Optional[str] = None, admin: dict = Depends(get_s
     names = await _tenant_names([r["_id"] for r in rows])
     invoiced = {
         d["tenant_id"]: d["status"]
-        async for d in main_db.ai_invoices.find({"month": month}, {"_id": 0, "tenant_id": 1, "status": 1})
+        async for d in main_db.ai_invoices.find(
+            {"month": month}, {"_id": 0, "tenant_id": 1, "status": 1}
+        )
     }
     items = []
     for r in rows:
         tid = r["_id"]
         billed_usd = round(r["cost_usd"] * (1 + cfg["margin_pct"] / 100), 4)
         t = names.get(tid, {})
-        items.append({
-            "tenant_id": tid,
-            "tenant_name": t.get("name", ""),
-            "short_id": t.get("short_id", ""),
-            "calls": r["calls"],
-            "tokens_in": r["tokens_in"],
-            "tokens_out": r["tokens_out"],
-            "cost_usd": round(r["cost_usd"], 4),
-            "billed_usd": billed_usd,
-            "amount_dzd": round(billed_usd * cfg["usd_dzd_rate"], 2),
-            "monthly_cap_usd": t.get("ai_monthly_cap_usd", 0),
-            "invoice_status": invoiced.get(tid),
-        })
+        items.append(
+            {
+                "tenant_id": tid,
+                "tenant_name": t.get("name", ""),
+                "short_id": t.get("short_id", ""),
+                "calls": r["calls"],
+                "tokens_in": r["tokens_in"],
+                "tokens_out": r["tokens_out"],
+                "cost_usd": round(r["cost_usd"], 4),
+                "billed_usd": billed_usd,
+                "amount_dzd": round(billed_usd * cfg["usd_dzd_rate"], 2),
+                "monthly_cap_usd": t.get("ai_monthly_cap_usd", 0),
+                "invoice_status": invoiced.get(tid),
+            }
+        )
     items.sort(key=lambda x: -x["cost_usd"])
     return {"month": month, "config": cfg, "tenants": items}
-
-
 
 
 async def _record_ai_commission(tid, month, cost_usd, cfg, amount_dzd):
@@ -147,11 +162,14 @@ async def _record_ai_commission(tid, month, cost_usd, cfg, amount_dzd):
         if amount_dzd <= 0:
             return
         from services.commission_engine import record_platform_commission
+
         gross_dzd = round(float(cost_usd) * float(cfg["usd_dzd_rate"]), 2)
         await record_platform_commission(
             main_db,
-            service_type="ai", tenant_id=tid,
-            reference_type="ai_invoice", reference_id=f"{tid}:{month}",
+            service_type="ai",
+            tenant_id=tid,
+            reference_type="ai_invoice",
+            reference_id=f"{tid}:{month}",
             gross_amount=gross_dzd,
             tenant_commission_pct=0.0,
             platform_commission_pct=float(cfg["margin_pct"]),
@@ -160,6 +178,7 @@ async def _record_ai_commission(tid, month, cost_usd, cfg, amount_dzd):
         )
     except Exception:
         logger.exception("p295: ai commission record failed (%s/%s)", tid, month)
+
 
 @router.post("/saas/ai-billing/run")
 async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
@@ -174,7 +193,8 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
         billed_usd = round(r["cost_usd"] * (1 + cfg["margin_pct"] / 100), 4)
         amount_dzd = round(billed_usd * cfg["usd_dzd_rate"], 2)
         existing = await main_db.ai_invoices.find_one(
-            {"tenant_id": tid, "month": data.month, "status": "billed"}, {"_id": 0})
+            {"tenant_id": tid, "month": data.month, "status": "billed"}, {"_id": 0}
+        )
         if existing:
             results["skipped"].append({"tenant_id": tid, "reason": "invoiced"})
             # p295: backfill commission for invoices billed before the hook existed
@@ -205,14 +225,22 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
             inv["status"] = "billed"
             inv["billed_at"] = now
             await main_db.ai_invoices.update_one(
-                {"tenant_id": tid, "month": data.month}, {"$set": inv}, upsert=True)
-            results["billed"].append({"tenant_id": tid, "amount_dzd": 0, "code": inv["code"]})
+                {"tenant_id": tid, "month": data.month}, {"$set": inv}, upsert=True
+            )
+            results["billed"].append(
+                {"tenant_id": tid, "amount_dzd": 0, "code": inv["code"]}
+            )
             continue
         try:
             from services.wallet_service import debit_wallet
+
             txn_id = str(uuid.uuid4())
             await debit_wallet(
-                main_db, tid, amount_dzd, "ai_billing", txn_id,
+                main_db,
+                tid,
+                amount_dzd,
+                "ai_billing",
+                txn_id,
                 f"فاتورة استهلاك الذكاء الاصطناعي {data.month} ({inv['code']})",
                 admin.get("email", "system"),
             )
@@ -225,9 +253,16 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
             inv["status"] = "failed"
             inv["error"] = str(getattr(exc, "detail", exc))[:300]
         await main_db.ai_invoices.update_one(
-            {"tenant_id": tid, "month": data.month}, {"$set": inv}, upsert=True)
+            {"tenant_id": tid, "month": data.month}, {"$set": inv}, upsert=True
+        )
         results["billed" if inv["status"] == "billed" else "failed"].append(
-            {"tenant_id": tid, "amount_dzd": amount_dzd, "code": inv["code"], "error": inv["error"]})
+            {
+                "tenant_id": tid,
+                "amount_dzd": amount_dzd,
+                "code": inv["code"],
+                "error": inv["error"],
+            }
+        )
     return {"month": data.month, **results}
 
 
@@ -242,7 +277,11 @@ async def list_invoices(
         q["tenant_id"] = tenant_id
     if month:
         q["month"] = month
-    invoices = await main_db.ai_invoices.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    invoices = (
+        await main_db.ai_invoices.find(q, {"_id": 0})
+        .sort("created_at", -1)
+        .to_list(500)
+    )
     names = await _tenant_names(list({i["tenant_id"] for i in invoices}))
     for i in invoices:
         t = names.get(i["tenant_id"], {})
@@ -250,7 +289,9 @@ async def list_invoices(
         i["short_id"] = t.get("short_id", "")
     return {"total": len(invoices), "invoices": invoices}
 
+
 # ── p296: platform AI key settings (super admin UI → DB, env fallback) ──────
+
 
 def _mask_key(k: str) -> str:
     return (k[:6] + "..." + k[-4:]) if k and len(k) > 12 else ("***" if k else "")
@@ -260,12 +301,16 @@ def _mask_key(k: str) -> str:
 async def get_ai_settings(admin: dict = Depends(get_super_admin)):
     """Effective AI configuration + source (db/env) without exposing the key."""
     from services.ai.platform_ai_settings import refresh_effective
-    doc = await main_db.ai_platform_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+
+    doc = (
+        await main_db.ai_platform_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    )
     eff = await refresh_effective(main_db, force=True)
     has_db_key = bool(doc.get("api_key"))
     masked = ""
     if has_db_key:
         from services.crypto_fields import decrypt_field
+
         try:
             masked = _mask_key(decrypt_field(doc["api_key"]))
         except Exception:
@@ -288,6 +333,7 @@ async def put_ai_settings(data: dict, admin: dict = Depends(get_super_admin)):
     (contains ...) keeps the stored key; clear_key=true removes the DB key so
     the platform falls back to the server env var."""
     from services.ai.platform_ai_settings import invalidate_cache
+
     now = datetime.now(timezone.utc).isoformat()
     upd = {"updated_at": now, "updated_by": admin.get("email", "")}
     unset = {}
@@ -297,6 +343,7 @@ async def put_ai_settings(data: dict, admin: dict = Depends(get_super_admin)):
         key = (data.get("api_key") or "").strip()
         if key and "..." not in key:
             from services.crypto_fields import encrypt_field
+
             upd["api_key"] = encrypt_field(key)
     for f in ("base_url", "model"):
         if f in data:
@@ -306,10 +353,14 @@ async def put_ai_settings(data: dict, admin: dict = Depends(get_super_admin)):
             else:
                 unset[f] = ""
     update = {}
-    if upd: update["$set"] = {"id": "global", **upd}
-    if unset: update["$unset"] = unset
+    if upd:
+        update["$set"] = {"id": "global", **upd}
+    if unset:
+        update["$unset"] = unset
     if update:
-        await main_db.ai_platform_settings.update_one({"id": "global"}, update, upsert=True)
+        await main_db.ai_platform_settings.update_one(
+            {"id": "global"}, update, upsert=True
+        )
     invalidate_cache()
     return await get_ai_settings(admin)
 
@@ -318,22 +369,34 @@ async def put_ai_settings(data: dict, admin: dict = Depends(get_super_admin)):
 async def test_ai_settings(admin: dict = Depends(get_super_admin)):
     """Live-check the effective AI config with a minimal completion call."""
     from services.ai.platform_ai_settings import refresh_effective, current
+
     await refresh_effective(main_db, force=True)
     eff = current()
     if not eff["api_key"]:
-        return {"ok": False, "error": "لا يوجد مفتاح مضبوط (لا في الواجهة ولا في السيرفر)"}
+        return {
+            "ok": False,
+            "error": "لا يوجد مفتاح مضبوط (لا في الواجهة ولا في السيرفر)",
+        }
     try:
         from openai import AsyncOpenAI
+
         client = AsyncOpenAI(api_key=eff["api_key"], base_url=eff["base_url"])
         msgs = [{"role": "user", "content": "Reply with one word: works"}]
         try:
-            resp = await client.chat.completions.create(model=eff["model"], messages=msgs, max_tokens=10)
+            resp = await client.chat.completions.create(
+                model=eff["model"], messages=msgs, max_tokens=10
+            )
         except Exception as e1:
             if "max_tokens" in str(e1):  # gpt-5 family requires max_completion_tokens
-                resp = await client.chat.completions.create(model=eff["model"], messages=msgs, max_completion_tokens=16)
+                resp = await client.chat.completions.create(
+                    model=eff["model"], messages=msgs, max_completion_tokens=16
+                )
             else:
                 raise
-        return {"ok": True, "model": eff["model"],
-                "reply": (resp.choices[0].message.content or "").strip()[:60]}
+        return {
+            "ok": True,
+            "model": eff["model"],
+            "reply": (resp.choices[0].message.content or "").strip()[:60],
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}

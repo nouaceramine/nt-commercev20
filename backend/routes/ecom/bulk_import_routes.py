@@ -25,7 +25,6 @@ manual entry: duplicate flag (p240, also inside the file itself), COD risk,
 network reputation, POS sale mirror, notifications. Tags: excel-import + batch id.
 """
 from datetime import datetime, timezone
-from typing import Optional
 import csv
 import io
 import logging

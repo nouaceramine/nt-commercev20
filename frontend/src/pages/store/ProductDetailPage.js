@@ -4,7 +4,7 @@ import apiClient from '../../lib/apiClient';
 import { initPixels, trackPixel } from '../../lib/pixel';
 import { captureUtm, getUtm } from '../../lib/utm';
 import { toast } from 'sonner';
-import { ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin, Minus, Plus, CheckCircle } from 'lucide-react';
+import { ShoppingCart as _ShoppingCart, Truck, Shield, RefreshCw, ChevronLeft, Tag, Gift, MapPin, Minus, Plus, CheckCircle } from 'lucide-react';
 
 export default function ProductDetailPage() {
   const { slug, productId } = useParams();
@@ -89,7 +89,7 @@ export default function ProductDetailPage() {
       const p = response.data.product;
       setMainImage(p.image_url || (p.images && p.images[0]) || '');
       window.scrollTo(0, 0);
-    } catch (error) {
+    } catch (_error) {
       toast.error('المنتج غير متوفر');
       navigate(`/shop/${slug}`);
     } finally {
@@ -142,7 +142,7 @@ export default function ProductDetailPage() {
         setCouponMessage(response.data.error);
         toast.error(response.data.error);
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('فشل التحقق من الكوبون');
     } finally {
       setCouponLoading(false);
@@ -156,7 +156,7 @@ export default function ProductDetailPage() {
       if (response.data.success) {
         setLoyaltyPoints(response.data.data);
       }
-    } catch (error) {
+    } catch (_error) {
       // نقاط الولاء اختيارية — تجاهل الخطأ
     }
   };

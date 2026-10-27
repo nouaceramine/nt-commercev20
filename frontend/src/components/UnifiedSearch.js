@@ -139,7 +139,7 @@ export function UnifiedSearch({
         setResults(products);
         setTotalResults(products.length);
         setIsOpen(products.length > 0 || (searchQuery && searchQuery.length > 0));
-      } catch (e) {
+      } catch (_e) {
         setResults([]);
         setTotalResults(0);
       }

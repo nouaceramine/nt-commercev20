@@ -3,7 +3,7 @@ Sales Routes — thin HTTP layer. Business logic lives in
 services/application/sales_service.py
 """
 from fastapi import APIRouter, HTTPException, Depends
-from services.balances import adjust_customer_mirror, adjust_supplier_mirror
+from services.balances import adjust_customer_mirror
 from typing import Optional
 
 

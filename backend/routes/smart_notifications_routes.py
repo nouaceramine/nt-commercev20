@@ -4,7 +4,6 @@ Smart Notifications Routes — robot alerts view over the unified notifications 
 from fastapi import APIRouter, Depends
 from typing import Optional
 from datetime import datetime, timezone
-import uuid
 
 
 def create_smart_notifications_routes(db, main_db, get_current_user) -> dict:

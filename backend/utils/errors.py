@@ -1,6 +1,7 @@
 """
 Unified Error Handling for NT Commerce
 """
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 import logging
@@ -12,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class AppException(Exception):
-    def __init__(self, message: str, status_code: int = 400, error_code: str = "APP_ERROR"):
+    def __init__(
+        self, message: str, status_code: int = 400, error_code: str = "APP_ERROR"
+    ):
         self.message = message
         self.status_code = status_code
         self.error_code = error_code
@@ -43,25 +46,41 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
     # p133: persist to system_logs with 5-minute dedup (count increments)
     try:
         from config.database import main_db
-        import os, httpx
+        import os
+        import httpx
+
         msg = f"{type(exc).__name__}: {exc}"[:500]
         path = request.url.path
         now = datetime.now(timezone.utc)
         five_min_ago = datetime.fromtimestamp(now.timestamp() - 300, timezone.utc)
         existing = await main_db.system_logs.find_one(
-            {"source": "backend", "type": "exception", "message": msg, "url": path,
-             "created_at": {"$gte": five_min_ago.isoformat()}})
+            {
+                "source": "backend",
+                "type": "exception",
+                "message": msg,
+                "url": path,
+                "created_at": {"$gte": five_min_ago.isoformat()},
+            }
+        )
         if existing:
             await main_db.system_logs.update_one(
                 {"id": existing["id"]},
-                {"$inc": {"occurrences": 1}, "$set": {"created_at": now.isoformat()}})
+                {"$inc": {"occurrences": 1}, "$set": {"created_at": now.isoformat()}},
+            )
         else:
-            await main_db.system_logs.insert_one({
-                "id": str(uuid.uuid4()), "level": "error", "source": "backend",
-                "type": "exception", "message": msg, "url": path,
-                "stack": traceback.format_exc()[-3000:], "occurrences": 1,
-                "created_at": now.isoformat(),
-            })
+            await main_db.system_logs.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "level": "error",
+                    "source": "backend",
+                    "type": "exception",
+                    "message": msg,
+                    "url": path,
+                    "stack": traceback.format_exc()[-3000:],
+                    "occurrences": 1,
+                    "created_at": now.isoformat(),
+                }
+            )
             # optional Telegram alert (active once the platform bot token is set)
             token = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN")
             chat = os.environ.get("TELEGRAM_ALERT_CHAT_ID")
@@ -70,8 +89,11 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
                     async with httpx.AsyncClient(timeout=8) as client:
                         await client.post(
                             f"https://api.telegram.org/bot{token}/sendMessage",
-                            json={"chat_id": chat,
-                                  "text": f"🚨 خطأ خلفي غير معالج\n{path}\n{msg}"})
+                            json={
+                                "chat_id": chat,
+                                "text": f"🚨 خطأ خلفي غير معالج\n{path}\n{msg}",
+                            },
+                        )
                 except Exception:
                     pass
     except Exception:

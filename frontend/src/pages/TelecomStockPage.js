@@ -28,7 +28,7 @@ import { errText } from "../lib/errorText";
 import { toast } from "sonner";
 import {
   Package, Plus, Pencil, Trash2, ShoppingCart, ArrowLeftRight,
-  Smartphone, Wallet, CreditCard, Zap, Download, DollarSign,
+  Smartphone, Wallet, CreditCard, Zap, Download, DollarSign as _DollarSign,
 } from "lucide-react";
 
 const KIND_LABELS = {
@@ -98,7 +98,7 @@ export default function TelecomStockPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const boxName = (id) => cashBoxes.find((b) => b.id === id)?.name || id;
+  const _boxName = (id) => cashBoxes.find((b) => b.id === id)?.name || id;
 
   // ── card type CRUD ──
   const openNewCard = () => { setEditingCard(null); setCardForm(EMPTY_CARD); setCardDialog(true); };
@@ -244,7 +244,7 @@ export default function TelecomStockPage() {
     } finally { setSaving(false); }
   };
 
-  const partyLabel = (kind, slotId) => {
+  const _partyLabel = (kind, slotId) => {
     if (kind === "wallet") return ar ? "محفظة الشحن/IPTV" : "Wallet";
     const s = slots.find((x) => x.slot_id === parseInt(slotId));
     return s ? `${s.operator} (${formatCurrency(s.balance)})` : `SIM ${slotId}`;

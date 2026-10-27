@@ -10,7 +10,7 @@ import {
   Star, 
   Zap, 
   Shield, 
-  ArrowLeft,
+  ArrowLeft as _ArrowLeft,
   CheckCircle,
   Package,
   Users,
@@ -99,7 +99,7 @@ export default function PricingPage() {
 
   const getFeatureCount = (features) => {
     if (!features) return 0;
-    return Object.entries(features).filter(([k, v]) => {
+    return Object.entries(features).filter(([_k, v]) => {
       if (typeof v === 'boolean') return v === true;
       if (v && typeof v === 'object' && 'enabled' in v) return v.enabled === true;
       return false;
@@ -264,7 +264,7 @@ export default function PricingPage() {
             </div>
           ) : (
             <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-              {plans.map((plan, index) => {
+              {plans.map((plan, _index) => {
                 const price = billingCycle === 'yearly' ? (plan.yearly_price ?? plan.price_yearly ?? 0) : (plan.monthly_price ?? plan.price_monthly ?? 0);
                 const featureCount = getFeatureCount(plan.features);
                 
@@ -318,7 +318,7 @@ export default function PricingPage() {
                       
                       <ul className="space-y-3">
                         {Object.entries(text.featureCategories).map(([key, label]) => {
-                          const Icon = FEATURE_ICONS[key] || Check;
+                          const _Icon = FEATURE_ICONS[key] || Check;
                           const isEnabled = plan.features?.[key]?.enabled;
                           
                           return (

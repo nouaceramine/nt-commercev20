@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 
 export default function ProductFamiliesPage() {
-  const { t, language, isRTL } = useLanguage();
+  const { t, language, isRTL: _isRTL } = useLanguage();
   const [families, setFamilies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -61,7 +61,7 @@ export default function ProductFamiliesPage() {
 
   const fetchFamilies = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/product-families`);
       setFamilies(response.data);
     } catch (error) {
@@ -79,7 +79,7 @@ export default function ProductFamiliesPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const data = {
         name_en: form.name,
         name_ar: form.name,
@@ -160,7 +160,7 @@ export default function ProductFamiliesPage() {
 
   // Organize families into tree structure
   const mainFamilies = families.filter(f => !f.parent_id);
-  const getSubFamilies = (parentId) => families.filter(f => f.parent_id === parentId);
+  const _getSubFamilies = (parentId) => families.filter(f => f.parent_id === parentId);
 
   if (loading) {
     return (

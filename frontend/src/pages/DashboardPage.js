@@ -39,8 +39,8 @@ import {
 export default function DashboardPage() {
   const { t, isRTL, language } = useLanguage();
   const { isAdmin } = useAuth();
-  const { formatCurrency, formatNumber, formatDate } = useDateFormat();
-  const { widgets, setWidgets, isWidgetVisible, getWidgetOrder } = useDashboardWidgets();
+  const { formatCurrency: _formatCurrency, formatNumber: _formatNumber, formatDate: _formatDate } = useDateFormat();
+  const { widgets: _widgets, setWidgets, isWidgetVisible, getWidgetOrder: _getWidgetOrder } = useDashboardWidgets();
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [stats, setStats] = useState({
     total_products: 0, total_customers: 0, total_suppliers: 0,
@@ -152,8 +152,8 @@ export default function DashboardPage() {
 
   const Arrow = isRTL ? ArrowLeft : ArrowRight;
 
-  const customerBalance = stats.customer_balance_total || 0;
-  const customerBalanceCount = stats.customer_balance_count || 0;
+  const _customerBalance = stats.customer_balance_total || 0;
+  const _customerBalanceCount = stats.customer_balance_count || 0;
   const customerDebt = stats.customer_debt_total || 0;
   const customerDebtCount = stats.customers_with_debt || 0;
   const totalPlatformDebt = (walletDebt || 0); // Already includes subscription_due; backend may extend
@@ -432,7 +432,7 @@ export default function DashboardPage() {
                         await apiClient.post(`/cash-boxes/reset-all`, {});
                         toast.success('تم إعادة تعيين الصناديق');
                         window.location.reload();
-                      } catch (err) {
+                      } catch (_err) {
                         toast.error('فشل في إعادة التعيين');
                       }
                     }

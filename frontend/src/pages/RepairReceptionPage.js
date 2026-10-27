@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import { Badge } from '../components/ui/badge';
+import { Badge as _Badge } from '../components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -18,7 +18,7 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
+  DialogDescription as _DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -28,12 +28,12 @@ import {
   Smartphone,
   User,
   Phone,
-  FileText,
-  Camera,
+  FileText as _FileText,
+  Camera as _Camera,
   Printer,
   Save,
-  Hash,
-  Calendar,
+  Hash as _Hash,
+  Calendar as _Calendar,
   DollarSign,
   Clock,
   CheckCircle2,
@@ -85,7 +85,7 @@ export default function RepairReceptionPage() {
   const [createdTicket, setCreatedTicket] = useState(null);
   const [customers, setCustomers] = useState([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  const [isNewCustomer, setIsNewCustomer] = useState(true);
+  const [_isNewCustomer, setIsNewCustomer] = useState(true);
 
   const [formData, setFormData] = useState({
     // Customer info

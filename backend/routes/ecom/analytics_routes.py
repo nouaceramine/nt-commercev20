@@ -9,12 +9,8 @@ Routes:
 The LLM call uses the Emergent LLM key (Gemini/OpenAI/Claude). Per-lead result
 is persisted on the doc so re-clicking is free.
 """
-import os
-import json
 import logging
-import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 

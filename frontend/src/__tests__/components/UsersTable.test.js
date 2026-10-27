@@ -2,7 +2,7 @@
  * UsersTable Component Tests
  * Phase 4g: UI Component Unit Tests
  */
-import React from 'react';
+import _React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import UsersTable from '../../components/permissions/UsersTable';
 

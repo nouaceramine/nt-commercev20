@@ -53,14 +53,14 @@ function WhepPlayer({ url, ar }) {
         const answer = await r.text();
         if (cancelled) return;
         await pc.setRemoteDescription({ type: 'answer', sdp: answer });
-      } catch (e) {
+      } catch (_e) {
         if (!cancelled) setStatus('failed');
       }
     };
     start();
     return () => {
       cancelled = true;
-      try { pcRef.current?.close(); } catch (e) { /* noop */ }
+      try { pcRef.current?.close(); } catch (_e) { /* noop */ }
       pcRef.current = null;
     };
   }, [url]);
@@ -119,7 +119,7 @@ export default function ScreenRecordingPage() {
       ]);
       setDevices(d.data.items || []);
       setInfo(i.data);
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل التحميل' : 'Échec du chargement');
     } finally {
       setLoading(false);
@@ -167,7 +167,7 @@ export default function ScreenRecordingPage() {
       await apiClient.delete(`/screen-recording/devices/${d.id}`);
       toast.success(ar ? 'حُذف' : 'Supprimé');
       load();
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل الحذف' : 'Échec');
     }
   };

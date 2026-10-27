@@ -10,7 +10,6 @@ Covers:
 - Tenant login + tenant's products endpoint returns empty list
 """
 import os
-import time
 import uuid
 import requests
 import pytest

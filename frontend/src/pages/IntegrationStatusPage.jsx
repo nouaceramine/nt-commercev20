@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import _React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Layout } from '../components/Layout';
+import { Layout as _Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { useLanguage } from '../contexts/LanguageContext';

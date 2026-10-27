@@ -312,7 +312,7 @@ export default function RobotsPage() {
       await apiClient.post('/robots/stop-all');
       toast.success('تم إيقاف جميع الروبوتات');
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل إيقاف الروبوتات');
     } finally { setActionLoading(false); }
   };
@@ -323,7 +323,7 @@ export default function RobotsPage() {
       await apiClient.post('/robots/start-all');
       toast.success('تم تشغيل جميع الروبوتات');
       setTimeout(fetchStatus, 2000);
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل تشغيل الروبوتات');
     } finally { setActionLoading(false); }
   };
@@ -352,7 +352,7 @@ export default function RobotsPage() {
   const robots = status?.robots || {};
   const isSystemRunning = status?.is_running;
   const watchdogActive = status?.watchdog_active;
-  const runningCount = Object.values(robots).filter(r => r.is_running).length;
+  const _runningCount = Object.values(robots).filter(r => r.is_running).length;
   const aliveCount = Object.values(robots).filter(r => r.task_alive !== false && r.is_running).length;
   const totalChecks = Object.values(robots).reduce((s, r) => s + (r.stats?.checks || 0), 0);
   const startedAt = status?.started_at

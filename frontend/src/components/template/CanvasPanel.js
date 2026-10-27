@@ -10,7 +10,7 @@ import BlockVisual from './BlockVisual';
 
 // ── Sortable block on the canvas ───────────────────────────────────────────
 function CanvasBlock({ block, isSelected, onSelect, onDelete, branding, accentColor, isA4, language }) {
-  const ar = language === 'ar';
+  const _ar = language === 'ar';
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: block.id,
     data: { source: 'canvas', blockId: block.id },

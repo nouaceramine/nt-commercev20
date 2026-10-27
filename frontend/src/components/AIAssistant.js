@@ -14,9 +14,9 @@ import {
   Loader2,
   User,
   Sparkles,
-  Terminal,
-  HelpCircle,
-  RefreshCw
+  Terminal as _Terminal,
+  HelpCircle as _HelpCircle,
+  RefreshCw as _RefreshCw
 } from 'lucide-react';
 
 const QUICK_COMMANDS = [

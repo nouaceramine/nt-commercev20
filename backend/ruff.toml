@@ -1,0 +1,16 @@
+# These bootstrap modules intentionally load environment variables, optional
+# dependencies, or package paths before their remaining module-level imports.
+[lint.per-file-ignores]
+"main.py" = ["E402"]
+"routes/saas/tenants_routes.py" = ["E402"]
+"routes/migration_routes.py" = ["E402"]
+"routes/database_routes.py" = ["E402"]
+"routes/recharge/sim_routes.py" = ["E402"]
+"routes/ecom/orders_routes.py" = ["E402"]
+"routes/ecom/constants.py" = ["E402"]
+"routes/ecom/shipping_routes.py" = ["E402"]
+"routes/recharge/idoom_routes.py" = ["E402"]
+"routes/system_errors.py" = ["E402"]
+"services/code_generator.py" = ["E402"]
+"services/ecom/courier_sync.py" = ["E402"]
+"tests/test_iter27_eda.py" = ["E402"]

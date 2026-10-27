@@ -2,9 +2,8 @@
 Advanced Security Routes
 Collections: security_logs, blocked_ips, login_attempts, audit_logs, api_keys, user_sessions
 """
-from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel
-from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 import secrets

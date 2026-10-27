@@ -8,7 +8,6 @@ import uuid
 
 from services.code_generator import generate_code
 from services.wallet_service import PLATFORM_WALLET_ID
-from utils.permissions import create_cashier_block
 
 
 def create_wallet_requests_routes(main_db, get_current_user, get_super_admin, block_cashier) -> dict:

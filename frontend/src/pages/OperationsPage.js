@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
-import apiClient from '../lib/apiClient';
+import { useState, useEffect as _useEffect } from 'react';
+import _apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
@@ -22,14 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { toast } from 'sonner';
+import { toast as _toast } from 'sonner';
 import {
   History,
   ArrowRight,
   Search,
-  Filter,
+  Filter as _Filter,
   Download,
-  Calendar,
+  Calendar as _Calendar,
   Smartphone,
   Wifi,
   CreditCard,
@@ -37,7 +37,7 @@ import {
   XCircle,
   Clock,
   TrendingUp,
-  TrendingDown
+  TrendingDown as _TrendingDown
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -53,12 +53,12 @@ const SAMPLE_OPERATIONS = [
 export default function OperationsPage() {
   const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState('all');
-  const [operations, setOperations] = useState(SAMPLE_OPERATIONS);
+  const [operations, _setOperations] = useState(SAMPLE_OPERATIONS);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterOperator, setFilterOperator] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [_dateFrom, _setDateFrom] = useState('');
+  const [_dateTo, _setDateTo] = useState('');
 
   const filteredOperations = operations.filter(op => {
     const matchesSearch = op.phone.includes(searchQuery) || op.operator.toLowerCase().includes(searchQuery.toLowerCase());

@@ -61,7 +61,7 @@ export function usePOSSession({ language, toast, apiClient }) {
         setCurrentSession(null);
         setSessionStats(null);
       }
-    } catch (error) {
+    } catch (_error) {
       setHasOpenSession(false);
       setCurrentSession(null);
       setSessionStats(null);
@@ -70,7 +70,7 @@ export function usePOSSession({ language, toast, apiClient }) {
     }
   }, [apiClient, language, toast]);
 
-  const fetchSessionStats = useCallback(async (sessionId) => {
+  const fetchSessionStats = useCallback(async (_sessionId) => {
     try {
       const salesRes = await apiClient.get('/sales');
       const today = new Date().toISOString().split('T')[0];
@@ -93,7 +93,7 @@ export function usePOSSession({ language, toast, apiClient }) {
       try {
         const codeRes = await apiClient.get('/daily-sessions/generate-code');
         code = codeRes.data.code;
-      } catch (e) { /* silent */ }
+      } catch (_e) { /* silent */ }
 
       const session = {
         code,

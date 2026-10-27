@@ -154,7 +154,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         new_qty = old_qty + qty
         new_avg = round(((old_qty * old_cost) + total) / new_qty, 2) if new_qty > 0 else cost
 
-        slot_updated = cash_done = False
+        slot_updated = _cash_done = False
         try:
             await db.sim_slots.update_one(
                 {"slot_id": payload.slot_id},
@@ -177,7 +177,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
                     "created_at": now,
                     "created_by": admin.get("name", ""),
                 })
-            cash_done = True
+            _cash_done = True
         except Exception as e:
             if slot_updated:
                 try:
@@ -205,7 +205,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
 
         now = datetime.now(timezone.utc).isoformat()
         old_balance = float(slot.get("balance", 0) or 0)
-        slot_updated = cash_done = False
+        slot_updated = _cash_done = False
         try:
             await db.sim_slots.update_one(
                 {"slot_id": slot_id},
@@ -234,7 +234,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
                 "created_at": now,
                 "created_by": admin.get("name", ""),
             })
-            cash_done = True
+            _cash_done = True
         except Exception as e:
             if slot_updated:
                 try:
@@ -265,7 +265,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         transfer_id = str(uuid.uuid4())
 
         # ── debit source ──
-        source_done = False
+        _source_done = False
         src_slot = None
         try:
             if payload.from_kind == "slot":
@@ -280,7 +280,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
                 from services.wallet_service import debit_wallet
                 await debit_wallet(main_db, entity_id, amount, "sim_transfer_out", transfer_id,
                                    "تحويل رصيد من المحفظة إلى شريحة", admin.get("name", ""))
-            source_done = True
+            _source_done = True
         except HTTPException:
             raise
         except Exception as e:

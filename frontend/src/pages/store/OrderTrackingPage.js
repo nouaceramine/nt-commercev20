@@ -23,7 +23,7 @@ export default function OrderTrackingPage() {
       } else {
         toast.error('الطلب غير موجود');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error('فشل جلب التتبع');
     } finally {
       setLoading(false);

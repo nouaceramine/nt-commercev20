@@ -4,7 +4,7 @@ Coupon/Discount Service
 """
 import uuid
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)

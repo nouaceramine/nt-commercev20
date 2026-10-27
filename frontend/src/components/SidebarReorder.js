@@ -49,7 +49,7 @@ function SortableItem({ id, label, Icon, data }) {
 }
 
 // One draggable section card containing its items
-function SortableSection({ section, language }) {
+function SortableSection({ section, language: _language }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `S::${section.id}`,
     data: { type: 'section', sectionId: section.id },

@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter as _DialogFooter } from '../components/ui/dialog';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -55,7 +55,7 @@ export default function DigitalServicesCatalogPage() {
     try {
       const r = await apiClient.get('/digital-panel/services');
       setServices(r.data || []);
-    } catch (err) {
+    } catch (_err) {
     } finally {
       setLoading(false);
     }
@@ -66,7 +66,7 @@ export default function DigitalServicesCatalogPage() {
     try {
       const r = await apiClient.get('/digital-panel/platform-catalog');
       setPlatformItems(r.data || []);
-    } catch (err) {
+    } catch (_err) {
       // If endpoint not available (feature disabled), silently ignore
     } finally {
       setPlatformLoading(false);

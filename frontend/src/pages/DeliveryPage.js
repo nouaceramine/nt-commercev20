@@ -43,7 +43,7 @@ export default function DeliveryPage() {
       ]);
       setOrders(o.data || []);
       setSummary(s.data || null);
-    } catch (e) { /* جلب دوري صامت */ }
+    } catch (_e) { /* جلب دوري صامت */ }
     finally { setLoading(false); }
   }, []);
 
@@ -60,7 +60,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل PDF"); }
+    } catch (_e) { toast.error("تعذر تحميل PDF"); }
   };
   // p470: سجل التوصيلات الفاشلة CSV (30 يومًا)
   const downloadFailedCsv = async () => {
@@ -74,7 +74,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
   // p469: مقارنة السائقين الأسبوعية PDF
   const downloadWeeklyPdf = async () => {
@@ -88,7 +88,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل PDF"); }
+    } catch (_e) { toast.error("تعذر تحميل PDF"); }
   };
   // p468: زمن التوصيل لكل سائق CSV (متوسط/أقصر/أطول — 30 يومًا)
   const downloadTimeCsv = async () => {
@@ -102,7 +102,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
   // p460: الإلغاءات حسب السبب CSV (BOM عربي لـ Excel — 30 يومًا)
   const downloadReasonsCsv = async () => {
@@ -116,7 +116,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
 
   // p446: أفضل زبائن التوصيل CSV (BOM عربي لـ Excel — 90 يومًا)
@@ -131,7 +131,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
 
   // p442: إحصائيات سائقي التوصيل PDF (نفس فترة CSV — 30 يومًا)
@@ -146,7 +146,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل PDF"); }
+    } catch (_e) { toast.error("تعذر تحميل PDF"); }
   };
 
   // p430: إحصائيات سائقي التوصيل CSV (BOM عربي لـ Excel — 30 يومًا)
@@ -161,7 +161,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
   const downloadCsv = async () => {
     try {
@@ -174,7 +174,7 @@ export default function DeliveryPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
 
   useEffect(() => {
@@ -195,7 +195,7 @@ export default function DeliveryPage() {
       try {
         const r = await apiClient.get("/products");
         setProducts((r.data || []).filter((p) => p.is_active !== false));
-      } catch (e) { /* تُركت فارغة */ }
+      } catch (_e) { /* تُركت فارغة */ }
     }
   };
 
@@ -221,7 +221,7 @@ export default function DeliveryPage() {
       try {
         const r = await apiClient.get("/products");
         setProducts((r.data || []).filter((p) => p.is_active !== false));
-      } catch (e) { /* تُركت فارغة */ }
+      } catch (_e) { /* تُركت فارغة */ }
     }
   };
 

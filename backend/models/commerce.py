@@ -3,7 +3,7 @@ NT Commerce Models - 24 Collections
 Tenants, Agents, Plans, Wallet, Subscriptions, Features, Roles
 """
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 
 
 class Tenant(BaseModel):

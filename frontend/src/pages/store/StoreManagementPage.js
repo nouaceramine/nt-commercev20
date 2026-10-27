@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -44,23 +44,23 @@ import {
   ExternalLink,
   Copy,
   Settings,
-  Eye,
-  EyeOff,
-  Check,
-  X,
+  Eye as _Eye,
+  EyeOff as _EyeOff,
+  Check as _Check,
+  X as _X,
   RefreshCw,
   Save,
-  Plus,
-  Minus,
-  Image,
-  Edit,
-  Trash2,
+  Plus as _Plus,
+  Minus as _Minus,
+  Image as _Image,
+  Edit as _Edit,
+  Trash2 as _Trash2,
   Globe,
   Palette,
   Layout as LayoutIcon,
   Phone,
-  MapPin,
-  Clock,
+  MapPin as _MapPin,
+  Clock as _Clock,
   Truck,
   CreditCard,
   Banknote,
@@ -69,7 +69,7 @@ import {
 
 export default function StoreManagementPage() {
   const { language } = useLanguage();
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [storeSettings, setStoreSettings] = useState({
     enabled: false,
     store_name: '',
@@ -99,7 +99,7 @@ export default function StoreManagementPage() {
   const [cdBusy, setCdBusy] = useState(false);       // p152
   const [allFamilies, setAllFamilies] = useState([]);  // p149: لاختيار العائلات الظاهرة
   const [products, setProducts] = useState([]);
-  const [storeProducts, setStoreProducts] = useState([]);
+  const [_storeProducts, setStoreProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cartLeads, setCartLeads] = useState([]);  // p83
   const [cartRecovered, setCartRecovered] = useState(0);  // p107
@@ -112,7 +112,7 @@ export default function StoreManagementPage() {
   const [watches, setWatches] = useState([]);
   const [watchForm, setWatchForm] = useState({ product_name: '', competitor_name: '', competitor_url: '-', my_price: '', competitor_price: '' });
   const [saving, setSaving] = useState(false);
-  const [showProductDialog, setShowProductDialog] = useState(false);
+  const [_showProductDialog, _setShowProductDialog] = useState(false);
   const [landingDialog, setLandingDialog] = useState(null);
   const [landingCfg, setLandingCfg] = useState(null);
   const [landingSaving, setLandingSaving] = useState(false);
@@ -185,7 +185,7 @@ export default function StoreManagementPage() {
       setCdInfo(null);
       setCdDomain('');
       toast.success(language === 'ar' ? 'أُزيل الدومين' : 'Domaine supprimé');
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'فشل الحذف' : 'Échec');
     } finally {
       setCdBusy(false);
@@ -288,7 +288,7 @@ export default function StoreManagementPage() {
       const r = await apiClient.get('/store/cart-leads');
       setCartLeads(r.data?.leads || []);
       setCartRecovered(r.data?.recovered || 0);  // p107
-    } catch (e) { /* optional */ }
+    } catch (_e) { /* optional */ }
   };
 
   const fetchOrdersOnly = async () => {
@@ -341,7 +341,7 @@ export default function StoreManagementPage() {
   const saveStoreSettings = async () => {
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/store/settings`, storeSettings);
       toast.success(language === 'ar' ? 'تم حفظ إعدادات المتجر' : 'Store settings saved');
     } catch (error) {
@@ -357,7 +357,7 @@ export default function StoreManagementPage() {
       const res = await apiClient.get(`/store/landing/${product.id}`);
       setLandingCfg(res.data);
       setLandingDialog(product);
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'تعذر تحميل إعدادات صفحة الهبوط' : 'Erreur');
     }
   };
@@ -378,7 +378,7 @@ export default function StoreManagementPage() {
       await apiClient.put(`/store/landing/${landingDialog.id}`, payload);
       toast.success(language === 'ar' ? 'تم حفظ صفحة الهبوط' : 'Sauvegardé');
       setLandingDialog(null);
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'فشل الحفظ' : 'Erreur');
     } finally {
       setLandingSaving(false);
@@ -406,7 +406,7 @@ export default function StoreManagementPage() {
 
   const toggleProductInStore = async (productId, add) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       if (add) {
         await apiClient.post(`/store/products`, { product_id: productId });
         setSelectedProducts(prev => [...prev, productId]);
@@ -416,28 +416,28 @@ export default function StoreManagementPage() {
         setSelectedProducts(prev => prev.filter(id => id !== productId));
         toast.success(language === 'ar' ? 'تمت إزالة المنتج من المتجر' : 'Product removed from store');
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'حدث خطأ' : 'An error occurred');
     }
   };
 
-  const updateOrderStatus = async (orderId, status) => {
+  const _updateOrderStatus = async (orderId, status) => {
     try {
       await apiClient.put(`/store/orders/${orderId}/status`, { status });
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
       fetchOrdersOnly();
       toast.success(language === 'ar' ? 'تم تحديث حالة الطلب' : 'Order status updated');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل تحديث الحالة' : 'Failed to update status');
     }
   };
 
-  const updateDeliveryType = async (orderId, dt) => {  // p138
+  const _updateDeliveryType = async (orderId, dt) => {  // p138
     try {
       await apiClient.put(`/store/orders/${orderId}/delivery-type`, { delivery_type: dt });
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, delivery_type: dt } : o));
       toast.success(language === 'ar' ? 'تم تحديث نوع التوصيل' : 'Delivery type updated');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل تحديث نوع التوصيل' : 'Failed to update delivery type');
     }
   };
@@ -456,7 +456,7 @@ export default function StoreManagementPage() {
     toast.success(language === 'ar' ? 'تم نسخ الرابط' : 'URL copied');
   };
 
-  const getStatusBadge = (status) => {
+  const _getStatusBadge = (status) => {
     const statusMap = {
       pending: { label: language === 'ar' ? 'قيد الانتظار' : 'Pending', color: 'bg-yellow-100 text-yellow-800' },
       confirmed: { label: language === 'ar' ? 'مؤكد' : 'Confirmed', color: 'bg-blue-100 text-blue-800' },
@@ -607,7 +607,7 @@ export default function StoreManagementPage() {
                                 } else {
                                   toast.error('الرابط مستخدم، جرب اسماً آخر');
                                 }
-                              } catch (e) {
+                              } catch (_e) {
                                 toast.error('فشل التحقق');
                               }
                             }}

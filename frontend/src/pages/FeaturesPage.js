@@ -8,16 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Input as _Input } from '../components/ui/input';
+import { Label as _Label } from '../components/ui/label';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import { 
-  Settings, ShoppingCart, Package, Users, FileText, Truck, CreditCard, 
+  Settings, ShoppingCart, Package, Users, FileText as _FileText, Truck, CreditCard as _CreditCard,
   Bell, BarChart3, Smartphone, Globe, Shield, Save, RefreshCw, 
-  Store, Wrench, MessageCircle, Mail, Wallet, Calculator, Boxes,
-  Receipt, UserCog, ClipboardList, TrendingUp, Star, Lock, Unlock,
-  Landmark, Coins, Sparkles, Bot, CheckSquare, Database, Key
+  Store, Wrench, MessageCircle as _MessageCircle, Mail as _Mail, Wallet, Calculator, Boxes,
+  Receipt as _Receipt, UserCog, ClipboardList, TrendingUp as _TrendingUp, Star, Lock, Unlock,
+  Landmark, Coins as _Coins, Sparkles, Bot as _Bot, CheckSquare, Database, Key as _Key
 } from 'lucide-react';
 
 export default function FeaturesPage() {
@@ -363,7 +363,7 @@ export default function FeaturesPage() {
 
   const fetchFeatures = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/settings/features`);
       setFeatures(response.data || getDefaultFeatures());
     } catch (error) {

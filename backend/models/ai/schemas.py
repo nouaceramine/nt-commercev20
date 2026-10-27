@@ -2,9 +2,8 @@
 AI Models for NT Commerce AI-Powered Accounting Platform
 All data models for AI agents, insights, and chat
 """
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional, Literal
-from datetime import datetime
 from enum import Enum
 
 

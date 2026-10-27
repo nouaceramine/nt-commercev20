@@ -16,12 +16,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from config.database import db, client, get_tenant_db
+from config.database import db, get_tenant_db
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["SaaS Data Browser"])
 
-_ESC = lambda s: re.escape((s or "").strip())
+def _ESC(s):
+    return re.escape((s or "").strip())
 
 
 async def _tenant_or_404(tenant_id: str) -> dict:

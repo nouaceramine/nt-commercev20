@@ -14,7 +14,6 @@ the creation flows register it in Redis so every worker sees it instantly.
 """
 import os
 import time
-from typing import Optional
 
 # Hand-picked unique 2-letter codes per business activity (first-two-letters
 # would collide: retail/restaurant=re, car_rental/car_wash/car_importer=ca).

@@ -61,7 +61,7 @@ export default function DataImportExportPage() {
       ]);
       setCollections(collectionsRes.data);
       setImportHistory(historyRes.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في التحميل' : 'Loading error');
     } finally {
       setLoading(false);
@@ -82,7 +82,7 @@ export default function DataImportExportPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
       toast.success(language === 'ar' ? 'تم التصدير بنجاح' : 'Export successful');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل التصدير' : 'Export failed');
     } finally {
       setExporting(null);
@@ -100,7 +100,7 @@ export default function DataImportExportPage() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ' : 'Error');
     }
   };

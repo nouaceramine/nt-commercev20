@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
+import { Button as _Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import {
@@ -23,7 +23,7 @@ import {
 } from '../components/ui/select';
 import { 
   History, Search, TrendingUp, TrendingDown, Minus, ArrowUpDown,
-  Package, Calendar, User, FileText
+  Package, Calendar, User, FileText as _FileText
 } from 'lucide-react';
 
 export default function PriceHistoryPage() {

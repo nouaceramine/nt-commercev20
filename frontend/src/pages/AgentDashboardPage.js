@@ -12,7 +12,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Textarea } from '../components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -38,9 +38,9 @@ import {
 } from '../components/ui/select';
 import { toast } from 'sonner';
 import { 
-  Truck, Users, DollarSign, TrendingUp, Plus, LogOut, 
+  Truck, Users, DollarSign as _DollarSign, TrendingUp, Plus, LogOut,
   Wallet, CreditCard, Clock, CheckCircle, AlertTriangle,
-  Building, Phone, Mail, Calendar, FileText, Eye, EyeOff,
+  Building as _Building, Phone, Mail, Calendar, FileText, Eye, EyeOff as _EyeOff,
   Bell, BarChart3, Target, Star, RefreshCw, Search,
   ArrowUpRight, ArrowDownRight, Activity, PiggyBank, Percent,
   Banknote, Send, XCircle, TimerIcon, ChevronDown, ChevronRight
@@ -85,7 +85,7 @@ export default function AgentDashboardPage() {
   const [plans, setPlans] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [_activeTab, setActiveTab] = useState('overview');
   const [searchQuery, setSearchQuery] = useState('');
   
   const [addTenantDialogOpen, setAddTenantDialogOpen] = useState(false);
@@ -302,7 +302,7 @@ export default function AgentDashboardPage() {
     try {
       const response = await apiClient.get(`/saas/agent/my-tenants`, { headers: getHeaders() });
       setTenants(response.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في تحميل المشتركين');
     }
   };
@@ -313,7 +313,7 @@ export default function AgentDashboardPage() {
       const response = await apiClient.get(`/saas/agents/${agentId}/transactions`, { headers: getHeaders() });
       setTransactions(response.data);
       setViewTransactionsDialogOpen(true);
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في تحميل المعاملات');
     }
   };

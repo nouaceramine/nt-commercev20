@@ -96,7 +96,7 @@ const SystemUpdatesPage = () => {
       });
       fetchAnnouncements();
       fetchStats();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل في إرسال الإعلان' : 'Échec de l\'envoi');
     } finally {
       setLoading(false);
@@ -120,7 +120,7 @@ const SystemUpdatesPage = () => {
         loyalty_settings: false,
         pos_settings: false
       });
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل في نشر الإعدادات' : 'Échec de la publication');
     } finally {
       setLoading(false);
@@ -132,7 +132,7 @@ const SystemUpdatesPage = () => {
       await apiClient.delete(`/system-updates/announcements/${id}`, { headers });
       toast.success(language === 'ar' ? 'تم حذف الإعلان' : 'Annonce supprimée');
       fetchAnnouncements();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل في الحذف' : 'Échec de la suppression');
     }
   };

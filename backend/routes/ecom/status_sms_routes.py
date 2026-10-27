@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from config.database import db, main_db
 from utils.auth import require_tenant, get_tenant_admin, get_super_admin
 from routes.ecom.constants import require_ecom_feature
-from services.ecom.status_sms_service import get_settings, DEFAULT_TEMPLATES, render_template
+from services.ecom.status_sms_service import get_settings, DEFAULT_TEMPLATES
 from services.ecom.sms_gateway import get_sms_provider
 from services.application.ecom_order_service import normalize_phone
 

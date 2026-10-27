@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import _React, { useEffect, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Camera, Loader2 } from 'lucide-react';
@@ -47,7 +47,7 @@ const CameraBarcodeScanner = ({ language, onDetected, testId = 'camera-scan-btn'
           },
           () => { /* per-frame miss — normal while aiming */ }
         );
-      } catch (e) {
+      } catch (_e) {
         if (!cancelled) {
           toast.error(isAr
             ? 'تعذر فتح الكاميرا — امنح إذن الكاميرا للمتصفح ثم أعد المحاولة'

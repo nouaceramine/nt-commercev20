@@ -73,9 +73,9 @@ describe('usePOSSession', () => {
       
       act(() => { result.current.setOpeningCash(5000); });
       
-      let success;
+      let _success;
       await act(async () => {
-        success = await result.current.openSession();
+        _success = await result.current.openSession();
       });
 
       expect(mockApi.post).toHaveBeenCalledWith('/daily-sessions', expect.objectContaining({

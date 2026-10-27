@@ -40,7 +40,7 @@ export function usePermissions() {
       setUsers(usersRes.data);
       setRoles(rolesRes.data.roles);
       setDefaultPermissions(rolesRes.data.default_permissions);
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
     finally { setLoading(false); }
   }, []);
 
@@ -50,7 +50,7 @@ export function usePermissions() {
       setSelectedUser(users.find(u => u.id === userId));
       setUserPermissions(res.data.permissions);
       setShowPermissionsDialog(true);
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
   }, [users]);
 
   const savePermissions = useCallback(async () => {

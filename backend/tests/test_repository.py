@@ -1,5 +1,4 @@
 import pytest
-import pytest_asyncio
 from repositories.base_repository import BaseRepository
 
 @pytest.mark.asyncio

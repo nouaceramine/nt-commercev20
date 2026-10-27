@@ -49,7 +49,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
   // p458: تقرير الإضافات CSV (BOM عربي لـ Excel — 30 يومًا)
@@ -64,7 +64,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p466: توزيع تكرار الزبائن CSV (BOM عربي لـ Excel — 90 يومًا)
@@ -79,7 +79,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p464: الزبائن الخامدون CSV (BOM عربي لـ Excel — خمول 14+ يومًا)
@@ -94,7 +94,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p454: أفضل زبائن الصالة CSV (BOM عربي لـ Excel — 90 يومًا)
@@ -109,7 +109,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p452: ربحية الأصناف CSV (BOM عربي لـ Excel — 30 يومًا)
@@ -124,7 +124,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p436: مبيعات الفئات CSV (BOM عربي لـ Excel — 30 يومًا)
@@ -139,7 +139,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p434: تصدير الأقل مبيعًا CSV (يشمل الصفري — BOM عربي لـ Excel)
@@ -154,7 +154,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p422: تصدير الأكثر مبيعًا CSV (BOM عربي لـ Excel — 30 يومًا)
@@ -169,7 +169,7 @@ export default function RestaurantPOSPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   const fetchAll = useCallback(async () => {
@@ -186,7 +186,7 @@ export default function RestaurantPOSPage() {
       setProducts(((p.data && p.data.items) || p.data || []).filter(x => Number(x.retail_price) > 0 && x.is_active !== false));
       setTopIds((tp.data?.top || []).map(x => x.product_id));
       setPayMode(pm.data?.payment_mode || 'postpaid');
-    } catch (e) { /* صامت */ }
+    } catch (_e) { /* صامت */ }
   }, []);
 
   useEffect(() => {

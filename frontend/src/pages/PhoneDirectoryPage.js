@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
-import apiClient from '../lib/apiClient';
+import { useState, useEffect as _useEffect } from 'react';
+import _apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -18,7 +18,7 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
+  DialogDescription as _DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -30,7 +30,7 @@ import {
   Plus,
   Search,
   User,
-  Phone,
+  Phone as _Phone,
   Edit,
   Trash2,
   Smartphone

@@ -67,7 +67,7 @@ const MotherboardPage = () => {
       if (results[3].status === 'fulfilled') setRobotsData(results[3].value.data);
       if (results[4].status === 'fulfilled') setTenantHealth(results[4].value.data);
       if (results[5].status === 'fulfilled') setFeatures(results[5].value.data.features || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error(isAr ? 'تعذّر جلب حالة المكوّنات' : 'Échec du chargement');
     } finally {
       setLoading(false);
@@ -104,7 +104,7 @@ const MotherboardPage = () => {
     try {
       const res = await apiClient.get(`/diagnostics/logs/${mod.key}?lines=200`);
       setLogLines(res.data.lines || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error(isAr ? 'تعذّر جلب اللوغ' : 'Échec du chargement du journal');
     } finally {
       setLogLoading(false);
@@ -116,7 +116,7 @@ const MotherboardPage = () => {
       await apiClient.post(`/diagnostics/modules/${mod.key}/clear-error`);
       toast.success(isAr ? 'تم مسح الخطأ وإعادة تعيين الدائرة' : 'Erreur effacée');
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error(isAr ? 'تعذّر مسح الخطأ' : 'Échec');
     }
   };
@@ -126,7 +126,7 @@ const MotherboardPage = () => {
       await apiClient.post(`/diagnostics/modules/${mod.key}/reset-circuit`);
       toast.success('تم إعادة تعيين قاطع الدائرة');
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error('فشل إعادة التعيين');
     }
   };

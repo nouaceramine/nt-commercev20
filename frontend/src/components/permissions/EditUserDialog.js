@@ -16,7 +16,7 @@ import {
 import { AVAILABLE_ROLES } from '../../lib/permissionConstants';
 
 export default function EditUserDialog({
-  open, onOpenChange, user, language, t,
+  open, onOpenChange, user, language, t: _t,
   onSave, saving,
 }) {
   const ar = language === 'ar';

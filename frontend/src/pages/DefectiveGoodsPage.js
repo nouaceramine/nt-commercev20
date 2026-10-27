@@ -5,24 +5,24 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger as _DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import apiClient from '../lib/apiClient';
-import { AlertTriangle, Plus, Search, Eye, RotateCcw, Trash2, ClipboardCheck, PackageX } from 'lucide-react';
+import { AlertTriangle, Plus, Search, Eye as _Eye, RotateCcw, Trash2 as _Trash2, ClipboardCheck, PackageX } from 'lucide-react';
 
 export default function DefectiveGoodsPage() {
   const { language } = useLanguage();
   const isAr = language === 'ar';
   const [items, setItems] = useState([]);
   const [stats, setStats] = useState({});
-  const [categories, setCategories] = useState([]);
+  const [_categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
-  const [showDetail, setShowDetail] = useState(null);
+  const [_showDetail, _setShowDetail] = useState(null);
   const [form, setForm] = useState({ product_name: '', defect_type: 'manufacturing', defect_severity: 'medium', description: '', quantity: 1, unit_cost: 0 });
 
   const token = localStorage.getItem('token');
@@ -60,7 +60,7 @@ export default function DefectiveGoodsPage() {
       await apiClient.post(`/defective/inspections`, { defective_goods_id: itemId, confirmed_defective: confirmed, recommended_action: confirmed ? 'return_to_supplier' : 'return_to_stock' }, { headers });
       toast.success(isAr ? 'تم الفحص' : 'Inspection terminée');
       fetchData();
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const severityColor = (s) => ({ high: 'bg-red-500/10 text-red-400 border-red-500/30', medium: 'bg-amber-500/10 text-amber-400 border-amber-500/30', low: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' }[s] || 'bg-gray-500/10 text-muted-foreground');

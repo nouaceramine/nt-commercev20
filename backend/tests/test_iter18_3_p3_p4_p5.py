@@ -111,7 +111,7 @@ async def test_whatsapp_webhook_verify_and_create_lead():
 
         leads = (await c.get(f"{BASE_URL}/ecom/leads?channel=whatsapp", headers=th)).json()
         assert leads["total"] >= 1
-        wa_lead = [l for l in leads["items"] if l["phone"] == "213555111222"][-1]
+        wa_lead = [lead for lead in leads["items"] if lead["phone"] == "213555111222"][-1]
         assert "هل المنتج متوفر" in wa_lead["message"]
 
         # 4) Idempotent — same external_id (msg id) won't duplicate
@@ -150,7 +150,7 @@ async def test_telegram_and_viber_webhooks():
         r = await c.post(f"{BASE_URL}/ecom/webhooks/telegram/{tenant_id}/{tg_id}", **_signed_args(tg_payload, "tg_webhook_secret", "telegram"))
         assert r.status_code == 200 and r.json()["lead_created"] is True
         leads = (await c.get(f"{BASE_URL}/ecom/leads?channel=telegram", headers=th)).json()
-        assert any("يوسف كريم" in l.get("name", "") for l in leads["items"])
+        assert any("يوسف كريم" in lead.get("name", "") for lead in leads["items"])
 
         # Viber
         vb_integ = (await c.post(

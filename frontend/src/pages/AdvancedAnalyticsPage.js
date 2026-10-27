@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -12,11 +12,11 @@ import {
   TrendingUp,
   Users,
   Package,
-  Calendar,
+  Calendar as _Calendar,
   RefreshCw,
   ArrowUpRight,
   ArrowDownRight,
-  DollarSign,
+  DollarSign as _DollarSign,
   ShoppingCart,
   Target,
   Award

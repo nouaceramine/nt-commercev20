@@ -10,7 +10,6 @@ Configuration (backend/.env):
   AI_INTEGRATIONS_OPENAI_MODEL     — optional, default gpt-4o-mini
 """
 import logging
-import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)

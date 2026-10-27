@@ -2,7 +2,7 @@
 Stats, Reports & Analytics Routes - Extracted from server.py
 Dashboard stats, sales analytics, profit reports, AI predictions
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter

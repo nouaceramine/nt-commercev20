@@ -24,9 +24,9 @@ export default function KioskPage() {
   const [phone, setPhone] = useState('');
   const [showCart, setShowCart] = useState(false);
   // p368: مفتاح اللغة عربي/إنجليزي — يُحفظ محلياً ويشمل أسماء الأطباق (name_en) والنصوص
-  const [lang, setLang] = useState(() => { try { return localStorage.getItem('pub_lang') || 'ar'; } catch (e) { return 'ar'; } });
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem('pub_lang') || 'ar'; } catch (_e) { return 'ar'; } });
   const isAr = lang !== 'en';
-  const setL = (l) => { setLang(l); try { localStorage.setItem('pub_lang', l); } catch (e) {} };
+  const setL = (l) => { setLang(l); try { localStorage.setItem('pub_lang', l); } catch (_e) {} };
   const dname = (x) => (!isAr && x && x.name_en) ? x.name_en : (x ? x.name : '');
   const STR = isAr ? {
     askStaff: 'اسأل الموظف عن طريقة الطلب', gotIt: 'استلمنا طلبك!',

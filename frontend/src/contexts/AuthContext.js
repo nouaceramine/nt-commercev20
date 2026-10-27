@@ -23,7 +23,7 @@ export const AuthProvider = ({ children }) => {
           const b64 = superTokenRaw.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
           const pl = JSON.parse(atob(b64));
           expired = !!(pl.exp && pl.exp * 1000 < Date.now());
-        } catch (e) { expired = false; }
+        } catch (_e) { expired = false; }
         if (!hasFlag || expired) {
           localStorage.removeItem('super_admin_token');
           localStorage.removeItem('super_admin_user');

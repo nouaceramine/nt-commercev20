@@ -22,7 +22,7 @@ export default function BrandingTab() {
         const res = await apiClient.get('/settings/tenant-branding');
         setName(res.data?.name || '');
         setLogoUrl(res.data?.logo_url || '');
-      } catch (e) {
+      } catch (_e) {
         // ignore
       } finally {
         setLoading(false);
@@ -53,7 +53,7 @@ export default function BrandingTab() {
       await apiClient.post('/settings/tenant-branding', { name, logo_url: logoUrl });
       window.dispatchEvent(new Event('branding-updated'));
       toast.success(ar ? 'تم حفظ العلامة التجارية' : 'Image de marque enregistrée');
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل الحفظ' : 'Échec de l\'enregistrement');
     } finally {
       setSaving(false);

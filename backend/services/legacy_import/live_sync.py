@@ -50,7 +50,7 @@ def apply_items(db, rows):
     fam_by_legacy = {str(d.get("legacy_id")): (d["id"], d.get("name_ar", ""))
                      for d in db.product_families.find({"import_source": SRC},
                                                        {"id": 1, "legacy_id": 1, "name_ar": 1})}
-    uom = {}
+    _uom = {}
     for it in rows:
         lid = s(it.get("ID"))
         if not lid:
@@ -76,7 +76,7 @@ def apply_items(db, rows):
             "is_blocked": b(it.get("Inactive")),
             "updated_at": _now(),
         }
-        res = db.products.update_one(
+        _res = db.products.update_one(
             {"id": pid},
             {"$set": doc,
              "$setOnInsert": {

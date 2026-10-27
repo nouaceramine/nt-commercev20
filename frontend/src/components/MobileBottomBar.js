@@ -1,4 +1,4 @@
-import React from 'react';
+import _React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Home, ShoppingCart, Receipt, Package, Menu } from 'lucide-react';
 

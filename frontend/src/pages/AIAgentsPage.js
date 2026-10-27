@@ -6,8 +6,8 @@ import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Progress } from '../components/ui/progress';
-import { Switch } from '../components/ui/switch';
+import { Progress as _Progress } from '../components/ui/progress';
+import { Switch as _Switch } from '../components/ui/switch';
 import {
   Bot,
   Brain,
@@ -20,18 +20,18 @@ import {
   LineChart,
   Clock,
   Play,
-  Pause,
+  Pause as _Pause,
   RefreshCw,
   CheckCircle,
   XCircle,
   Loader2,
   Settings,
-  ChevronRight
+  ChevronRight as _ChevronRight
 } from 'lucide-react';
 
 export default function AIAgentsPage() {
   const { language } = useLanguage();
-  const { user } = useAuth();
+  const { user: _user } = useAuth();
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [runningAgent, setRunningAgent] = useState(null);

@@ -3,12 +3,11 @@ Notifications Routes - Extracted from legacy_inline_routes.py
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Literal
+from pydantic import BaseModel
+from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter
 import uuid
-import os
 import io
 import logging
 from openpyxl import Workbook, load_workbook

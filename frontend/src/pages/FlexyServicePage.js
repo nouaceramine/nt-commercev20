@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import apiClient from '../lib/apiClient';
+import _apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -8,11 +8,11 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select as _Select,
+  SelectContent as _SelectContent,
+  SelectItem as _SelectItem,
+  SelectTrigger as _SelectTrigger,
+  SelectValue as _SelectValue,
 } from '../components/ui/select';
 import { toast } from 'sonner';
 import {
@@ -92,7 +92,7 @@ export default function FlexyServicePage() {
       setPhoneNumber('');
       setAmount('');
       setCustomAmount('');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل في عملية الشحن' : 'Échec de la recharge');
     } finally {
       setLoading(false);

@@ -3,8 +3,8 @@ Bank Integration Routes
 Bank accounts, transactions, reconciliation
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import logging

@@ -11,7 +11,6 @@ Validates:
      - CRUD leads
      - Create mock shipping label → order moves to 'shipped'
 """
-import os
 import asyncio
 import pytest
 import httpx
@@ -41,8 +40,8 @@ async def test_ecom_hub_full_flow():
         assert tenants, "Need at least one tenant for the test"
         tenant = tenants[0]
         tenant_id = tenant["id"]
-        tenant_email = tenant["email"]
-        tenant_pass = "TenantPass@2024"  # may not match — we'll impersonate instead
+        _tenant_email = tenant["email"]
+        _tenant_pass = "TenantPass@2024"  # may not match — we'll impersonate instead
 
         # ── Verify the feature flag exists in the resolved features ───────
         # First clear any prior override from this test so we observe the default.

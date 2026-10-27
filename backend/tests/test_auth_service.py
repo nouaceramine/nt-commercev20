@@ -1,5 +1,4 @@
 import pytest
-from services.auth_service import AuthService
 
 @pytest.mark.asyncio
 async def test_auth_service_hash_verify(auth_service):

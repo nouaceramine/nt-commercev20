@@ -6,7 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import { Switch } from '../components/ui/switch';
@@ -28,7 +28,7 @@ import {
 } from '../components/ui/table';
 import {
   Tabs,
-  TabsContent,
+  TabsContent as _TabsContent,
   TabsList,
   TabsTrigger,
 } from '../components/ui/tabs';
@@ -44,8 +44,8 @@ import {
   DollarSign,
   Percent,
   Calculator,
-  ArrowUp,
-  ArrowDown,
+  ArrowUp as _ArrowUp,
+  ArrowDown as _ArrowDown,
   RefreshCw,
   Check,
   Eye,
@@ -55,12 +55,12 @@ import {
   TrendingDown,
   Settings2,
   Save,
-  History,
-  AlertTriangle,
+  History as _History,
+  AlertTriangle as _AlertTriangle,
   Sparkles,
   Target,
   Layers,
-  Filter
+  Filter as _Filter
 } from 'lucide-react';
 
 export default function BulkPriceUpdatePage() {
@@ -125,7 +125,7 @@ export default function BulkPriceUpdatePage() {
     if (value === 0 && !selectMode) return;
     
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const params = new URLSearchParams({
         update_type: updateType,
         price_field: priceField,
@@ -211,7 +211,7 @@ export default function BulkPriceUpdatePage() {
   // Calculate margin-based price
   const calculateMarginPrice = () => {
     // For retail price = purchase price * (1 + margin/100)
-    const marginMultiplier = (100 + targetMargin) / 100;
+    const _marginMultiplier = (100 + targetMargin) / 100;
     setUpdateType('margin');
     setValue(targetMargin);
     setShowMarginCalculator(false);

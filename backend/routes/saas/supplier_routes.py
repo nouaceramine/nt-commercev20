@@ -31,7 +31,6 @@ Order processing is **atomic & all-or-nothing**:
   6. Insert supplier_orders doc.
 """
 import uuid
-import io
 import logging
 import re
 from datetime import datetime, timezone

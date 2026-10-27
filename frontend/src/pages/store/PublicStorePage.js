@@ -6,9 +6,9 @@ import { captureUtm, getUtm } from '../../lib/utm';
 import { toast, Toaster } from 'sonner';
 import {
   ShoppingCart, Search, X, Plus, Minus, Trash2,
-  Phone, MapPin, Clock, Package, CheckCircle,
-  ChevronLeft, Star, Truck, Shield, RefreshCw,
-  Heart, Share2, Menu, ArrowRight
+  Phone, MapPin, Clock, Package as _Package, CheckCircle,
+  ChevronLeft as _ChevronLeft, Star as _Star, Truck, Shield, RefreshCw,
+  Heart, Share2, Menu as _Menu, ArrowRight as _ArrowRight
 } from 'lucide-react';
 
 // ─── CSS Styles (NOUACER-COD Theme) ───
@@ -1097,11 +1097,11 @@ export default function PublicStorePage({ overrideSlug } = {}) {
     fetchStore();
     const saved = localStorage.getItem(`cart_${slug}`);
     if (saved) {
-      try { setCart(JSON.parse(saved)); } catch (e) {}
+      try { setCart(JSON.parse(saved)); } catch (_e) {}
     }
   }, [slug, fetchStore]);
 
-  const addToCart = (product) => {
+  const _addToCart = (product) => {
     const existing = cart.find(item => item.product_id === product.id);
     if (existing) {
       setCart(cart.map(item =>

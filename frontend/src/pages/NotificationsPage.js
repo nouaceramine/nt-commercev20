@@ -20,7 +20,7 @@ import {
   CheckCheck,
   AlertTriangle,
   Package,
-  Users,
+  Users as _Users,
   CreditCard,
   Wrench,
   Calendar,
@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 
 export default function NotificationsPage() {
-  const { language, isRTL } = useLanguage();
+  const { language, isRTL: _isRTL } = useLanguage();
   const [notifications, setNotifications] = useState([]);
   const [settings, setSettings] = useState({
     low_stock_enabled: true,
@@ -141,10 +141,10 @@ export default function NotificationsPage() {
   const saveSettings = async () => {
     setSavingSettings(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/notifications/settings`, settings);
       toast.success(texts.saved);
-    } catch (error) {
+    } catch (_error) {
       toast.error('Error saving settings');
     } finally {
       setSavingSettings(false);
@@ -153,7 +153,7 @@ export default function NotificationsPage() {
 
   const markAsRead = async (notificationId) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/notifications/${notificationId}/read`, {});
       setNotifications(prev => 
         prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
@@ -166,24 +166,24 @@ export default function NotificationsPage() {
 
   const markAllAsRead = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/notifications/mark-all-read`, {});
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       setUnreadCount(0);
       toast.success(language === 'ar' ? 'تم تحديد الكل كمقروء' : 'Tout marqué comme lu');
-    } catch (error) {
+    } catch (_error) {
       toast.error('Error');
     }
   };
 
   const deleteNotification = async (notificationId) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.delete(`/notifications/${notificationId}`);
       setNotifications(prev => prev.filter(n => n.id !== notificationId));
       setTotalCount(prev => prev - 1);
       toast.success(language === 'ar' ? 'تم الحذف' : 'Supprimé');
-    } catch (error) {
+    } catch (_error) {
       toast.error('Error');
     }
   };
@@ -197,7 +197,7 @@ export default function NotificationsPage() {
       setUnreadCount(0);
       setTotalCount(0);
       toast.success(language === 'ar' ? 'تم مسح كل الإشعارات' : 'Toutes les notifications effacées');
-    } catch (error) {
+    } catch (_error) {
       toast.error('Error');
     }
   };

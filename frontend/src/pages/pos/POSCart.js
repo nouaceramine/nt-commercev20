@@ -16,8 +16,8 @@ import {
 import {
   ShoppingCart, Plus, Minus, User, UserPlus, Warehouse,
   X, Check, Trash2, Banknote, CreditCard, AlertCircle, CalendarDays,
-  Wallet, Percent, MessageSquare, PauseCircle, PlayCircle, Clock,
-  ArrowDownUp, ChevronDown, ChevronUp, Shuffle,
+  Wallet, Percent as _Percent, MessageSquare, PauseCircle, PlayCircle, Clock,
+  ArrowDownUp, ChevronDown as _ChevronDown, ChevronUp as _ChevronUp, Shuffle,
 } from 'lucide-react';
 
 export default function POSCart({
@@ -34,7 +34,7 @@ export default function POSCart({
   loading, hasOpenSession, completeSale,
   language, formatCurrency, t, isRTL,
   paymentType, setPaymentType,
-  paymentMethod, setPaymentMethod,
+  paymentMethod: _paymentMethod, setPaymentMethod: _setPaymentMethod,
   paidAmount, setPaidAmount,
   onInstallmentClick,
   installmentPlan,

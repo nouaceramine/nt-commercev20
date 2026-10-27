@@ -4,7 +4,6 @@ AI Service — Google Gemini API
 """
 import os
 from google import genai
-from typing import Optional
 
 # Configure with the tenant owner's API key; no provider call is made at import.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

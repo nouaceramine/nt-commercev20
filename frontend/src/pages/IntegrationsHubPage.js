@@ -50,7 +50,7 @@ export default function IntegrationsHubPage() {
     try {
       const res = await apiClient.get('/integrations-hub/catalog');
       setItems(res.data?.items || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل تحميل التكاملات' : 'Échec du chargement');
     } finally {
       setLoading(false);
@@ -101,7 +101,7 @@ export default function IntegrationsHubPage() {
       await apiClient.post(`/integrations-hub/${id}/disconnect`);
       toast.success(ar ? 'أُوقف التكامل' : 'Désactivé');
       await load();
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل الإيقاف' : 'Échec');
     }
   };

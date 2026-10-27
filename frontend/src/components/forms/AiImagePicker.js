@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import _React, { useState } from 'react';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { ImagePlus, Loader2, ExternalLink, Sparkles } from 'lucide-react';

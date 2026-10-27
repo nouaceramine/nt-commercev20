@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import List, Optional, Literal
+from pydantic import BaseModel, ConfigDict, field_validator
+from typing import Optional
 # ============ USER MODELS ============
 
 class UserCreate(BaseModel):

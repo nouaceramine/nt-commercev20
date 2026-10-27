@@ -17,7 +17,7 @@ const STATUS_AR = { billed: "مُفوترة", failed: "فشل الخصم", pendi
 
 export function AiBillingCard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [config, setConfig] = useState(null);
+  const [_config, setConfig] = useState(null);
   const [cfgForm, setCfgForm] = useState({ margin_pct: "", usd_dzd_rate: "" });
   const [summary, setSummary] = useState(null);
   const [invoices, setInvoices] = useState([]);
@@ -47,7 +47,7 @@ export function AiBillingCard() {
       setCfgForm({ margin_pct: String(c.data.margin_pct), usd_dzd_rate: String(c.data.usd_dzd_rate) });
       setSummary(s.data);
       setInvoices(inv.data.invoices || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل تحميل بيانات فوترة الذكاء الاصطناعي");
     } finally {
       setLoading(false);
@@ -83,7 +83,7 @@ export function AiBillingCard() {
       const r = await apiClient.put("/saas/ai-settings", { clear_key: true });
       setAiSet(r.data);
       toast.success("تم حذف مفتاح الواجهة — المنصة تستخدم مفتاح السيرفر الآن");
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل الحذف");
     }
   };

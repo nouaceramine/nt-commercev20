@@ -42,7 +42,7 @@ export const SystemAlertsSection = () => {
 
   const fetchErrors = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/saas/system-errors`);
       setErrors(response.data.errors || []);
       setStats(response.data.stats || {
@@ -74,7 +74,7 @@ export const SystemAlertsSection = () => {
 
   const handleAutoFix = async (errorId, fixAction) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/saas/system-errors/${errorId}/fix`, { action: fixAction });
       toast.success('تم تنفيذ الإصلاح التلقائي');
       setErrors(prev => prev.map(e => e.id === errorId ? { ...e, status: 'resolved' } : e));
@@ -88,7 +88,7 @@ export const SystemAlertsSection = () => {
 
   const handleManualFix = async (errorId) => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/saas/system-errors/${errorId}/resolve`, {});
       toast.success('تم وضع علامة محلول');
       setErrors(prev => prev.map(e => e.id === errorId ? { ...e, status: 'resolved' } : e));
@@ -102,7 +102,7 @@ export const SystemAlertsSection = () => {
 
   const handleClearResolved = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.delete(`/saas/system-errors/resolved`);
       setErrors(prev => prev.filter(e => e.status !== 'resolved'));
       toast.success(`تم مسح ${response.data.deleted_count || 0} خطأ محلول`);
@@ -327,10 +327,10 @@ export const SystemAlertsSection = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Button variant="outline" className="h-auto py-4 flex-col gap-2" onClick={async () => {
               try {
-                const token = localStorage.getItem('token');
+                const _token = localStorage.getItem('token');
                 const res = await apiClient.post(`/saas/system-errors/maintenance/clear_cache`, {});
                 toast.success(res.data.message || 'تم مسح الكاش');
-              } catch (err) {
+              } catch (_err) {
                 toast.error('فشل في مسح الكاش');
               }
             }}>
@@ -339,10 +339,10 @@ export const SystemAlertsSection = () => {
             </Button>
             <Button variant="outline" className="h-auto py-4 flex-col gap-2" onClick={async () => {
               try {
-                const token = localStorage.getItem('token');
+                const _token = localStorage.getItem('token');
                 const res = await apiClient.post(`/saas/system-errors/maintenance/reconnect_db`, {});
                 toast.success(res.data.message || 'تم إعادة الاتصال');
-              } catch (err) {
+              } catch (_err) {
                 toast.error('فشل في إعادة الاتصال');
               }
             }}>
@@ -351,10 +351,10 @@ export const SystemAlertsSection = () => {
             </Button>
             <Button variant="outline" className="h-auto py-4 flex-col gap-2" onClick={async () => {
               try {
-                const token = localStorage.getItem('token');
+                const _token = localStorage.getItem('token');
                 const res = await apiClient.post(`/saas/system-errors/maintenance/restart_services`, {});
                 toast.success(res.data.message || 'تم إعادة تشغيل الخدمات');
-              } catch (err) {
+              } catch (_err) {
                 toast.error('فشل في إعادة التشغيل');
               }
             }}>
@@ -366,7 +366,7 @@ export const SystemAlertsSection = () => {
                 const res = await apiClient.post(`/saas/system-errors/maintenance/system_check`, {});
                 const details = res.data.details || {};
                 toast.success(`${res.data.message || 'تم فحص النظام'}\nCPU: ${details.cpu_usage || 'N/A'} | RAM: ${details.memory_usage || 'N/A'}`);
-              } catch (err) {
+              } catch (_err) {
                 toast.error('فشل في فحص النظام');
               }
             }}>

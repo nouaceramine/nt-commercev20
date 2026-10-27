@@ -3,9 +3,9 @@ Advanced Tax Reports Routes
 VAT calculations, tax period reports, tax summaries
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Optional, List
-from datetime import datetime, timezone, timedelta
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime, timezone
 import uuid
 import logging
 

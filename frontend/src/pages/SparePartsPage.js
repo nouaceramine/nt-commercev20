@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -18,7 +18,7 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
+  DialogDescription as _DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -39,10 +39,10 @@ import {
   Edit,
   Trash2,
   AlertTriangle,
-  Smartphone,
-  DollarSign,
-  Boxes,
-  Filter
+  Smartphone as _Smartphone,
+  DollarSign as _DollarSign,
+  Boxes as _Boxes,
+  Filter as _Filter
 } from 'lucide-react';
 
 // Spare part categories
@@ -67,7 +67,7 @@ const PHONE_BRANDS = [
 ];
 
 // Sample spare parts data
-const SAMPLE_PARTS = [
+const _SAMPLE_PARTS = [
   {
     id: '1',
     name: 'شاشة Samsung Galaxy S23',
@@ -145,7 +145,7 @@ export default function SparePartsPage() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingPart, setEditingPart] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ total: 0, lowStock: 0, totalValue: 0 });
+  const [_stats, setStats] = useState({ total: 0, lowStock: 0, totalValue: 0 });
   const [spareFamilies, setSpareFamilies] = useState([]);  // p286: العائلات المعلَّمة كقطع غيار
 
   const [formData, setFormData] = useState({

@@ -4,7 +4,7 @@ import logging
 
 from config.database import main_db, get_tenant_db
 from .helpers import get_super_admin
-from services.crypto_fields import is_crypto_available, key_fingerprint, encrypt_field, decrypt_field  # p272: extended stores below
+from services.crypto_fields import is_crypto_available, key_fingerprint, encrypt_field  # p272: extended stores below
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,6 @@ async def encrypt_secrets_now(admin: dict = Depends(get_super_admin)):
 
     # ── p272: migrate the extended secret stores ──
     from services.crypto_fields import (
-        SENSITIVE_CRED_KEYS as _SCK,
         encrypt_credentials as _enc_creds,
     )
     migrated.update({

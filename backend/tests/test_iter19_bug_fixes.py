@@ -7,7 +7,6 @@ Covers 4 fixes:
   (4) POST /api/purchases syncs purchase_price AND selling_price on products when
       items[].selling_price > 0 (price-sync on purchase).
 """
-import os
 import uuid
 import pytest
 import httpx

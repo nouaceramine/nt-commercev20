@@ -1,9 +1,9 @@
 """SaaS Monitoring Routes - Stats, finance reports, payments"""
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
-from config.database import db, client, main_db, get_tenant_db
+from config.database import db, main_db, get_tenant_db
 from utils.cache import cached_json
 from .schemas import SubscriptionPaymentResponse
 from .helpers import get_super_admin

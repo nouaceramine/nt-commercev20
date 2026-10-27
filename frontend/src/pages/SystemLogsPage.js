@@ -53,7 +53,7 @@ export default function SystemLogsPage() {
       ]);
       setLogs(logsRes.data?.items || []);
       setStats(statsRes.data || null);
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل تحميل السجل");
     } finally {
       setLoading(false);

@@ -2,7 +2,6 @@
 Warehouse, Stock Transfer, Inventory Session Routes - Extracted from server.py
 """
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
 

@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import uuid
 
 from services.wallet_service import enrich_transfers
-from utils.permissions import create_cashier_block
 
 
 def create_wallet_transactions_routes(main_db, get_current_user, get_super_admin, block_cashier) -> dict:
@@ -117,8 +116,8 @@ def create_wallet_transactions_routes(main_db, get_current_user, get_super_admin
         if from_wallet.get("balance", 0) < (amount + fee):
             raise HTTPException(status_code=400, detail="الرصيد غير كافي")
 
-        from_old = from_wallet["balance"]
-        to_old = to_wallet["balance"]
+        _from_old = from_wallet["balance"]
+        _to_old = to_wallet["balance"]
         net_amount = amount - fee
 
         await main_db.wallets.update_one({"entity_id": from_id}, {"$inc": {"balance": -(amount + fee)}})

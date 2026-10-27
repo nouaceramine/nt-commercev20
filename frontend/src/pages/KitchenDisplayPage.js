@@ -58,8 +58,8 @@ export default function KitchenDisplayPage() {
       const o = (res.data || []).find((x) => x.id === orderId);
       if (!o) return;
       setTicket(o);
-      setTimeout(() => { try { window.print(); } catch (e) {} }, 400);
-    } catch (e) { /* الطبع التلقائي صامت */ }
+      setTimeout(() => { try { window.print(); } catch (_e) {} }, 400);
+    } catch (_e) { /* الطبع التلقائي صامت */ }
   }, []);
 
   // p381: نغمة تنبيه المطبخ — WebAudio ثنائية النبرة، بلا ملفات صوتية
@@ -76,8 +76,8 @@ export default function KitchenDisplayPage() {
         gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.16);
         osc.start(t0); osc.stop(t0 + 0.16);
       });
-      setTimeout(() => { try { ctx.close(); } catch (e) {} }, 800);
-    } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
+      setTimeout(() => { try { ctx.close(); } catch (_e) {} }, 800);
+    } catch (_e) { /* الصوت غير متاح في هذا المتصفح */ }
   }, []);
 
   // p386: نغمة تصعيد المتأخرات — ثلاثية تصاعدية تميّزها عن نغمة الطلب الجديد
@@ -94,8 +94,8 @@ export default function KitchenDisplayPage() {
         gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
         osc.start(t0); osc.stop(t0 + 0.15);
       });
-      setTimeout(() => { try { ctx.close(); } catch (e) {} }, 900);
-    } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
+      setTimeout(() => { try { ctx.close(); } catch (_e) {} }, 900);
+    } catch (_e) { /* الصوت غير متاح في هذا المتصفح */ }
   }, []);
   const lateAlerted = useRef(new Set());  // طلبات نُبّه عنها — لا تكرار
 
@@ -110,7 +110,7 @@ export default function KitchenDisplayPage() {
       const res = await apiClient.get("/restaurant/kitchen-orders");
       setOrders(res.data || []);
       apiClient.get("/restaurant/kitchen-stats?days=1").then(r => setStats(r.data)).catch(() => {});  // p363
-    } catch (e) { /* عرض خفيف: لا إزعاج عند فشل جلب دوري */ }
+    } catch (_e) { /* عرض خفيف: لا إزعاج عند فشل جلب دوري */ }
     finally { setLoading(false); }
   }, []);
 
@@ -121,7 +121,7 @@ export default function KitchenDisplayPage() {
       const res = await apiClient.get(`/restaurant/kitchen-orders?all=1&search=${encodeURIComponent(kdsQuery.trim())}`);
       setOrders(res.data || []);
       setSearching(true);
-    } catch (e) { toast.error("تعذر البحث"); }
+    } catch (_e) { toast.error("تعذر البحث"); }
   };
   const clearKdsSearch = () => { setKdsQuery(""); setSearching(false); fetchOrders(); };
   useEffect(() => {
@@ -179,7 +179,7 @@ export default function KitchenDisplayPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل PDF"); }
+    } catch (_e) { toast.error("تعذر تحميل PDF"); }
   };
   // p405: تصدير أداء المطبخ CSV (BOM عربي لـ Excel — نفس فترة زر PDF: اليوم)
   const downloadStatsCsv = async () => {
@@ -193,7 +193,7 @@ export default function KitchenDisplayPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
   // p456: حمل المطبخ حسب الساعة CSV (BOM عربي لـ Excel — آخر 30 يومًا)
   const downloadLoadCsv = async () => {
@@ -207,7 +207,7 @@ export default function KitchenDisplayPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
 
   // p438: تقرير الإلغاءات اليومي CSV (BOM عربي لـ Excel — آخر 30 يومًا)
@@ -222,7 +222,7 @@ export default function KitchenDisplayPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
 
   // p426: أرشيف طلبات المطبخ CSV (BOM عربي لـ Excel — آخر 7 أيام)
@@ -237,7 +237,7 @@ export default function KitchenDisplayPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error("تعذر تحميل CSV"); }
+    } catch (_e) { toast.error("تعذر تحميل CSV"); }
   };
   return (
     <div className="min-h-screen bg-background p-4 space-y-4" dir="rtl" data-testid="kds-page">

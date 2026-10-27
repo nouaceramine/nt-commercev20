@@ -33,15 +33,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { Textarea } from './ui/textarea';
+import { Textarea as _Textarea } from './ui/textarea';
 import { toast } from 'sonner';
 import {
   Database, HardDrive, Activity, AlertTriangle, Check, X, Clock,
   Download, Upload, Trash2, RefreshCw, Eye, Settings, Search,
-  Shield, Lock, Unlock, Copy, Merge, Archive, BarChart3,
-  Calendar, FileJson, FileSpreadsheet, Server, Cpu, MemoryStick,
-  CloudUpload, Mail, Bell, Zap,
-  Play, Pause, RotateCcw, Filter, MoreHorizontal, Plus
+  Shield as _Shield, Lock, Unlock, Copy as _Copy, Merge as _Merge, Archive, BarChart3,
+  Calendar, FileJson, FileSpreadsheet as _FileSpreadsheet, Server as _Server, Cpu as _Cpu, MemoryStick as _MemoryStick,
+  CloudUpload, Mail as _Mail, Bell as _Bell, Zap as _Zap,
+  Play as _Play, Pause, RotateCcw, Filter as _Filter, MoreHorizontal as _MoreHorizontal, Plus as _Plus
 } from 'lucide-react';
 import { StatCard } from './StatCard';
 
@@ -95,12 +95,12 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
   const [selectedDb, setSelectedDb] = useState(null);
   const [operationLogs, setOperationLogs] = useState([]);
   const [backups, setBackups] = useState([]);
-  const [schedules, setSchedules] = useState([]);
+  const [_schedules, _setSchedules] = useState([]);
   
   // Import/Export State
   const [availableExports, setAvailableExports] = useState([]);
   const [importLogs, setImportLogs] = useState([]);
-  const [uploadingFile, setUploadingFile] = useState(false);
+  const [_uploadingFile, _setUploadingFile] = useState(false);
   const [convertingFile, setConvertingFile] = useState(false);
   const [importingData, setImportingData] = useState(false);
   const [selectedExportFile, setSelectedExportFile] = useState(null);
@@ -111,13 +111,13 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
   // Dialogs
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
-  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [_restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [_syncDialogOpen, _setSyncDialogOpen] = useState(false);
+  const [_importDialogOpen, setImportDialogOpen] = useState(false);
   
   // Forms
   const [deleteConfirmCode, setDeleteConfirmCode] = useState('');
@@ -265,13 +265,13 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       toast.success('تم إنشاء النسخة الاحتياطية بنجاح');
       setBackupDialogOpen(false);
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.dismiss();
       toast.error('حدث خطأ أثناء إنشاء النسخة الاحتياطية');
     }
   };
 
-  const handleRestore = async (dbId, backupId) => {
+  const _handleRestore = async (dbId, backupId) => {
     try {
       toast.loading('جاري استعادة البيانات...');
       await apiClient.post(`/saas/databases/${dbId}/restore`, { backup_id: backupId }, { headers });
@@ -279,7 +279,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       toast.success('تم استعادة البيانات بنجاح');
       setRestoreDialogOpen(false);
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.dismiss();
       toast.error('حدث خطأ أثناء الاستعادة');
     }
@@ -304,7 +304,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       toast.dismiss();
       toast.success('تم تصدير البيانات بنجاح');
       setExportDialogOpen(false);
-    } catch (error) {
+    } catch (_error) {
       toast.dismiss();
       toast.error('حدث خطأ أثناء التصدير');
     }
@@ -323,20 +323,20 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       setDeleteDialogOpen(false);
       setDeleteConfirmCode('');
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.dismiss();
       toast.error('حدث خطأ أثناء الحذف');
     }
   };
 
-  const handleClear = async (dbId) => {
+  const _handleClear = async (dbId) => {
     try {
       toast.loading('جاري تفريغ قاعدة البيانات...');
       await apiClient.post(`/saas/databases/${dbId}/clear`, {}, { headers });
       toast.dismiss();
       toast.success('تم تفريغ قاعدة البيانات بنجاح');
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.dismiss();
       toast.error('حدث خطأ أثناء التفريغ');
     }
@@ -347,7 +347,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       await apiClient.post(`/saas/databases/${dbId}/freeze`, { freeze }, { headers });
       toast.success(freeze ? 'تم تجميد قاعدة البيانات' : 'تم إلغاء التجميد');
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('حدث خطأ');
     }
   };
@@ -358,7 +358,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       toast.success('تم حفظ جدولة النسخ الاحتياطي');
       setScheduleDialogOpen(false);
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('حدث خطأ');
     }
   };
@@ -430,7 +430,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       
       toast.dismiss();
       toast.success('تم تحميل الملف بنجاح');
-    } catch (error) {
+    } catch (_error) {
       toast.dismiss();
       toast.error('حدث خطأ أثناء التحميل');
     }
@@ -443,7 +443,7 @@ export const DatabaseManager = ({ tenants = [], agents = [] }) => {
       await apiClient.delete(`/saas/database/exports/${filename}`, { headers });
       toast.success('تم حذف الملف بنجاح');
       fetchAvailableExports();
-    } catch (error) {
+    } catch (_error) {
       toast.error('حدث خطأ أثناء الحذف');
     }
   };

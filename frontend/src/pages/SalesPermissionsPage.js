@@ -39,7 +39,7 @@ export default function SalesPermissionsPage() {
 
   const fetchPermissions = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/settings/sales-permissions`);
       setPermissions({ ...permissions, ...response.data });
     } catch (error) {
@@ -54,7 +54,7 @@ export default function SalesPermissionsPage() {
     try {
       await apiClient.post(`/settings/sales-permissions`, permissions);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في الحفظ' : 'Erreur de sauvegarde');
     } finally {
       setSaving(false);

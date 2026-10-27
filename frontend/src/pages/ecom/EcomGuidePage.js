@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../../components/ui/accordion';
 import {
-  BookOpen, ArrowRight, ShoppingBag, MessageCircle, Truck, Sparkles,
-  CheckCircle2, AlertCircle, ExternalLink, Link2, Inbox, Zap, Lock, Lightbulb,
+  BookOpen, ArrowRight, ShoppingBag, MessageCircle as _MessageCircle, Truck, Sparkles,
+  CheckCircle2, AlertCircle as _AlertCircle, ExternalLink, Link2, Inbox, Zap, Lock, Lightbulb,
 } from 'lucide-react';
 
 const QUICK_STEPS = [

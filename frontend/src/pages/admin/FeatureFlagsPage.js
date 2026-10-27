@@ -16,7 +16,7 @@ import {
 } from '../../components/ui/select';
 import { toast } from 'sonner';
 import { 
-  Settings, 
+  Settings as _Settings,
   Check, 
   X, 
   Save, 
@@ -31,7 +31,7 @@ import {
   Bell,
   Store,
   Shield,
-  Layers,
+  Layers as _Layers,
   ChevronDown,
   ChevronRight,
   Smartphone,
@@ -242,7 +242,7 @@ export default function FeatureFlagsPage() {
   const [plans, setPlans] = useState([]);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [planFeatures, setPlanFeatures] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
 
@@ -273,7 +273,7 @@ export default function FeatureFlagsPage() {
   const fetchPlans = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/saas/plans?include_inactive=true`);
       setPlans(response.data);
       if (response.data.length > 0) {

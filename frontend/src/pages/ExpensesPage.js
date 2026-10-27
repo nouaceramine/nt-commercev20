@@ -4,11 +4,11 @@ import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
 import PrintButton from '../components/print/PrintButton';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Textarea } from '../components/ui/textarea';
+import { Textarea as _Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import {
   Dialog,
@@ -98,7 +98,7 @@ export default function ExpensesPage() {
     try {
       const r = await apiClient.get('/expenses/usd-wallet');
       setUsdWallet(r.data);
-    } catch (e) { /* optional */ }
+    } catch (_e) { /* optional */ }
   };
 
   const buyUsd = async () => {  // p111
@@ -214,7 +214,7 @@ export default function ExpensesPage() {
       fetchExpenses();
       fetchStats();
       fetchReminders();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
   };
@@ -225,7 +225,7 @@ export default function ExpensesPage() {
       toast.success(language === 'ar' ? 'تم تسجيل الدفع' : 'Paiement enregistré');
       fetchReminders();
       fetchExpenses();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
   };
@@ -246,7 +246,7 @@ export default function ExpensesPage() {
         recurring: false,
         recurring_period: 'monthly'
       });
-    } catch (error) {
+    } catch (_error) {
       setFormData({
         title: '', category: '', amount: '', currency: 'DZD', exchange_rate: '', payment_method: 'cash', date: new Date().toISOString().split('T')[0],
         notes: '', code: '', recurring: false, recurring_period: 'monthly'
@@ -549,7 +549,7 @@ export default function ExpensesPage() {
                         gainNode.gain.value = 0.3;
                         oscillator.start();
                         setTimeout(() => oscillator.stop(), 100);
-                      } catch (e) {}
+                      } catch (_e) {}
                     }
                   }}
                   className="pe-10"

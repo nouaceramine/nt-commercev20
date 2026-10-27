@@ -339,7 +339,7 @@ async def handle_ecom_order_cancelled(event: Event) -> None:
 async def handle_tenant_subscription_expired(event: Event) -> None:
     """Disable tenant features & notify owner. Idempotent — re-running just
     re-sets the same flags."""
-    p = event.payload or {}
+    _p = event.payload or {}
     tenant_id = event.tenant_id
     if tenant_id == "platform":
         log.warning("tenant.subscription.expired missing tenant_id")

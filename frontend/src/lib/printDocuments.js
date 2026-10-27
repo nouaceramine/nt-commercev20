@@ -73,7 +73,7 @@ const statusLabel = (s, ar) => {
 const dateOf = (record) => {
   const raw = record.created_at || record.expense_date || record.date || record.updated_at;
   if (!raw) return formatShortDate(new Date());
-  try { return formatDateTime(raw); } catch (e) { return formatShortDate(raw); }
+  try { return formatDateTime(raw); } catch (_e) { return formatShortDate(raw); }
 };
 
 /**
@@ -205,7 +205,7 @@ function renderMetaRows(meta) {
     .join('');
 }
 
-function renderItemsThermal(items, ar) {
+function renderItemsThermal(items, _ar) {
   if (!items || !items.length) return '';
   const body = items
     .map(

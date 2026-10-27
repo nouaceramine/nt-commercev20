@@ -9,20 +9,20 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Switch } from '../components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
 import { formatShortDate } from '../utils/globalDateFormatter';
 import {
-  MessageSquare, Settings, Send, Phone, Check, X,
-  Clock, ArrowUpRight, ArrowDownRight, Activity, Wifi, WifiOff
+  MessageSquare, Settings, Send, Phone as _Phone, Check as _Check, X as _X,
+  Clock as _Clock, ArrowUpRight, ArrowDownRight, Activity, Wifi, WifiOff
 } from 'lucide-react';
 
 export default function WhatsAppPage() {
-  const { t, language } = useLanguage();
-  const [config, setConfig] = useState(null);
+  const { t: _t, language: _language } = useLanguage();
+  const [_config, setConfig] = useState(null);
   const [messages, setMessages] = useState([]);
   const [stats, setStats] = useState({ incoming: 0, outgoing: 0, total: 0, is_active: false });
   const [loading, setLoading] = useState(true);
@@ -59,12 +59,12 @@ export default function WhatsAppPage() {
 
   const saveConfig = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/whatsapp/config`, configForm);
       toast.success('تم حفظ الإعدادات');
       setConfigDialog(false);
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في حفظ الإعدادات');
     }
   };

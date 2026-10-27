@@ -31,15 +31,15 @@ import {
   Users, 
   Package, 
   Clock,
-  Calendar,
+  Calendar as _Calendar,
   DollarSign,
   CreditCard,
   Banknote,
   Wallet,
-  Download,
+  Download as _Download,
   Filter,
   RefreshCw,
-  Eye,
+  Eye as _Eye,
   AlertTriangle,
   RotateCcw,
   User,
@@ -66,7 +66,7 @@ export default function AdvancedSalesReportPage() {
   const [returnsData, setReturnsData] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [permissions, setPermissions] = useState({});
+  const [_permissions, setPermissions] = useState({});
 
   useEffect(() => {
     fetchInitialData();

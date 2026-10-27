@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Switch } from './ui/switch';
 import { 
-  Bell, AlertTriangle, Package, Users, Calendar, 
+  Bell, AlertTriangle as _AlertTriangle, Package, Users, Calendar as _Calendar,
   TrendingDown, Clock, CheckCircle, X, Settings,
   Volume2, VolumeX
 } from 'lucide-react';
@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
-import { toast } from 'sonner';
+import { toast as _toast } from 'sonner';
 
 export function SmartNotifications({ onNotificationCount }) {
   const { language } = useLanguage();
@@ -178,7 +178,7 @@ export function SmartNotifications({ onNotificationCount }) {
         oscillator.frequency.value = 1000;
         setTimeout(() => oscillator.stop(), 100);
       }, 100);
-    } catch (e) {}
+    } catch (_e) {}
   };
 
   const dismissNotification = (id) => {

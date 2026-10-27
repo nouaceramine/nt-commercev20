@@ -11,7 +11,7 @@
  *   TemplatePropertiesPanel - Right sidebar
  *   TemplateService - API calls
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef as _useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
@@ -27,7 +27,7 @@ import TemplateToolbar from '../../components/template/TemplateToolbar';
 import PalettePanel from '../../components/template/PalettePanel';
 import CanvasPanel from '../../components/template/CanvasPanel';
 import TemplatePropertiesPanel from '../../components/template/TemplatePropertiesPanel';
-import BlockVisual from '../../components/template/BlockVisual';
+import _BlockVisual from '../../components/template/BlockVisual';
 
 // === Extracted Service & Constants ===
 import { TemplateService } from '../../services/TemplateService';

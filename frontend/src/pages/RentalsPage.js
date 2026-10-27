@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -21,7 +21,7 @@ import {
 import { toast } from 'sonner';
 import {
   KeyRound, Plus, Edit, Trash2, Car, Building, Banknote, CalendarClock,
-  CheckCircle2, AlertTriangle, Wrench, RefreshCw,
+  CheckCircle2, AlertTriangle as _AlertTriangle, Wrench, RefreshCw as _RefreshCw,
 } from 'lucide-react';
 
 const fmt = (n) => (Number(n) || 0).toLocaleString('fr-DZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

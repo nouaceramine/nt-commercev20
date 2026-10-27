@@ -55,9 +55,9 @@ function formatDate(iso) {
 }
 
 export default function TransfersPage() {
-  const { language } = useLanguage();
+  const { language: _language } = useLanguage();
   const { isSuperAdmin, isAgent } = useAuth();
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
 
   const [transfers, setTransfers] = useState([]);
   const [total, setTotal] = useState(0);
@@ -72,8 +72,8 @@ export default function TransfersPage() {
   const [refType, setRefType] = useState('');
 
   // Summary stats from visible page
-  const totalOut = transfers.reduce((s, t) => {
-    const myId = null; // computed per row
+  const _totalOut = transfers.reduce((s, t) => {
+    const _myId = null; // computed per row
     return s + (t.transaction_direction === 'out' ? t.amount : 0);
   }, 0);
 

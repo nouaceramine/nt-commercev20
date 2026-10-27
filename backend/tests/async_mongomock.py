@@ -1,5 +1,4 @@
 import mongomock
-from unittest.mock import AsyncMock
 import asyncio
 
 class AsyncCollectionWrapper:

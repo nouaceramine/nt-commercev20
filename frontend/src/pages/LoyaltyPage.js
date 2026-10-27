@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Layout } from '../components/Layout';
+import { Layout as _Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -44,9 +44,9 @@ import {
   Send,
   Percent,
   DollarSign,
-  Calendar,
-  Trash2,
-  Edit,
+  Calendar as _Calendar,
+  Trash2 as _Trash2,
+  Edit as _Edit,
   RefreshCw,
   Star
 } from 'lucide-react';
@@ -112,7 +112,7 @@ export default function LoyaltyPage() {
     try {
       await apiClient.put(`/loyalty/settings`, loyaltySettings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في الحفظ' : 'Erreur de sauvegarde');
     }
   };
@@ -122,20 +122,20 @@ export default function LoyaltyPage() {
     try {
       await apiClient.put(`/marketing/reactivation/settings`, reactSettings);
       toast.success(language === 'ar' ? 'حُفظت إعدادات إعادة التنشيط' : 'Paramètres enregistrés');
-    } catch (e) { toast.error(language === 'ar' ? 'فشل الحفظ' : 'Erreur'); }
+    } catch (_e) { toast.error(language === 'ar' ? 'فشل الحفظ' : 'Erreur'); }
   };
   const previewReactivation = async () => {
     try {
       const r = await apiClient.get(`/marketing/reactivation/preview?days=${reactSettings.dormant_days || 30}`);
       setReactPreview(r.data);
-    } catch (e) { toast.error(language === 'ar' ? 'فشلت المعاينة' : 'Erreur'); }
+    } catch (_e) { toast.error(language === 'ar' ? 'فشلت المعاينة' : 'Erreur'); }
   };
   const runReactivation = async () => {
     setReactRunning(true);
     try {
       const r = await apiClient.post(`/marketing/reactivation/run`);
       toast.success(language === 'ar' ? `أُرسلت ${r.data.sent} رسالة (من أصل ${r.data.dormant} غائباً)` : `${r.data.sent} SMS envoyes`);
-    } catch (e) { toast.error(language === 'ar' ? 'فشل التشغيل' : 'Erreur'); }
+    } catch (_e) { toast.error(language === 'ar' ? 'فشل التشغيل' : 'Erreur'); }
     finally { setReactRunning(false); }
   };
 
@@ -151,7 +151,7 @@ export default function LoyaltyPage() {
       setShowCampaignDialog(false);
       setNewCampaign({ name: '', message: '', target: 'all', scheduled_at: '' });
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في إنشاء الحملة' : 'Erreur de création');
     }
   };

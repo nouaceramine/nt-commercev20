@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';

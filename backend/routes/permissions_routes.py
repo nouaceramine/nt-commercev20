@@ -3,7 +3,6 @@ Role-Based Permissions System
 500+ granular permissions organized by module
 """
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
 

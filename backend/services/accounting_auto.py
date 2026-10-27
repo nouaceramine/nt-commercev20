@@ -68,8 +68,8 @@ async def _insert_entry(tdb, *, reference, reference_id, source_tag, description
     """Insert a balanced, approved auto journal entry + update balances.
     p209: optional date override (e.g. fiscal close dated YYYY-12-31) and
     extra doc fields (e.g. fiscal_year)."""
-    total_debit = round(sum(l["debit"] for l in lines), 2)
-    total_credit = round(sum(l["credit"] for l in lines), 2)
+    total_debit = round(sum(line["debit"] for line in lines), 2)
+    total_credit = round(sum(line["credit"] for line in lines), 2)
     if abs(total_debit - total_credit) > 0.01:
         raise ValueError(f"unbalanced auto entry: {total_debit} != {total_credit}")
     now = datetime.now(timezone.utc).isoformat()

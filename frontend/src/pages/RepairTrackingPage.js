@@ -5,13 +5,13 @@ import { escapeHtml } from '../lib/escape';
 import { toSafeJsString as jsString } from '../lib/printSafety';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -39,11 +39,11 @@ import { toast } from 'sonner';
 import {
   Wrench,
   Search,
-  Filter,
+  Filter as _Filter,
   Eye,
   Edit,
   Phone,
-  MessageSquare,
+  MessageSquare as _MessageSquare,
   MessageCircle,
   Clock,
   CheckCircle2,
@@ -51,9 +51,9 @@ import {
   AlertTriangle,
   Smartphone,
   User,
-  Calendar,
-  DollarSign,
-  ArrowRight,
+  Calendar as _Calendar,
+  DollarSign as _DollarSign,
+  ArrowRight as _ArrowRight,
   RefreshCw,
   Printer,
   Package,
@@ -74,7 +74,7 @@ const REPAIR_STATUSES = [
 ];
 
 // Sample repairs data
-const SAMPLE_REPAIRS = [
+const _SAMPLE_REPAIRS = [
   {
     id: '1',
     ticket_number: 'REP-260207-0001',
@@ -163,7 +163,7 @@ export default function RepairTrackingPage() {
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [updateForm, setUpdateForm] = useState({ status: '', notes: '', actual_cost: '', spare_parts: [] });
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0, inProgress: 0, ready: 0, delivered: 0 });
   const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);  // p151
   const [invoicingRepair, setInvoicingRepair] = useState(null);        // p151
@@ -173,7 +173,7 @@ export default function RepairTrackingPage() {
   // Spare parts search
   const [productSearch, setProductSearch] = useState('');
   const [productResults, setProductResults] = useState([]);
-  const [searchingProducts, setSearchingProducts] = useState(false);
+  const [_searchingProducts, setSearchingProducts] = useState(false);
 
   // Fetch repairs from API
   const fetchRepairs = async () => {
@@ -334,7 +334,7 @@ export default function RepairTrackingPage() {
       // Try to send WhatsApp notification (silent fail if not configured)
       try {
         await apiClient.post(`/whatsapp/notify-repair/${selectedRepair.id}`);
-      } catch (e) {
+      } catch (_e) {
       }
 
       // Refresh data
@@ -655,9 +655,9 @@ export default function RepairTrackingPage() {
                 ) : (
                   filteredRepairs.map(repair => {
                     const statusInfo = getStatusInfo(repair.status);
-    const esc = escapeHtml;
-    const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
-    const statusClass = REPAIR_STATUSES.some((item) => item.id === repair.status) ? repair.status : 'received';
+    const _esc = escapeHtml;
+    const _num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const _statusClass = REPAIR_STATUSES.some((item) => item.id === repair.status) ? repair.status : 'received';
                     const StatusIcon = statusInfo.icon;
                     return (
                       <TableRow key={repair.id}>

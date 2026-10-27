@@ -4,7 +4,7 @@ Cash session management for employees (open, close, summary)
 """
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 from pymongo.errors import DuplicateKeyError
@@ -175,7 +175,7 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         # p291: عند الغلق يُحوَّل المبلغ الفعلي المعدود من الصندوق النقدي إلى الخزنة
         # تلقائياً (حركة + قيدان في دفتر الحركات). idempotent: حقل
         # cash_transferred_to_safe يمنع التحويل المزدوج عند إعادة الإغلاق/التعديل.
-        transferred = None
+        _transferred = None
         if closing_data.transfer_to_safe and closing_data.closing_cash > 0 \
                 and not session.get("cash_transferred_to_safe"):
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -193,7 +193,7 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
             await db.cash_boxes.update_one({"id": "safe"}, {"$inc": {"balance": amt}, "$set": {"updated_at": now_iso}})
             await db.transactions.insert_many([
                 {"id": str(uuid.uuid4()), "cash_box_id": "cash", "type": "expense",
-                 "amount": amt, "description": f"غلق الحصة — تحويل الحصيلة الفعلية إلى الخزنة",
+                 "amount": amt, "description": "غلق الحصة — تحويل الحصيلة الفعلية إلى الخزنة",
                  "reference_type": "session_close", "reference_id": session_id,
                  "created_at": now_iso, "created_by": user.get("name", "")},
                 {"id": str(uuid.uuid4()), "cash_box_id": "safe", "type": "income",
@@ -201,7 +201,7 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
                  "reference_type": "session_close", "reference_id": session_id,
                  "created_at": now_iso, "created_by": user.get("name", "")},
             ])
-            transferred = amt
+            _transferred = amt
             update_data["cash_transferred_to_safe"] = amt
             await db.daily_sessions.update_one(
                 {"id": session_id}, {"$set": {"cash_transferred_to_safe": amt}})

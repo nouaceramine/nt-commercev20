@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';  // p288: +useNavigate
 import apiClient from '../../lib/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -310,7 +310,7 @@ export default function EcomChannelsPage() {
       await apiClient.delete(`/ecom/integrations/${integration.id}`);
       toast.success('تم الحذف');
       load();
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل الحذف');
     }
   };

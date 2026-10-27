@@ -41,14 +41,14 @@ import {
   Warehouse, 
   Plus, 
   ArrowRightLeft, 
-  Package,
+  Package as _Package,
   MapPin,
   Edit2,
   Trash2,
-  Check,
+  Check as _Check,
   Building2,
   Boxes,
-  TrendingUp,
+  TrendingUp as _TrendingUp,
   Search,
   Grid3X3,
   List
@@ -124,7 +124,7 @@ export default function WarehousesPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/warehouses`, newWarehouse);
       toast.success(language === 'ar' ? 'تم إضافة المخزن' : 'Entrepôt ajouté');
       setShowAddWarehouse(false);
@@ -139,7 +139,7 @@ export default function WarehousesPage() {
     if (!editingWarehouse?.name.trim()) return;
 
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/warehouses/${editingWarehouse.id}`, editingWarehouse);
       toast.success(language === 'ar' ? 'تم تحديث المخزن' : 'Entrepôt mis à jour');
       setEditingWarehouse(null);
@@ -153,7 +153,7 @@ export default function WarehousesPage() {
     if (!confirm(language === 'ar' ? 'هل أنت متأكد من حذف هذا المخزن؟' : 'Êtes-vous sûr de supprimer cet entrepôt?')) return;
 
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.delete(`/warehouses/${id}`);
       toast.success(language === 'ar' ? 'تم حذف المخزن' : 'Entrepôt supprimé');
       fetchData();

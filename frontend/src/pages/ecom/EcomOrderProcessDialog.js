@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../../lib/apiClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
-import { Badge } from '../../components/ui/badge';
+import { Badge as _Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { toast } from 'sonner';
 import { Copy, Truck, Hand, Zap, Printer, Loader2, CheckCircle2 } from 'lucide-react';

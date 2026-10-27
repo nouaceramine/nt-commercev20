@@ -27,7 +27,7 @@ const PROVIDER_LABELS = {
 
 export default function EmailSettingsPage() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [settings, setSettings] = useState({});

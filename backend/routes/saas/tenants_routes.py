@@ -889,7 +889,6 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
 # ============ Golden Template management (p31) ============
 from services.tenant_template import (
     build_template as _tpl_build,
-    copy_template_to_tenant as _tpl_copy,
     doctor_tenant as _tpl_doctor,
     doctor_all as _tpl_doctor_all,
     TEMPLATE_DB_NAME,

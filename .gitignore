@@ -142,3 +142,6 @@ archive/data/backups/
 *.mongodump
 backups/
 *.bak.*
+
+# Local backup encryption key — keep on server and offline only
+.backup_key

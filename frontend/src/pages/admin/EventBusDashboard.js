@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo as _useMemo, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
+import { Input as _Input } from "../../components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Layout } from "../../components/Layout";
@@ -74,7 +74,7 @@ export default function EventBusDashboard() {
       setDlq(d.data || []);
       setMovements(m.data || []);
       setAlerts(a.data?.items || []);  // p210
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل تحميل البيانات");
     } finally {
       setLoading(false);
@@ -112,7 +112,7 @@ export default function EventBusDashboard() {
       await apiClient.post(`/admin/event-bus/alerts/${alertId}/ack`);
       toast.success("تم تأكيد التنبيه");
       loadAll();
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل تأكيد التنبيه");
     }
   };

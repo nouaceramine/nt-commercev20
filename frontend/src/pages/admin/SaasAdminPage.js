@@ -47,8 +47,8 @@ import { MonitoringSection } from './components/MonitoringSection';
 import { FinanceReportsSection } from './components/FinanceReportsSection';
 import { MonitoringDashboard } from './components/MonitoringDashboard';
 import { AIAssistant } from '../../components/AIAssistant';
-import { Bot } from 'lucide-react';
-import { formatShortDate, convertToWesternNumerals } from '../../utils/globalDateFormatter';
+import { Bot as _Bot } from 'lucide-react';
+import { formatShortDate, convertToWesternNumerals as _convertToWesternNumerals } from '../../utils/globalDateFormatter';
 
 // Map sidebar/url slugs ↔ internal Tabs `value` keys
 const SLUG_TO_TAB = {
@@ -88,7 +88,7 @@ const TAB_HEADERS = {
 };
 
 export default function SaasAdminPage() {
-  const { t, language } = useLanguage();
+  const { t: _t, language: _language } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -105,9 +105,9 @@ export default function SaasAdminPage() {
   // Lightweight collections still needed by the Finance + Databases tabs
   // (those tabs are still served by this legacy page — extracting them is a
   // future cleanup task).
-  const [tenants, setTenants] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [agents, setAgents] = useState([]);
+  const [tenants, _setTenants] = useState([]);
+  const [payments, _setPayments] = useState([]);
+  const [agents, _setAgents] = useState([]);
 
   // ── Withdrawal requests (legacy /saas-admin/withdrawals tab)
   const [withdrawals, setWithdrawals] = useState([]);
@@ -178,7 +178,7 @@ export default function SaasAdminPage() {
     try {
       const res = await apiClient.get(`/saas/agent-withdrawals`);
       setWithdrawals(res.data || []);
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في تحميل طلبات السحب');
     }
   };
@@ -287,7 +287,7 @@ export default function SaasAdminPage() {
     try {
       const res = await apiClient.get('/saas/platform-catalog');
       setPlatformCatalog(res.data || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error('فشل تحميل الكتالوج');
     } finally {
       setPlatformCatalogLoading(false);
@@ -354,7 +354,7 @@ export default function SaasAdminPage() {
     try {
       const res = await apiClient.get('/saas/recharge-config');
       setRechargeOperators(res.data || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error('فشل تحميل إعدادات شركات الاتصال');
     } finally {
       setRechargeOperatorsLoading(false);
@@ -367,7 +367,7 @@ export default function SaasAdminPage() {
       const res = await apiClient.get('/saas/recharge-transactions?limit=100');
       setRechargeTxns(res.data?.transactions || []);
       setRechargeTxnsMeta({ total_count: res.data?.total_count || 0, total_amount: res.data?.total_amount || 0 });
-    } catch (e) {
+    } catch (_e) {
       toast.error('فشل تحميل سجل العمليات');
     } finally {
       setRechargeTxnsLoading(false);

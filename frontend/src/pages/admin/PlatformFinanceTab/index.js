@@ -4,18 +4,18 @@
  * Sub-tabs: لوحة المعلومات | الموردون | المشتريات
  * Backend contract: /app/backend/routes/saas/platform_finance_routes.py
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo as _useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
+import { Input as _Input } from "../../../components/ui/input";
 import { Badge } from "../../../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
 import { toast } from "sonner";
 import apiClient from "../../../lib/apiClient";
-import { downloadCsv, todayStamp } from "../../../lib/csvExport";
+import { downloadCsv as _downloadCsv, todayStamp as _todayStamp } from "../../../lib/csvExport";
 import { printFinanceMonthlyReport } from "../../../lib/financeMonthlyReport";
-import { Loader2, Plus, Trash2, TrendingUp, TrendingDown, Wallet, Users, Truck, Receipt, Pencil, Banknote, AlertTriangle, RefreshCw, Upload, FileText } from "lucide-react";
+import { Loader2 as _Loader2, Plus, Trash2, TrendingUp, TrendingDown, Wallet, Users, Truck, Receipt as _Receipt, Pencil, Banknote, AlertTriangle, RefreshCw, Upload, FileText } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
@@ -53,7 +53,7 @@ export function PlatformFinanceTab() {
       setSummary(s.data);
       setSuppliers(sup.data || []);
       setPurchases(p.data || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error("فشل تحميل البيانات المالية");
     } finally {
       setLoading(false);
@@ -63,7 +63,7 @@ export function PlatformFinanceTab() {
   useEffect(() => { loadAll(); }, [days]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const kpis = summary?.kpis || {};
-  const profitColor = (kpis.gross_profit || 0) >= 0 ? "text-emerald-700" : "text-rose-700";
+  const _profitColor = (kpis.gross_profit || 0) >= 0 ? "text-emerald-700" : "text-rose-700";
   const profitIcon  = (kpis.gross_profit || 0) >= 0 ? TrendingUp : TrendingDown;
   const ProfitIcon  = profitIcon;
 

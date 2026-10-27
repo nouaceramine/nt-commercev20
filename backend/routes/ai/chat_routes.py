@@ -198,7 +198,7 @@ def create_ai_routes(db, get_current_user) -> dict:
             
             # Add financial summary to context
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            month_start = today[:7] + "-01"
+            _month_start = today[:7] + "-01"
             
             # Get basic stats
             sales_today = await db.sales.count_documents({"created_at": {"$regex": f"^{today}"}})
@@ -292,7 +292,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         ).sort("created_at", -1).to_list(20)
         
         # Generate financial health
-        manager = AIAgentsManager(db)
+        _manager = AIAgentsManager(db)
         
         # Get basic financial data
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -544,7 +544,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         """Get overall financial health score"""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         month_start = today[:7] + "-01"
-        year_start = today[:4] + "-01-01"
+        _year_start = today[:4] + "-01-01"
         
         # Get metrics
         revenue = await db.sales.aggregate([

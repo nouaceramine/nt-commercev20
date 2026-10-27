@@ -8,8 +8,8 @@ import { Progress } from './ui/progress';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
 import { 
-  Download, Upload, Database, FileJson, FileSpreadsheet,
-  CheckCircle, AlertCircle, Clock, HardDrive, RefreshCw, Settings
+  Download as _Download, Upload, Database, FileJson, FileSpreadsheet,
+  CheckCircle, AlertCircle, Clock, HardDrive as _HardDrive, RefreshCw, Settings
 } from 'lucide-react';
 import {
   Dialog,
@@ -53,7 +53,7 @@ export function BackupSystem() {
   
   const fetchAutoBackupSettings = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/backup/auto-settings`);
       setAutoBackupSettings(response.data);
     } catch (error) {
@@ -63,21 +63,21 @@ export function BackupSystem() {
   
   const saveAutoBackupSettings = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/backup/auto-settings`, autoBackupSettings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
       setShowSettingsDialog(false);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل حفظ الإعدادات' : 'Échec de l\'enregistrement');
     }
   };
   
   const runAutoBackup = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/backup/run-auto`, {});
       toast.success(language === 'ar' ? 'تم إنشاء نسخة احتياطية' : 'Sauvegarde créée');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل النسخ الاحتياطي' : 'Échec de la sauvegarde');
     }
   };
@@ -214,7 +214,7 @@ export function BackupSystem() {
               quantity: product.quantity,
               barcode: product.barcode
             });
-          } catch (e) {
+          } catch (_e) {
           }
         }
       }
@@ -230,7 +230,7 @@ export function BackupSystem() {
               phone: customer.phone,
               email: customer.email
             });
-          } catch (e) {
+          } catch (_e) {
           }
         }
       }
@@ -246,7 +246,7 @@ export function BackupSystem() {
               phone: supplier.phone,
               email: supplier.email
             });
-          } catch (e) {
+          } catch (_e) {
           }
         }
       }

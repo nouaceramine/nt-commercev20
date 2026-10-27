@@ -8,12 +8,11 @@ Generates an hourly snapshot for the super-admin Monitoring dashboard:
 
 Cached for 1 hour via @cached_json (keeps Emergent LLM cost negligible).
 """
-import os
 import json
 import logging
 from datetime import datetime, timezone, timedelta
 
-from config.database import db, main_db
+from config.database import main_db
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ async def _gather_platform_metrics() -> dict:
     """
     now = datetime.now(timezone.utc)
     iso_7d = (now - timedelta(days=7)).isoformat()
-    iso_30d = (now - timedelta(days=30)).isoformat()
+    _iso_30d = (now - timedelta(days=30)).isoformat()
 
     total_tenants = await main_db.saas_tenants.count_documents({})
     active_tenants = await main_db.saas_tenants.count_documents({"is_active": True})

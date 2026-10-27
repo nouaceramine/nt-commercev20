@@ -3,7 +3,7 @@ import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent as _CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
@@ -27,14 +27,14 @@ import {
 } from 'lucide-react';
 
 export default function AIChatPage() {
-  const { t, isRTL, language } = useLanguage();
-  const { user } = useAuth();
+  const { t: _t, isRTL: _isRTL, language } = useLanguage();
+  const { user: _user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, _setShowSidebar] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 

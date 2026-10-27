@@ -25,8 +25,8 @@ export default function PermissionsTab() {
   const { t, language } = useLanguage();
   const { user: currentUser } = useAuth();
   const {
-    loading, users, setUsers,
-    selectedUser, setSelectedUser,
+    loading, users, setUsers: _setUsers,
+    selectedUser, setSelectedUser: _setSelectedUser,
     showPermissionsDialog, setShowPermissionsDialog,
     userPermissions,
     savingPermissions,

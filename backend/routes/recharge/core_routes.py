@@ -2,7 +2,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
-import uuid
 import logging
 
 logger = logging.getLogger(__name__)
@@ -135,7 +134,7 @@ def build_core_router(db, main_db, require_tenant, get_tenant_admin, RECHARGE_CO
         if prefix not in operator_map:
             raise HTTPException(status_code=400, detail="رقم هاتف غير صالح. يجب أن يبدأ بـ 05, 06, أو 07")
 
-        operator = operator_map[prefix]
+        _operator = operator_map[prefix]
 
         # No real carrier adapter is configured for this legacy endpoint.
         # Fail closed: never log success or deduct SIM balance without a carrier response.

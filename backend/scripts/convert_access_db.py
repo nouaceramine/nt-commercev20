@@ -10,7 +10,6 @@ import csv
 import io
 import os
 from datetime import datetime
-from pathlib import Path
 
 def run_mdb_export(db_path: str, table_name: str) -> list:
     """Export a table from Access database to list of dictionaries."""
@@ -44,25 +43,25 @@ def parse_date(date_str: str) -> str:
         # Format: "04/18/23 14:23:54" or "04/18/23 00:00:00"
         dt = datetime.strptime(date_str, "%m/%d/%y %H:%M:%S")
         return dt.isoformat()
-    except:
+    except Exception:
         try:
             dt = datetime.strptime(date_str, "%m/%d/%Y %H:%M:%S")
             return dt.isoformat()
-        except:
+        except Exception:
             return None
 
 def safe_float(value: str, default=0.0) -> float:
     """Safely convert string to float."""
     try:
         return float(value) if value and value.strip() else default
-    except:
+    except Exception:
         return default
 
 def safe_int(value: str, default=0) -> int:
     """Safely convert string to int."""
     try:
         return int(float(value)) if value and value.strip() else default
-    except:
+    except Exception:
         return default
 
 def safe_bool(value: str) -> bool:

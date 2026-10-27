@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
 
-from utils.permissions import create_cashier_block
 
 
 def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> dict:

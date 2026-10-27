@@ -1,13 +1,11 @@
 """
 Ocr Invoice Routes - Extracted from legacy_inline_routes.py
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Literal
-from datetime import datetime, timezone, timedelta
+from typing import List
+from datetime import datetime, timezone
 import uuid
-import os
 import io
 import logging
 

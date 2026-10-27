@@ -1,6 +1,5 @@
 """Iter11 — Tenant Debts dashboard + MAX_TENANTS cap + Platform Stats."""
 import os
-import re
 import pytest
 import requests
 

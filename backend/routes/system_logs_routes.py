@@ -9,14 +9,13 @@ Endpoints (all under /api):
     POST   /system-logs/analyze      admin   -> AI summary + suggested fixes via Emergent LLM
     DELETE /system-logs              admin   -> clear ALL logs (manual purge)
 """
-import os
 import io
 import json
 import uuid
 import logging
 import traceback
 from datetime import datetime, timezone
-from typing import Optional, List, Literal
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse

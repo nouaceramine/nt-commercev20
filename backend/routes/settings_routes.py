@@ -4,8 +4,7 @@ Handles date/time format, locale, and system settings
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from utils.permissions import create_cashier_block
 

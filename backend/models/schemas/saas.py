@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import List, Optional, Literal
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
 # ============ SAAS MODELS ============
 
 class PlanCreate(BaseModel):

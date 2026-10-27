@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -14,12 +14,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { formatShortDate, formatLargeNumber } from '../utils/globalDateFormatter';
 import {
-  Receipt, Calculator, FileText, TrendingUp, TrendingDown,
-  Download, Plus, Edit, Trash2, DollarSign, PieChart, Calendar
+  Receipt, Calculator, FileText, TrendingUp as _TrendingUp, TrendingDown as _TrendingDown,
+  Download as _Download, Plus, Edit, Trash2, DollarSign as _DollarSign, PieChart, Calendar as _Calendar
 } from 'lucide-react';
 
 export default function TaxReportsPage() {
-  const { t, language } = useLanguage();
+  const { t: _t, language: _language } = useLanguage();
   const [rates, setRates] = useState([]);
   const [report, setReport] = useState(null);
   const [declarations, setDeclarations] = useState([]);
@@ -64,7 +64,7 @@ export default function TaxReportsPage() {
       });
       setReport(res.data);
       toast.success('تم إنشاء التقرير الضريبي');
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في إنشاء التقرير');
     }
   };
@@ -76,14 +76,14 @@ export default function TaxReportsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       setAnnualSummary(res.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في تحميل الملخص السنوي');
     }
   };
 
   const fileDeclaration = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/tax/declarations`, {
         start_date: reportPeriod.start_date,
         end_date: reportPeriod.end_date,
@@ -91,7 +91,7 @@ export default function TaxReportsPage() {
       });
       toast.success('تم تقديم التصريح الضريبي');
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في تقديم التصريح');
     }
   };
@@ -108,7 +108,7 @@ export default function TaxReportsPage() {
       toast.success('تم حفظ معدل الضريبة');
       setRateDialog(false);
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في الحفظ');
     }
   };
@@ -119,7 +119,7 @@ export default function TaxReportsPage() {
       await apiClient.delete(`/tax/rates/${id}`);
       toast.success('تم الحذف');
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في الحذف');
     }
   };

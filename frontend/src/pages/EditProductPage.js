@@ -467,7 +467,7 @@ export default function EditProductPage() {
       } else {
         toast.error(res.data.error || (isAr ? 'فشل توليد الوصف' : 'Échec de la génération'));
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error(isAr ? 'فشل الاتصال بالذكاء الاصطناعي' : 'Connexion IA impossible');
     } finally {
       setAiLoading(false);

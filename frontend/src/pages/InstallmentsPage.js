@@ -1,7 +1,7 @@
 import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
@@ -17,7 +17,7 @@ import {
 } from '../components/ui/select';
 import {
   CreditCard, CheckCircle, Clock, AlertTriangle, TrendingUp,
-  Search, DollarSign, Calendar, User, Filter,
+  Search, DollarSign, Calendar, User, Filter as _Filter,
 } from 'lucide-react';
 import apiClient from '../lib/apiClient';
 import { toast } from 'sonner';
@@ -78,7 +78,7 @@ export default function InstallmentsPage() {
       setSummary(sumRes.data);
       setCashBoxes(cbRes.data);
       if (cbRes.data.length > 0) setSelectedCashBox(cbRes.data[0].id);
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'خطأ في تحميل البيانات' : 'Erreur de chargement');
     } finally {
       setLoading(false);

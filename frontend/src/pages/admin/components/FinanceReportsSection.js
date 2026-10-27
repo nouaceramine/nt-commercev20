@@ -39,7 +39,7 @@ export const FinanceReportsSection = ({ tenants, payments }) => {
     },
     monthly_breakdown: []
   });
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState('all');
 
   useEffect(() => {

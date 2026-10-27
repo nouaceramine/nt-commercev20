@@ -2,7 +2,7 @@ import { errText } from '../lib/errorText';
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { formatShortDate, formatLargeNumber } from '../utils/globalDateFormatter';
 import {
   Landmark, Plus, ArrowUpRight, ArrowDownRight, RefreshCw,
-  Wallet, Building2, CreditCard, TrendingUp, Edit, Trash2
+  Wallet, Building2, CreditCard, TrendingUp as _TrendingUp, Edit as _Edit, Trash2
 } from 'lucide-react';
 
 const getHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -64,7 +64,7 @@ export default function BankingPage() {
       setAccountDialog(false);
       setAccountForm({ bank_name: '', bank_name_ar: '', account_number: '', iban: '', swift_code: '', account_type: 'current', currency: 'DZD', initial_balance: 0, is_primary: false });
       fetchData();
-    } catch (err) {
+    } catch (_err) {
       toast.error('خطأ في إنشاء الحساب');
     }
   };
@@ -87,7 +87,7 @@ export default function BankingPage() {
       if (res.data.status === 'matched') toast.success('المطابقة ناجحة - لا يوجد فرق');
       else toast.warning(`فرق: ${formatLargeNumber(res.data.difference)} دج`);
       setReconcileDialog(false);
-    } catch (err) {
+    } catch (_err) {
       toast.error('خطأ في المطابقة');
     }
   };
@@ -98,7 +98,7 @@ export default function BankingPage() {
       await apiClient.delete(`/banking/accounts/${id}`, { headers: getHeaders() });
       toast.success('تم الحذف');
       fetchData();
-    } catch (err) {
+    } catch (_err) {
       toast.error('خطأ');
     }
   };

@@ -6,13 +6,13 @@ import { errText } from '../../../lib/errorText';
 import { useState, useEffect, useMemo } from 'react';
 import apiClient from '../../../lib/apiClient';
 import { formatShortDate } from '../../../utils/globalDateFormatter';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Badge } from '../../../components/ui/badge';
 import { Textarea } from '../../../components/ui/textarea';
-import { Switch } from '../../../components/ui/switch';
+import { Switch as _Switch } from '../../../components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -40,11 +40,11 @@ import { toast } from 'sonner';
 import { 
   Users, Plus, Edit, Trash2, Search, 
   DollarSign, FileText, TrendingUp, TrendingDown,
-  Award, Bell, BarChart3, PieChart, Wallet,
+  Award, Bell as _Bell, BarChart3, PieChart as _PieChart, Wallet,
   Phone, Mail, Building, MapPin, Percent,
   ArrowUpRight, ArrowDownRight, RefreshCw,
-  Eye, EyeOff, Filter, Download, Star,
-  AlertTriangle, CheckCircle, Clock, Target, Shield, UserCog, LogIn, KeyRound
+  Eye, EyeOff, Filter, Download as _Download, Star,
+  AlertTriangle as _AlertTriangle, CheckCircle, Clock, Target, Shield, UserCog, LogIn, KeyRound
 } from 'lucide-react';
 import { AgentPermissionsDialog } from './AgentPermissionsDialog';
 import { AgentTenantsDialog } from './AgentTenantsDialog';
@@ -106,7 +106,7 @@ export const AgentsDashboard = () => {
   const [resetBusy, setResetBusy] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [_notificationDialogOpen, _setNotificationDialogOpen] = useState(false);
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [tenantsDialogOpen, setTenantsDialogOpen] = useState(false);
   
@@ -126,7 +126,7 @@ export const AgentsDashboard = () => {
     amount: 0, transaction_type: 'payment', description: '', notes: ''
   });
   
-  const [notificationForm, setNotificationForm] = useState({
+  const [_notificationForm, _setNotificationForm] = useState({
     title: '', message: '', type: 'info'
   });
 
@@ -136,7 +136,7 @@ export const AgentsDashboard = () => {
   const fetchAgents = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/saas/agents`);
       
       // Enhance agents data with computed stats
@@ -150,7 +150,7 @@ export const AgentsDashboard = () => {
       }));
       
       setAgents(enhancedAgents);
-    } catch (err) {
+    } catch (_err) {
       toast.error('فشل تحميل بيانات الوكلاء');
     }
     setLoading(false);
@@ -173,7 +173,7 @@ export const AgentsDashboard = () => {
 
   // Generate mock chart data
   const generateMockChartData = (base) => {
-    return Array(7).fill(0).map((_, i) => Math.max(0, base * (0.5 + Math.random() * 0.8)));
+    return Array(7).fill(0).map((_, _i) => Math.max(0, base * (0.5 + Math.random() * 0.8)));
   };
 
   // Filter and Sort Agents
@@ -271,7 +271,7 @@ export const AgentsDashboard = () => {
   const deleteAgent = async (agentId) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا الوكيل؟')) return;
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.delete(`/saas/agents/${agentId}`);
       toast.success('تم حذف الوكيل');
       fetchAgents();
@@ -328,11 +328,11 @@ export const AgentsDashboard = () => {
   const openTransactionsDialog = async (agent) => {
     setSelectedAgent(agent);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/saas/agents/${agent.id}/transactions`);
       setAgentTransactions(response.data);
       setTransactionsDialogOpen(true);
-    } catch (error) {
+    } catch (_error) {
       toast.error('خطأ في تحميل المعاملات');
     }
   };

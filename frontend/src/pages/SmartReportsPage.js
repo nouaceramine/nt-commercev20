@@ -11,21 +11,21 @@ import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select as _Select,
+  SelectContent as _SelectContent,
+  SelectItem as _SelectItem,
+  SelectTrigger as _SelectTrigger,
+  SelectValue as _SelectValue,
 } from '../components/ui/select';
 import { toast } from 'sonner';
 import { 
   Mail, Send, Settings2, Clock, TrendingUp, AlertTriangle, 
-  Package, Users, DollarSign, Calendar, CheckCircle, XCircle,
-  Sparkles, FileText, BarChart3
+  Package, Users, DollarSign as _DollarSign, Calendar, CheckCircle, XCircle,
+  Sparkles, FileText, BarChart3 as _BarChart3
 } from 'lucide-react';
 
 export default function SmartReportsPage() {
-  const { t, language, isRTL } = useLanguage();
+  const { t, language, isRTL: _isRTL } = useLanguage();
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,7 +54,7 @@ export default function SmartReportsPage() {
 
   const fetchSettings = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       
       // Fetch email settings
       const emailRes = await apiClient.get(`/email/settings`);
@@ -79,7 +79,7 @@ export default function SmartReportsPage() {
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/smart-reports/settings`, reportSettings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
     } catch (error) {
@@ -92,7 +92,7 @@ export default function SmartReportsPage() {
   const handleSendTestReport = async () => {
     setSending(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.post(`/smart-reports/send-now`, {});
       toast.success(language === 'ar' ? 'تم إرسال التقرير بنجاح' : 'Rapport envoyé avec succès');
       fetchSettings();
@@ -107,7 +107,7 @@ export default function SmartReportsPage() {
     try {
       const res = await apiClient.get(`/smart-reports/preview`);
       setReportPreview(res.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل تحميل المعاينة' : 'Échec du chargement de l\'aperçu');
     }
   };

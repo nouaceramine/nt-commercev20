@@ -8,7 +8,7 @@ Features:
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import logging
@@ -172,7 +172,7 @@ def create_agent_hierarchy_routes(db, get_super_admin) -> dict:
         """Get full agent hierarchy as a tree"""
         agents = await db.saas_agents.find({}, {"_id": 0, "password": 0}).to_list(5000)
         levels = await db.agent_levels.find({}, {"_id": 0}).sort("level", 1).to_list(20)
-        levels_map = {l["id"]: l for l in levels}
+        levels_map = {level["id"]: level for level in levels}
 
         # Build tree
         agents_map = {}

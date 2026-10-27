@@ -21,7 +21,7 @@ import {
 // p151: Smart import wizard — reads files from other accounting software,
 // maps columns with AI, previews, then submits to the existing import API.
 
-const STEPS = ['collection', 'file', 'mapping', 'preview'];
+const _STEPS = ['collection', 'file', 'mapping', 'preview'];
 
 function parseCsvText(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');

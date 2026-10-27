@@ -28,7 +28,7 @@ export function barcodeDataURL(text, { width = 1.4, height = 34, fontSize = 11 }
       background: '#ffffff',
     });
     return canvas.toDataURL('image/png');
-  } catch (e) {
+  } catch (_e) {
     return '';
   }
 }

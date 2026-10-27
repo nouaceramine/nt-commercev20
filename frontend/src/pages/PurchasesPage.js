@@ -556,7 +556,7 @@ export default function PurchasesPage() {
     
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/purchases/${editingPurchase.id}`, {
         paid_amount: editPaidAmount,
         notes: editNotes
@@ -580,7 +580,7 @@ export default function PurchasesPage() {
       await apiClient.post(`/purchases/${purchase.id}/confirm-stock`);
       toast.success(language === 'ar' ? 'تم تأكيد المخزون' : 'Stock confirmé');
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'فشل تأكيد المخزون' : 'Échec de confirmation');
     }
   };
@@ -590,7 +590,7 @@ export default function PurchasesPage() {
       await apiClient.post(`/purchases/${purchase.id}/reopen`);
       toast.success(language === 'ar' ? 'تمت إعادة فتح الفاتورة' : 'Facture rouverte');
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error(language === 'ar' ? 'فشل إعادة الفتح' : 'Échec de réouverture');
     }
   };
@@ -652,7 +652,7 @@ export default function PurchasesPage() {
   const totalPaid = purchases.reduce((sum, p) => sum + p.paid_amount, 0);
   const safePurchases = Array.isArray(purchases) ? purchases : [];
   const totalRemaining = safePurchases.reduce((sum, p) => sum + (p.remaining || 0), 0);
-  const purchasesThisMonth = safePurchases.filter(p => {
+  const _purchasesThisMonth = safePurchases.filter(p => {
     const purchaseDate = new Date(p.created_at);
     const now = new Date();
     return purchaseDate.getMonth() === now.getMonth() && purchaseDate.getFullYear() === now.getFullYear();
@@ -660,7 +660,7 @@ export default function PurchasesPage() {
 
   const safeSuppliers = Array.isArray(suppliers) ? suppliers : [];
   const safeSupplierDebts = Array.isArray(supplierDebts) ? supplierDebts : [];
-  const selectedSupplierData = safeSuppliers.find(s => s.id === selectedSupplier);
+  const _selectedSupplierData = safeSuppliers.find(s => s.id === selectedSupplier);
   const supplierPreviousDebt = safeSupplierDebts.find(d => d.supplier_id === selectedSupplier)?.total_debt || 0;
 
   return (
@@ -705,7 +705,7 @@ export default function PurchasesPage() {
               try {
                 const response = await apiClient.get(`/purchases/generate-code`);
                 setPurchaseCode(response.data.code);
-              } catch (error) {
+              } catch (_error) {
                 setPurchaseCode('');
               }
               setShowNewPurchaseDialog(true);

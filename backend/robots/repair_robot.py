@@ -5,7 +5,6 @@ Monitors overdue repairs, suggests spare parts, provides diagnostics insights
 import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
-import uuid
 
 logger = logging.getLogger(__name__)
 

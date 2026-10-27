@@ -28,7 +28,7 @@ const FRENCH_MONTHS = [
 ];
 
 // أسماء الأيام بالعربية
-const ARABIC_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const _ARABIC_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
 /**
  * تحويل الأرقام العربية الشرقية إلى اللاتينية (الغربية)
@@ -215,7 +215,7 @@ export function formatRelative(date) {
  * @param {string} currency - العملة (افتراضي: دج)
  * @returns {string} - المبلغ منسقاً
  */
-export function formatCurrency(amount, currency = 'DZD') {
+export function formatCurrency(amount, _currency = 'DZD') {
   const num = Number(amount) || 0;
   const formatted = num.toLocaleString('en-US', {
     minimumFractionDigits: 2,

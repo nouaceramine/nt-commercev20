@@ -1,14 +1,14 @@
 import { errText } from '../lib/errorText';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import apiClient from '../lib/apiClient';
+import _apiClient from '../lib/apiClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import {
-  Building2, Eye, EyeOff, LogIn, Users, Truck, Store,
+  Building2, Eye, EyeOff, LogIn, Users as _Users, Truck, Store,
   Shield, ArrowLeft, Loader2, CheckCircle, KeyRound, Mail, AlertTriangle, Globe, Home
 } from 'lucide-react';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
@@ -142,7 +142,7 @@ export default function UnifiedLoginPage() {
   const T = STR[language === 'fr' ? 'fr' : 'ar'];
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
+  const [_formData, _setFormData] = useState({
     email: '',
     password: ''
   });

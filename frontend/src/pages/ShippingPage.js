@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Layout } from '../components/Layout';
+import { Layout as _Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -27,11 +27,11 @@ import {
 import { toast } from 'sonner';
 import { 
   Truck, 
-  Settings, 
+  Settings as _Settings,
   Calculator,
   MapPin,
   Building2,
-  Key,
+  Key as _Key,
   Save,
   RefreshCw,
   ExternalLink,
@@ -87,7 +87,7 @@ export default function ShippingPage() {
       const companySetting = settings.find(s => s.company_id === companyId);
       await apiClient.put(`/shipping/settings/${companyId}`, companySetting);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     } finally {
       setSaving(false);
@@ -108,7 +108,7 @@ export default function ShippingPage() {
         weight: weight
       });
       setRates(response.data.rates);
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     } finally {
       setCalculating(false);

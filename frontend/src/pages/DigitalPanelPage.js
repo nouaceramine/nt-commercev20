@@ -28,7 +28,7 @@ export default function DigitalPanelPage() {
         ]);
         setStats(s.data);
         setExpiring(e.data || []);
-      } catch (err) {
+      } catch (_err) {
         // handled by interceptor
       } finally {
         setLoading(false);

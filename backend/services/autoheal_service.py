@@ -586,7 +586,7 @@ class AutoHealEngine:
     # ── p225 L1: error classification — tag system_errors + spike findings ──
     async def _check_error_classification(self):
         from services.autoheal_level1 import classify_system_errors, RUNBOOKS
-        stats = await classify_system_errors(self._main_db)
+        _stats = await classify_system_errors(self._main_db)
         # spike detection: errors of one category in the last hour
         cutoff = _iso(_now() - timedelta(hours=1))
         recent = await self._main_db.system_errors.find(
@@ -828,7 +828,7 @@ class AutoHealEngine:
         findings = []
         d14 = _iso(now - timedelta(days=14))
         d28 = _iso(now - timedelta(days=28))
-        d7 = _iso(now - timedelta(days=7))
+        _d7 = _iso(now - timedelta(days=7))
         tenants = await self._main_db.saas_tenants.find(
             {"is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "short_id": 1}
         ).to_list(500)

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { Phone, PhoneCall, PhoneOff, Clock, PhoneMissed, PhoneForwarded, LogOut, RefreshCw, CheckCircle2, Search } from 'lucide-react';
+import { Phone, PhoneCall as _PhoneCall, PhoneOff, Clock, PhoneMissed, PhoneForwarded, LogOut, RefreshCw, CheckCircle2, Search } from 'lucide-react';
 import { ORDER_STATUSES } from '../ecom/ecomConstants';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -67,7 +67,7 @@ export default function WorkerWorkspacePage() {
     try {
       await wapi('POST', `/ecom-workers/me/orders/${order.id}/call-attempt`, { result });
       await load();
-    } catch (e) { /* toast-free: errors surface via reload */ }
+    } catch (_e) { /* toast-free: errors surface via reload */ }
     finally { setActingOn(null); }
   };
 

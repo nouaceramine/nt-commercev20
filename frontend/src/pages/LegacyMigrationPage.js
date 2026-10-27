@@ -14,7 +14,7 @@ import {
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import {
-  Upload, Database, Loader2, CheckCircle2, AlertTriangle, XCircle,
+  Upload, Database as _Database, Loader2, CheckCircle2, AlertTriangle, XCircle,
   RefreshCw, History, Undo2, FileUp, Link2, Radio, Copy, Download, Trash2,
 } from 'lucide-react';
 
@@ -60,11 +60,11 @@ export default function LegacyMigrationPage() {
       const res = await apiClient.get('/migration/live/status');
       setAgents(res.data.agents || []);
       setCounters(res.data.counters || {});
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
     try {
       const rc = await apiClient.get('/migration/live/reconciliation');
       setRecon(rc.data);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   }, []);
 
   const generateToken = async () => {
@@ -151,7 +151,7 @@ export default function LegacyMigrationPage() {
           setReportJob(full.data.job);
         }
       }
-    } catch (e) { /* silent on poll */ }
+    } catch (_e) { /* silent on poll */ }
   }, [reportJob]);
 
   useEffect(() => {
@@ -178,7 +178,7 @@ export default function LegacyMigrationPage() {
           } else {
             setActiveJob(j);
           }
-        } catch (e) { /* keep polling */ }
+        } catch (_e) { /* keep polling */ }
       }, 3000);
       return () => clearInterval(pollRef.current);
     }
@@ -219,7 +219,7 @@ export default function LegacyMigrationPage() {
     if (!rollbackTarget) return;
     setRollingBack(true);
     try {
-      const res = await apiClient.post(`/migration/legacy/jobs/${rollbackTarget.id}/rollback`);
+      const _res = await apiClient.post(`/migration/legacy/jobs/${rollbackTarget.id}/rollback`);
       toast.success(ar ? 'تم التراجع عن كل البيانات المستوردة' : 'Rollback effectué');
       setRollbackTarget(null);
       setReportJob(null);

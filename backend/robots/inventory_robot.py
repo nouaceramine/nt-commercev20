@@ -2,6 +2,7 @@
 Smart Inventory Robot
 Monitors stock levels, predicts stockouts, sends alerts, reorder recommendations
 """
+
 import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
@@ -20,7 +21,8 @@ def _linreg_slope_intercept(xs: list[float], ys: list[float]) -> tuple[float, fl
     n = len(xs)
     if n == 0:
         return 0.0, 0.0
-    sx = sum(xs); sy = sum(ys)
+    sx = sum(xs)
+    sy = sum(ys)
     sxx = sum(x * x for x in xs)
     sxy = sum(x * y for x, y in zip(xs, ys, strict=True))
     denom = (n * sxx) - (sx * sx)
@@ -40,7 +42,12 @@ class InventoryRobot:
         self.is_running = False
         self.check_interval = 3600
         self.last_run = None
-        self.stats = {"checks": 0, "alerts_sent": 0, "recommendations": 0, "predictions": 0}
+        self.stats = {
+            "checks": 0,
+            "alerts_sent": 0,
+            "recommendations": 0,
+            "predictions": 0,
+        }
 
     async def start(self) -> dict:
         self.is_running = True
@@ -61,7 +68,9 @@ class InventoryRobot:
 
     async def run_checks(self) -> dict:
         self.stats["checks"] += 1
-        tenants = await self.db.saas_tenants.find({"is_active": True}, {"_id": 0}).to_list(500)
+        tenants = await self.db.saas_tenants.find(
+            {"is_active": True}, {"_id": 0}
+        ).to_list(500)
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
@@ -75,11 +84,14 @@ class InventoryRobot:
                 logger.error(f"Inventory check failed for {tenant.get('id')}: {e}")
 
     async def _check_low_stock(self, tenant, tdb) -> dict:
-        low_stock = await tdb.products.find({
-            "$expr": {
-                "$lte": ["$quantity", {"$ifNull": ["$low_stock_threshold", 10]}]
-            }
-        }, {"_id": 0}).to_list(100)
+        low_stock = await tdb.products.find(
+            {
+                "$expr": {
+                    "$lte": ["$quantity", {"$ifNull": ["$low_stock_threshold", 10]}]
+                }
+            },
+            {"_id": 0},
+        ).to_list(100)
         if not low_stock:
             return
         for p in low_stock[:5]:
@@ -105,18 +117,22 @@ class InventoryRobot:
         pipeline = [
             {"$match": {"created_at": {"$gte": thirty_days_ago}}},
             {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
-            {"$group": {
-                "_id": "$items.product_id",
-                "name": {"$first": "$items.product_name"},
-                "total_sold": {"$sum": "$items.quantity"},
-                "avg_price": {"$avg": "$items.unit_price"},
-            }},
+            {
+                "$group": {
+                    "_id": "$items.product_id",
+                    "name": {"$first": "$items.product_name"},
+                    "total_sold": {"$sum": "$items.quantity"},
+                    "avg_price": {"$avg": "$items.unit_price"},
+                }
+            },
             {"$sort": {"total_sold": -1}},
         ]
         sales = await tdb.sales.aggregate(pipeline).to_list(1000)
         recs = []
         for item in sales:
-            prod = await tdb.products.find_one({"id": item["_id"]}, {"_id": 0, "quantity": 1, "name": 1, "name_ar": 1})
+            prod = await tdb.products.find_one(
+                {"id": item["_id"]}, {"_id": 0, "quantity": 1, "name": 1, "name_ar": 1}
+            )
             if not prod:
                 continue
             qty = prod.get("quantity", 0)
@@ -125,36 +141,55 @@ class InventoryRobot:
                 continue
             days_left = qty / daily_rate
             if days_left < 7:
-                recs.append({
-                    "id": str(uuid.uuid4()),
-                    "tenant_id": tenant["id"],
-                    "product_id": item["_id"],
-                    "product_name": item.get("name") or prod.get("name_ar", ""),
-                    "current_stock": qty,
-                    "daily_sales_rate": round(daily_rate, 2),
-                    "days_until_out": round(days_left, 1),
-                    "recommended_order": int(daily_rate * 60),
-                    "urgency": "high" if days_left < 3 else "medium",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                recs.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "tenant_id": tenant["id"],
+                        "product_id": item["_id"],
+                        "product_name": item.get("name") or prod.get("name_ar", ""),
+                        "current_stock": qty,
+                        "daily_sales_rate": round(daily_rate, 2),
+                        "days_until_out": round(days_left, 1),
+                        "recommended_order": int(daily_rate * 60),
+                        "urgency": "high" if days_left < 3 else "medium",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
         if recs:
             await tdb.reorder_recommendations.delete_many({"tenant_id": tenant["id"]})
             await tdb.reorder_recommendations.insert_many(recs)
             self.stats["recommendations"] += len(recs)
 
     async def _predict_stockout(self, tenant, tdb) -> dict:
-        popular = await tdb.products.find({}, {"_id": 0}).sort("sales_count", -1).limit(20).to_list(20)
+        popular = (
+            await tdb.products.find({}, {"_id": 0})
+            .sort("sales_count", -1)
+            .limit(20)
+            .to_list(20)
+        )
         predictions = []
         for product in popular:
             pid = product.get("id")
             if not pid:
                 continue
-            thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            thirty_days_ago = (
+                datetime.now(timezone.utc) - timedelta(days=30)
+            ).isoformat()
             pipeline = [
-                {"$match": {"created_at": {"$gte": thirty_days_ago}, "items.product_id": pid}},
+                {
+                    "$match": {
+                        "created_at": {"$gte": thirty_days_ago},
+                        "items.product_id": pid,
+                    }
+                },
                 {"$unwind": "$items"},
                 {"$match": {"items.product_id": pid}},
-                {"$group": {"_id": {"$substr": ["$created_at", 0, 10]}, "quantity": {"$sum": "$items.quantity"}}},
+                {
+                    "$group": {
+                        "_id": {"$substr": ["$created_at", 0, 10]},
+                        "quantity": {"$sum": "$items.quantity"},
+                    }
+                },
                 {"$sort": {"_id": 1}},
             ]
             daily_sales = await tdb.sales.aggregate(pipeline).to_list(30)
@@ -163,23 +198,32 @@ class InventoryRobot:
                 ys = [float(d["quantity"]) for d in daily_sales]
                 slope, intercept = _linreg_slope_intercept(xs, ys)
                 # Predict next 7 days, then average
-                future_preds = [slope * (len(daily_sales) + i) + intercept for i in range(7)]
+                future_preds = [
+                    slope * (len(daily_sales) + i) + intercept for i in range(7)
+                ]
                 avg_daily = max(sum(future_preds) / len(future_preds), 0.01)
                 current_stock = product.get("quantity", 0)
                 days_until_out = current_stock / avg_daily
                 if days_until_out < 14:
-                    predictions.append({
-                        "id": str(uuid.uuid4()),
-                        "tenant_id": tenant["id"],
-                        "product_id": pid,
-                        "product_name": product.get("name_ar", product.get("name", "")),
-                        "current_stock": current_stock,
-                        "avg_daily_sales": round(float(avg_daily), 2),
-                        "predicted_stockout_date": (datetime.now(timezone.utc) + timedelta(days=days_until_out)).isoformat(),
-                        "days_remaining": round(float(days_until_out), 1),
-                        "confidence": min(0.9, len(daily_sales) / 30),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    })
+                    predictions.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "tenant_id": tenant["id"],
+                            "product_id": pid,
+                            "product_name": product.get(
+                                "name_ar", product.get("name", "")
+                            ),
+                            "current_stock": current_stock,
+                            "avg_daily_sales": round(float(avg_daily), 2),
+                            "predicted_stockout_date": (
+                                datetime.now(timezone.utc)
+                                + timedelta(days=days_until_out)
+                            ).isoformat(),
+                            "days_remaining": round(float(days_until_out), 1),
+                            "confidence": min(0.9, len(daily_sales) / 30),
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
         if predictions:
             await tdb.stockout_predictions.delete_many({"tenant_id": tenant["id"]})
             await tdb.stockout_predictions.insert_many(predictions)
@@ -197,8 +241,12 @@ class InventoryRobot:
     async def _cleanup_old_data(self, tenant, tdb) -> dict:
         week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         try:
-            await tdb.reorder_recommendations.delete_many({"created_at": {"$lt": week_ago}})
-            await tdb.stockout_predictions.delete_many({"created_at": {"$lt": week_ago}})
+            await tdb.reorder_recommendations.delete_many(
+                {"created_at": {"$lt": week_ago}}
+            )
+            await tdb.stockout_predictions.delete_many(
+                {"created_at": {"$lt": week_ago}}
+            )
         except Exception:
             pass
 

@@ -12,7 +12,7 @@ import uuid
 
 def create_rental_routes(db, get_current_user, get_tenant_admin, require_tenant) -> APIRouter:
     from utils.permissions import create_permission_checker
-    require_permission = create_permission_checker(db, get_current_user)
+    _require_permission = create_permission_checker(db, get_current_user)
     router = APIRouter(prefix="/rentals", tags=["rentals"])
 
     def _now():

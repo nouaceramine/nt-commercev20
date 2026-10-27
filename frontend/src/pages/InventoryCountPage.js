@@ -6,7 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Badge } from '../components/ui/badge';
+import { Badge as _Badge } from '../components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -76,10 +76,10 @@ export default function InventoryCountPage() {
   
   // Enhanced features
   const [viewMode, setViewMode] = useState('all'); // all, counted, uncounted, differences
-  const [sortBy, setSortBy] = useState('name'); // name, barcode, difference
-  const [sortOrder, setSortOrder] = useState('asc');
-  const [autoFocus, setAutoFocus] = useState(true);
-  const [showOnlyLowStock, setShowOnlyLowStock] = useState(false);
+  const [sortBy, _setSortBy] = useState('name'); // name, barcode, difference
+  const [sortOrder, _setSortOrder] = useState('asc');
+  const [autoFocus, _setAutoFocus] = useState(true);
+  const [showOnlyLowStock, _setShowOnlyLowStock] = useState(false);
   const [quickCountMode, setQuickCountMode] = useState(false);
   const [lastScannedProduct, setLastScannedProduct] = useState(null);
 
@@ -90,7 +90,7 @@ export default function InventoryCountPage() {
   // Fetch inventory code when dialog opens
   useEffect(() => {
     if (showStartDialog && !inventoryCode) {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       apiClient.get(`/inventory-sessions/generate-code`)
         .then(res => setInventoryCode(res.data.code))
         .catch(() => {});
@@ -141,7 +141,7 @@ export default function InventoryCountPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       
       // Generate inventory code first
       let code = '';
@@ -237,7 +237,7 @@ export default function InventoryCountPage() {
   const saveCountToSession = async (items) => {
     if (!activeSession) return;
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/inventory-sessions/${activeSession.id}`, {
         ...activeSession,
         counted_items: items
@@ -372,7 +372,7 @@ export default function InventoryCountPage() {
     let matched = 0;
     let notFound = 0;
 
-    importData.forEach((row, rowIndex) => {
+    importData.forEach((row, _rowIndex) => {
       const barcode = String(row[barcodeIdx] || '').trim();
       const quantity = parseInt(row[quantityIdx]) || 0;
       const excelName = nameIdx !== null ? String(row[nameIdx] || '') : '';
@@ -460,7 +460,7 @@ export default function InventoryCountPage() {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 0);
       toast.success(language === 'ar' ? 'تم تحميل القالب' : 'Modèle téléchargé');
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'تعذر إنشاء القالب' : 'Erreur de création du modèle');
     }
   };

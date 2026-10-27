@@ -14,7 +14,6 @@ These tests exercise the live FastAPI app via httpx — they assume:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 import uuid
@@ -27,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 from models.events import Event, EventMetadata, ProcessedEvent
-from services.event_bus import RedisEventBus, STREAM_KEY, GROUP_NAME, PROCESSED_COLLECTION
+from services.event_bus import RedisEventBus, STREAM_KEY, PROCESSED_COLLECTION
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -269,7 +268,6 @@ async def test_sale_completed_consumer_writes_movement():
 @pytest.mark.asyncio
 async def test_ecom_order_confirmed_deducts_stock_idempotent():
     """Publish ecom_order.confirmed twice → stock deducted exactly once via _eda_stock_deducted flag."""
-    from config.database import get_tenant_db
     mongo, main_db, r = _fresh_clients()
     try:
         tenant_id = "ecomtest_" + uuid.uuid4().hex[:6]

@@ -3,9 +3,8 @@ Smart Supplier Robot
 Analyzes supplier performance, compares prices, tracks delivery times
 """
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import logging
-import uuid
 
 logger = logging.getLogger(__name__)
 

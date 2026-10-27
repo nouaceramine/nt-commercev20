@@ -1,7 +1,4 @@
 """iter 18.4 — AI Co-pilot + Health Alerts smoke tests."""
-import asyncio
-import json
-import time
 
 import httpx
 import pytest

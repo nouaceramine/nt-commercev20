@@ -65,7 +65,7 @@ export function usePOSCart({ language, toast }) {
       gainNode.gain.value = 0.15;
       oscillator.start();
       setTimeout(() => oscillator.stop(), 80);
-    } catch (e) { /* silent */ }
+    } catch (_e) { /* silent */ }
   }, []);
 
   const addItem = useCallback((product, options = {}) => {

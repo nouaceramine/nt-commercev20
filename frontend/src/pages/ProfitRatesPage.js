@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import apiClient from '../lib/apiClient';
+import { useState as _useState, useEffect as _useEffect } from 'react';
+import _apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -14,13 +14,13 @@ import {
   TableRow,
 } from '../components/ui/table';
 import {
-  TrendingUp,
+  TrendingUp as _TrendingUp,
   ArrowRight,
   Percent,
   Smartphone,
   Wifi,
   CreditCard,
-  DollarSign,
+  DollarSign as _DollarSign,
   Info
 } from 'lucide-react';
 import { Link } from 'react-router-dom';

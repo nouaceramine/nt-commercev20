@@ -30,7 +30,7 @@ import {
   CreditCard,
   Phone,
   Plus,
-  Minus,
+  Minus as _Minus,
   History,
   RefreshCw,
   Zap,
@@ -75,7 +75,7 @@ export default function SimManagementPage() {
     try {
       const r = await apiClient.get('/sim/offers/all');
       setOffers(Array.isArray(r.data) ? r.data : []);
-    } catch (e) {
+    } catch (_e) {
       setOffers([]);
     }
   };
@@ -122,7 +122,7 @@ export default function SimManagementPage() {
       await apiClient.delete(`/sim/offers/${id}`);
       toast.success(language === 'ar' ? 'تم حذف العرض' : 'Offre supprimée');
       fetchOffers();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     }
   };
@@ -144,7 +144,7 @@ export default function SimManagementPage() {
       await apiClient.put(`/sim/slots/${slotId}`, data);
       toast.success(language === 'ar' ? 'تم تحديث الشريحة' : 'SIM mise à jour');
       fetchSlots();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     } finally {
       setSaving(false);
@@ -170,7 +170,7 @@ export default function SimManagementPage() {
       toast.success(language === 'ar' ? 'تم تحديث الرصيد' : 'Solde mis à jour');
       setShowBalanceDialog(false);
       fetchSlots();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     } finally {
       setSaving(false);
@@ -182,7 +182,7 @@ export default function SimManagementPage() {
       const response = await apiClient.get(`/sim/slots/${slotId}/logs`);
       setLogs(response.data);
       setShowLogsDialog(true);
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     }
   };

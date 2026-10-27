@@ -8,7 +8,6 @@ each channel can have its own auth shape. Real channels are added in P2+.
 Until then, integrations remain in "mock" mode and webhook/poll workers no-op.
 """
 from datetime import datetime, timezone
-from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException

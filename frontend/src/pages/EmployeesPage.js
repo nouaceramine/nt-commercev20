@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -11,12 +11,12 @@ import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../components/ui/alert-dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs as _Tabs, TabsContent as _TabsContent, TabsList as _TabsList, TabsTrigger as _TabsTrigger } from '../components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { toast } from 'sonner';
 import { 
   Users, Plus, Edit, Trash2, Calendar, DollarSign, Clock, UserPlus, KeyRound, UserX, Eye, EyeOff,
-  TrendingUp, Wallet, CheckCircle, XCircle, AlertTriangle, Download, FileText, BarChart3, Briefcase
+  TrendingUp, Wallet, CheckCircle as _CheckCircle, XCircle as _XCircle, AlertTriangle as _AlertTriangle, Download, FileText, BarChart3 as _BarChart3, Briefcase as _Briefcase
 } from 'lucide-react';
 
 export default function EmployeesPage() {
@@ -36,10 +36,10 @@ export default function EmployeesPage() {
   const [accountData, setAccountData] = useState({ email: '', password: '', role: 'seller' });
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [activeTab, setActiveTab] = useState('employees');
-  const [attendanceReport, setAttendanceReport] = useState([]);
+  const [_activeTab, _setActiveTab] = useState('employees');
+  const [_attendanceReport, _setAttendanceReport] = useState([]);
   const [salaryMonth, setSalaryMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [salaryReport, setSalaryReport] = useState([]);
+  const [_salaryReport, setSalaryReport] = useState([]);
 
   // Statistics
   const stats = {
@@ -74,7 +74,7 @@ export default function EmployeesPage() {
       setDialogOpen(false);
       resetForm();
       fetchEmployees();
-    } catch (e) { toast.error(t.somethingWentWrong); }
+    } catch (_e) { toast.error(t.somethingWentWrong); }
   };
 
   const handleDelete = async () => {
@@ -83,7 +83,7 @@ export default function EmployeesPage() {
       toast.success(t.employeeDeleted);
       setDeleteDialogOpen(false);
       fetchEmployees();
-    } catch (e) { toast.error(t.somethingWentWrong); }
+    } catch (_e) { toast.error(t.somethingWentWrong); }
   };
 
   const handleAttendance = async (e) => {
@@ -92,7 +92,7 @@ export default function EmployeesPage() {
       await apiClient.post(`/employees/attendance`, { employee_id: selectedEmployee.id, ...attendanceData });
       toast.success(t.recordAttendance);
       setAttendanceDialogOpen(false);
-    } catch (e) { toast.error(t.somethingWentWrong); }
+    } catch (_e) { toast.error(t.somethingWentWrong); }
   };
 
   const handleAdvance = async (e) => {
@@ -103,7 +103,7 @@ export default function EmployeesPage() {
       setAdvanceDialogOpen(false);
       setAdvanceAmount('');
       fetchEmployees();
-    } catch (e) { toast.error(t.somethingWentWrong); }
+    } catch (_e) { toast.error(t.somethingWentWrong); }
   };
 
   const handleCreateAccount = async (e) => {

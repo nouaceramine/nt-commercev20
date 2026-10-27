@@ -7,7 +7,7 @@ import { Badge } from "../../../components/ui/badge";
 import { toast } from "sonner";
 import apiClient from "../../../lib/apiClient";
 import { downloadCsv, todayStamp } from "../../../lib/csvExport";
-import { Loader2, Search, Package, Truck, Receipt, CheckCircle2, XCircle, FileText, Users } from "lucide-react";
+import { Loader2, Search, Package, Truck, Receipt as _Receipt, CheckCircle2, XCircle, FileText, Users } from "lucide-react";
 import { fmt } from "./format";
 
 const STATUS_META = {

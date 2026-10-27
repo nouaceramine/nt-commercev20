@@ -5,19 +5,19 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
-import { Separator } from '../components/ui/separator';
+import { Separator as _Separator } from '../components/ui/separator';
 import { toast } from 'sonner';
 import apiClient from '../lib/apiClient';
 import {
   Database, Download, Calendar, Shield, Clock, HardDrive,
-  Plus, Trash2, RefreshCw, Upload, AlertTriangle, CheckCircle2,
-  Globe, Lock, RotateCcw, Server, Activity, ChevronDown, ChevronRight,
+  Plus as _Plus, Trash2, RefreshCw, Upload, AlertTriangle, CheckCircle2,
+  Globe, Lock, RotateCcw, Server as _Server, Activity, ChevronDown, ChevronRight,
   FileArchive, Info
 } from 'lucide-react';
 
@@ -37,7 +37,7 @@ const NUM_BADGE = {
 
 export default function BackupSystemPage() {
   const { language } = useLanguage();
-  const { user, isSuperAdmin } = useAuth();
+  const { user: _user, isSuperAdmin } = useAuth();
   const isAr = language === 'ar';
 
   const [backups, setBackups]         = useState([]);
@@ -139,7 +139,7 @@ export default function BackupSystemPage() {
       a.download = backup.file_name || `backup_${backup.backup_number}.json.gz`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e) {
+    } catch (_e) {
       toast.error(isAr ? 'خطأ في تحميل الملف' : 'Erreur téléchargement');
     }
   };
@@ -207,7 +207,7 @@ export default function BackupSystemPage() {
       await apiClient.delete(`/backup/${id}`);
       toast.success(isAr ? 'تم الحذف' : 'Supprimé');
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error('Error');
     }
   };
@@ -218,7 +218,7 @@ export default function BackupSystemPage() {
       toast.success(isAr ? 'تم إنشاء الجدول التلقائي' : 'Planification créée');
       setShowSchedule(false);
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error('Error');
     }
   };
@@ -228,7 +228,7 @@ export default function BackupSystemPage() {
       await apiClient.post('/backup/schema-version/sync');
       toast.success(isAr ? `تم تحديث إصدار المخطط إلى ${stats.system_version}` : `Schéma mis à jour → ${stats.system_version}`);
       fetchData();
-    } catch (e) {
+    } catch (_e) {
       toast.error('Error');
     }
   };

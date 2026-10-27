@@ -131,7 +131,7 @@ export default function AddProductPage() {
 
   const fetchFamilies = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/product-families`);
       setFamilies(response.data);
       const brandsRes = await apiClient.get(`/product-brands`);  // p217
@@ -164,7 +164,7 @@ export default function AddProductPage() {
         setUploadingProductImage(false);
       };
       reader.readAsDataURL(file);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'فشل رفع الصورة' : 'Échec du téléchargement');
       setUploadingProductImage(false);
     }
@@ -176,7 +176,7 @@ export default function AddProductPage() {
       const response = await apiClient.get(`/products/generate-barcode`);
       setFormData(prev => ({ ...prev, barcode: response.data.barcode }));
       toast.success(t.barcodeGenerated);
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     } finally {
       setGeneratingBarcode(false);
@@ -262,7 +262,7 @@ export default function AddProductPage() {
         }));
         toast.success(`${t.modelsExtracted} (${extracted_models.length})`);
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.ocrFailed);
     } finally {
       setOcrLoading(false);
@@ -318,7 +318,7 @@ export default function AddProductPage() {
       } else {
         toast.error(res.data.error || (isAr ? 'فشل توليد الوصف' : 'Échec de la génération'));
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error(isAr ? 'فشل الاتصال بالذكاء الاصطناعي' : 'Connexion IA impossible');
     } finally {
       setAiLoading(false);

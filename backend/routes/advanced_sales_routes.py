@@ -2,8 +2,7 @@
 Advanced Sales Tracking & Reports Routes - Extracted from server.py
 Advanced reports, employee sales, peak hours, returns analysis
 """
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 

@@ -5,7 +5,7 @@ import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
+import { Label as _Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -88,7 +88,7 @@ export default function DateTimeSettingsPage() {
       
       const res = await apiClient.get(`/settings/datetime/preview?${params}`);
       setPreview(res.data.formatted);
-    } catch (error) {
+    } catch (_error) {
       // Generate preview locally WITHOUT mutating global formatter state
       const now = new Date();
       const prevConfig = globalDateFormatter.getConfig();

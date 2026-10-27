@@ -18,7 +18,6 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -203,26 +202,26 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         leads = await db.store_cart_leads.find({"last_seen": {"$gte": since}}, {"_id": 0}).to_list(2000)
         total = len(leads)
-        converted = sum(1 for l in leads if l.get("converted"))
-        abandoned = [l for l in leads if not l.get("converted")]
+        converted = sum(1 for lead in leads if lead.get("converted"))
+        abandoned = [lead for lead in leads if not lead.get("converted")]
 
         # Heuristics: high shipping vs total, missing name, stale reminders
         suggestions = []
         ship_loss = 0
-        for l in abandoned:
-            tot = float(l.get("total") or 0)
+        for lead in abandoned:
+            tot = float(lead.get("total") or 0)
             if 0 < tot < 2500:
                 ship_loss += 1
         if total >= 5:
-            rate = round(100 * len(abandoned) / total, 1)
+            _rate = round(100 * len(abandoned) / total, 1)
             if ship_loss >= max(2, len(abandoned) // 3):
-                avg = round(sum(float(l.get("total") or 0) for l in abandoned if l.get("total")) / max(ship_loss, 1))
+                avg = round(sum(float(lead.get("total") or 0) for lead in abandoned if lead.get("total")) / max(ship_loss, 1))
                 suggestions.append({
                     "key": "free_shipping_threshold",
                     "title_ar": "فعّل التوصيل المجاني فوق عتبة",
                     "detail_ar": f"{ship_loss} سلة مهجورة قيمتها أقل من 2500 دج (متوسط {avg} دج) — غالباً بسبب كلفة التوصيل. عتبة توصيل مجاني عند {max(3000, avg + 800)} دج قد تسترجع جزءاً كبيراً منها.",
                 })
-            not_reminded = sum(1 for l in abandoned if not l.get("reminder_sent"))
+            not_reminded = sum(1 for lead in abandoned if not lead.get("reminder_sent"))
             if not_reminded >= 3:
                 suggestions.append({
                     "key": "enable_reminders",
@@ -233,7 +232,7 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
             "days": days, "total_leads": total, "converted": converted,
             "abandoned": len(abandoned),
             "abandon_rate": round(100 * len(abandoned) / total, 1) if total else 0,
-            "recoverable_value": round(sum(float(l.get("total") or 0) for l in abandoned), 2),
+            "recoverable_value": round(sum(float(lead.get("total") or 0) for lead in abandoned), 2),
             "suggestions": suggestions,
         }
 
@@ -544,7 +543,7 @@ async def handle_wa_sales_bot(db, tenant_id: str, parsed: dict, store_slug: str)
 
     link = f"https://nt-commerce.net/shop/{store_slug}" if store_slug else ""
     if products:
-        lines = [f"🛍️ لقيت هذو في متجرنا:"]
+        lines = ["🛍️ لقيت هذو في متجرنا:"]
         for p in products:
             price = p.get("sale_price") or p.get("price") or 0
             lines.append(f"• {p.get('name_ar') or p.get('name_en')} — {price:,.0f} دج")

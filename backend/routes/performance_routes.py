@@ -2,10 +2,8 @@
 Performance Optimization Module
 Response caching, query optimization, and performance monitoring
 """
-from fastapi import APIRouter, HTTPException, Depends, Request, Response
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, timezone
 import time
 import logging
 

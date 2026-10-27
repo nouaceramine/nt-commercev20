@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import _React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { useLanguage } from "../contexts/LanguageContext";
 import { Layout } from "../components/Layout";
@@ -35,7 +35,7 @@ export default function MarketplacePage() {
       ]);
       setListings(l.data.listings || []);
       setProducts(p.data || []);
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? "فشل التحميل" : "Échec du chargement");
     } finally {
       setLoading(false);

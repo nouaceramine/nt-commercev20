@@ -39,7 +39,7 @@ const STATUS_BADGE = {
 const TABS = ['pos', 'bridge', 'history'];
 
 export default function RechargePage() {
-  const { t, language } = useLanguage();
+  const { t: _t, language } = useLanguage();
   const { isAdmin } = useAuth();
   const ar = language === 'ar';
 
@@ -90,7 +90,7 @@ export default function RechargePage() {
       const c = custRes.data;
       setCustomers(Array.isArray(c) ? c : (c?.items || []));
       if (walletRes.data) setWalletBalance(walletRes.data.balance ?? 0);
-    } catch (err) {
+    } catch (_err) {
       toast.error(ar ? 'خطأ في تحميل البيانات' : 'Erreur de chargement');
     } finally {
       setLoading(false);

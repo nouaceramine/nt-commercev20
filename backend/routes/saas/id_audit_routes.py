@@ -6,7 +6,7 @@ are missing it, and whether any duplicate codes exist (must always be 0).
 """
 from fastapi import APIRouter, Depends
 
-from config.database import db, client, get_tenant_db
+from config.database import db, get_tenant_db
 from .helpers import get_super_admin
 
 router = APIRouter(tags=["ID Audit"])

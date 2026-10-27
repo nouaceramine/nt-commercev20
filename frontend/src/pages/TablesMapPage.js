@@ -77,7 +77,7 @@ export default function TablesMapPage() {
       setOrders((o.data || []).filter(x => x.status !== 'served' && x.status !== 'cancelled'));
       setSchedList(sc.data || []);  // p337
       setResvList(rv.data || []);  // p370
-    } catch (e) { /* جلب دوري صامت */ }
+    } catch (_e) { /* جلب دوري صامت */ }
     finally { setLoading(false); }
   }, []);
 
@@ -143,7 +143,7 @@ export default function TablesMapPage() {
       a.href = url; a.download = `period-report.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p394: تصدير التقرير المخصص CSV (BOM عربي لـ Excel)
   const downloadPeriodCsv = async () => {
@@ -159,7 +159,7 @@ export default function TablesMapPage() {
       a.href = url; a.download = `period-report.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p379: تنزيل تقرير الإقفال Z كملف PDF — جلب مصادق عليه ثم تنزيل
@@ -174,7 +174,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p401: تصدير الإقفال اليومي Z كملف CSV (BOM عربي لـ Excel)
   const downloadZCsv = async () => {
@@ -188,7 +188,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p385: تحميل تقرير أداء الندل PDF (نفس فترة جدول الأداء tstatsDays)
   const downloadWsPdf = async () => {
@@ -202,7 +202,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p397: تصدير أداء الندل CSV (BOM عربي لـ Excel — نفس فترة الجدول)
   const downloadWsCsv = async () => {
@@ -216,7 +216,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p388: تحميل تقرير الحجوزات PDF (الفترة الافتراضية: آخر 7 أيام — حدود الباك-إند)
   const downloadResvPdf = async () => {
@@ -230,7 +230,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p465: اتجاه التغيّب عن الحجوزات CSV (BOM عربي لـ Excel — 30 يومًا)
   const downloadNoshowCsv = async () => {
@@ -244,7 +244,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p406: تصدير تقرير الحجوزات CSV (BOM عربي لـ Excel — نفس فترة تقرير PDF)
   const downloadResvCsv = async () => {
@@ -258,7 +258,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p392: تحميل تقرير دوران الطاولات PDF (نفس فترة الجدول tstatsDays)
   const downloadTablePdf = async () => {
@@ -272,7 +272,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p404: تصدير دوران الطاولات CSV (BOM عربي لـ Excel — نفس فترة الجدول)
   const downloadTableCsv = async () => {
@@ -286,7 +286,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p418: منحنى الإيرادات PDF (نفس فترة trendDays)
   const downloadTrendPdf = async () => {
@@ -300,7 +300,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p417: تصدير الطلبيات المجدولة CSV (BOM عربي لـ Excel)
   const downloadSchedCsv = async () => {
@@ -314,7 +314,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p461: الطاولات الخاملة CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadIdleCsv = async () => {
@@ -328,7 +328,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p448: أداء الطاولات CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadTablesPerfCsv = async () => {
@@ -342,7 +342,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p444: المبيعات حسب يوم الأسبوع CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadWdaysCsv = async () => {
@@ -356,7 +356,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p450: توزيع طرق الدفع CSV (BOM عربي لـ Excel — نفس فترة trendDays)
@@ -371,7 +371,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p453: تقرير الخصومات PDF (نفس فترة trendDays)
   const downloadDiscPdf = async () => {
@@ -385,7 +385,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
   // p441: تقرير الخصومات CSV (BOM عربي لـ Excel — نفس فترة trendDays)
   const downloadDiscCsv = async () => {
@@ -399,7 +399,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p437: المبيعات حسب الساعة CSV (BOM عربي لـ Excel — نفس فترة trendDays)
@@ -414,7 +414,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p462: متوسط قيمة الطلب اليومي CSV (BOM عربي لـ Excel — نفس فترة trendDays أو مرشّح p472)
@@ -430,7 +430,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
   // p408: تصدير منحنى الإيرادات CSV (BOM عربي لـ Excel — نفس فترة المنحنى trendDays)
   const downloadTrendCsv = async () => {
@@ -445,7 +445,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل CSV' : 'Echec CSV'); }
   };
 
   // p378: تنبيه النادل عند جاهزية الطلب — حدث SSE مع صوت اختياري (WebAudio بلا ملفات)
@@ -459,8 +459,8 @@ export default function TablesMapPage() {
       gain.gain.setValueAtTime(0.15, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
       osc.start(); osc.stop(ctx.currentTime + 0.6);
-      osc.onended = () => { try { ctx.close(); } catch (e) {} };
-    } catch (e) { /* الصوت غير متاح في هذا المتصفح */ }
+      osc.onended = () => { try { ctx.close(); } catch (_e) {} };
+    } catch (_e) { /* الصوت غير متاح في هذا المتصفح */ }
   }, []);
 
   useEffect(() => {
@@ -585,7 +585,7 @@ export default function TablesMapPage() {
     setResvTable(r.table_id || '');
     setResvName(r.customer_name || '');
     setResvPhone(r.customer_phone || '');
-    try { setResvWhen(r.reserved_for ? new Date(r.reserved_for).toISOString().slice(0, 16) : ''); } catch (e) { setResvWhen(''); }
+    try { setResvWhen(r.reserved_for ? new Date(r.reserved_for).toISOString().slice(0, 16) : ''); } catch (_e) { setResvWhen(''); }
     setResvSize(String(r.party_size || 2));
     setResvDlg(true);
   };
@@ -676,8 +676,8 @@ export default function TablesMapPage() {
       const res = await apiClient.get(`/restaurant/kitchen-orders/${oid}/receipt`);
       setPrintMode('receipt');
       setReceipt(res.data);
-      setTimeout(() => { try { window.print(); } catch (e) {} }, 400);
-    } catch (e) { toast.error(isAr ? 'تعذر جلب الفاتورة' : 'Recu indisponible'); }
+      setTimeout(() => { try { window.print(); } catch (_e) {} }, 400);
+    } catch (_e) { toast.error(isAr ? 'تعذر جلب الفاتورة' : 'Recu indisponible'); }
   };
 
   // p377: تحميل فاتورة الزبون PDF — جلب مصادق عليه ثم تنزيل كملف
@@ -692,7 +692,7 @@ export default function TablesMapPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
+    } catch (_e) { toast.error(isAr ? 'تعذر تحميل PDF' : 'Echec PDF'); }
   };
 
   // p336: تأكيد دفع طلب (كاش) من خريطة الطاولات
@@ -752,7 +752,7 @@ export default function TablesMapPage() {
     setSchedEditId(o.id);
     setSchedItems((o.items || []).map(i => ({ product_id: i.product_id || null, product_name: i.product_name,
       quantity: i.quantity || 1, unit_price: i.unit_price || 0, note: i.note || '' })));
-    try { setSchedWhen(o.scheduled_for ? new Date(o.scheduled_for).toISOString().slice(0, 16) : ''); } catch (e) { setSchedWhen(''); }
+    try { setSchedWhen(o.scheduled_for ? new Date(o.scheduled_for).toISOString().slice(0, 16) : ''); } catch (_e) { setSchedWhen(''); }
     setSchedRemind(String(o.remind_days || 1));
     setSchedPhone(o.customer_phone || '');
     setSchedNotes(o.notes || '');
@@ -763,7 +763,7 @@ export default function TablesMapPage() {
     try {
       const { data } = await apiClient.get('/products?limit=1000');
       setProducts((data?.items || data || []).filter(p => Number(p.retail_price) > 0 && p.is_active !== false));
-    } catch (e) { /* صامت */ }
+    } catch (_e) { /* صامت */ }
   };
   const addSchedItem = (p) => {
     setSchedItems(prev => {
@@ -924,7 +924,7 @@ export default function TablesMapPage() {
                 <span className="text-muted-foreground">{isAr ? 'افتح هذا الرابط بملء الشاشة على جهاز الكونتوار:' : 'Lien:'}</span>
                 <code className="bg-muted rounded px-2 py-1 break-all" dir="ltr" data-testid="kiosk-url">{`${window.location.origin}/kiosk/${user?.tenant_id}`}</code>
                 <Button size="sm" variant="outline" className="h-7"
-                  onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/kiosk/${user?.tenant_id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (e) {} }}
+                  onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/kiosk/${user?.tenant_id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (_e) {} }}
                   data-testid="kiosk-copy">
                   <Copy className="h-3.5 w-3.5 ml-1" />{isAr ? 'نسخ' : 'Copier'}
                 </Button>
@@ -1062,7 +1062,7 @@ export default function TablesMapPage() {
                   className="border rounded h-8 px-2 text-xs bg-background" data-testid="z-date" />
                 <Button size="sm" variant="outline" className="h-8" data-testid="z-print-btn"
                   disabled={!zrep || (zrep.orders === 0 && zrep.cancelled === 0)}
-                  onClick={() => { setPrintMode('z'); setTimeout(() => { try { window.print(); } catch (e) {} }, 300); }}>
+                  onClick={() => { setPrintMode('z'); setTimeout(() => { try { window.print(); } catch (_e) {} }, 300); }}>
                   <Printer className="h-3.5 w-3.5 ml-1" />{isAr ? 'طباعة' : 'Imprimer'}
                 </Button>
                 <Button size="sm" variant="outline" className="h-8" data-testid="z-pdf-btn"
@@ -1671,7 +1671,7 @@ export default function TablesMapPage() {
                     <p className="text-[11px] text-muted-foreground text-center break-all" dir="ltr">{`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`}</p>
                     <Button variant="outline" size="sm" className="w-full"
                       data-testid={`table-qr-copy-${selTable.id}`}
-                      onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (e) {} }}>
+                      onClick={() => { try { navigator.clipboard.writeText(`${window.location.origin}/r/${user?.tenant_id}/${selTable.id}`); toast.success(isAr ? 'نُسخ الرابط' : 'Lien copie'); } catch (_e) {} }}>
                       <Copy className="h-4 w-4 ml-1" />{isAr ? 'نسخ رابط الطلب' : 'Copier le lien'}
                     </Button>
                     {/* p325: الرمز المطبوع دائم — روابط الطلب المؤقتة تموت عند تحرير الطاولة */}
@@ -1686,7 +1686,7 @@ export default function TablesMapPage() {
                           toast.success(isAr ? 'جُدّد الرابط — الرابط السابق مات فورًا' : 'Lien renouvele');
                           setSelTable(null);
                           fetchAll();
-                        } catch (e) { toast.error(isAr ? 'فشل التجديد' : 'Echec'); }
+                        } catch (_e) { toast.error(isAr ? 'فشل التجديد' : 'Echec'); }
                       }}>
                       <RefreshCw className="h-4 w-4 ml-1" />{isAr ? 'تجديد الرابط الآن' : 'Renouveler le lien'}
                     </Button>

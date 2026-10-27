@@ -2,11 +2,9 @@
 AI Agents Service for NT Commerce
 Implements 8 intelligent accounting agents
 """
-import os
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from datetime import datetime, timezone, timedelta
-import asyncio
 
 from .llm_service import get_llm_service
 
@@ -581,7 +579,7 @@ class DailyAutomationAgent:
     
     async def _check_overdue_invoices(self) -> List[Dict[str, Any]]:
         """Check for overdue invoices"""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        _today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         
         overdue = await self.db.sales.find(
             {

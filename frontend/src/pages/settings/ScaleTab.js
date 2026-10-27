@@ -40,7 +40,7 @@ export default function ScaleTab() {
     try {
       await apiClient.put('/pos/scale-config', cfg);
       toast.success(ar ? 'تم حفظ إعدادات الميزان' : 'Configuration balance enregistrée');
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل الحفظ' : 'Échec');
     } finally {
       setSaving(false);

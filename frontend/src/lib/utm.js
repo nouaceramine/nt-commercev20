@@ -13,13 +13,13 @@ export function captureUtm() {
       if (v) found[f] = v.slice(0, 100);
     });
     if (Object.keys(found).length) sessionStorage.setItem(KEY, JSON.stringify(found));
-  } catch (e) { /* tracking must never break the store */ }
+  } catch (_e) { /* tracking must never break the store */ }
 }
 
 export function getUtm() {
   try {
     return JSON.parse(sessionStorage.getItem(KEY) || '{}');
-  } catch (e) {
+  } catch (_e) {
     return {};
   }
 }

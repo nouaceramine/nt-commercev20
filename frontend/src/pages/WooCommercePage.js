@@ -2,21 +2,21 @@ import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Layout } from '../components/Layout';
+import { Layout as _Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Badge } from '../components/ui/badge';
+import { Input as _Input } from '../components/ui/input';
+import { Label as _Label } from '../components/ui/label';
+import { Badge as _Badge } from '../components/ui/badge';
 import { Switch } from '../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table as _Table,
+  TableBody as _TableBody,
+  TableCell as _TableCell,
+  TableHead as _TableHead,
+  TableHeader as _TableHeader,
+  TableRow as _TableRow,
 } from '../components/ui/table';
 import { toast } from 'sonner';
 import { 
@@ -29,7 +29,7 @@ import {
   Package,
   Users,
   FileText,
-  Globe,
+  Globe as _Globe,
   Key,
   Save
 } from 'lucide-react';
@@ -72,7 +72,7 @@ export default function WooCommercePage() {
     try {
       await apiClient.put(`/woocommerce/settings`, settings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات' : 'Paramètres enregistrés');
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.error);
     } finally {
       setSaving(false);

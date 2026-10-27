@@ -1,7 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from motor.motor_asyncio import AsyncIOMotorDatabase
-from datetime import datetime, timezone
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel, EmailStr
 from middleware.rate_limiter import limiter
 from services.auth_service import AuthService

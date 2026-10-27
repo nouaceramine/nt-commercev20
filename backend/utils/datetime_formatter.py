@@ -3,8 +3,6 @@ Date/Time Format Configuration Service
 Supports Western (Latin) numerals and customizable date/time formats
 """
 from datetime import datetime, timezone
-from typing import Optional
-import re
 
 
 class DateTimeFormatter:

@@ -38,7 +38,9 @@ class KitchenItem(BaseModel):
     quantity: float = 1
     note: Optional[str] = None
     variant: Optional[dict] = None  # p184
-    product_id: Optional[str] = None  # p311: enables loading a table order back into the POS cart
+    product_id: Optional[str] = (
+        None  # p311: enables loading a table order back into the POS cart
+    )
     unit_price: Optional[float] = None  # p311: server-side price snapshot (QR orders)
     modifiers: Optional[List[dict]] = None  # p311: structured modifier choices
 
@@ -48,7 +50,9 @@ class KitchenOrderCreate(BaseModel):
     items: List[KitchenItem]
     notes: Optional[str] = None
     customer_phone: Optional[str] = None  # p315: إشعار واتساب عند الجاهزية
-    source: Optional[str] = None  # p338: pos | waiter | kitchen — qr/delivery تُضبط تلقائيًا في مساريهما
+    source: Optional[str] = (
+        None  # p338: pos | waiter | kitchen — qr/delivery تُضبط تلقائيًا في مساريهما
+    )
     scheduled_for: Optional[str] = None  # p337: طلبية مجدولة — موعد التجهيز (ISO)
     remind_days: Optional[int] = 1  # p337: تذكير قبل الموعد بيوم أو ثلاثة
 
@@ -70,7 +74,9 @@ class PayBody(BaseModel):
     # p336: تأكيد دفع طلب مطبخ
     method: str = "cash"  # cash | card | debt
     customer_phone: Optional[str] = None  # p356: ولاء — هاتف الزبون عند الدفع
-    item_indexes: Optional[List[int]] = None  # p366: تقسيم الفاتورة — فهارس العناصر في هذه الدفعة (None = كل غير المدفوع)
+    item_indexes: Optional[List[int]] = (
+        None  # p366: تقسيم الفاتورة — فهارس العناصر في هذه الدفعة (None = كل غير المدفوع)
+    )
 
 
 class NeighborIn(BaseModel):
@@ -154,7 +160,9 @@ class CheckoutBody(BaseModel):
 class ModifierOption(BaseModel):
     name: str
     price_delta: float = 0
-    product_id: Optional[str] = None  # p308: مكوّن مخزون مرتبط يُخصم عند البيع (مثلاً جبن إضافي)
+    product_id: Optional[str] = (
+        None  # p308: مكوّن مخزون مرتبط يُخصم عند البيع (مثلاً جبن إضافي)
+    )
     qty: float = 1  # كمية المكوّن لكل وحدة طبق
 
 
@@ -188,6 +196,7 @@ def _clean_phone(raw):
     if not raw:
         return None
     import re
+
     d = re.sub(r"\D", "", str(raw))
     if d.startswith("00213"):
         d = d[2:]
@@ -198,6 +207,7 @@ def _clean_phone(raw):
 
 def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     router = APIRouter(prefix="/restaurant", tags=["restaurant"])
+
     # Resolve collections per-call: _TenantDBProxy routes via ContextVar,
     # capturing collections at factory time would bind them to main_db forever.
     def _tables():
@@ -229,31 +239,41 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         try:
             tenant_id = user.get("tenant_id")
             when = o.get("scheduled_for")
-            when_txt = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else str(when or "")
+            when_txt = (
+                when.strftime("%Y-%m-%d %H:%M")
+                if hasattr(when, "strftime")
+                else str(when or "")
+            )
             title = "تذكير: طلبية مجدولة تقترب"
             msg = f"الطلبية {o.get('code')} مجدولة بتاريخ {when_txt} — جهّزوا المكونات والمواد."
             admins = await db.users.find(
                 {"role": {"$in": ["admin", "tenant_admin"]}}, {"_id": 0, "id": 1}
             ).to_list(10)
             for a in admins:
-                await db.notifications.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "tenant_id": tenant_id,
-                    "user_id": a.get("id"),
-                    "type": "scheduled_order",
-                    "title": title,
-                    "message": msg,
-                    "data": {"order_id": o.get("id"), "code": o.get("code")},
-                    "link": "/tables",
-                    "read": False,
-                    "created_at": _now().isoformat(),
-                })
+                await db.notifications.insert_one(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "tenant_id": tenant_id,
+                        "user_id": a.get("id"),
+                        "type": "scheduled_order",
+                        "title": title,
+                        "message": msg,
+                        "data": {"order_id": o.get("id"), "code": o.get("code")},
+                        "link": "/tables",
+                        "read": False,
+                        "created_at": _now().isoformat(),
+                    }
+                )
             try:
                 from config.database import main_db as _mdb
-                t = await _mdb.tenants.find_one({"id": tenant_id}, {"_id": 0, "email": 1})
+
+                t = await _mdb.tenants.find_one(
+                    {"id": tenant_id}, {"_id": 0, "email": 1}
+                )
                 to = (t or {}).get("email")
                 if to:
                     from services.email_service import send_email
+
                     await send_email(to, title, body=msg)
             except Exception:
                 pass
@@ -261,17 +281,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             try:
                 from services.outbox import outbox_write
                 from config.database import main_db as _mdb2
+
                 await outbox_write(
-                    _mdb2, "scheduled_order.reminder",
-                    {"order_id": o.get("id"), "code": o.get("code"),
-                     "table_name": o.get("table_name"),
-                     "scheduled_for": when.isoformat() if hasattr(when, "isoformat") else str(when or "")},
+                    _mdb2,
+                    "scheduled_order.reminder",
+                    {
+                        "order_id": o.get("id"),
+                        "code": o.get("code"),
+                        "table_name": o.get("table_name"),
+                        "scheduled_for": when.isoformat()
+                        if hasattr(when, "isoformat")
+                        else str(when or ""),
+                    },
                     tenant_id=tenant_id or "platform",
                     source="restaurant",
                 )
             except Exception:
                 pass
-            await _orders().update_one({"id": o.get("id")}, {"$set": {"reminder_sent": True}})
+            await _orders().update_one(
+                {"id": o.get("id")}, {"$set": {"reminder_sent": True}}
+            )
         except Exception:
             pass
 
@@ -280,11 +309,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         try:
             from services.outbox import outbox_write
             from config.database import main_db as _main_db
+
             await outbox_write(
-                _main_db, event_type,
+                _main_db,
+                event_type,
                 {
-                    "order_id": o.get("id"), "code": o.get("code"),
-                    "table_name": o.get("table_name"), "status": o.get("status"),
+                    "order_id": o.get("id"),
+                    "code": o.get("code"),
+                    "table_name": o.get("table_name"),
+                    "status": o.get("status"),
                     "item_count": len(o.get("items") or []),
                 },
                 tenant_id=user.get("tenant_id") or "platform",
@@ -298,14 +331,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         try:
             from services.outbox import outbox_write
             from config.database import main_db as _main_db
+
             rf = r.get("reserved_for")
             await outbox_write(
-                _main_db, event_type,
+                _main_db,
+                event_type,
                 {
-                    "resv_id": r.get("id"), "customer_name": r.get("customer_name"),
-                    "table_name": r.get("table_name"), "party_size": r.get("party_size"),
+                    "resv_id": r.get("id"),
+                    "customer_name": r.get("customer_name"),
+                    "table_name": r.get("table_name"),
+                    "party_size": r.get("party_size"),
                     "status": r.get("status"),
-                    "reserved_for": rf.isoformat() if hasattr(rf, "isoformat") else str(rf or ""),
+                    "reserved_for": rf.isoformat()
+                    if hasattr(rf, "isoformat")
+                    else str(rf or ""),
                 },
                 tenant_id=user.get("tenant_id") or "platform",
                 source="restaurant",
@@ -317,10 +356,13 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         o = dict(o)
         o.pop("_id", None)
         try:  # p336: إجمالي الطلب — لشارات الدفع والفاتورة الموحدة
-            o["total"] = round(sum(
-                float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
-                for i in (o.get("items") or [])
-            ), 2)
+            o["total"] = round(
+                sum(
+                    float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                    for i in (o.get("items") or [])
+                ),
+                2,
+            )
         except Exception:
             o["total"] = 0
         try:  # p337: الخصم — المبلغ المحسوب والصافي بعده
@@ -335,9 +377,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             o["paid_amount"] = round(sum(float(p.get("amount") or 0) for p in pays), 2)
             if o.get("payment_status") == "paid" and not pays:
                 o["paid_amount"] = o["final_total"]  # طلبات قديمة مدفوعة بلا سجل دفعات
-            o["remaining_total"] = round(max(0.0, (o["final_total"] or 0) - o["paid_amount"]), 2)
-            o["unpaid_count"] = 0 if o.get("payment_status") == "paid" else sum(
-                1 for i in (o.get("items") or []) if not i.get("paid"))
+            o["remaining_total"] = round(
+                max(0.0, (o["final_total"] or 0) - o["paid_amount"]), 2
+            )
+            o["unpaid_count"] = (
+                0
+                if o.get("payment_status") == "paid"
+                else sum(1 for i in (o.get("items") or []) if not i.get("paid"))
+            )
         except Exception:
             o["paid_amount"] = 0
             o["remaining_total"] = o.get("final_total") or 0
@@ -346,7 +393,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     async def _payment_mode(tdb=None):
         """p336: نمط دفع المطعم — postpaid افتراضيًا (سلوك ما قبل p336 حرفيًا)"""
         coll = tdb.restaurant_settings if tdb is not None else db.restaurant_settings
-        doc = await coll.find_one({"_id": "order_settings"}, {"_id": 0, "payment_mode": 1}) or {}
+        doc = (
+            await coll.find_one(
+                {"_id": "order_settings"}, {"_id": 0, "payment_mode": 1}
+            )
+            or {}
+        )
         return doc.get("payment_mode") or "postpaid"
 
     async def _order_code() -> str:
@@ -356,7 +408,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p308: Modifier groups (إضافات/بدائل الأطباق) ----------
     @router.get("/products/{product_id}/modifier-groups")
-    async def get_modifier_groups(product_id: str, user: dict = Depends(get_current_user)):
+    async def get_modifier_groups(
+        product_id: str, user: dict = Depends(get_current_user)
+    ):
         p = await db.products.find_one(
             {"id": product_id}, {"_id": 0, "modifier_groups": 1, "name": 1}
         )
@@ -369,21 +423,38 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         }
 
     # ---------- p365: علامات الحساسية/النظام الغذائي للأطباق ----------
-    DIETARY_TAGS = ("gluten", "nuts", "dairy", "egg", "fish", "sesame", "spicy", "vegan", "vegetarian")
+    DIETARY_TAGS = (
+        "gluten",
+        "nuts",
+        "dairy",
+        "egg",
+        "fish",
+        "sesame",
+        "spicy",
+        "vegan",
+        "vegetarian",
+    )
 
     class DietaryBody(BaseModel):
         tags: List[str] = []
 
     @router.get("/products/{product_id}/dietary")
     async def get_dietary(product_id: str, user: dict = Depends(get_current_user)):
-        p = await db.products.find_one({"id": product_id}, {"_id": 0, "dietary_tags": 1, "name": 1, "name_ar": 1})
+        p = await db.products.find_one(
+            {"id": product_id}, {"_id": 0, "dietary_tags": 1, "name": 1, "name_ar": 1}
+        )
         if not p:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        return {"product_id": product_id, "product_name": p.get("name_ar") or p.get("name"),
-                "tags": [t for t in (p.get("dietary_tags") or []) if t in DIETARY_TAGS]}
+        return {
+            "product_id": product_id,
+            "product_name": p.get("name_ar") or p.get("name"),
+            "tags": [t for t in (p.get("dietary_tags") or []) if t in DIETARY_TAGS],
+        }
 
     @router.put("/products/{product_id}/dietary")
-    async def set_dietary(product_id: str, body: DietaryBody, admin: dict = Depends(get_tenant_admin)):
+    async def set_dietary(
+        product_id: str, body: DietaryBody, admin: dict = Depends(get_tenant_admin)
+    ):
         clean = []
         for t in body.tags:
             t = (t or "").strip()
@@ -391,14 +462,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 raise HTTPException(status_code=400, detail=f"علامة غير معروفة: {t}")
             if t not in clean:
                 clean.append(t)
-        res = await db.products.update_one({"id": product_id}, {"$set": {"dietary_tags": clean}})
+        res = await db.products.update_one(
+            {"id": product_id}, {"$set": {"dietary_tags": clean}}
+        )
         if not res.matched_count:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
         return {"ok": True, "tags": clean}
 
     @router.put("/products/{product_id}/modifier-groups")
     async def set_modifier_groups(
-        product_id: str, body: ModifierGroupsBody, admin: dict = Depends(get_tenant_admin)
+        product_id: str,
+        body: ModifierGroupsBody,
+        admin: dict = Depends(get_tenant_admin),
     ):
         res = await db.products.update_one(
             {"id": product_id},
@@ -416,7 +491,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         async for t in cursor:
             if not t.get("qr_token"):  # p323: backfill للطاولات القديمة
                 t["qr_token"] = secrets.token_hex(5)
-                await _tables().update_one({"id": t["id"]}, {"$set": {"qr_token": t["qr_token"]}})
+                await _tables().update_one(
+                    {"id": t["id"]}, {"$set": {"qr_token": t["qr_token"]}}
+                )
             out.append(_table_out(t))
         return out
 
@@ -432,14 +509,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "zone": (data.zone or "").strip() or None,
             "status": "free",
             "active_order_id": None,
-            "qr_token": secrets.token_hex(5),  # p323: رابط QR مؤقت يدور عند تحرير الطاولة
+            "qr_token": secrets.token_hex(
+                5
+            ),  # p323: رابط QR مؤقت يدور عند تحرير الطاولة
             "created_at": _now(),
         }
         await _tables().insert_one(doc)
         return _table_out(doc)
 
     @router.put("/tables/{table_id}")
-    async def update_table(table_id: str, data: TableUpdate, admin: dict = Depends(get_tenant_admin)):
+    async def update_table(
+        table_id: str, data: TableUpdate, admin: dict = Depends(get_tenant_admin)
+    ):
         t = await _tables().find_one({"id": table_id})
         if not t:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
@@ -463,22 +544,31 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not t:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
         if t.get("status") == "occupied":
-            raise HTTPException(status_code=400, detail="الطاولة مشغولة — أنهِ الطلب أولاً")
+            raise HTTPException(
+                status_code=400, detail="الطاولة مشغولة — أنهِ الطلب أولاً"
+            )
         await _tables().delete_one({"id": table_id})
         return {"ok": True}
 
     # ---------- Kitchen orders ----------
     @router.get("/kitchen-orders")
-    async def list_kitchen_orders(status: Optional[str] = None, all: bool = False,
-                                  search: Optional[str] = None,
-                                  user: dict = Depends(get_current_user)):
+    async def list_kitchen_orders(
+        status: Optional[str] = None,
+        all: bool = False,
+        search: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         # p337: الطلبيات المجدولة التي حان موعدها تدخل المطبخ تلقائيًا
         # p400: التفعيل يبث kitchen_order.created لكل طلب — KDS يُنبّه ويطبع تلقائيًا كأي طلب جديد
-        due = await _orders().find(
-            {"status": "scheduled", "scheduled_for": {"$lte": _now()}}).to_list(50)
+        due = (
+            await _orders()
+            .find({"status": "scheduled", "scheduled_for": {"$lte": _now()}})
+            .to_list(50)
+        )
         for d in due:
             await _orders().update_one(
-                {"id": d["id"]}, {"$set": {"status": "pending", "updated_at": _now()}})
+                {"id": d["id"]}, {"$set": {"status": "pending", "updated_at": _now()}}
+            )
             d["status"] = "pending"
             await _publish("kitchen_order.created", d, user)
         q = {}
@@ -493,30 +583,43 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         # p473: بحث الأرشيف — بالرمز/الطاولة/الزبون/الهاتف (اختياري، لا أثر عند غيابه)
         if search and search.strip():
             import re as _re
+
             rx = {"$regex": _re.escape(search.strip()), "$options": "i"}
-            q["$or"] = [{"code": rx}, {"table_name": rx},
-                        {"customer_name": rx}, {"customer_phone": rx}]
+            q["$or"] = [
+                {"code": rx},
+                {"table_name": rx},
+                {"customer_name": rx},
+                {"customer_phone": rx},
+            ]
         cursor = _orders().find(q).sort("created_at", -1).limit(200)
         return [_order_out(o) async for o in cursor]
 
     @router.post("/kitchen-orders")
-    async def create_kitchen_order(data: KitchenOrderCreate, user: dict = Depends(get_current_user)):
+    async def create_kitchen_order(
+        data: KitchenOrderCreate, user: dict = Depends(get_current_user)
+    ):
         if not data.items:
             raise HTTPException(status_code=400, detail="لا توجد عناصر في الطلب")
         items = [it.model_dump() for it in data.items]
         if data.scheduled_for:
             # p337: طلبية مجدولة — لا تدخل المطبخ ولا تشغل طاولة حتى موعدها
             try:
-                sched = datetime.fromisoformat(str(data.scheduled_for).replace("Z", "+00:00"))
+                sched = datetime.fromisoformat(
+                    str(data.scheduled_for).replace("Z", "+00:00")
+                )
                 if sched.tzinfo is None:
                     sched = sched.replace(tzinfo=timezone.utc)
             except Exception:
                 raise HTTPException(status_code=400, detail="موعد الجدولة غير صالح")
             if sched <= _now():
-                raise HTTPException(status_code=400, detail="موعد الجدولة يجب أن يكون في المستقبل")
+                raise HTTPException(
+                    status_code=400, detail="موعد الجدولة يجب أن يكون في المستقبل"
+                )
             remind_days = int(data.remind_days or 1)
             if remind_days not in (1, 3):
-                raise HTTPException(status_code=400, detail="التذكير إما قبل يوم أو قبل ثلاثة أيام")
+                raise HTTPException(
+                    status_code=400, detail="التذكير إما قبل يوم أو قبل ثلاثة أيام"
+                )
             table = None
             if data.table_id:
                 table = await _tables().find_one({"id": data.table_id})
@@ -533,7 +636,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "status": "scheduled",
                 "payment_status": None,
                 "sale_id": None,
-                "source": data.source if data.source in ("pos", "waiter", "kitchen") else "pos",
+                "source": data.source
+                if data.source in ("pos", "waiter", "kitchen")
+                else "pos",
                 "scheduled_for": sched,
                 "remind_days": remind_days,
                 "reminder_sent": False,
@@ -552,7 +657,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             active_id = table.get("active_order_id")
             if active_id:
                 # p336: pending_payment أيضًا — الطلب غير المدفوع (نمط مسبق) يُلحق ولا يتضاعف
-                existing = await _orders().find_one({"id": active_id, "status": {"$in": ["pending", "preparing", "pending_payment"]}})
+                existing = await _orders().find_one(
+                    {
+                        "id": active_id,
+                        "status": {"$in": ["pending", "preparing", "pending_payment"]},
+                    }
+                )
                 if existing:
                     _set = {"updated_at": _now()}
                     if existing.get("status") != "pending_payment":
@@ -576,47 +686,76 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "notes": data.notes,
             "customer_phone": _clean_phone(data.customer_phone),  # p315
             "status": "pending_payment" if _mode == "prepaid" else "pending",  # p336
-            "payment_status": "unpaid" if _mode == "prepaid" else None,        # p336
+            "payment_status": "unpaid" if _mode == "prepaid" else None,  # p336
             "sale_id": None,
-            "source": data.source if data.source in ("pos", "waiter", "kitchen") else "pos",  # p338
+            "source": data.source
+            if data.source in ("pos", "waiter", "kitchen")
+            else "pos",  # p338
             "created_by": user.get("username") or user.get("email"),
             "created_at": _now(),
             "updated_at": _now(),
         }
         await _orders().insert_one(doc)
         if table:
-            await _tables().update_one({"id": table["id"]}, {"$set": {"status": "occupied", "active_order_id": doc["id"]}})
+            await _tables().update_one(
+                {"id": table["id"]},
+                {"$set": {"status": "occupied", "active_order_id": doc["id"]}},
+            )
         await _publish("kitchen_order.created", doc, user)
         return _order_out(doc)
 
     @router.put("/kitchen-orders/{order_id}/status")
-    async def update_order_status(order_id: str, data: StatusUpdate, user: dict = Depends(get_current_user)):
+    async def update_order_status(
+        order_id: str, data: StatusUpdate, user: dict = Depends(get_current_user)
+    ):
         if data.status not in ("pending", "preparing", "served", "cancelled"):
             raise HTTPException(status_code=400, detail="حالة غير صالحة")
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
-        await _orders().update_one({"id": order_id}, {"$set": {
-            "status": data.status, "updated_at": _now(),
-            f"timestamps.{data.status}": _now(),  # p363: ختم كل انتقال لقياس أداء المطبخ
-        }})
+        await _orders().update_one(
+            {"id": order_id},
+            {
+                "$set": {
+                    "status": data.status,
+                    "updated_at": _now(),
+                    f"timestamps.{data.status}": _now(),  # p363: ختم كل انتقال لقياس أداء المطبخ
+                }
+            },
+        )
         if data.status in ("served", "cancelled") and o.get("table_id"):
             # p323: تحرير الطاولة يقتل رابط QR الحالي — رابط مؤقت لكل زيارة
-            await _tables().update_one({"id": o["table_id"]}, {"$set": {
-                "status": "free", "active_order_id": None, "qr_token": secrets.token_hex(5)}})
+            await _tables().update_one(
+                {"id": o["table_id"]},
+                {
+                    "$set": {
+                        "status": "free",
+                        "active_order_id": None,
+                        "qr_token": secrets.token_hex(5),
+                    }
+                },
+            )
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         if data.status == "served" and updated.get("customer_phone"):
             # p315: إشعار واتساب عند الجاهزية — لا يفشل تحديث الحالة إن تعذر الإرسال
             try:
                 from services.whatsapp_service import WhatsAppService
+
                 res = await WhatsAppService().send_message(
                     updated["customer_phone"],
                     f"طلبك {updated.get('code')} جاهز للاستلام. شكرًا لزيارتكم!",
                 )
                 await _orders().update_one(
                     {"id": order_id},
-                    {"$set": {"ready_notified": {"at": _now(), "sent": bool(res.get("sent"))}}},
+                    {
+                        "$set": {
+                            "ready_notified": {
+                                "at": _now(),
+                                "sent": bool(res.get("sent")),
+                            }
+                        }
+                    },
                 )
             except Exception:
                 pass
@@ -627,7 +766,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         table_id: str
 
     @router.put("/kitchen-orders/{order_id}/table")
-    async def move_order_table(order_id: str, data: TableMoveIn, user: dict = Depends(get_current_user)):
+    async def move_order_table(
+        order_id: str, data: TableMoveIn, user: dict = Depends(get_current_user)
+    ):
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
@@ -644,15 +785,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=400, detail="الطاولة الهدف مشغولة")
         act = target.get("active_order_id")
         if act and await _orders().find_one(
-                {"id": act, "status": {"$in": ["pending", "preparing", "pending_payment"]}}):
+            {"id": act, "status": {"$in": ["pending", "preparing", "pending_payment"]}}
+        ):
             raise HTTPException(status_code=400, detail="الطاولة الهدف مشغولة")
         # تحرير القديمة (مع تدوير QR كما p323) وإشغال الهدف
-        await _tables().update_one({"id": o["table_id"]}, {"$set": {
-            "status": "free", "active_order_id": None, "qr_token": secrets.token_hex(5)}})
-        await _tables().update_one({"id": target["id"]}, {"$set": {
-            "status": "occupied", "active_order_id": order_id}})
-        await _orders().update_one({"id": order_id}, {"$set": {
-            "table_id": target["id"], "table_name": target.get("name"), "updated_at": _now()}})
+        await _tables().update_one(
+            {"id": o["table_id"]},
+            {
+                "$set": {
+                    "status": "free",
+                    "active_order_id": None,
+                    "qr_token": secrets.token_hex(5),
+                }
+            },
+        )
+        await _tables().update_one(
+            {"id": target["id"]},
+            {"$set": {"status": "occupied", "active_order_id": order_id}},
+        )
+        await _orders().update_one(
+            {"id": order_id},
+            {
+                "$set": {
+                    "table_id": target["id"],
+                    "table_name": target.get("name"),
+                    "updated_at": _now(),
+                }
+            },
+        )
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         return _order_out(updated)
@@ -663,32 +823,77 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         days = max(1, min(int(days or 7), 90))
         since = _now() - timedelta(days=days)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since}, "status": "served",
-                        "timestamps.preparing": {"$exists": True},
-                        "timestamps.served": {"$exists": True}}},
-            {"$addFields": {
-                "wait_ms": {"$subtract": ["$timestamps.preparing", "$created_at"]},
-                "prep_ms": {"$subtract": ["$timestamps.served", "$timestamps.preparing"]},
-                "total_ms": {"$subtract": ["$timestamps.served", "$created_at"]}}},
-            {"$facet": {
-                "overall": [{"$group": {"_id": None, "n": {"$sum": 1},
-                                        "avg_wait": {"$avg": "$wait_ms"},
-                                        "avg_prep": {"$avg": "$prep_ms"},
-                                        "avg_total": {"$avg": "$total_ms"},
-                                        "late": {"$sum": {"$cond": [{"$gte": ["$total_ms", 900000]}, 1, 0]}}}}],
-                "dishes": [{"$unwind": "$items"},
-                           {"$group": {"_id": "$items.product_name", "n": {"$sum": 1},
-                                       "avg_total": {"$avg": "$total_ms"}}},
-                           {"$sort": {"avg_total": -1}}, {"$limit": 8}],
-                "hours": [{"$group": {"_id": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
-                                      "n": {"$sum": 1}, "avg_total": {"$avg": "$total_ms"}}},
-                          {"$sort": {"_id": 1}}],
-            }},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": "served",
+                    "timestamps.preparing": {"$exists": True},
+                    "timestamps.served": {"$exists": True},
+                }
+            },
+            {
+                "$addFields": {
+                    "wait_ms": {"$subtract": ["$timestamps.preparing", "$created_at"]},
+                    "prep_ms": {
+                        "$subtract": ["$timestamps.served", "$timestamps.preparing"]
+                    },
+                    "total_ms": {"$subtract": ["$timestamps.served", "$created_at"]},
+                }
+            },
+            {
+                "$facet": {
+                    "overall": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "n": {"$sum": 1},
+                                "avg_wait": {"$avg": "$wait_ms"},
+                                "avg_prep": {"$avg": "$prep_ms"},
+                                "avg_total": {"$avg": "$total_ms"},
+                                "late": {
+                                    "$sum": {
+                                        "$cond": [{"$gte": ["$total_ms", 900000]}, 1, 0]
+                                    }
+                                },
+                            }
+                        }
+                    ],
+                    "dishes": [
+                        {"$unwind": "$items"},
+                        {
+                            "$group": {
+                                "_id": "$items.product_name",
+                                "n": {"$sum": 1},
+                                "avg_total": {"$avg": "$total_ms"},
+                            }
+                        },
+                        {"$sort": {"avg_total": -1}},
+                        {"$limit": 8},
+                    ],
+                    "hours": [
+                        {
+                            "$group": {
+                                "_id": {
+                                    "$hour": {
+                                        "date": "$created_at",
+                                        "timezone": "Africa/Algiers",
+                                    }
+                                },
+                                "n": {"$sum": 1},
+                                "avg_total": {"$avg": "$total_ms"},
+                            }
+                        },
+                        {"$sort": {"_id": 1}},
+                    ],
+                }
+            },
         ]
         rows = await _orders().aggregate(pipeline).to_list(1)
         fac = rows[0] if rows else {}
+
         def _mins(ms):
             return round(float(ms or 0) / 60000, 1)
+
         ov = (fac.get("overall") or [{}])[0]
         return {
             "days": days,
@@ -697,16 +902,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "avg_prep_min": _mins(ov.get("avg_prep")),
             "avg_total_min": _mins(ov.get("avg_total")),
             "late_count": ov.get("late", 0),
-            "slowest_dishes": [{"name": d["_id"], "count": d["n"], "avg_total_min": _mins(d["avg_total"])}
-                               for d in (fac.get("dishes") or [])],
-            "by_hour": [{"hour": h["_id"], "count": h["n"], "avg_total_min": _mins(h["avg_total"])}
-                        for h in (fac.get("hours") or [])],
+            "slowest_dishes": [
+                {
+                    "name": d["_id"],
+                    "count": d["n"],
+                    "avg_total_min": _mins(d["avg_total"]),
+                }
+                for d in (fac.get("dishes") or [])
+            ],
+            "by_hour": [
+                {
+                    "hour": h["_id"],
+                    "count": h["n"],
+                    "avg_total_min": _mins(h["avg_total"]),
+                }
+                for h in (fac.get("hours") or [])
+            ],
         }
 
     # ---------- p390: تقرير أداء المطبخ PDF ----------
     @router.get("/kitchen-stats.pdf")
     async def kitchen_stats_pdf(days: int = 7, user: dict = Depends(get_current_user)):
-        d = await kitchen_stats(days, user)  # نفس تجميعة JSON تمامًا — لا تغيير على المنطق
+        d = await kitchen_stats(
+            days, user
+        )  # نفس تجميعة JSON تمامًا — لا تغيير على المنطق
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -717,7 +936,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -732,8 +953,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -783,25 +1010,35 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             _dash()
             _center("أبطأ الأطباق", 11)
             for x in dishes:
-                _row("{} (×{})".format(x.get("name") or "", x.get("count") or 0),
-                     str(x.get("avg_total_min")) + " د", 9)
+                _row(
+                    "{} (×{})".format(x.get("name") or "", x.get("count") or 0),
+                    str(x.get("avg_total_min")) + " د",
+                    9,
+                )
         hours = d.get("by_hour") or []
         if hours:
             _dash()
             _center("التوزيع الساعي (توقيت الجزائر)", 11)
-            cells = ["{}:00 ×{} ({} د)".format(h.get("hour"), h.get("count"), h.get("avg_total_min"))
-                     for h in hours]
+            cells = [
+                "{}:00 ×{} ({} د)".format(
+                    h.get("hour"), h.get("count"), h.get("avg_total_min")
+                )
+                for h in hours
+            ]
             for i in range(0, len(cells), 4):
                 _need()
                 c.setFont("Arabic", 9)
-                c.drawCentredString(W / 2, y[0], _ar("  ·  ".join(cells[i:i + 4])))
+                c.drawCentredString(W / 2, y[0], _ar("  ·  ".join(cells[i : i + 4])))
                 y[0] -= 13
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "kitchen-stats-" + str(d.get("days") or 0) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p405: تصدير أداء المطبخ CSV (BOM لـ Excel) ----------
     @router.get("/kitchen-stats.csv")
@@ -811,6 +1048,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = []
@@ -826,19 +1064,36 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append("")
             lines.append("الطبق,المرات,متوسط الزمن (د)")
             for x in dishes:
-                lines.append(",".join([_cell(x.get("name")), _cell(x.get("count")),
-                                       _cell(x.get("avg_total_min"))]))
+                lines.append(
+                    ",".join(
+                        [
+                            _cell(x.get("name")),
+                            _cell(x.get("count")),
+                            _cell(x.get("avg_total_min")),
+                        ]
+                    )
+                )
         hours = d.get("by_hour") or []
         if hours:
             lines.append("")
             lines.append("الساعة,عدد الطلبات,متوسط الزمن (د)")
             for h in hours:
-                lines.append(",".join([_cell(h.get("hour")), _cell(h.get("count")),
-                                       _cell(h.get("avg_total_min"))]))
+                lines.append(
+                    ",".join(
+                        [
+                            _cell(h.get("hour")),
+                            _cell(h.get("count")),
+                            _cell(h.get("avg_total_min")),
+                        ]
+                    )
+                )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "kitchen-stats-" + str(d.get("days") or 0) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p367: دوران الطاولات — طلبات وإيراد ومدة الجلسة لكل طاولة ----------
     @router.get("/table-stats")
@@ -846,63 +1101,170 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         days = max(1, min(int(days or 7), 90))
         since = _now() - timedelta(days=days)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since}, "table_id": {"$ne": None},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "bill": {"$max": [{"$subtract": [
-                    {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                                 "in": {"$add": ["$$value",
-                                                 {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                                {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-                    {"$ifNull": ["$discount.amount", 0]}]}, 0]},
-                "dur_ms": {"$cond": [
-                    {"$and": ["$timestamps.served", "$created_at"]},
-                    {"$subtract": ["$timestamps.served", "$created_at"]}, None]},
-                # p367/p366: الإيراد = المدفوع فعلاً — كامل الفاتورة إن paid، وإلا مجموع دفعات payments
-                "rev": {"$cond": [
-                    {"$eq": ["$payment_status", "paid"]},
-                    {"$max": [{"$subtract": [
-                        {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                                     "in": {"$add": ["$$value",
-                                                     {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                                    {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-                        {"$ifNull": ["$discount.amount", 0]}]}, 0]},
-                    {"$reduce": {"input": {"$ifNull": ["$payments", []]}, "initialValue": 0,
-                                 "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}]}}},
-            {"$group": {
-                "_id": "$table_id",
-                "orders": {"$sum": 1},
-                "revenue": {"$sum": "$rev"},
-                "avg_bill": {"$avg": "$bill"},
-                "avg_dur_ms": {"$avg": "$dur_ms"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "table_id": {"$ne": None},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "bill": {
+                        "$max": [
+                            {
+                                "$subtract": [
+                                    {
+                                        "$reduce": {
+                                            "input": {"$ifNull": ["$items", []]},
+                                            "initialValue": 0,
+                                            "in": {
+                                                "$add": [
+                                                    "$$value",
+                                                    {
+                                                        "$multiply": [
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$$this.quantity",
+                                                                    0,
+                                                                ]
+                                                            },
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$$this.unit_price",
+                                                                    0,
+                                                                ]
+                                                            },
+                                                        ]
+                                                    },
+                                                ]
+                                            },
+                                        }
+                                    },
+                                    {"$ifNull": ["$discount.amount", 0]},
+                                ]
+                            },
+                            0,
+                        ]
+                    },
+                    "dur_ms": {
+                        "$cond": [
+                            {"$and": ["$timestamps.served", "$created_at"]},
+                            {"$subtract": ["$timestamps.served", "$created_at"]},
+                            None,
+                        ]
+                    },
+                    # p367/p366: الإيراد = المدفوع فعلاً — كامل الفاتورة إن paid، وإلا مجموع دفعات payments
+                    "rev": {
+                        "$cond": [
+                            {"$eq": ["$payment_status", "paid"]},
+                            {
+                                "$max": [
+                                    {
+                                        "$subtract": [
+                                            {
+                                                "$reduce": {
+                                                    "input": {
+                                                        "$ifNull": ["$items", []]
+                                                    },
+                                                    "initialValue": 0,
+                                                    "in": {
+                                                        "$add": [
+                                                            "$$value",
+                                                            {
+                                                                "$multiply": [
+                                                                    {
+                                                                        "$ifNull": [
+                                                                            "$$this.quantity",
+                                                                            0,
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "$ifNull": [
+                                                                            "$$this.unit_price",
+                                                                            0,
+                                                                        ]
+                                                                    },
+                                                                ]
+                                                            },
+                                                        ]
+                                                    },
+                                                }
+                                            },
+                                            {"$ifNull": ["$discount.amount", 0]},
+                                        ]
+                                    },
+                                    0,
+                                ]
+                            },
+                            {
+                                "$reduce": {
+                                    "input": {"$ifNull": ["$payments", []]},
+                                    "initialValue": 0,
+                                    "in": {
+                                        "$add": [
+                                            "$$value",
+                                            {"$ifNull": ["$$this.amount", 0]},
+                                        ]
+                                    },
+                                }
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$table_id",
+                    "orders": {"$sum": 1},
+                    "revenue": {"$sum": "$rev"},
+                    "avg_bill": {"$avg": "$bill"},
+                    "avg_dur_ms": {"$avg": "$dur_ms"},
+                }
+            },
         ]
         rows = await _orders().aggregate(pipeline).to_list(100)
         tables = {t["id"]: t async for t in _tables().find({}, {"_id": 0})}
         out = []
         for r in rows:
             t = tables.get(r["_id"]) or {}
-            out.append({
-                "table_id": r["_id"],
-                "table_name": t.get("name") or r["_id"],
-                "seats": t.get("seats") or 0,
-                "orders": r["orders"],
-                "revenue": round(float(r.get("revenue") or 0), 2),
-                "avg_bill": round(float(r.get("avg_bill") or 0), 2),
-                "avg_duration_min": round(float(r.get("avg_dur_ms") or 0) / 60000, 1),
-                "orders_per_day": round(r["orders"] / days, 2),
-            })
+            out.append(
+                {
+                    "table_id": r["_id"],
+                    "table_name": t.get("name") or r["_id"],
+                    "seats": t.get("seats") or 0,
+                    "orders": r["orders"],
+                    "revenue": round(float(r.get("revenue") or 0), 2),
+                    "avg_bill": round(float(r.get("avg_bill") or 0), 2),
+                    "avg_duration_min": round(
+                        float(r.get("avg_dur_ms") or 0) / 60000, 1
+                    ),
+                    "orders_per_day": round(r["orders"] / days, 2),
+                }
+            )
         # الطاولات بلا طلبات في الفترة تظهر بأصفار — لكشف الطاولات الميتة
         seen = {r["table_id"] for r in out}
         for tid, t in tables.items():
             if tid not in seen:
-                out.append({"table_id": tid, "table_name": t.get("name") or tid,
-                            "seats": t.get("seats") or 0, "orders": 0, "revenue": 0,
-                            "avg_bill": 0, "avg_duration_min": 0, "orders_per_day": 0})
+                out.append(
+                    {
+                        "table_id": tid,
+                        "table_name": t.get("name") or tid,
+                        "seats": t.get("seats") or 0,
+                        "orders": 0,
+                        "revenue": 0,
+                        "avg_bill": 0,
+                        "avg_duration_min": 0,
+                        "orders_per_day": 0,
+                    }
+                )
         out.sort(key=lambda x: -x["revenue"])
-        return {"days": days,
-                "tables": out,
-                "total_orders": sum(r["orders"] for r in out),
-                "total_revenue": round(sum(r["revenue"] for r in out), 2)}
+        return {
+            "days": days,
+            "tables": out,
+            "total_orders": sum(r["orders"] for r in out),
+            "total_revenue": round(sum(r["revenue"] for r in out), 2),
+        }
 
     # ---------- p392: تقرير دوران الطاولات PDF ----------
     @router.get("/table-stats.pdf")
@@ -918,7 +1280,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -933,8 +1297,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -983,23 +1353,36 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             for i, t in enumerate(tables, 1):
                 _need()
                 c.setFont("Arabic", 11)
-                c.drawRightString(W - MARGIN, y[0], _ar("{}. {} ({} مقعد)".format(
-                    i, t.get("table_name") or "—", t.get("seats") or 0)))
+                c.drawRightString(
+                    W - MARGIN,
+                    y[0],
+                    _ar(
+                        "{}. {} ({} مقعد)".format(
+                            i, t.get("table_name") or "—", t.get("seats") or 0
+                        )
+                    ),
+                )
                 c.drawString(MARGIN, y[0], _ar(str(t.get("revenue") or 0)))
                 y[0] -= 15
                 _need()
                 c.setFont("Arabic", 9)
                 sub = "طلبات: {} · متوسط الفاتورة: {} · متوسط الجلسة: {} د · طلب/يوم: {}".format(
-                    t.get("orders") or 0, t.get("avg_bill") or 0,
-                    t.get("avg_duration_min") or 0, t.get("orders_per_day") or 0)
+                    t.get("orders") or 0,
+                    t.get("avg_bill") or 0,
+                    t.get("avg_duration_min") or 0,
+                    t.get("orders_per_day") or 0,
+                )
                 c.drawRightString(W - MARGIN - 14, y[0], _ar(sub))
                 y[0] -= 14
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "table-stats-" + str(d.get("days") or 0) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p404: تصدير إحصاءات الطاولات CSV (BOM لـ Excel) ----------
     @router.get("/table-stats.csv")
@@ -1009,69 +1392,152 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = []
-        lines.append("الطاولة,المقاعد,الطلبات,طلبات/يوم,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل")
+        lines.append(
+            "الطاولة,المقاعد,الطلبات,طلبات/يوم,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل"
+        )
         for t in d.get("tables") or []:
-            lines.append(",".join([_cell(t.get("table_name")), _cell(t.get("seats")),
-                                   _cell(t.get("orders")), _cell(t.get("orders_per_day")),
-                                   _cell(t.get("avg_bill")), _cell(t.get("avg_duration_min")),
-                                   _cell(t.get("revenue"))]))
-        lines.append(",".join([_cell("الإجمالي"), "", _cell(d.get("total_orders")), "", "", "",
-                               _cell(d.get("total_revenue"))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(t.get("table_name")),
+                        _cell(t.get("seats")),
+                        _cell(t.get("orders")),
+                        _cell(t.get("orders_per_day")),
+                        _cell(t.get("avg_bill")),
+                        _cell(t.get("avg_duration_min")),
+                        _cell(t.get("revenue")),
+                    ]
+                )
+            )
+        lines.append(
+            ",".join(
+                [
+                    _cell("الإجمالي"),
+                    "",
+                    _cell(d.get("total_orders")),
+                    "",
+                    "",
+                    "",
+                    _cell(d.get("total_revenue")),
+                ]
+            )
+        )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "table-stats-" + str(d.get("days") or 0) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p369: أداء النوادل — طلبات وإيراد وزمن لكل موظف ----------
     @router.get("/waiter-stats")
     async def waiter_stats(days: int = 7, user: dict = Depends(get_current_user)):
         days = max(1, min(int(days or 7), 90))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
-        _rev = {"$cond": [  # الإيراد المحصَّل: كامل الفاتورة إن paid وإلا مجموع دفعات p366
-            {"$eq": ["$payment_status", "paid"]}, _bill,
-            {"$reduce": {"input": {"$ifNull": ["$payments", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
+        _rev = {
+            "$cond": [  # الإيراد المحصَّل: كامل الفاتورة إن paid وإلا مجموع دفعات p366
+                {"$eq": ["$payment_status", "paid"]},
+                _bill,
+                {
+                    "$reduce": {
+                        "input": {"$ifNull": ["$payments", []]},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]},
+                    }
+                },
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "created_by": {"$nin": [None, "QR", "KIOSK"],  # قنوات الزبون الذاتية ليست نوادل
-                                       "$not": {"$regex": "^جار:"}}}},
-            {"$addFields": {
-                "bill": _bill,
-                "rev": _rev,
-                "dur_ms": {"$cond": [
-                    {"$and": ["$timestamps.served", "$created_at"]},
-                    {"$subtract": ["$timestamps.served", "$created_at"]}, None]},
-                "cxl": {"$eq": ["$status", "cancelled"]}}},
-            {"$group": {
-                "_id": "$created_by",
-                "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
-                "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
-                "revenue": {"$sum": {"$cond": ["$cxl", 0, "$rev"]}},
-                "avg_bill": {"$avg": {"$cond": ["$cxl", None, "$bill"]}},
-                "avg_dur_ms": {"$avg": "$dur_ms"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "created_by": {
+                        "$nin": [
+                            None,
+                            "QR",
+                            "KIOSK",
+                        ],  # قنوات الزبون الذاتية ليست نوادل
+                        "$not": {"$regex": "^جار:"},
+                    },
+                }
+            },
+            {
+                "$addFields": {
+                    "bill": _bill,
+                    "rev": _rev,
+                    "dur_ms": {
+                        "$cond": [
+                            {"$and": ["$timestamps.served", "$created_at"]},
+                            {"$subtract": ["$timestamps.served", "$created_at"]},
+                            None,
+                        ]
+                    },
+                    "cxl": {"$eq": ["$status", "cancelled"]},
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$created_by",
+                    "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                    "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                    "revenue": {"$sum": {"$cond": ["$cxl", 0, "$rev"]}},
+                    "avg_bill": {"$avg": {"$cond": ["$cxl", None, "$bill"]}},
+                    "avg_dur_ms": {"$avg": "$dur_ms"},
+                }
+            },
             {"$sort": {"revenue": -1}},
             {"$limit": 50},
         ]
         rows = await _orders().aggregate(pipeline).to_list(50)
-        return {"days": days,
-                "waiters": [{
+        return {
+            "days": days,
+            "waiters": [
+                {
                     "name": r["_id"],
                     "orders": r["orders"],
                     "cancelled": r["cancelled"],
                     "revenue": round(float(r.get("revenue") or 0), 2),
                     "avg_bill": round(float(r.get("avg_bill") or 0), 2),
-                    "avg_duration_min": round(float(r.get("avg_dur_ms") or 0) / 60000, 1),
-                } for r in rows],
-                "total_waiters": len(rows)}
+                    "avg_duration_min": round(
+                        float(r.get("avg_dur_ms") or 0) / 60000, 1
+                    ),
+                }
+                for r in rows
+            ],
+            "total_waiters": len(rows),
+        }
 
     # ---------- p397: تصدير أداء الندل CSV (BOM لـ Excel) ----------
     @router.get("/waiter-stats.csv")
@@ -1081,26 +1547,65 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["النادل,الطلبات,الملغاة,متوسط الفاتورة,متوسط المدة (د),الإيراد المحصَّل"]
-        for w in (d.get("waiters") or []):
-            lines.append(",".join([
-                _cell(w.get("name")), _cell(w.get("orders")), _cell(w.get("cancelled")),
-                _cell(w.get("avg_bill")), _cell(w.get("avg_duration_min")), _cell(w.get("revenue"))]))
+        for w in d.get("waiters") or []:
+            lines.append(
+                ",".join(
+                    [
+                        _cell(w.get("name")),
+                        _cell(w.get("orders")),
+                        _cell(w.get("cancelled")),
+                        _cell(w.get("avg_bill")),
+                        _cell(w.get("avg_duration_min")),
+                        _cell(w.get("revenue")),
+                    ]
+                )
+            )
         lines.append("")
-        lines.append(",".join(["الإجمالي", _cell(sum(int(w.get("orders") or 0) for w in (d.get("waiters") or []))),
-                               _cell(sum(int(w.get("cancelled") or 0) for w in (d.get("waiters") or []))), "", "",
-                               _cell(round(sum(float(w.get("revenue") or 0) for w in (d.get("waiters") or [])), 2))]))
+        lines.append(
+            ",".join(
+                [
+                    "الإجمالي",
+                    _cell(
+                        sum(int(w.get("orders") or 0) for w in (d.get("waiters") or []))
+                    ),
+                    _cell(
+                        sum(
+                            int(w.get("cancelled") or 0)
+                            for w in (d.get("waiters") or [])
+                        )
+                    ),
+                    "",
+                    "",
+                    _cell(
+                        round(
+                            sum(
+                                float(w.get("revenue") or 0)
+                                for w in (d.get("waiters") or [])
+                            ),
+                            2,
+                        )
+                    ),
+                ]
+            )
+        )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "waiter-stats-" + str(d.get("days") or 0) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p385: تقرير أداء الندل PDF ----------
     @router.get("/waiter-stats.pdf")
     async def waiter_stats_pdf(days: int = 7, user: dict = Depends(get_current_user)):
-        d = await waiter_stats(days, user)  # نفس تجميعة JSON تمامًا — لا تغيير على المنطق
+        d = await waiter_stats(
+            days, user
+        )  # نفس تجميعة JSON تمامًا — لا تغيير على المنطق
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -1111,7 +1616,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -1126,8 +1633,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -1179,22 +1692,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             for i, w in enumerate(waiters, 1):
                 _need()
                 c.setFont("Arabic", 11)
-                c.drawRightString(W - MARGIN, y[0], _ar("{}. {}".format(i, w.get("name") or "—")))
+                c.drawRightString(
+                    W - MARGIN, y[0], _ar("{}. {}".format(i, w.get("name") or "—"))
+                )
                 c.drawString(MARGIN, y[0], _ar(str(w.get("revenue") or 0)))
                 y[0] -= 15
                 _need()
                 c.setFont("Arabic", 9)
                 sub = "طلبات: {} · ملغاة: {} · متوسط الفاتورة: {} · متوسط المدة: {} د".format(
-                    w.get("orders") or 0, w.get("cancelled") or 0,
-                    w.get("avg_bill") or 0, w.get("avg_duration_min") or 0)
+                    w.get("orders") or 0,
+                    w.get("cancelled") or 0,
+                    w.get("avg_bill") or 0,
+                    w.get("avg_duration_min") or 0,
+                )
                 c.drawRightString(W - MARGIN - 14, y[0], _ar(sub))
                 y[0] -= 14
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "waiter-stats-" + str(d.get("days") or 0) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p370: حجوزات الطاولات المسبقة ----------
     def _resv():
@@ -1209,7 +1730,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         try:
             dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone(timedelta(hours=1)))  # الافتراضي توقيت الجزائر
+                dt = dt.replace(
+                    tzinfo=timezone(timedelta(hours=1))
+                )  # الافتراضي توقيت الجزائر
             return dt.astimezone(timezone.utc)
         except Exception:
             return None
@@ -1221,60 +1744,115 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         try:
             if when is not None and getattr(when, "tzinfo", None) is None:
                 when = when.replace(tzinfo=timezone.utc)
-            when_txt = when.astimezone(timezone(timedelta(hours=1))).strftime("%Y-%m-%d %H:%M")
+            when_txt = when.astimezone(timezone(timedelta(hours=1))).strftime(
+                "%Y-%m-%d %H:%M"
+            )
         except Exception:
             when_txt = str(when or "")
         title = "تذكير: حجز طاولة يقترب"
         msg = "حجز {} على طاولة {} لعدد {} أشخاص بتاريخ {}.".format(
-            r.get("customer_name") or "زبون", r.get("table_name") or "—",
-            r.get("party_size") or 0, when_txt)
+            r.get("customer_name") or "زبون",
+            r.get("table_name") or "—",
+            r.get("party_size") or 0,
+            when_txt,
+        )
         admins = await db.users.find(
-            {"role": {"$in": ["admin", "tenant_admin"]}}, {"_id": 0, "id": 1}).to_list(20)
+            {"role": {"$in": ["admin", "tenant_admin"]}}, {"_id": 0, "id": 1}
+        ).to_list(20)
         for a in admins:
-            await db.notifications.insert_one({
-                "id": str(uuid.uuid4()), "tenant_id": tenant_id, "user_id": a.get("id"),
-                "type": "reservation_reminder", "title": title, "message": msg,
-                "data": {"resv_id": r.get("id"), "table_name": r.get("table_name"),
-                         "reserved_for": when.isoformat() if hasattr(when, "isoformat") else str(when or "")},
-                "link": "/tables", "read": False, "created_at": _now().isoformat(),
-            })
+            await db.notifications.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "tenant_id": tenant_id,
+                    "user_id": a.get("id"),
+                    "type": "reservation_reminder",
+                    "title": title,
+                    "message": msg,
+                    "data": {
+                        "resv_id": r.get("id"),
+                        "table_name": r.get("table_name"),
+                        "reserved_for": when.isoformat()
+                        if hasattr(when, "isoformat")
+                        else str(when or ""),
+                    },
+                    "link": "/tables",
+                    "read": False,
+                    "created_at": _now().isoformat(),
+                }
+            )
         wa_sent = False
         wa_status = "no_phone"
         if r.get("customer_phone"):
             try:
                 from services.whatsapp_service import WhatsAppService
+
                 res = await WhatsAppService().send_message(r["customer_phone"], msg)
                 wa_sent = bool(res.get("sent"))
-                wa_status = "sent" if wa_sent else str(res.get("error") or res.get("status") or "failed")
+                wa_status = (
+                    "sent"
+                    if wa_sent
+                    else str(res.get("error") or res.get("status") or "failed")
+                )
             except Exception as exc:
                 wa_status = str(exc)[:120]
-        await _resv().update_one({"id": r.get("id")}, {"$set": {
-            "reminder_sent": True,
-            "reminder_result": {"at": _now(), "admin_count": len(admins),
-                                "whatsapp_sent": wa_sent, "whatsapp_status": wa_status}}})
+        await _resv().update_one(
+            {"id": r.get("id")},
+            {
+                "$set": {
+                    "reminder_sent": True,
+                    "reminder_result": {
+                        "at": _now(),
+                        "admin_count": len(admins),
+                        "whatsapp_sent": wa_sent,
+                        "whatsapp_status": wa_status,
+                    },
+                }
+            },
+        )
         try:
             from services.outbox import outbox_write
             from config.database import main_db as _mdb
-            await outbox_write(_mdb, "reservation.reminder", {
-                "resv_id": r.get("id"), "customer_name": r.get("customer_name"),
-                "table_name": r.get("table_name"), "reserved_for": when.isoformat() if hasattr(when, "isoformat") else str(when or ""),
-                "whatsapp_sent": wa_sent}, tenant_id=tenant_id or "platform", source="restaurant")
+
+            await outbox_write(
+                _mdb,
+                "reservation.reminder",
+                {
+                    "resv_id": r.get("id"),
+                    "customer_name": r.get("customer_name"),
+                    "table_name": r.get("table_name"),
+                    "reserved_for": when.isoformat()
+                    if hasattr(when, "isoformat")
+                    else str(when or ""),
+                    "whatsapp_sent": wa_sent,
+                },
+                tenant_id=tenant_id or "platform",
+                source="restaurant",
+            )
         except Exception:
             pass
         return {"admins": len(admins), "whatsapp_sent": wa_sent}
 
     async def _run_reservation_reminders(user):
         now = _now()
-        rows = await _resv().find({
-            "status": "booked", "reminder_sent": {"$ne": True},
-            "reserved_for": {"$gte": now, "$lte": now + timedelta(hours=24)},
-        }).sort("reserved_for", 1).to_list(100)
+        rows = (
+            await _resv()
+            .find(
+                {
+                    "status": "booked",
+                    "reminder_sent": {"$ne": True},
+                    "reserved_for": {"$gte": now, "$lte": now + timedelta(hours=24)},
+                }
+            )
+            .sort("reserved_for", 1)
+            .to_list(100)
+        )
         sent = 0
         for r in rows:
             # المطالبة الذرية تمنع تكرار الرسائل عند تزامن طلبين أو استطلاعين.
             claimed = await _resv().find_one_and_update(
                 {"id": r.get("id"), "status": "booked", "reminder_sent": {"$ne": True}},
-                {"$set": {"reminder_sent": True, "reminder_claimed_at": now}})
+                {"$set": {"reminder_sent": True, "reminder_claimed_at": now}},
+            )
             if claimed:
                 await _send_reservation_reminder(claimed, user)
                 sent += 1
@@ -1287,13 +1865,23 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         # p382: حجز مضى على موعده أكثر من ساعتين بلا حضور يُوسم no_show تلقائيًا (كسولًا عند القراءة)
         await _resv().update_many(
             {"status": "booked", "reserved_for": {"$lt": now - timedelta(hours=2)}},
-            {"$set": {"status": "no_show", "auto_no_show": True, "updated_at": now}})
+            {"$set": {"status": "no_show", "auto_no_show": True, "updated_at": now}},
+        )
         # p478: التذكير الكسول يعمل مع الاستطلاع الحالي لشاشة الطاولات.
         await _run_reservation_reminders(user)
-        rows = await _resv().find({
-            "reserved_for": {"$gte": now - timedelta(hours=3),
-                             "$lte": now + timedelta(days=days)},
-        }).sort("reserved_for", 1).to_list(300)
+        rows = (
+            await _resv()
+            .find(
+                {
+                    "reserved_for": {
+                        "$gte": now - timedelta(hours=3),
+                        "$lte": now + timedelta(days=days),
+                    },
+                }
+            )
+            .sort("reserved_for", 1)
+            .to_list(300)
+        )
         return [_resv_out(r) for r in rows]
 
     # ---------- p478: تشغيل تذكيرات الحجوزات المستحقة يدويًا/من مجدول خارجي ----------
@@ -1303,7 +1891,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return {"sent": sent, "window_hours": 24}
 
     @router.post("/reservations")
-    async def create_reservation(data: ReservationIn, user: dict = Depends(get_current_user)):
+    async def create_reservation(
+        data: ReservationIn, user: dict = Depends(get_current_user)
+    ):
         name = (data.customer_name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
@@ -1314,16 +1904,24 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not when:
             raise HTTPException(status_code=400, detail="موعد الحجز غير صالح")
         if when <= _now():
-            raise HTTPException(status_code=400, detail="موعد الحجز يجب أن يكون في المستقبل")
+            raise HTTPException(
+                status_code=400, detail="موعد الحجز يجب أن يكون في المستقبل"
+            )
         if not (1 <= int(data.party_size or 1) <= 50):
             raise HTTPException(status_code=400, detail="عدد الأشخاص غير صالح")
         win = timedelta(minutes=90)  # تعارض: نفس الطاولة وحجز قائم ضمن ±90 دقيقة
-        clash = await _resv().find_one({
-            "table_id": data.table_id, "status": "booked",
-            "reserved_for": {"$gt": when - win, "$lt": when + win}})  # حدّان حصريان: فرق 90د بالضبط مسموح
+        clash = await _resv().find_one(
+            {
+                "table_id": data.table_id,
+                "status": "booked",
+                "reserved_for": {"$gt": when - win, "$lt": when + win},
+            }
+        )  # حدّان حصريان: فرق 90د بالضبط مسموح
         if clash:
-            raise HTTPException(status_code=409,
-                                detail=f"الطاولة محجوزة في موعد قريب ({clash.get('customer_name', '')})")
+            raise HTTPException(
+                status_code=409,
+                detail=f"الطاولة محجوزة في موعد قريب ({clash.get('customer_name', '')})",
+            )
         doc = {
             "id": f"resv_{uuid.uuid4().hex[:12]}",
             "table_id": t["id"],
@@ -1333,7 +1931,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "reserved_for": when,
             "party_size": int(data.party_size or 1),
             "notes": (data.notes or "").strip() or None,
-            "status": "booked", "reminder_sent": False,
+            "status": "booked",
+            "reminder_sent": False,
             "created_by": user.get("username") or user.get("email"),
             "created_at": _now(),
             "updated_at": _now(),
@@ -1343,7 +1942,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _resv_out(doc)
 
     @router.put("/reservations/{resv_id}/status")
-    async def update_reservation_status(resv_id: str, data: ReservationStatusIn, user: dict = Depends(get_current_user)):
+    async def update_reservation_status(
+        resv_id: str, data: ReservationStatusIn, user: dict = Depends(get_current_user)
+    ):
         if data.status not in ("seated", "cancelled", "no_show"):
             raise HTTPException(status_code=400, detail="حالة غير صالحة")
         r = await _resv().find_one({"id": resv_id})
@@ -1351,16 +1952,25 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=404, detail="الحجز غير موجود")
         if r.get("status") in ("cancelled", "no_show"):
             raise HTTPException(status_code=400, detail="الحجز منتهٍ — لا يمكن تعديله")
-        await _resv().update_one({"id": resv_id}, {"$set": {
-            "status": data.status, "updated_at": _now(),
-            "handled_by": user.get("username") or user.get("email")}})
+        await _resv().update_one(
+            {"id": resv_id},
+            {
+                "$set": {
+                    "status": data.status,
+                    "updated_at": _now(),
+                    "handled_by": user.get("username") or user.get("email"),
+                }
+            },
+        )
         upd = await _resv().find_one({"id": resv_id})
         await _publish_resv("reservation.updated", upd, user)  # p393
         return _resv_out(upd)
 
     # ---------- p429: تعديل الحجز القائم (طاولة/اسم/هاتف/موعد/أشخاص/ملاحظات) ----------
     @router.put("/reservations/{resv_id}")
-    async def edit_reservation(resv_id: str, data: dict = None, user: dict = Depends(get_current_user)):
+    async def edit_reservation(
+        resv_id: str, data: dict = None, user: dict = Depends(get_current_user)
+    ):
         data = data or {}
         r = await _resv().find_one({"id": resv_id})
         if not r:
@@ -1382,7 +1992,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if "customer_phone" in data:
             sets["customer_phone"] = _clean_phone(data.get("customer_phone"))
         if "reserved_for" in data and data.get("reserved_for"):
-            rf = _parse_when(data.get("reserved_for"))  # نفس دلالة الإنشاء: النائي = توقيت الجزائر
+            rf = _parse_when(
+                data.get("reserved_for")
+            )  # نفس دلالة الإنشاء: النائي = توقيت الجزائر
             if not rf:
                 raise HTTPException(status_code=400, detail="موعد غير صالح")
             sets["reserved_for"] = rf
@@ -1403,18 +2015,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if new_when is not None and getattr(new_when, "tzinfo", None) is None:
             new_when = new_when.replace(tzinfo=timezone.utc)
         win = timedelta(minutes=90)
-        clash = await _resv().find_one({
-            "id": {"$ne": resv_id}, "table_id": new_table, "status": "booked",
-            "reserved_for": {"$gt": new_when - win, "$lt": new_when + win}})
+        clash = await _resv().find_one(
+            {
+                "id": {"$ne": resv_id},
+                "table_id": new_table,
+                "status": "booked",
+                "reserved_for": {"$gt": new_when - win, "$lt": new_when + win},
+            }
+        )
         if clash:
-            raise HTTPException(status_code=409, detail="تعارض مع حجز آخر على نفس الطاولة")
+            raise HTTPException(
+                status_code=409, detail="تعارض مع حجز آخر على نفس الطاولة"
+            )
         await _resv().update_one({"id": resv_id}, {"$set": sets})
         upd = await _resv().find_one({"id": resv_id})
         await _publish_resv("reservation.updated", upd, user)
         return _resv_out(upd)
 
     # ---------- p476: إشغال مقاعد الطاولات من الحجوزات — نواة CSV/PDF ----------
-    async def _reservation_table_occupancy_rows(days: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+    async def _reservation_table_occupancy_rows(
+        days: int, date_from: Optional[str] = None, date_to: Optional[str] = None
+    ):
         d1 = d2 = None
         if date_from or date_to:
             d1, d2, start, end = await _period_bounds(date_from, date_to)
@@ -1424,23 +2045,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             days = max(1, min(int(days), 365))
             date_query = {"$gte": _now() - timedelta(days=days)}
             suffix = str(days) + "d"
-        tables = await _tables().find(
-            {}, {"_id": 0, "id": 1, "name": 1, "seats": 1}).to_list(1000)
+        tables = (
+            await _tables()
+            .find({}, {"_id": 0, "id": 1, "name": 1, "seats": 1})
+            .to_list(1000)
+        )
         stats = {}
         for t in tables:
             stats[t.get("id")] = {
-                "table_id": t.get("id"), "table": t.get("name") or "—",
+                "table_id": t.get("id"),
+                "table": t.get("name") or "—",
                 "seats": max(0, int(t.get("seats") or 0)),
-                "total": 0, "seated": 0, "no_show": 0, "cancelled": 0, "guests": 0}
+                "total": 0,
+                "seated": 0,
+                "no_show": 0,
+                "cancelled": 0,
+                "guests": 0,
+            }
         async for r in _resv().find(
-                {"reserved_for": date_query},
-                {"_id": 0, "table_id": 1, "table_name": 1, "party_size": 1, "status": 1}):
+            {"reserved_for": date_query},
+            {"_id": 0, "table_id": 1, "table_name": 1, "party_size": 1, "status": 1},
+        ):
             tid = r.get("table_id")
             if tid not in stats:
                 stats[tid] = {
-                    "table_id": tid, "table": r.get("table_name") or "طاولة محذوفة",
-                    "seats": 0, "total": 0, "seated": 0, "no_show": 0,
-                    "cancelled": 0, "guests": 0}
+                    "table_id": tid,
+                    "table": r.get("table_name") or "طاولة محذوفة",
+                    "seats": 0,
+                    "total": 0,
+                    "seated": 0,
+                    "no_show": 0,
+                    "cancelled": 0,
+                    "guests": 0,
+                }
             a = stats[tid]
             a["total"] += 1
             status = r.get("status") or "booked"
@@ -1454,36 +2091,67 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         rows = []
         for a in stats.values():
             capacity = a["seated"] * a["seats"]
-            a["occupancy"] = round(100.0 * a["guests"] / capacity, 1) if capacity else 0.0
+            a["occupancy"] = (
+                round(100.0 * a["guests"] / capacity, 1) if capacity else 0.0
+            )
             rows.append(a)
         rows.sort(key=lambda a: (-a["seated"], -a["total"], str(a["table"])))
         return days, rows, suffix, d1, d2
 
     @router.get("/reservation-table-occupancy.csv")
-    async def reservation_table_occupancy_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                                    user: dict = Depends(get_current_user)):
-        days, rows, suffix, d1, d2 = await _reservation_table_occupancy_rows(days, date_from, date_to)
+    async def reservation_table_occupancy_csv(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
+        days, rows, suffix, d1, d2 = await _reservation_table_occupancy_rows(
+            days, date_from, date_to
+        )
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
-        lines = ["الطاولة,المقاعد,الحجوزات,حضروا,لم يحضروا,أُلغيت,الضيوف الحاضرون,إشغال المقاعد %"]
+        lines = [
+            "الطاولة,المقاعد,الحجوزات,حضروا,لم يحضروا,أُلغيت,الضيوف الحاضرون,إشغال المقاعد %"
+        ]
         for a in rows:
-            lines.append(",".join([
-                _cell(a["table"]), _cell(a["seats"]), _cell(a["total"]), _cell(a["seated"]),
-                _cell(a["no_show"]), _cell(a["cancelled"]), _cell(a["guests"]), _cell(a["occupancy"])]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(a["table"]),
+                        _cell(a["seats"]),
+                        _cell(a["total"]),
+                        _cell(a["seated"]),
+                        _cell(a["no_show"]),
+                        _cell(a["cancelled"]),
+                        _cell(a["guests"]),
+                        _cell(a["occupancy"]),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "reservation-table-occupancy-" + suffix + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p476: إشغال مقاعد الطاولات من الحجوزات PDF ----------
     @router.get("/reservation-table-occupancy.pdf")
-    async def reservation_table_occupancy_pdf(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                                    user: dict = Depends(get_current_user)):
-        days, rows, suffix, d1, d2 = await _reservation_table_occupancy_rows(days, date_from, date_to)
+    async def reservation_table_occupancy_pdf(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
+        days, rows, suffix, d1, d2 = await _reservation_table_occupancy_rows(
+            days, date_from, date_to
+        )
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -1494,7 +2162,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -1509,8 +2179,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -1542,7 +2218,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if store:
             _center(store, 13)
         _center("إشغال مقاعد الطاولات من الحجوزات", 12)
-        _center(((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا")) + " — الحضور الفعلي فقط", 9)
+        _center(
+            ((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"))
+            + " — الحضور الفعلي فقط",
+            9,
+        )
         y[0] -= 4
         _row("عدد الطاولات", len(rows))
         _row("الحجوزات", sum(a["total"] for a in rows))
@@ -1551,7 +2231,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if rows:
             _center("الطاولة | الحجوزات | حضروا | الضيوف | إشغال المقاعد", 10)
             for a in rows:
-                value = "{} | {} | {} | {}%".format(a["total"], a["seated"], a["guests"], a["occupancy"])
+                value = "{} | {} | {} | {}%".format(
+                    a["total"], a["seated"], a["guests"], a["occupancy"]
+                )
                 _row(a["table"], value)
         else:
             _center("لا طاولات في الفترة", 10)
@@ -1559,8 +2241,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "reservation-table-occupancy-" + suffix + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p465: اتجاه التغيّب عن الحجوزات اليومي CSV (توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/no-show-rate.csv")
@@ -1569,12 +2254,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         since = _now() - timedelta(days=days)
         pipeline = [
             {"$match": {"created_at": {"$gte": since}}},
-            {"$group": {"_id": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
-                                                  "timezone": "Africa/Algiers"}},
-                        "total": {"$sum": 1},
-                        "seated": {"$sum": {"$cond": [{"$eq": ["$status", "seated"]}, 1, 0]}},
-                        "cancelled": {"$sum": {"$cond": [{"$eq": ["$status", "cancelled"]}, 1, 0]}},
-                        "no_show": {"$sum": {"$cond": [{"$eq": ["$status", "no_show"]}, 1, 0]}}}},
+            {
+                "$group": {
+                    "_id": {
+                        "$dateToString": {
+                            "date": "$created_at",
+                            "format": "%Y-%m-%d",
+                            "timezone": "Africa/Algiers",
+                        }
+                    },
+                    "total": {"$sum": 1},
+                    "seated": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "seated"]}, 1, 0]}
+                    },
+                    "cancelled": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "cancelled"]}, 1, 0]}
+                    },
+                    "no_show": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "no_show"]}, 1, 0]}
+                    },
+                }
+            },
             {"$sort": {"_id": 1}},
         ]
         rows = await _resv().aggregate(pipeline).to_list(400)
@@ -1582,24 +2282,55 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["اليوم,الحجوزات,حضروا,أُلغيت,لم يحضروا,نسبة التغيّب %"]
         tn = ts = tc = tx = 0
         for r in rows:
-            t = int(r.get("total") or 0); s = int(r.get("seated") or 0)
-            cx = int(r.get("cancelled") or 0); ns = int(r.get("no_show") or 0)
+            t = int(r.get("total") or 0)
+            s = int(r.get("seated") or 0)
+            cx = int(r.get("cancelled") or 0)
+            ns = int(r.get("no_show") or 0)
             done = s + ns
             rate = round(ns / done * 100, 1) if done else 0
-            tn += t; ts += s; tc += cx; tx += ns
-            lines.append(",".join([_cell(r.get("_id")), _cell(t), _cell(s), _cell(cx), _cell(ns), _cell(rate)]))
+            tn += t
+            ts += s
+            tc += cx
+            tx += ns
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r.get("_id")),
+                        _cell(t),
+                        _cell(s),
+                        _cell(cx),
+                        _cell(ns),
+                        _cell(rate),
+                    ]
+                )
+            )
         done_t = ts + tx
         rate_t = round(tx / done_t * 100, 1) if done_t else 0
-        lines.append(",".join([_cell("المجموع ←"), _cell(tn), _cell(ts), _cell(tc), _cell(tx), _cell(rate_t)]))
+        lines.append(
+            ",".join(
+                [
+                    _cell("المجموع ←"),
+                    _cell(tn),
+                    _cell(ts),
+                    _cell(tc),
+                    _cell(tx),
+                    _cell(rate_t),
+                ]
+            )
+        )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "no-show-rate-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p433: حذف الحجز نهائيًا (الملغى / لم يحضر فقط) ----------
     @router.delete("/reservations/{resv_id}")
@@ -1615,11 +2346,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p388: تقرير الحجوزات PDF لفترة ----------
     @router.get("/reservations/report.pdf")
-    async def reservations_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                      user: dict = Depends(get_current_user)):
+    async def reservations_report_pdf(
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         d1, d2, start, end = await _period_bounds(date_from, date_to)
-        rows = await _resv().find(
-            {"reserved_for": {"$gte": start, "$lt": end}}).sort("reserved_for", 1).to_list(500)
+        rows = (
+            await _resv()
+            .find({"reserved_for": {"$gte": start, "$lt": end}})
+            .sort("reserved_for", 1)
+            .to_list(500)
+        )
         dz = timezone(timedelta(hours=1))
         counts = {}
         guests = 0
@@ -1640,7 +2378,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -1655,8 +2395,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -1706,17 +2452,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if rows:
             _dash()
             _center("القائمة التفصيلية", 11)
-            lbl = {"booked": "مؤكد", "seated": "حضر", "cancelled": "ملغى", "no_show": "لم يحضر"}
+            lbl = {
+                "booked": "مؤكد",
+                "seated": "حضر",
+                "cancelled": "ملغى",
+                "no_show": "لم يحضر",
+            }
             for r in rows:
                 _need()
                 when = r.get("reserved_for")
                 try:
-                    when_s = when.astimezone(dz).strftime("%d/%m %H:%M") if hasattr(when, "astimezone") else str(when)
+                    when_s = (
+                        when.astimezone(dz).strftime("%d/%m %H:%M")
+                        if hasattr(when, "astimezone")
+                        else str(when)
+                    )
                 except Exception:
                     when_s = str(when or "")
                 line = "{} — {} — {} — {} ض — {}".format(
-                    when_s, r.get("customer_name") or "", r.get("table_name") or "—",
-                    r.get("party_size") or 0, lbl.get(r.get("status"), r.get("status") or ""))
+                    when_s,
+                    r.get("customer_name") or "",
+                    r.get("table_name") or "—",
+                    r.get("party_size") or 0,
+                    lbl.get(r.get("status"), r.get("status") or ""),
+                )
                 c.setFont("Arabic", 9)
                 c.drawRightString(W - MARGIN, y[0], _ar(line))
                 y[0] -= 13
@@ -1724,16 +2483,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "reservations-report-" + str(d1) + "_" + str(d2) + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p406: تصدير تقرير الحجوزات CSV (BOM لـ Excel) — نفس بيانات p388 ----------
     @router.get("/reservations/report.csv")
-    async def reservations_report_csv(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                      user: dict = Depends(get_current_user)):
+    async def reservations_report_csv(
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         d1, d2, start, end = await _period_bounds(date_from, date_to)
-        rows = await _resv().find(
-            {"reserved_for": {"$gte": start, "$lt": end}}).sort("reserved_for", 1).to_list(500)
+        rows = (
+            await _resv()
+            .find({"reserved_for": {"$gte": start, "$lt": end}})
+            .sort("reserved_for", 1)
+            .to_list(500)
+        )
         dz = timezone(timedelta(hours=1))
         counts = {}
         guests = 0
@@ -1747,6 +2516,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = []
@@ -1763,7 +2533,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if rows:
             lines.append("")
             lines.append("التاريخ,الوقت,الزبون,الطاولة,الأشخاص,الحالة")
-            lbl = {"booked": "مؤكد", "seated": "حضر", "cancelled": "ملغى", "no_show": "لم يحضر"}
+            lbl = {
+                "booked": "مؤكد",
+                "seated": "حضر",
+                "cancelled": "ملغى",
+                "no_show": "لم يحضر",
+            }
             for r in rows:
                 when = r.get("reserved_for")
                 try:
@@ -1772,93 +2547,207 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     t_s = local.strftime("%H:%M") if local else ""
                 except Exception:
                     d_s, t_s = str(when or ""), ""
-                lines.append(",".join([_cell(d_s), _cell(t_s), _cell(r.get("customer_name")),
-                                       _cell(r.get("table_name") or "—"), _cell(r.get("party_size") or 0),
-                                       _cell(lbl.get(r.get("status"), r.get("status") or ""))]))
+                lines.append(
+                    ",".join(
+                        [
+                            _cell(d_s),
+                            _cell(t_s),
+                            _cell(r.get("customer_name")),
+                            _cell(r.get("table_name") or "—"),
+                            _cell(r.get("party_size") or 0),
+                            _cell(lbl.get(r.get("status"), r.get("status") or "")),
+                        ]
+                    )
+                )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "reservations-report-" + str(d1) + "_" + str(d2) + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p371: تقرير إقفال اليوم (Z) للمطعم — بتوقيت الجزائر ----------
     async def _zreport_agg(start, end) -> dict:
         # p380: نواة تجميع z-report — مشتركة بين اليوم الواحد (p371) وتقارير الفترات (p380)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
             {"$match": {"created_at": {"$gte": start, "$lt": end}}},
-            {"$addFields": {
-                "bill": _bill,
-                "cxl": {"$eq": ["$status", "cancelled"]},
-                "disc_amt": {"$cond": [{"$eq": ["$status", "cancelled"]}, 0,
-                                       {"$ifNull": ["$discount.amount", 0]}]},
-                # توحيد الدفعات: p366+ لها payments[]؛ الطلبات الأقدم المدفوعة تُشتق من payment_method
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$facet": {
-                "overall": [{"$group": {"_id": None,
-                                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
-                                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
-                                        "discounts": {"$sum": "$disc_amt"},
-                                        "avg_bill": {"$avg": {"$cond": ["$cxl", None, "$bill"]}}}}],
-                "methods": [{"$unwind": "$pay_list"},
-                            {"$group": {"_id": "$pay_list.method",
-                                        "amount": {"$sum": {"$ifNull": ["$pay_list.amount", 0]}},
-                                        "count": {"$sum": 1}}},
-                            {"$sort": {"amount": -1}}],
-                "dishes": [{"$match": {"cxl": False}},
-                           {"$unwind": "$items"},
-                           {"$group": {"_id": "$items.product_name", "qty": {"$sum": "$items.quantity"}}},
-                           {"$sort": {"qty": -1}}, {"$limit": 8}],
-                "hours": [{"$match": {"cxl": False}},
-                          {"$group": {"_id": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
-                                      "n": {"$sum": 1}}},
-                          {"$sort": {"_id": 1}}],
-            }},
+            {
+                "$addFields": {
+                    "bill": _bill,
+                    "cxl": {"$eq": ["$status", "cancelled"]},
+                    "disc_amt": {
+                        "$cond": [
+                            {"$eq": ["$status", "cancelled"]},
+                            0,
+                            {"$ifNull": ["$discount.amount", 0]},
+                        ]
+                    },
+                    # توحيد الدفعات: p366+ لها payments[]؛ الطلبات الأقدم المدفوعة تُشتق من payment_method
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$facet": {
+                    "overall": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                                "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                                "discounts": {"$sum": "$disc_amt"},
+                                "avg_bill": {
+                                    "$avg": {"$cond": ["$cxl", None, "$bill"]}
+                                },
+                            }
+                        }
+                    ],
+                    "methods": [
+                        {"$unwind": "$pay_list"},
+                        {
+                            "$group": {
+                                "_id": "$pay_list.method",
+                                "amount": {
+                                    "$sum": {"$ifNull": ["$pay_list.amount", 0]}
+                                },
+                                "count": {"$sum": 1},
+                            }
+                        },
+                        {"$sort": {"amount": -1}},
+                    ],
+                    "dishes": [
+                        {"$match": {"cxl": False}},
+                        {"$unwind": "$items"},
+                        {
+                            "$group": {
+                                "_id": "$items.product_name",
+                                "qty": {"$sum": "$items.quantity"},
+                            }
+                        },
+                        {"$sort": {"qty": -1}},
+                        {"$limit": 8},
+                    ],
+                    "hours": [
+                        {"$match": {"cxl": False}},
+                        {
+                            "$group": {
+                                "_id": {
+                                    "$hour": {
+                                        "date": "$created_at",
+                                        "timezone": "Africa/Algiers",
+                                    }
+                                },
+                                "n": {"$sum": 1},
+                            }
+                        },
+                        {"$sort": {"_id": 1}},
+                    ],
+                }
+            },
         ]
         rows = await _orders().aggregate(pipeline).to_list(1)
         fac = rows[0] if rows else {}
         ov = (fac.get("overall") or [{}])[0]
-        methods = [{"method": m["_id"], "amount": round(float(m.get("amount") or 0), 2),
-                    "count": m["count"]} for m in (fac.get("methods") or [])]
+        methods = [
+            {
+                "method": m["_id"],
+                "amount": round(float(m.get("amount") or 0), 2),
+                "count": m["count"],
+            }
+            for m in (fac.get("methods") or [])
+        ]
         return {
             "orders": ov.get("orders", 0),
             "cancelled": ov.get("cancelled", 0),
             "discounts": round(float(ov.get("discounts") or 0), 2),
             "avg_order": round(float(ov.get("avg_bill") or 0), 2),
-            "revenue": round(sum(m["amount"] for m in methods if m["method"] != "debt"), 2),
+            "revenue": round(
+                sum(m["amount"] for m in methods if m["method"] != "debt"), 2
+            ),
             "by_method": methods,
-            "top_dishes": [{"name": d["_id"], "qty": d["qty"]} for d in (fac.get("dishes") or [])],
-            "by_hour": [{"hour": h["_id"], "count": h["n"]} for h in (fac.get("hours") or [])],
+            "top_dishes": [
+                {"name": d["_id"], "qty": d["qty"]} for d in (fac.get("dishes") or [])
+            ],
+            "by_hour": [
+                {"hour": h["_id"], "count": h["n"]} for h in (fac.get("hours") or [])
+            ],
         }
 
     async def _zreport_payload(date: Optional[str]) -> dict:
         dz = timezone(timedelta(hours=1))
         try:
-            day = datetime.fromisoformat(str(date)).date() if date else _now().astimezone(dz).date()
+            day = (
+                datetime.fromisoformat(str(date)).date()
+                if date
+                else _now().astimezone(dz).date()
+            )
         except Exception:
             raise HTTPException(status_code=400, detail="تاريخ غير صالح")
-        start = datetime(day.year, day.month, day.day, tzinfo=dz).astimezone(timezone.utc)
+        start = datetime(day.year, day.month, day.day, tzinfo=dz).astimezone(
+            timezone.utc
+        )
         end = start + timedelta(days=1)
         d = await _zreport_agg(start, end)
         d["date"] = day.isoformat()
         return d
 
     @router.get("/z-report")
-    async def z_report(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    async def z_report(
+        date: Optional[str] = None, user: dict = Depends(get_current_user)
+    ):
         return await _zreport_payload(date)
 
     # ---------- p379: تقرير الإقفال Z كملف PDF — نفس بيانات p371 قابلة للتنزيل والأرشفة ----------
     @router.get("/z-report.pdf")
-    async def z_report_pdf(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    async def z_report_pdf(
+        date: Optional[str] = None, user: dict = Depends(get_current_user)
+    ):
         d = await _zreport_payload(date)
         import os as _os
         import io as _io
@@ -1870,7 +2759,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -1885,8 +2776,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -1932,9 +2829,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _row("متوسط الطلب", str(d.get("avg_order") or 0))
         _dash()
         mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
-        for m in (d.get("by_method") or []):
-            _row("{} ({})".format(mlabel.get(m.get("method"), m.get("method") or ""), m.get("count")),
-                 str(m.get("amount")), 10)
+        for m in d.get("by_method") or []:
+            _row(
+                "{} ({})".format(
+                    mlabel.get(m.get("method"), m.get("method") or ""), m.get("count")
+                ),
+                str(m.get("amount")),
+                10,
+            )
         _row("الإيراد المحصَّل (بلا الآجل)", str(d.get("revenue") or 0), 13)
         dishes = d.get("top_dishes") or []
         if dishes:
@@ -1950,23 +2852,29 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             for i in range(0, len(cells), 4):
                 _need()
                 c.setFont("Arabic", 9)
-                c.drawCentredString(W / 2, y[0], _ar(" · ".join(cells[i:i + 4])))
+                c.drawCentredString(W / 2, y[0], _ar(" · ".join(cells[i : i + 4])))
                 y[0] -= 15
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "z-report-" + (d.get("date") or "today") + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p401: تصدير الإقفال اليومي Z كملف CSV (BOM لـ Excel) ----------
     @router.get("/z-report.csv")
-    async def z_report_csv(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    async def z_report_csv(
+        date: Optional[str] = None, user: dict = Depends(get_current_user)
+    ):
         d = await _zreport_payload(date)
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = []
@@ -1983,8 +2891,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append("طريقة الدفع,العدد,المبلغ")
             mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
             for m in methods:
-                lines.append(",".join([_cell(mlabel.get(m.get("method"), m.get("method") or "")),
-                                       _cell(m.get("count")), _cell(m.get("amount"))]))
+                lines.append(
+                    ",".join(
+                        [
+                            _cell(mlabel.get(m.get("method"), m.get("method") or "")),
+                            _cell(m.get("count")),
+                            _cell(m.get("amount")),
+                        ]
+                    )
+                )
         dishes = d.get("top_dishes") or []
         if dishes:
             lines.append("")
@@ -1999,15 +2914,22 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 lines.append(",".join([_cell(h.get("hour")), _cell(h.get("count"))]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "z-report-" + (d.get("date") or "today") + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p380: تقرير فترة مخصصة (من/إلى) — JSON وPDF ----------
     async def _period_bounds(date_from, date_to):
         dz = timezone(timedelta(hours=1))
         today = _now().astimezone(dz).date()
         try:
-            d1 = datetime.fromisoformat(str(date_from)).date() if date_from else today - timedelta(days=6)
+            d1 = (
+                datetime.fromisoformat(str(date_from)).date()
+                if date_from
+                else today - timedelta(days=6)
+            )
             d2 = datetime.fromisoformat(str(date_to)).date() if date_to else today
         except Exception:
             raise HTTPException(status_code=400, detail="تاريخ غير صالح")
@@ -2016,7 +2938,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if (d2 - d1).days > 92:
             raise HTTPException(status_code=400, detail="الفترة أطول من 92 يومًا")
         start = datetime(d1.year, d1.month, d1.day, tzinfo=dz).astimezone(timezone.utc)
-        end = datetime(d2.year, d2.month, d2.day, tzinfo=dz).astimezone(timezone.utc) + timedelta(days=1)
+        end = datetime(d2.year, d2.month, d2.day, tzinfo=dz).astimezone(
+            timezone.utc
+        ) + timedelta(days=1)
         return d1, d2, start, end
 
     async def _period_payload(date_from, date_to, compare: bool = False) -> dict:
@@ -2041,27 +2965,44 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     return None if cur == 0 else 100.0
                 return round(100.0 * (cur - old) / old, 1)
 
-            d["prev"] = {"from": pd1.isoformat(), "to": pd2.isoformat(), "days": d["days"],
-                         "orders": prev.get("orders"), "cancelled": prev.get("cancelled"),
-                         "revenue": prev.get("revenue"), "discounts": prev.get("discounts")}
-            d["delta"] = {"orders_pct": _pct(d.get("orders"), prev.get("orders")),
-                          "revenue_pct": _pct(d.get("revenue"), prev.get("revenue"))}
+            d["prev"] = {
+                "from": pd1.isoformat(),
+                "to": pd2.isoformat(),
+                "days": d["days"],
+                "orders": prev.get("orders"),
+                "cancelled": prev.get("cancelled"),
+                "revenue": prev.get("revenue"),
+                "discounts": prev.get("discounts"),
+            }
+            d["delta"] = {
+                "orders_pct": _pct(d.get("orders"), prev.get("orders")),
+                "revenue_pct": _pct(d.get("revenue"), prev.get("revenue")),
+            }
         return d
 
     @router.get("/period-report")
-    async def period_report(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                            compare: int = 0, user: dict = Depends(get_current_user)):
+    async def period_report(
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        compare: int = 0,
+        user: dict = Depends(get_current_user),
+    ):
         return await _period_payload(date_from, date_to, compare=bool(compare))
 
     # ---------- p394: تصدير التقرير المخصص CSV (BOM لـ Excel) ----------
     @router.get("/period-report.csv")
-    async def period_report_csv(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                compare: int = 0, user: dict = Depends(get_current_user)):
+    async def period_report_csv(
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        compare: int = 0,
+        user: dict = Depends(get_current_user),
+    ):
         d = await _period_payload(date_from, date_to, compare=bool(compare))
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = []
@@ -2080,8 +3021,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append("طريقة الدفع,العدد,المبلغ")
             mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
             for m in methods:
-                lines.append(",".join([_cell(mlabel.get(m.get("method"), m.get("method") or "")),
-                                       _cell(m.get("count")), _cell(m.get("amount"))]))
+                lines.append(
+                    ",".join(
+                        [
+                            _cell(mlabel.get(m.get("method"), m.get("method") or "")),
+                            _cell(m.get("count")),
+                            _cell(m.get("amount")),
+                        ]
+                    )
+                )
         dishes = d.get("top_dishes") or []
         if dishes:
             lines.append("")
@@ -2108,13 +3056,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append("الطلبات," + _cell(_pct_lbl(delta.get("orders_pct"))))
             lines.append("الإيراد المحصَّل," + _cell(_pct_lbl(delta.get("revenue_pct"))))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        fname = "period-report-" + (d.get("from") or "") + "_" + (d.get("to") or "") + ("-compare" if prev else "") + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        fname = (
+            "period-report-"
+            + (d.get("from") or "")
+            + "_"
+            + (d.get("to") or "")
+            + ("-compare" if prev else "")
+            + ".csv"
+        )
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     @router.get("/period-report.pdf")
-    async def period_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                user: dict = Depends(get_current_user)):
+    async def period_report_pdf(
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         d = await _period_payload(date_from, date_to)
         import os as _os
         import io as _io
@@ -2126,7 +3087,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -2141,8 +3104,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -2189,9 +3158,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _row("متوسط الطلب", str(d.get("avg_order") or 0))
         _dash()
         mlabel = {"cash": "كاش", "card": "بطاقة", "debt": "آجل"}
-        for m in (d.get("by_method") or []):
-            _row("{} ({})".format(mlabel.get(m.get("method"), m.get("method") or ""), m.get("count")),
-                 str(m.get("amount")), 10)
+        for m in d.get("by_method") or []:
+            _row(
+                "{} ({})".format(
+                    mlabel.get(m.get("method"), m.get("method") or ""), m.get("count")
+                ),
+                str(m.get("amount")),
+                10,
+            )
         _row("الإيراد المحصَّل (بلا الآجل)", str(d.get("revenue") or 0), 13)
         dishes = d.get("top_dishes") or []
         if dishes:
@@ -2202,16 +3176,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.showPage()
         c.save()
         buf.seek(0)
-        fname = "period-report-" + (d.get("from") or "") + "_" + (d.get("to") or "") + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        fname = (
+            "period-report-"
+            + (d.get("from") or "")
+            + "_"
+            + (d.get("to") or "")
+            + ".pdf"
+        )
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p372: فاتورة/إيصال الزبون — بيانات جاهزة للطباعة ----------
     async def _receipt_payload(order_id: str, user: dict) -> dict:
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
-        data = _order_out(o)  # total / discount_amount / final_total / paid_amount / remaining_total
+        data = _order_out(
+            o
+        )  # total / discount_amount / final_total / paid_amount / remaining_total
 
         def _iso(v):
             return v.isoformat() if hasattr(v, "isoformat") else (str(v) if v else "")
@@ -2223,25 +3208,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
-        items = [{
-            "name": i.get("product_name") or "",
-            "quantity": i.get("quantity") or 0,
-            "unit_price": round(float(i.get("unit_price") or 0), 2),
-            "total": round(float(i.get("quantity") or 0) * float(i.get("unit_price") or 0), 2),
-            "paid": bool(i.get("paid")),
-        } for i in (o.get("items") or [])]
-        pays = [{
-            "method": p.get("method") or "cash",
-            "amount": round(float(p.get("amount") or 0), 2),
-            "paid_by": p.get("paid_by") or "",
-            "paid_at": _iso(p.get("paid_at")),
-            "invoice_number": p.get("invoice_number") or "",
-        } for p in (o.get("payments") or [])]
+        items = [
+            {
+                "name": i.get("product_name") or "",
+                "quantity": i.get("quantity") or 0,
+                "unit_price": round(float(i.get("unit_price") or 0), 2),
+                "total": round(
+                    float(i.get("quantity") or 0) * float(i.get("unit_price") or 0), 2
+                ),
+                "paid": bool(i.get("paid")),
+            }
+            for i in (o.get("items") or [])
+        ]
+        pays = [
+            {
+                "method": p.get("method") or "cash",
+                "amount": round(float(p.get("amount") or 0), 2),
+                "paid_by": p.get("paid_by") or "",
+                "paid_at": _iso(p.get("paid_at")),
+                "invoice_number": p.get("invoice_number") or "",
+            }
+            for p in (o.get("payments") or [])
+        ]
         ts = o.get("timestamps") or {}
         return {
             "store_name": store,
@@ -2265,8 +3264,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p426: أرشيف طلبات المطبخ CSV (BOM لـ Excel — فترة + حالة اختيارية) ----------
     @router.get("/kitchen-orders.csv")
-    async def kitchen_orders_csv(status: Optional[str] = None, days: int = 7,
-                                 user: dict = Depends(get_current_user)):
+    async def kitchen_orders_csv(
+        status: Optional[str] = None,
+        days: int = 7,
+        user: dict = Depends(get_current_user),
+    ):
         days = max(1, min(int(days), 90))
         since = _now() - timedelta(days=days)
         q = {"created_at": {"$gte": since}}
@@ -2280,35 +3282,61 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         def _dt(v):
-            return v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
+            return (
+                v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
+            )
 
-        slbl = {"pending": "قيد الانتظار", "preparing": "قيد التحضير", "ready": "جاهز",
-                "served": "قُدّم", "cancelled": "ملغى", "scheduled": "مجدول"}
+        slbl = {
+            "pending": "قيد الانتظار",
+            "preparing": "قيد التحضير",
+            "ready": "جاهز",
+            "served": "قُدّم",
+            "cancelled": "ملغى",
+            "scheduled": "مجدول",
+        }
         lines = ["الرمز,الطاولة,الحالة,الأصناف,الإجمالي,الخصم,الصافي,المدفوع,التاريخ"]
         for o in rows:
             oo = _order_out(o)
-            lines.append(",".join([
-                _cell(oo.get("code")),
-                _cell(tnames.get(oo.get("table_id")) or oo.get("table_name") or ""),
-                _cell(slbl.get(oo.get("status"), oo.get("status") or "")),
-                _cell(len(oo.get("items") or [])), _cell(oo.get("total")),
-                _cell(oo.get("discount_amount")), _cell(oo.get("final_total")),
-                _cell(oo.get("paid_amount")), _cell(_dt(o.get("created_at")))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(oo.get("code")),
+                        _cell(
+                            tnames.get(oo.get("table_id")) or oo.get("table_name") or ""
+                        ),
+                        _cell(slbl.get(oo.get("status"), oo.get("status") or "")),
+                        _cell(len(oo.get("items") or [])),
+                        _cell(oo.get("total")),
+                        _cell(oo.get("discount_amount")),
+                        _cell(oo.get("final_total")),
+                        _cell(oo.get("paid_amount")),
+                        _cell(_dt(o.get("created_at"))),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "kitchen-orders-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     @router.get("/kitchen-orders/{order_id}/receipt")
-    async def kitchen_order_receipt(order_id: str, user: dict = Depends(get_current_user)):
+    async def kitchen_order_receipt(
+        order_id: str, user: dict = Depends(get_current_user)
+    ):
         return await _receipt_payload(order_id, user)
 
     # ---------- p377: إيصال الزبون PDF — نفس بيانات p372 بتنسيق قابل للتنزيل والمشاركة ----------
     @router.get("/kitchen-orders/{order_id}/receipt.pdf")
-    async def kitchen_order_receipt_pdf(order_id: str, user: dict = Depends(get_current_user)):
+    async def kitchen_order_receipt_pdf(
+        order_id: str, user: dict = Depends(get_current_user)
+    ):
         d = await _receipt_payload(order_id, user)
         import os as _os
         import io as _io
@@ -2321,7 +3349,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from fastapi.responses import StreamingResponse
 
         # نمط import_export المجرب: Noto Naskh Arabic + تشكيل + bidi
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -2336,8 +3366,13 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         items = d.get("items") or []
         pays = d.get("payments") or []
         W = 80 * mm  # عرض طابعة الإيصالات القياسي
-        rows = 16 + len(items) + (len(pays) + 3 if pays else 0) \
-            + (1 if d.get("discount_amount") else 0) + (1 if d.get("remaining_total") else 0)
+        rows = (
+            16
+            + len(items)
+            + (len(pays) + 3 if pays else 0)
+            + (1 if d.get("discount_amount") else 0)
+            + (1 if d.get("remaining_total") else 0)
+        )
         H = 20 * mm + rows * 5.2 * mm
         buf = _io.BytesIO()
         c = _canvas.Canvas(buf, pagesize=(W, H))
@@ -2362,12 +3397,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         _center(d.get("store_name") or "", 13)
         _center("فاتورة زبون", 10)
-        _center((d.get("code") or "") + (" · " + d["table_name"] if d.get("table_name") else ""), 9)
+        _center(
+            (d.get("code") or "")
+            + (" · " + d["table_name"] if d.get("table_name") else ""),
+            9,
+        )
         if d.get("created_at"):
             _center(str(d["created_at"]).replace("T", " ")[:16], 8)
         _dash()
         for it in items:
-            _row("{} ×{}".format(it.get("name"), it.get("quantity")), str(it.get("total")), 9)
+            _row(
+                "{} ×{}".format(it.get("name"), it.get("quantity")),
+                str(it.get("total")),
+                9,
+            )
         _dash()
         _row("المجموع", str(d.get("total")), 9)
         if d.get("discount_amount"):
@@ -2390,18 +3433,27 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "receipt-" + (d.get("code") or order_id) + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p374: منحنى إيرادات المطعم متعدد الأيام ----------
     @router.get("/revenue-trend")
-    async def revenue_trend(days: int = 7, user: dict = Depends(get_current_user),
-                            date_from: str = None, date_to: str = None):
+    async def revenue_trend(
+        days: int = 7,
+        user: dict = Depends(get_current_user),
+        date_from: str = None,
+        date_to: str = None,
+    ):
         days = max(1, min(int(days or 7), 90))  # days=0 → 7 (اتفاق p363)، سقف 90
         dz = timezone(timedelta(hours=1))
         today = _now().astimezone(dz).date()
         start_d = today - timedelta(days=days - 1)
-        start = datetime(start_d.year, start_d.month, start_d.day, tzinfo=dz).astimezone(timezone.utc)
+        start = datetime(
+            start_d.year, start_d.month, start_d.day, tzinfo=dz
+        ).astimezone(timezone.utc)
         until = None
         end_d = today
         # p472: مرشّحات من/إلى اختيارية (YYYY-MM-DD) — عند غيابها يُعتمد days كما كان تمامًا
@@ -2409,46 +3461,123 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             if date_from:
                 _df = datetime.strptime(date_from, "%Y-%m-%d").date()
                 start_d = _df
-                start = datetime(_df.year, _df.month, _df.day, tzinfo=dz).astimezone(timezone.utc)
+                start = datetime(_df.year, _df.month, _df.day, tzinfo=dz).astimezone(
+                    timezone.utc
+                )
             if date_to:
                 end_d = datetime.strptime(date_to, "%Y-%m-%d").date()
                 _dt = end_d + timedelta(days=1)
-                until = datetime(_dt.year, _dt.month, _dt.day, tzinfo=dz).astimezone(timezone.utc)
+                until = datetime(_dt.year, _dt.month, _dt.day, tzinfo=dz).astimezone(
+                    timezone.utc
+                )
         except ValueError:
-            raise HTTPException(status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)")
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+            raise HTTPException(
+                status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)"
+            )
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": ({"$gte": start, "$lt": until} if until else {"$gte": start})}},
-            {"$addFields": {
-                "bill": _bill,
-                "cxl": {"$eq": ["$status", "cancelled"]},
-                "disc_amt": {"$cond": [{"$eq": ["$status", "cancelled"]}, 0,
-                                       {"$ifNull": ["$discount.amount", 0]}]},
-                # توحيد الدفعات كما في z-report: p366+ لها payments[] والأقدم يُشتق من payment_method
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "day": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
-                                          "timezone": "Africa/Algiers"}},
-                # المحصَّل النقدي الفعلي يستثني الآجل — نفس دلالة revenue في z-report
-                "paid_nd": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": "$day",
-                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
-                        "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_nd"]}},
-                        "discounts": {"$sum": "$disc_amt"}}},
+            {
+                "$match": {
+                    "created_at": (
+                        {"$gte": start, "$lt": until} if until else {"$gte": start}
+                    )
+                }
+            },
+            {
+                "$addFields": {
+                    "bill": _bill,
+                    "cxl": {"$eq": ["$status", "cancelled"]},
+                    "disc_amt": {
+                        "$cond": [
+                            {"$eq": ["$status", "cancelled"]},
+                            0,
+                            {"$ifNull": ["$discount.amount", 0]},
+                        ]
+                    },
+                    # توحيد الدفعات كما في z-report: p366+ لها payments[] والأقدم يُشتق من payment_method
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$addFields": {
+                    "day": {
+                        "$dateToString": {
+                            "date": "$created_at",
+                            "format": "%Y-%m-%d",
+                            "timezone": "Africa/Algiers",
+                        }
+                    },
+                    # المحصَّل النقدي الفعلي يستثني الآجل — نفس دلالة revenue في z-report
+                    "paid_nd": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$day",
+                    "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                    "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_nd"]}},
+                    "discounts": {"$sum": "$disc_amt"},
+                }
+            },
             {"$sort": {"_id": 1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(100)
@@ -2458,14 +3587,21 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         while d <= end_d:  # ملء الأيام الفارغة بأصفار — المنحنى متصل زمنيًا
             k = d.isoformat()
             r = by_day.get(k) or {}
-            series.append({"date": k,
-                           "orders": int(r.get("orders") or 0),
-                           "revenue": round(float(r.get("revenue") or 0), 2),
-                           "discounts": round(float(r.get("discounts") or 0), 2)})
+            series.append(
+                {
+                    "date": k,
+                    "orders": int(r.get("orders") or 0),
+                    "revenue": round(float(r.get("revenue") or 0), 2),
+                    "discounts": round(float(r.get("discounts") or 0), 2),
+                }
+            )
             d += timedelta(days=1)
-        return {"days": days, "series": series,
-                "total_orders": sum(s["orders"] for s in series),
-                "total_revenue": round(sum(s["revenue"] for s in series), 2)}
+        return {
+            "days": days,
+            "series": series,
+            "total_orders": sum(s["orders"] for s in series),
+            "total_revenue": round(sum(s["revenue"] for s in series), 2),
+        }
 
     # ---------- p408: تصدير منحنى الإيرادات CSV (BOM لـ Excel) ----------
     # ---------- p458: تقرير الإضافات (modifiers) CSV (عدد/إجمالي الزيادة — BOM لـ Excel) ----------
@@ -2474,16 +3610,25 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
             {"$unwind": "$items"},
             {"$addFields": {"_mods": {"$ifNull": ["$items.modifiers", []]}}},
             {"$unwind": "$_mods"},
-            {"$group": {"_id": {"$ifNull": [
-                            {"$ifNull": ["$_mods.name", "$_mods.option"]}, "—"]},
-                        "count": {"$sum": 1},
-                        "extra": {"$sum": {"$ifNull": ["$_mods.price_delta", 0]}},
-                        "products": {"$addToSet": "$items.product_name"}}},
+            {
+                "$group": {
+                    "_id": {
+                        "$ifNull": [{"$ifNull": ["$_mods.name", "$_mods.option"]}, "—"]
+                    },
+                    "count": {"$sum": 1},
+                    "extra": {"$sum": {"$ifNull": ["$_mods.price_delta", 0]}},
+                    "products": {"$addToSet": "$items.product_name"},
+                }
+            },
             {"$sort": {"count": -1}},
             {"$limit": 200},
         ]
@@ -2492,6 +3637,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الإضافة,مرات الطلب,إجمالي الزيادة,أصناف مرتبطة"]
@@ -2500,48 +3646,119 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             ex = round(float(r.get("extra") or 0), 2)
             tot += ex
             prods = r.get("products") or []
-            lines.append(",".join([
-                _cell(r.get("_id")), _cell(int(r.get("count") or 0)), _cell(ex),
-                _cell(" | ".join(str(p) for p in prods[:3]))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r.get("_id")),
+                        _cell(int(r.get("count") or 0)),
+                        _cell(ex),
+                        _cell(" | ".join(str(p) for p in prods[:3])),
+                    ]
+                )
+            )
         lines.append(",".join([_cell("المجموع ←"), "", _cell(round(tot, 2)), ""]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "modifiers-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p464: الزبائن الخامدون CSV (لم يطلبوا منذ N يومًا — BOM لـ Excel) ----------
     @router.get("/dormant-customers.csv")
-    async def dormant_customers_csv(min_idle: int = 14, user: dict = Depends(get_current_user)):
+    async def dormant_customers_csv(
+        min_idle: int = 14, user: dict = Depends(get_current_user)
+    ):
         min_idle = max(1, min(int(min_idle), 180))
         since = _now() - timedelta(days=365)
         cutoff = _now() - timedelta(days=min_idle)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "customer_phone": {"$nin": [None, ""]},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "paid_amt": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": "$customer_phone",
-                        "orders": {"$sum": 1},
-                        "spent": {"$sum": "$paid_amt"},
-                        "last": {"$max": "$created_at"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "customer_phone": {"$nin": [None, ""]},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    }
+                }
+            },
+            {
+                "$addFields": {
+                    "paid_amt": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$customer_phone",
+                    "orders": {"$sum": 1},
+                    "spent": {"$sum": "$paid_amt"},
+                    "last": {"$max": "$created_at"},
+                }
+            },
             {"$match": {"last": {"$lt": cutoff}}},
             {"$sort": {"last": 1}},
             {"$limit": 200},
@@ -2553,6 +3770,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الهاتف,الطلبات,إجمالي المنفق,آخر زيارة,أيام الخمول"]
@@ -2562,51 +3780,124 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 ca = ca.replace(tzinfo=timezone.utc)
             idle = (now - ca).days if ca else ""
             dstr = ca.astimezone(dz).strftime("%Y-%m-%d") if ca else ""
-            lines.append(",".join([
-                _cell(r.get("_id")), _cell(int(r.get("orders") or 0)),
-                _cell(round(float(r.get("spent") or 0), 2)), _cell(dstr), _cell(idle)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r.get("_id")),
+                        _cell(int(r.get("orders") or 0)),
+                        _cell(round(float(r.get("spent") or 0), 2)),
+                        _cell(dstr),
+                        _cell(idle),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "dormant-customers-" + str(min_idle) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p466: توزيع الزبائن حسب تكرار الطلب CSV (فئات ولاء — BOM لـ Excel) ----------
     @router.get("/customer-frequency.csv")
-    async def customer_frequency_csv(days: int = 90, user: dict = Depends(get_current_user)):
+    async def customer_frequency_csv(
+        days: int = 90, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "customer_phone": {"$nin": [None, ""]},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "paid_amt": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": "$customer_phone",
-                        "orders": {"$sum": 1},
-                        "spent": {"$sum": "$paid_amt"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "customer_phone": {"$nin": [None, ""]},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    }
+                }
+            },
+            {
+                "$addFields": {
+                    "paid_amt": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$customer_phone",
+                    "orders": {"$sum": 1},
+                    "spent": {"$sum": "$paid_amt"},
+                }
+            },
         ]
         rows = await _orders().aggregate(pipeline).to_list(5000)
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         def _bucket(n):
@@ -2625,48 +3916,122 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             agg[b]["cust"] += 1
             agg[b]["orders"] += int(r.get("orders") or 0)
             agg[b]["spent"] += float(r.get("spent") or 0)
-        lines = ["فئة التكرار,عدد الزبائن,إجمالي الطلبات,إجمالي المنفق,متوسط المنفق للزبون"]
+        lines = [
+            "فئة التكرار,عدد الزبائن,إجمالي الطلبات,إجمالي المنفق,متوسط المنفق للزبون"
+        ]
         for b in order_lbl:
             a = agg[b]
             sp = round(a["spent"], 2)
             avg = round(sp / a["cust"], 2) if a["cust"] else 0
-            lines.append(",".join([_cell(b), _cell(a["cust"]), _cell(a["orders"]), _cell(sp), _cell(avg)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(b),
+                        _cell(a["cust"]),
+                        _cell(a["orders"]),
+                        _cell(sp),
+                        _cell(avg),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "customer-frequency-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p457: مساعد جلب أفضل زبائن الصالة (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _top_customer_rows(days):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "customer_phone": {"$nin": [None, ""]},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "paid_amt": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": "$customer_phone",
-                        "orders": {"$sum": 1},
-                        "spent": {"$sum": "$paid_amt"},
-                        "last": {"$max": "$created_at"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "customer_phone": {"$nin": [None, ""]},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    }
+                }
+            },
+            {
+                "$addFields": {
+                    "paid_amt": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$customer_phone",
+                    "orders": {"$sum": 1},
+                    "spent": {"$sum": "$paid_amt"},
+                    "last": {"$max": "$created_at"},
+                }
+            },
             {"$sort": {"orders": -1}},
             {"$limit": 100},
         ]
@@ -2677,11 +4042,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             ca = r.get("last")
             if ca and ca.tzinfo is None:
                 ca = ca.replace(tzinfo=timezone.utc)
-            out.append({
-                "phone": r.get("_id") or "",
-                "orders": int(r.get("orders") or 0),
-                "spent": round(float(r.get("spent") or 0), 2),
-                "last": ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else ""})
+            out.append(
+                {
+                    "phone": r.get("_id") or "",
+                    "orders": int(r.get("orders") or 0),
+                    "spent": round(float(r.get("spent") or 0), 2),
+                    "last": ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else "",
+                }
+            )
         return days, out
 
     # ---------- p454: أفضل زبائن الصالة CSV (حسب هاتف p356 — BOM لـ Excel) ----------
@@ -2692,16 +4060,28 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الهاتف,الطلبات,إجمالي المنفق,آخر زيارة"]
         for r in rows:
-            lines.append(",".join([
-                _cell(r["phone"]), _cell(r["orders"]), _cell(r["spent"]), _cell(r["last"])]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r["phone"]),
+                        _cell(r["orders"]),
+                        _cell(r["spent"]),
+                        _cell(r["last"]),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "top-customers-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p457: أفضل زبائن الصالة PDF (نفس بيانات CSV عبر _top_customer_rows) ----------
     @router.get("/top-customers.pdf")
@@ -2717,7 +4097,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -2732,8 +4114,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -2780,16 +4168,21 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if rows:
             _center("الهاتف — آخر زيارة | الطلبات — المنفق", 10)
             for r in rows:
-                _row(r["phone"] + " — " + r["last"],
-                     str(r["orders"]) + " — " + str(r["spent"]) + " دج")
+                _row(
+                    r["phone"] + " — " + r["last"],
+                    str(r["orders"]) + " — " + str(r["spent"]) + " دج",
+                )
         else:
             _center("لا بيانات في الفترة", 10)
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "top-customers-" + str(days) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p452: ربحية الأصناف CSV (إيراد/تكلفة/ربح/هامش — BOM لـ Excel) ----------
     @router.get("/items-profit.csv")
@@ -2799,12 +4192,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         cost = {}
         async for pr in db.products.find({}, {"_id": 0, "id": 1, "purchase_price": 1}):
             cost[pr.get("id")] = float(pr.get("purchase_price") or 0)
-        rows = await _orders().find(
-            {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}},
-            {"_id": 0, "items": 1}).to_list(5000)
+        rows = (
+            await _orders()
+            .find(
+                {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                },
+                {"_id": 0, "items": 1},
+            )
+            .to_list(5000)
+        )
         agg = {}
         for o in rows:
-            for it in (o.get("items") or []):
+            for it in o.get("items") or []:
                 name = it.get("product_name") or "—"
                 q = float(it.get("quantity") or 0)
                 up = float(it.get("unit_price") or 0)
@@ -2817,37 +4218,80 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الصنف,الكمية,الإيراد,التكلفة,الربح,الهامش %"]
         tot_r = tot_c = 0.0
-        for name, a in sorted(agg.items(), key=lambda kv: kv[1]["rev"] - kv[1]["cost"], reverse=True):
-            rev = round(a["rev"], 2); cst = round(a["cost"], 2)
+        for name, a in sorted(
+            agg.items(), key=lambda kv: kv[1]["rev"] - kv[1]["cost"], reverse=True
+        ):
+            rev = round(a["rev"], 2)
+            cst = round(a["cost"], 2)
             prof = round(rev - cst, 2)
             margin = round(prof / rev * 100, 1) if rev else 0
-            tot_r += rev; tot_c += cst
-            lines.append(",".join([
-                _cell(name), _cell(round(a["qty"], 2)), _cell(rev),
-                _cell(cst), _cell(prof), _cell(margin)]))
-        lines.append(",".join([_cell("المجموع ←"), "", _cell(round(tot_r, 2)),
-                               _cell(round(tot_c, 2)), _cell(round(tot_r - tot_c, 2)), ""]))
+            tot_r += rev
+            tot_c += cst
+            lines.append(
+                ",".join(
+                    [
+                        _cell(name),
+                        _cell(round(a["qty"], 2)),
+                        _cell(rev),
+                        _cell(cst),
+                        _cell(prof),
+                        _cell(margin),
+                    ]
+                )
+            )
+        lines.append(
+            ",".join(
+                [
+                    _cell("المجموع ←"),
+                    "",
+                    _cell(round(tot_r, 2)),
+                    _cell(round(tot_c, 2)),
+                    _cell(round(tot_r - tot_c, 2)),
+                    "",
+                ]
+            )
+        )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "items-profit-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p461: الطاولات الخاملة CSV (كل الطاولات مرتبة بالأقل استخدامًا — BOM لـ Excel) ----------
     @router.get("/idle-tables.csv")
     async def idle_tables_csv(days: int = 30, user: dict = Depends(get_current_user)):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        usage = await _orders().aggregate([
-            {"$match": {"created_at": {"$gte": since},
-                        "status": {"$nin": ["cancelled", "scheduled"]},
-                        "source": {"$ne": "delivery"}, "table_id": {"$nin": [None, ""]}}},
-            {"$group": {"_id": "$table_id", "orders": {"$sum": 1},
-                        "last": {"$max": "$created_at"}}},
-        ]).to_list(500)
+        usage = (
+            await _orders()
+            .aggregate(
+                [
+                    {
+                        "$match": {
+                            "created_at": {"$gte": since},
+                            "status": {"$nin": ["cancelled", "scheduled"]},
+                            "source": {"$ne": "delivery"},
+                            "table_id": {"$nin": [None, ""]},
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": "$table_id",
+                            "orders": {"$sum": 1},
+                            "last": {"$max": "$created_at"},
+                        }
+                    },
+                ]
+            )
+            .to_list(500)
+        )
         umap = {u["_id"]: u for u in usage}
         tables = await _tables().find({}, {"_id": 0}).to_list(500)
         dz = timezone(timedelta(hours=1))
@@ -2855,6 +4299,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         rows = []
@@ -2863,54 +4308,129 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             ca = u.get("last")
             if ca and ca.tzinfo is None:
                 ca = ca.replace(tzinfo=timezone.utc)
-            rows.append((int(u.get("orders") or 0), t.get("name") or "",
-                         t.get("zone") or "", t.get("seats") or "",
-                         ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else "—"))
+            rows.append(
+                (
+                    int(u.get("orders") or 0),
+                    t.get("name") or "",
+                    t.get("zone") or "",
+                    t.get("seats") or "",
+                    ca.astimezone(dz).strftime("%Y-%m-%d %H:%M") if ca else "—",
+                )
+            )
         rows.sort(key=lambda r: (r[0], r[1]))
         lines = ["الطاولة,المنطقة,المقاعد,الطلبات في الفترة,آخر طلب"]
         idle_n = 0
         for n, name, zone, seats, last in rows:
             if n == 0:
                 idle_n += 1
-            lines.append(",".join([_cell(name), _cell(zone), _cell(seats), _cell(n), _cell(last)]))
+            lines.append(
+                ",".join(
+                    [_cell(name), _cell(zone), _cell(seats), _cell(n), _cell(last)]
+                )
+            )
         lines.append(",".join([_cell("خاملة تمامًا ←"), "", "", _cell(idle_n), ""]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "idle-tables-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p448: أداء الطاولات CSV (طلبات/إيراد/متوسط/ملغاة — BOM لـ Excel) ----------
     @router.get("/tables-performance.csv")
-    async def tables_performance_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def tables_performance_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "source": {"$ne": "delivery"}, "status": {"$ne": "scheduled"}}},
-            {"$addFields": {
-                "cxl": {"$eq": ["$status", "cancelled"]},
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "paid_amt": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": {"$ifNull": ["$table_name", "—"]},
-                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
-                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
-                        "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_amt"]}}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "source": {"$ne": "delivery"},
+                    "status": {"$ne": "scheduled"},
+                }
+            },
+            {
+                "$addFields": {
+                    "cxl": {"$eq": ["$status", "cancelled"]},
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$addFields": {
+                    "paid_amt": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {"$ifNull": ["$table_name", "—"]},
+                    "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                    "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                    "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_amt"]}},
+                }
+            },
             {"$sort": {"revenue": -1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(500)
@@ -2918,6 +4438,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الطاولة,الطلبات,الإيراد المحصَّل,متوسط الطلب,الملغاة"]
@@ -2925,43 +4446,123 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             rev = round(float(r.get("revenue") or 0), 2)
             n = int(r.get("orders") or 0)
             avg = round(rev / n, 2) if n else 0
-            lines.append(",".join([
-                _cell(r.get("_id")), _cell(n), _cell(rev), _cell(avg),
-                _cell(int(r.get("cancelled") or 0))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r.get("_id")),
+                        _cell(n),
+                        _cell(rev),
+                        _cell(avg),
+                        _cell(int(r.get("cancelled") or 0)),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "tables-performance-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p444: المبيعات حسب يوم الأسبوع CSV (توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/sales-by-weekday.csv")
-    async def sales_by_weekday_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def sales_by_weekday_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 90))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "wd": {"$dayOfWeek": {"date": "$created_at", "timezone": "Africa/Algiers"}},
-                "bill": _bill,
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "paid_nd": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": "$wd", "orders": {"$sum": 1}, "revenue": {"$sum": "$paid_nd"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "wd": {
+                        "$dayOfWeek": {
+                            "date": "$created_at",
+                            "timezone": "Africa/Algiers",
+                        }
+                    },
+                    "bill": _bill,
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$addFields": {
+                    "paid_nd": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$wd",
+                    "orders": {"$sum": 1},
+                    "revenue": {"$sum": "$paid_nd"},
+                }
+            },
             {"$sort": {"_id": 1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(7)
@@ -2969,63 +4570,158 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
-        wdnames = {1: "الأحد", 2: "الاثنين", 3: "الثلاثاء", 4: "الأربعاء",
-                   5: "الخميس", 6: "الجمعة", 7: "السبت"}
+        wdnames = {
+            1: "الأحد",
+            2: "الاثنين",
+            3: "الثلاثاء",
+            4: "الأربعاء",
+            5: "الخميس",
+            6: "الجمعة",
+            7: "السبت",
+        }
         lines = ["اليوم,الطلبات,الإيراد المحصَّل,متوسط الطلب"]
         for r in rows:
             n = int(r["orders"])
             rev = round(float(r["revenue"]), 2)
             avg = round(rev / n, 2) if n else 0.0
-            lines.append(",".join([_cell(wdnames.get(r["_id"], r["_id"])), _cell(n),
-                                   _cell(rev), _cell(avg)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(wdnames.get(r["_id"], r["_id"])),
+                        _cell(n),
+                        _cell(rev),
+                        _cell(avg),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "sales-by-weekday-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p462: متوسط قيمة الطلب اليومي CSV (اتجاه AOV — توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/aov-trend.csv")
-    async def aov_trend_csv(days: int = 30, date_from: str = None, date_to: str = None,
-                            user: dict = Depends(get_current_user)):
+    async def aov_trend_csv(
+        days: int = 30,
+        date_from: str = None,
+        date_to: str = None,
+        user: dict = Depends(get_current_user),
+    ):
         # p472: مرشّحات من/إلى اختيارية (YYYY-MM-DD) — عند غيابها يُعتمد days كما كان تمامًا
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         until = None
         try:
             if date_from:
-                since = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                since = datetime.strptime(date_from, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
             if date_to:
-                until = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+                until = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                ) + timedelta(days=1)
         except ValueError:
-            raise HTTPException(status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)")
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+            raise HTTPException(
+                status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)"
+            )
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": ({"$gte": since, "$lt": until} if until else {"$gte": since}),
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "paid_amt": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
-                                                  "timezone": "Africa/Algiers"}},
-                        "orders": {"$sum": 1},
-                        "revenue": {"$sum": "$paid_amt"}}},
+            {
+                "$match": {
+                    "created_at": (
+                        {"$gte": since, "$lt": until} if until else {"$gte": since}
+                    ),
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    }
+                }
+            },
+            {
+                "$addFields": {
+                    "paid_amt": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$dateToString": {
+                            "date": "$created_at",
+                            "format": "%Y-%m-%d",
+                            "timezone": "Africa/Algiers",
+                        }
+                    },
+                    "orders": {"$sum": 1},
+                    "revenue": {"$sum": "$paid_amt"},
+                }
+            },
             {"$sort": {"_id": 1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(400)
@@ -3033,6 +4729,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["اليوم,الطلبات,الإيراد المحصَّل,متوسط الطلب"]
@@ -3040,12 +4737,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             n = int(r.get("orders") or 0)
             rev = round(float(r.get("revenue") or 0), 2)
             avg = round(rev / n, 2) if n else 0
-            lines.append(",".join([_cell(r.get("_id")), _cell(n), _cell(rev), _cell(avg)]))
+            lines.append(
+                ",".join([_cell(r.get("_id")), _cell(n), _cell(rev), _cell(avg)])
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
-        fname = ("aov-trend-" + str(date_from or "") + "_" + str(date_to or "") + ".csv") \
-            if (date_from or date_to) else ("aov-trend-" + str(days) + "d.csv")
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        fname = (
+            ("aov-trend-" + str(date_from or "") + "_" + str(date_to or "") + ".csv")
+            if (date_from or date_to)
+            else ("aov-trend-" + str(days) + "d.csv")
+        )
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p456: حمل المطبخ حسب الساعة CSV (طلبات/أصناف/زمن تحضير — BOM لـ Excel) ----------
     @router.get("/kitchen-load.csv")
@@ -3053,18 +4758,47 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "qty": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.quantity", 0]}]}}},
-                "prep_ms": {"$cond": [
-                    {"$and": ["$timestamps.preparing", "$timestamps.served"]},
-                    {"$subtract": ["$timestamps.served", "$timestamps.preparing"]}, None]}}},
-            {"$group": {"_id": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
-                        "orders": {"$sum": 1},
-                        "items": {"$sum": "$qty"},
-                        "avg_prep_ms": {"$avg": "$prep_ms"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "qty": {
+                        "$reduce": {
+                            "input": {"$ifNull": ["$items", []]},
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.quantity", 0]}]
+                            },
+                        }
+                    },
+                    "prep_ms": {
+                        "$cond": [
+                            {"$and": ["$timestamps.preparing", "$timestamps.served"]},
+                            {
+                                "$subtract": [
+                                    "$timestamps.served",
+                                    "$timestamps.preparing",
+                                ]
+                            },
+                            None,
+                        ]
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}
+                    },
+                    "orders": {"$sum": 1},
+                    "items": {"$sum": "$qty"},
+                    "avg_prep_ms": {"$avg": "$prep_ms"},
+                }
+            },
             {"$sort": {"_id": 1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(24)
@@ -3072,53 +4806,121 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الساعة,الطلبات,الأصناف,متوسط التحضير (د)"]
         for r in rows:
             pm = r.get("avg_prep_ms")
             prep = round(float(pm) / 60000, 1) if pm is not None else ""
-            lines.append(",".join([
-                _cell(str(r["_id"]).zfill(2) + ":00"), _cell(int(r.get("orders") or 0)),
-                _cell(round(float(r.get("items") or 0), 2)), _cell(prep)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(str(r["_id"]).zfill(2) + ":00"),
+                        _cell(int(r.get("orders") or 0)),
+                        _cell(round(float(r.get("items") or 0), 2)),
+                        _cell(prep),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "kitchen-load-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p437: المبيعات حسب الساعة CSV (توقيت الجزائر — BOM لـ Excel) ----------
     @router.get("/sales-by-hour.csv")
     async def sales_by_hour_csv(days: int = 30, user: dict = Depends(get_current_user)):
         days = max(1, min(int(days), 90))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
             {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "scheduled"}}},
-            {"$addFields": {
-                "bill": _bill,
-                "cxl": {"$eq": ["$status", "cancelled"]},
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$addFields": {
-                "hr": {"$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}},
-                "paid_nd": {"$reduce": {
-                    "input": {"$filter": {"input": "$pay_list", "as": "p",
-                                          "cond": {"$ne": ["$$p.method", "debt"]}}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]}}}}},
-            {"$group": {"_id": "$hr",
-                        "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
-                        "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_nd"]}},
-                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}}}},
+            {
+                "$addFields": {
+                    "bill": _bill,
+                    "cxl": {"$eq": ["$status", "cancelled"]},
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$addFields": {
+                    "hr": {
+                        "$hour": {"date": "$created_at", "timezone": "Africa/Algiers"}
+                    },
+                    "paid_nd": {
+                        "$reduce": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$pay_list",
+                                    "as": "p",
+                                    "cond": {"$ne": ["$$p.method", "debt"]},
+                                }
+                            },
+                            "initialValue": 0,
+                            "in": {
+                                "$add": ["$$value", {"$ifNull": ["$$this.amount", 0]}]
+                            },
+                        }
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$hr",
+                    "orders": {"$sum": {"$cond": ["$cxl", 0, 1]}},
+                    "revenue": {"$sum": {"$cond": ["$cxl", 0, "$paid_nd"]}},
+                    "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                }
+            },
             {"$sort": {"_id": 1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(24)
@@ -3126,39 +4928,84 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الساعة,الطلبات,الإيراد المحصَّل,الملغاة"]
         for r in rows:
-            lines.append(",".join([_cell(str(r["_id"]).zfill(2) + ":00"), _cell(r["orders"]),
-                                   _cell(round(float(r["revenue"]), 2)), _cell(r["cancelled"])]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(str(r["_id"]).zfill(2) + ":00"),
+                        _cell(r["orders"]),
+                        _cell(round(float(r["revenue"]), 2)),
+                        _cell(r["cancelled"]),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "sales-by-hour-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     @router.get("/revenue-trend.csv")
-    async def revenue_trend_csv(days: int = 7, date_from: str = None, date_to: str = None,
-                                user: dict = Depends(get_current_user)):
+    async def revenue_trend_csv(
+        days: int = 7,
+        date_from: str = None,
+        date_to: str = None,
+        user: dict = Depends(get_current_user),
+    ):
         d = await revenue_trend(days, user, date_from, date_to)
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = []
         lines.append("التاريخ,الطلبات (بلا الملغاة),الإيراد المحصَّل,الخصومات")
         for s in d.get("series") or []:
-            lines.append(",".join([_cell(s.get("date")), _cell(s.get("orders")),
-                                   _cell(s.get("revenue")), _cell(s.get("discounts"))]))
-        lines.append(",".join([_cell("الإجمالي"), _cell(d.get("total_orders")),
-                               _cell(d.get("total_revenue")), ""]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(s.get("date")),
+                        _cell(s.get("orders")),
+                        _cell(s.get("revenue")),
+                        _cell(s.get("discounts")),
+                    ]
+                )
+            )
+        lines.append(
+            ",".join(
+                [
+                    _cell("الإجمالي"),
+                    _cell(d.get("total_orders")),
+                    _cell(d.get("total_revenue")),
+                    "",
+                ]
+            )
+        )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        fname = ("revenue-trend-" + str(date_from or "") + "_" + str(date_to or "") + ".csv") \
-            if (date_from or date_to) else ("revenue-trend-" + str(d.get("days") or 0) + "d.csv")
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        fname = (
+            (
+                "revenue-trend-"
+                + str(date_from or "")
+                + "_"
+                + str(date_to or "")
+                + ".csv"
+            )
+            if (date_from or date_to)
+            else ("revenue-trend-" + str(d.get("days") or 0) + "d.csv")
+        )
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p418: منحنى الإيرادات PDF (نفس بيانات JSON — صفر ازدواجية) ----------
     @router.get("/revenue-trend.pdf")
@@ -3174,7 +5021,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -3189,8 +5038,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -3238,66 +5093,145 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if series:
             _center("التفصيل اليومي", 11)
             for s in series:
-                _row(str(s.get("date") or ""),
-                     str(s.get("orders") or 0) + " طلب — "
-                     + str(s.get("revenue") or 0) + " دج — خصم " + str(s.get("discounts") or 0))
+                _row(
+                    str(s.get("date") or ""),
+                    str(s.get("orders") or 0)
+                    + " طلب — "
+                    + str(s.get("revenue") or 0)
+                    + " دج — خصم "
+                    + str(s.get("discounts") or 0),
+                )
         else:
             _center("لا بيانات في الفترة", 10)
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "revenue-trend-" + str(d.get("days") or 0) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p460: الإلغاءات حسب السبب CSV (توصيل بأسبابه + صالة بلا سبب — BOM لـ Excel) ----------
     @router.get("/cancel-reasons.csv")
-    async def cancel_reasons_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def cancel_reasons_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        dlv = await _delivery().aggregate([
-            {"$match": {"created_at": {"$gte": since}, "status": "cancelled"}},
-            {"$group": {"_id": {"$ifNull": ["$cancel_reason", ""]},
-                        "count": {"$sum": 1},
-                        "value": {"$sum": {"$ifNull": ["$total", 0]}}}},
-            {"$sort": {"count": -1}},
-        ]).to_list(100)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
-        k = await _orders().aggregate([
-            {"$match": {"created_at": {"$gte": since}, "status": "cancelled",
-                        "source": {"$ne": "delivery"}}},
-            {"$group": {"_id": None, "count": {"$sum": 1}, "value": {"$sum": _bill}}},
-        ]).to_list(1)
+        dlv = (
+            await _delivery()
+            .aggregate(
+                [
+                    {"$match": {"created_at": {"$gte": since}, "status": "cancelled"}},
+                    {
+                        "$group": {
+                            "_id": {"$ifNull": ["$cancel_reason", ""]},
+                            "count": {"$sum": 1},
+                            "value": {"$sum": {"$ifNull": ["$total", 0]}},
+                        }
+                    },
+                    {"$sort": {"count": -1}},
+                ]
+            )
+            .to_list(100)
+        )
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
+        k = (
+            await _orders()
+            .aggregate(
+                [
+                    {
+                        "$match": {
+                            "created_at": {"$gte": since},
+                            "status": "cancelled",
+                            "source": {"$ne": "delivery"},
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "count": {"$sum": 1},
+                            "value": {"$sum": _bill},
+                        }
+                    },
+                ]
+            )
+            .to_list(1)
+        )
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["السبب,القناة,العدد,القيمة"]
-        tot_n = 0; tot_v = 0.0
+        tot_n = 0
+        tot_v = 0.0
         for r in dlv:
-            n = int(r.get("count") or 0); v = round(float(r.get("value") or 0), 2)
-            tot_n += n; tot_v += v
-            lines.append(",".join([
-                _cell((r.get("_id") or "").strip() or "بدون سبب"), _cell("توصيل"),
-                _cell(n), _cell(v)]))
+            n = int(r.get("count") or 0)
+            v = round(float(r.get("value") or 0), 2)
+            tot_n += n
+            tot_v += v
+            lines.append(
+                ",".join(
+                    [
+                        _cell((r.get("_id") or "").strip() or "بدون سبب"),
+                        _cell("توصيل"),
+                        _cell(n),
+                        _cell(v),
+                    ]
+                )
+            )
         if k:
-            n = int(k[0].get("count") or 0); v = round(float(k[0].get("value") or 0), 2)
+            n = int(k[0].get("count") or 0)
+            v = round(float(k[0].get("value") or 0), 2)
             if n:
-                tot_n += n; tot_v += v
-                lines.append(",".join([
-                    _cell("بدون تسجيل سبب"), _cell("صالة"), _cell(n), _cell(v)]))
-        lines.append(",".join([_cell("المجموع ←"), "", _cell(tot_n), _cell(round(tot_v, 2))]))
+                tot_n += n
+                tot_v += v
+                lines.append(
+                    ",".join(
+                        [_cell("بدون تسجيل سبب"), _cell("صالة"), _cell(n), _cell(v)]
+                    )
+                )
+        lines.append(
+            ",".join([_cell("المجموع ←"), "", _cell(tot_n), _cell(round(tot_v, 2))])
+        )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "cancel-reasons-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p438: تقرير الإلغاءات اليومي CSV (عدد وقيمة ونسبة — BOM لـ Excel) ----------
     @router.get("/cancellations.csv")
@@ -3306,18 +5240,43 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         since = _now() - timedelta(days=days)
         pipeline = [
             {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "scheduled"}}},
-            {"$addFields": {
-                "day": {"$dateToString": {"date": "$created_at", "format": "%Y-%m-%d",
-                                          "timezone": "Africa/Algiers"}},
-                "cxl": {"$eq": ["$status", "cancelled"]},
-                "bill": {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                                     "in": {"$add": ["$$value",
-                                                     {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                                    {"$ifNull": ["$$this.unit_price", 0]}]}]}}}}},
-            {"$group": {"_id": "$day",
-                        "total": {"$sum": 1},
-                        "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
-                        "cxl_value": {"$sum": {"$cond": ["$cxl", "$bill", 0]}}}},
+            {
+                "$addFields": {
+                    "day": {
+                        "$dateToString": {
+                            "date": "$created_at",
+                            "format": "%Y-%m-%d",
+                            "timezone": "Africa/Algiers",
+                        }
+                    },
+                    "cxl": {"$eq": ["$status", "cancelled"]},
+                    "bill": {
+                        "$reduce": {
+                            "input": {"$ifNull": ["$items", []]},
+                            "initialValue": 0,
+                            "in": {
+                                "$add": [
+                                    "$$value",
+                                    {
+                                        "$multiply": [
+                                            {"$ifNull": ["$$this.quantity", 0]},
+                                            {"$ifNull": ["$$this.unit_price", 0]},
+                                        ]
+                                    },
+                                ]
+                            },
+                        }
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$day",
+                    "total": {"$sum": 1},
+                    "cancelled": {"$sum": {"$cond": ["$cxl", 1, 0]}},
+                    "cxl_value": {"$sum": {"$cond": ["$cxl", "$bill", 0]}},
+                }
+            },
             {"$sort": {"_id": -1}},
         ]
         rows = await _orders().aggregate(pipeline).to_list(90)
@@ -3325,6 +5284,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["اليوم,إجمالي الطلبات,الملغاة,قيمة الملغاة,نسبة الإلغاء %"]
@@ -3332,22 +5292,44 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             tot = int(r["total"])
             cx = int(r["cancelled"])
             pct = round(100.0 * cx / tot, 1) if tot else 0.0
-            lines.append(",".join([_cell(r["_id"]), _cell(tot), _cell(cx),
-                                   _cell(round(float(r["cxl_value"]), 2)), _cell(pct)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r["_id"]),
+                        _cell(tot),
+                        _cell(cx),
+                        _cell(round(float(r["cxl_value"]), 2)),
+                        _cell(pct),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "cancellations-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p339: الأكثر مبيعًا — ترتيب شبكة POS المطاعم ----------
     @router.get("/top-sellers")
     async def top_sellers(days: int = 30, user: dict = Depends(get_current_user)):
         since = _now() - timedelta(days=max(1, min(int(days), 365)))
         pipeline = [
-            {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
             {"$unwind": "$items"},
             {"$match": {"items.product_id": {"$ne": None}}},
-            {"$group": {"_id": "$items.product_id", "qty": {"$sum": "$items.quantity"}}},
+            {
+                "$group": {
+                    "_id": "$items.product_id",
+                    "qty": {"$sum": "$items.quantity"},
+                }
+            },
             {"$sort": {"qty": -1}},
             {"$limit": 50},
         ]
@@ -3355,7 +5337,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return {"top": [{"product_id": r["_id"], "qty": r["qty"]} for r in rows]}
 
     # ---------- p436/p476: مبيعات الفئات — نواة مشتركة لـ CSV وPDF ----------
-    async def _category_sales_rows(days: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+    async def _category_sales_rows(
+        days: int, date_from: Optional[str] = None, date_to: Optional[str] = None
+    ):
         d1 = d2 = None
         if date_from or date_to:
             d1, d2, start, end = await _period_bounds(date_from, date_to)
@@ -3370,9 +5354,10 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             fams[p.get("id")] = (p.get("family_name") or "").strip() or "بدون فئة"
         agg = {}
         async for o in _orders().find(
-                {"created_at": date_query, "status": {"$nin": ["cancelled", "scheduled"]}},
-                {"_id": 0, "items": 1}):
-            for i in (o.get("items") or []):
+            {"created_at": date_query, "status": {"$nin": ["cancelled", "scheduled"]}},
+            {"_id": 0, "items": 1},
+        ):
+            for i in o.get("items") or []:
                 fam = fams.get(i.get("product_id"), "بدون فئة")
                 a = agg.setdefault(fam, [0.0, 0.0])
                 a[0] += float(i.get("quantity") or 0)
@@ -3382,13 +5367,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return days, rows, suffix, d1, d2
 
     @router.get("/category-sales.csv")
-    async def category_sales_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                       user: dict = Depends(get_current_user)):
-        days, rows, suffix, d1, d2 = await _category_sales_rows(days, date_from, date_to)
+    async def category_sales_csv(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
+        days, rows, suffix, d1, d2 = await _category_sales_rows(
+            days, date_from, date_to
+        )
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الفئة,الكمية,الإيراد"]
@@ -3396,14 +5388,23 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append(",".join([_cell(fam), _cell(qty), _cell(revenue)]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "category-sales-" + suffix + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p476: مبيعات الفئات PDF (نفس بيانات CSV عبر _category_sales_rows) ----------
     @router.get("/category-sales.pdf")
-    async def category_sales_pdf(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                       user: dict = Depends(get_current_user)):
-        days, rows, suffix, d1, d2 = await _category_sales_rows(days, date_from, date_to)
+    async def category_sales_pdf(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
+        days, rows, suffix, d1, d2 = await _category_sales_rows(
+            days, date_from, date_to
+        )
         import os as _os
         import io as _io
         from reportlab.pdfgen import canvas as _canvas
@@ -3414,7 +5415,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -3429,8 +5432,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -3462,7 +5471,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if store:
             _center(store, 13)
         _center("تقرير مبيعات الفئات", 12)
-        _center((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"), 9)
+        _center(
+            (str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"), 9
+        )
         y[0] -= 4
         _row("عدد الفئات", len(rows))
         _row("إجمالي الكمية", round(sum(r[1] for r in rows), 2))
@@ -3478,8 +5489,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "category-sales-" + suffix + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p422: تصدير الأكثر مبيعًا CSV مع أسماء الأصناف (BOM لـ Excel) ----------
     @router.get("/top-sellers.csv")
@@ -3490,43 +5504,71 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         ids = [t.get("product_id") for t in top if t.get("product_id")]
         names = {}
         if ids:
-            async for p in db.products.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1}):
+            async for p in db.products.find(
+                {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1}
+            ):
                 names[p.get("id")] = p.get("name")
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الترتيب,الصنف,الكمية"]
         for i, t in enumerate(top, 1):
             pid = t.get("product_id")
-            lines.append(",".join([_cell(i), _cell(names.get(pid) or pid), _cell(t.get("qty"))]))
+            lines.append(
+                ",".join([_cell(i), _cell(names.get(pid) or pid), _cell(t.get("qty"))])
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "top-sellers-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p434: الأقل مبيعًا CSV (يشمل الأصناف صفرية المبيعات — BOM لـ Excel) ----------
     @router.get("/bottom-sellers.csv")
-    async def bottom_sellers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def bottom_sellers_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
             {"$unwind": "$items"},
             {"$match": {"items.product_id": {"$ne": None}}},
-            {"$group": {"_id": "$items.product_id",
-                        "qty": {"$sum": "$items.quantity"},
-                        "revenue": {"$sum": {"$multiply": [
-                            {"$ifNull": ["$items.quantity", 0]},
-                            {"$ifNull": ["$items.unit_price", 0]}]}}}},
+            {
+                "$group": {
+                    "_id": "$items.product_id",
+                    "qty": {"$sum": "$items.quantity"},
+                    "revenue": {
+                        "$sum": {
+                            "$multiply": [
+                                {"$ifNull": ["$items.quantity", 0]},
+                                {"$ifNull": ["$items.unit_price", 0]},
+                            ]
+                        }
+                    },
+                }
+            },
         ]
         sales = {}
         async for r in _orders().aggregate(pipeline):
-            sales[r["_id"]] = (float(r.get("qty") or 0), round(float(r.get("revenue") or 0), 2))
+            sales[r["_id"]] = (
+                float(r.get("qty") or 0),
+                round(float(r.get("revenue") or 0), 2),
+            )
         products = await db.products.find(
-            {"is_blocked": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+            {"is_blocked": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}
+        ).to_list(1000)
         rows = []
         for p in products:
             qty, rev = sales.get(p.get("id"), (0.0, 0.0))
@@ -3536,6 +5578,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الترتيب,الصنف,الكمية,الإيراد"]
@@ -3543,11 +5586,16 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             lines.append(",".join([_cell(i), _cell(name), _cell(qty), _cell(rev)]))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "bottom-sellers-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p477: المبيعات مقابل المخزون — نواة مشتركة للتقارير ----------
-    async def _stock_sales_rows(days: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+    async def _stock_sales_rows(
+        days: int, date_from: Optional[str] = None, date_to: Optional[str] = None
+    ):
         d1 = d2 = None
         if date_from or date_to:
             d1, d2, start, end = await _period_bounds(date_from, date_to)
@@ -3558,86 +5606,160 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             date_query = {"$gte": _now() - timedelta(days=days)}
             suffix = str(days) + "d"
         pipeline = [
-            {"$match": {"created_at": date_query,
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
+            {
+                "$match": {
+                    "created_at": date_query,
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
             {"$unwind": "$items"},
             {"$match": {"items.product_id": {"$ne": None}}},
-            {"$group": {"_id": "$items.product_id",
-                        "sold": {"$sum": {"$ifNull": ["$items.quantity", 0]}},
-                        "revenue": {"$sum": {"$multiply": [
-                            {"$ifNull": ["$items.quantity", 0]},
-                            {"$ifNull": ["$items.unit_price", 0]}]}}}},
+            {
+                "$group": {
+                    "_id": "$items.product_id",
+                    "sold": {"$sum": {"$ifNull": ["$items.quantity", 0]}},
+                    "revenue": {
+                        "$sum": {
+                            "$multiply": [
+                                {"$ifNull": ["$items.quantity", 0]},
+                                {"$ifNull": ["$items.unit_price", 0]},
+                            ]
+                        }
+                    },
+                }
+            },
         ]
         sales = {}
         async for r in _orders().aggregate(pipeline):
             sales[r["_id"]] = (float(r.get("sold") or 0), float(r.get("revenue") or 0))
         rows = []
         async for p in db.products.find(
-                {"is_non_stockable": {"$ne": True}, "is_blocked": {"$ne": True}},
-                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1,
-                 "family_name": 1, "quantity": 1, "min_quantity": 1, "purchase_price": 1}):
+            {"is_non_stockable": {"$ne": True}, "is_blocked": {"$ne": True}},
+            {
+                "_id": 0,
+                "id": 1,
+                "name": 1,
+                "name_ar": 1,
+                "name_en": 1,
+                "family_name": 1,
+                "quantity": 1,
+                "min_quantity": 1,
+                "purchase_price": 1,
+            },
+        ):
             pid = p.get("id")
             stock = float(p.get("quantity") or 0)
             minimum = float(p.get("min_quantity") or 0)
             sold, revenue = sales.get(pid, (0.0, 0.0))
-            rows.append({
-                "product_id": pid,
-                "name": p.get("name") or p.get("name_ar") or p.get("name_en") or "—",
-                "family": (p.get("family_name") or "").strip() or "بدون فئة",
-                "stock": stock, "minimum": minimum, "sold": sold,
-                "revenue": round(revenue, 2),
-                "stock_value": round(stock * float(p.get("purchase_price") or 0), 2),
-                "sell_stock": round(sold / stock, 2) if stock > 0 else None,
-            })
+            rows.append(
+                {
+                    "product_id": pid,
+                    "name": p.get("name")
+                    or p.get("name_ar")
+                    or p.get("name_en")
+                    or "—",
+                    "family": (p.get("family_name") or "").strip() or "بدون فئة",
+                    "stock": stock,
+                    "minimum": minimum,
+                    "sold": sold,
+                    "revenue": round(revenue, 2),
+                    "stock_value": round(
+                        stock * float(p.get("purchase_price") or 0), 2
+                    ),
+                    "sell_stock": round(sold / stock, 2) if stock > 0 else None,
+                }
+            )
         rows.sort(key=lambda a: (-a["revenue"], -a["sold"], str(a["name"])))
         return days, rows, suffix, d1, d2
 
     @router.get("/stock-sales.csv")
-    async def stock_sales_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                    user: dict = Depends(get_current_user)):
+    async def stock_sales_csv(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         days, rows, suffix, d1, d2 = await _stock_sales_rows(days, date_from, date_to)
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
-        lines = ["الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد,قيمة المخزون,بيع/مخزون"]
+        lines = [
+            "الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد,قيمة المخزون,بيع/مخزون"
+        ]
         for a in rows:
-            lines.append(",".join([
-                _cell(a["name"]), _cell(a["family"]), _cell(a["stock"]), _cell(a["minimum"]),
-                _cell(a["sold"]), _cell(a["revenue"]), _cell(a["stock_value"]), _cell(a["sell_stock"])]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(a["name"]),
+                        _cell(a["family"]),
+                        _cell(a["stock"]),
+                        _cell(a["minimum"]),
+                        _cell(a["sold"]),
+                        _cell(a["revenue"]),
+                        _cell(a["stock_value"]),
+                        _cell(a["sell_stock"]),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "stock-sales-" + suffix + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p477: الأصناف منخفضة المخزون ذات المبيعات CSV ----------
     @router.get("/low-stock-sales.csv")
-    async def low_stock_sales_csv(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                        user: dict = Depends(get_current_user)):
+    async def low_stock_sales_csv(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         days, rows, suffix, d1, d2 = await _stock_sales_rows(days, date_from, date_to)
         rows = [a for a in rows if a["stock"] <= a["minimum"] and a["sold"] > 0]
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الصنف,الفئة,المخزون الحالي,حد المخزون,المبيعات (كمية),الإيراد"]
         for a in rows:
-            lines.append(",".join([
-                _cell(a["name"]), _cell(a["family"]), _cell(a["stock"]), _cell(a["minimum"]),
-                _cell(a["sold"]), _cell(a["revenue"])]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(a["name"]),
+                        _cell(a["family"]),
+                        _cell(a["stock"]),
+                        _cell(a["minimum"]),
+                        _cell(a["sold"]),
+                        _cell(a["revenue"]),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "low-stock-sales-" + suffix + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p477: المبيعات مقابل المخزون PDF ----------
     @router.get("/stock-sales.pdf")
-    async def stock_sales_pdf(days: int = 30, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                                    user: dict = Depends(get_current_user)):
+    async def stock_sales_pdf(
+        days: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        user: dict = Depends(get_current_user),
+    ):
         days, rows, suffix, d1, d2 = await _stock_sales_rows(days, date_from, date_to)
         import os as _os
         import io as _io
@@ -3649,7 +5771,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -3664,8 +5788,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -3697,12 +5827,17 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if store:
             _center(store, 13)
         _center("تقرير المبيعات مقابل المخزون", 12)
-        _center((str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"), 9)
+        _center(
+            (str(d1) + " → " + str(d2)) if d1 else ("آخر " + str(days) + " يومًا"), 9
+        )
         y[0] -= 4
         _row("عدد الأصناف", len(rows))
         _row("إجمالي الكمية المباعة", round(sum(a["sold"] for a in rows), 2))
         _row("إجمالي الإيراد", str(round(sum(a["revenue"] for a in rows), 2)) + " دج")
-        _row("قيمة المخزون الحالي", str(round(sum(a["stock_value"] for a in rows), 2)) + " دج")
+        _row(
+            "قيمة المخزون الحالي",
+            str(round(sum(a["stock_value"] for a in rows), 2)) + " دج",
+        )
         y[0] -= 6
         if rows:
             _center("الصنف | المخزون | المبيعات | الإيراد", 10)
@@ -3715,41 +5850,105 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "stock-sales-" + suffix + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p450: توزيع طرق الدفع CSV (دفعات/مبالغ + صف الآجل — BOM لـ Excel) ----------
     @router.get("/payment-methods.csv")
-    async def payment_methods_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def payment_methods_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        _bill = {"$max": [{"$subtract": [
-            {"$reduce": {"input": {"$ifNull": ["$items", []]}, "initialValue": 0,
-                         "in": {"$add": ["$$value",
-                                         {"$multiply": [{"$ifNull": ["$$this.quantity", 0]},
-                                                        {"$ifNull": ["$$this.unit_price", 0]}]}]}}},
-            {"$ifNull": ["$discount.amount", 0]}]}, 0]}
+        _bill = {
+            "$max": [
+                {
+                    "$subtract": [
+                        {
+                            "$reduce": {
+                                "input": {"$ifNull": ["$items", []]},
+                                "initialValue": 0,
+                                "in": {
+                                    "$add": [
+                                        "$$value",
+                                        {
+                                            "$multiply": [
+                                                {"$ifNull": ["$$this.quantity", 0]},
+                                                {"$ifNull": ["$$this.unit_price", 0]},
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$ifNull": ["$discount.amount", 0]},
+                    ]
+                },
+                0,
+            ]
+        }
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "status": {"$nin": ["cancelled", "scheduled"]}}},
-            {"$addFields": {
-                "bill": _bill,
-                "pay_list": {"$cond": [
-                    {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
-                    "$payments",
-                    {"$cond": [{"$eq": ["$payment_status", "paid"]},
-                               [{"method": {"$ifNull": ["$payment_method", "cash"]}, "amount": _bill}],
-                               []]}]}}},
-            {"$facet": {
-                "methods": [{"$unwind": "$pay_list"},
-                            {"$group": {"_id": "$pay_list.method",
-                                        "payments": {"$sum": 1},
-                                        "amount": {"$sum": {"$ifNull": ["$pay_list.amount", 0]}}}},
-                            {"$sort": {"amount": -1}}],
-                "debt": [{"$match": {"payment_status": "debt"}},
-                         {"$group": {"_id": None, "orders": {"$sum": 1},
-                                     "amount": {"$sum": "$bill"}}}],
-            }},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": {"$nin": ["cancelled", "scheduled"]},
+                }
+            },
+            {
+                "$addFields": {
+                    "bill": _bill,
+                    "pay_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$payments", []]}}, 0]},
+                            "$payments",
+                            {
+                                "$cond": [
+                                    {"$eq": ["$payment_status", "paid"]},
+                                    [
+                                        {
+                                            "method": {
+                                                "$ifNull": ["$payment_method", "cash"]
+                                            },
+                                            "amount": _bill,
+                                        }
+                                    ],
+                                    [],
+                                ]
+                            },
+                        ]
+                    },
+                }
+            },
+            {
+                "$facet": {
+                    "methods": [
+                        {"$unwind": "$pay_list"},
+                        {
+                            "$group": {
+                                "_id": "$pay_list.method",
+                                "payments": {"$sum": 1},
+                                "amount": {
+                                    "$sum": {"$ifNull": ["$pay_list.amount", 0]}
+                                },
+                            }
+                        },
+                        {"$sort": {"amount": -1}},
+                    ],
+                    "debt": [
+                        {"$match": {"payment_status": "debt"}},
+                        {
+                            "$group": {
+                                "_id": None,
+                                "orders": {"$sum": 1},
+                                "amount": {"$sum": "$bill"},
+                            }
+                        },
+                    ],
+                }
+            },
         ]
         rows = await _orders().aggregate(pipeline).to_list(1)
         fac = rows[0] if rows else {}
@@ -3757,36 +5956,74 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
-        mlbl = {"cash": "نقدًا", "card": "بطاقة", "transfer": "تحويل",
-                "debt": "آجل (دين)", "check": "شيك", "other": "أخرى"}
+        mlbl = {
+            "cash": "نقدًا",
+            "card": "بطاقة",
+            "transfer": "تحويل",
+            "debt": "آجل (دين)",
+            "check": "شيك",
+            "other": "أخرى",
+        }
         lines = ["طريقة الدفع,عدد الدفعات,المبلغ"]
-        for m in (fac.get("methods") or []):
-            lines.append(",".join([
-                _cell(mlbl.get(m.get("_id"), m.get("_id") or "أخرى")),
-                _cell(int(m.get("payments") or 0)),
-                _cell(round(float(m.get("amount") or 0), 2))]))
+        for m in fac.get("methods") or []:
+            lines.append(
+                ",".join(
+                    [
+                        _cell(mlbl.get(m.get("_id"), m.get("_id") or "أخرى")),
+                        _cell(int(m.get("payments") or 0)),
+                        _cell(round(float(m.get("amount") or 0), 2)),
+                    ]
+                )
+            )
         d = ((fac.get("debt") or [{}])[0]) or {}
         if d.get("orders"):
-            lines.append(",".join([
-                _cell("آجل (دين)"), _cell(int(d.get("orders") or 0)),
-                _cell(round(float(d.get("amount") or 0), 2))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell("آجل (دين)"),
+                        _cell(int(d.get("orders") or 0)),
+                        _cell(round(float(d.get("amount") or 0), 2)),
+                    ]
+                )
+            )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "payment-methods-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p453: مساعد جلب سطور الخصومات (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _discount_rows(days):
         days = max(1, min(int(days), 90))
         since = _now() - timedelta(days=days)
-        rows = await _orders().find(
-            {"created_at": {"$gte": since}, "discount.amount": {"$gt": 0}},
-            {"_id": 0, "code": 1, "table_name": 1, "status": 1, "created_at": 1, "discount": 1},
-        ).sort("created_at", -1).to_list(500)
-        slbl = {"pending": "قيد الانتظار", "preparing": "قيد التحضير", "served": "قُدّم",
-                "cancelled": "ملغى", "scheduled": "مجدولة"}
+        rows = (
+            await _orders()
+            .find(
+                {"created_at": {"$gte": since}, "discount.amount": {"$gt": 0}},
+                {
+                    "_id": 0,
+                    "code": 1,
+                    "table_name": 1,
+                    "status": 1,
+                    "created_at": 1,
+                    "discount": 1,
+                },
+            )
+            .sort("created_at", -1)
+            .to_list(500)
+        )
+        slbl = {
+            "pending": "قيد الانتظار",
+            "preparing": "قيد التحضير",
+            "served": "قُدّم",
+            "cancelled": "ملغى",
+            "scheduled": "مجدولة",
+        }
         tlbl = {"percent": "نسبة %", "amount": "مبلغ"}
         out = []
         tot = 0.0
@@ -3795,14 +6032,22 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             amt = round(float(d.get("amount") or 0), 2)
             tot += amt
             ca = o.get("created_at")
-            out.append({
-                "date": ca.strftime("%Y-%m-%d %H:%M") if hasattr(ca, "strftime") else str(ca or ""),
-                "code": o.get("code") or "", "table": o.get("table_name") or "",
-                "status": slbl.get(o.get("status"), o.get("status") or ""),
-                "type": tlbl.get(d.get("type"), d.get("type") or ""),
-                "value": d.get("value"), "amount": amt,
-                "coupon": d.get("code") or "", "reason": d.get("reason") or "",
-                "by": d.get("by") or ""})
+            out.append(
+                {
+                    "date": ca.strftime("%Y-%m-%d %H:%M")
+                    if hasattr(ca, "strftime")
+                    else str(ca or ""),
+                    "code": o.get("code") or "",
+                    "table": o.get("table_name") or "",
+                    "status": slbl.get(o.get("status"), o.get("status") or ""),
+                    "type": tlbl.get(d.get("type"), d.get("type") or ""),
+                    "value": d.get("value"),
+                    "amount": amt,
+                    "coupon": d.get("code") or "",
+                    "reason": d.get("reason") or "",
+                    "by": d.get("by") or "",
+                }
+            )
         return days, out, round(tot, 2)
 
     # ---------- p441: تقرير الخصومات CSV (رقابة على منح الخصم — BOM لـ Excel) ----------
@@ -3813,19 +6058,37 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
-        lines = ["التاريخ,رمز الطلب,الطاولة,الحالة,نوع الخصم,القيمة,المبلغ,كود الكوبون,السبب,المطبِّق"]
+        lines = [
+            "التاريخ,رمز الطلب,الطاولة,الحالة,نوع الخصم,القيمة,المبلغ,كود الكوبون,السبب,المطبِّق"
+        ]
         for r in rows:
-            lines.append(",".join([
-                _cell(r["date"]), _cell(r["code"]), _cell(r["table"]), _cell(r["status"]),
-                _cell(r["type"]), _cell(r["value"]), _cell(r["amount"]),
-                _cell(r["coupon"]), _cell(r["reason"]), _cell(r["by"])]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r["date"]),
+                        _cell(r["code"]),
+                        _cell(r["table"]),
+                        _cell(r["status"]),
+                        _cell(r["type"]),
+                        _cell(r["value"]),
+                        _cell(r["amount"]),
+                        _cell(r["coupon"]),
+                        _cell(r["reason"]),
+                        _cell(r["by"]),
+                    ]
+                )
+            )
         lines.append(",,,,,," + _cell(tot_amt) + ",,,المجموع ←")
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "discounts-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p453: تقرير الخصومات PDF (نفس بيانات CSV عبر _discount_rows) ----------
     @router.get("/discounts.pdf")
@@ -3841,7 +6104,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -3856,8 +6121,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -3904,37 +6175,58 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if rows:
             _center("التاريخ — الطاولة — الحالة | المبلغ — النوع (القيمة)", 10)
             for r in rows:
-                _row(r["date"] + " — " + (r["table"] or r["code"]) + " — " + r["status"],
-                     str(r["amount"]) + " دج — " + r["type"] + " (" + str(r["value"] or "") + ")")
+                _row(
+                    r["date"] + " — " + (r["table"] or r["code"]) + " — " + r["status"],
+                    str(r["amount"])
+                    + " دج — "
+                    + r["type"]
+                    + " ("
+                    + str(r["value"] or "")
+                    + ")",
+                )
         else:
             _center("لا خصومات في الفترة", 10)
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "discounts-" + str(days) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p337: خصومات طلبات المطعم ----------
     @router.post("/kitchen-orders/{order_id}/discount")
-    async def apply_discount(order_id: str, data: DiscountIn, user: dict = Depends(get_current_user)):
+    async def apply_discount(
+        order_id: str, data: DiscountIn, user: dict = Depends(get_current_user)
+    ):
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         if o.get("status") in ("served", "cancelled"):
             raise HTTPException(status_code=400, detail="لا يمكن الخصم على طلب منتهٍ")
-        total = round(sum(
-            float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
-            for i in (o.get("items") or [])
-        ), 2)
+        total = round(
+            sum(
+                float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                for i in (o.get("items") or [])
+            ),
+            2,
+        )
         dtype, dval, code = None, None, None
         if data.code:
             promo = await db.promotions.find_one(
-                {"code": data.code.strip(), "is_active": {"$ne": False}}, {"_id": 0})
+                {"code": data.code.strip(), "is_active": {"$ne": False}}, {"_id": 0}
+            )
             if not promo:
                 raise HTTPException(status_code=404, detail="كوبون غير صالح أو منتهٍ")
             ptype = str(promo.get("discount_type") or promo.get("type") or "percent")
-            pval = float(promo.get("discount_percent") or promo.get("discount_value") or promo.get("value") or 0)
+            pval = float(
+                promo.get("discount_percent")
+                or promo.get("discount_value")
+                or promo.get("value")
+                or 0
+            )
             dtype = "amount" if ptype in ("amount", "fixed") else "percent"
             dval, code = pval, data.code.strip()
         else:
@@ -3947,16 +6239,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             amount = round(total * dval / 100, 2)
         else:
             if total <= 0:
-                raise HTTPException(status_code=400, detail="لا يمكن الخصم على طلب بلا إجمالي")
+                raise HTTPException(
+                    status_code=400, detail="لا يمكن الخصم على طلب بلا إجمالي"
+                )
             if not (0 < dval <= total):
-                raise HTTPException(status_code=400, detail="مبلغ الخصم أكبر من إجمالي الطلب")
+                raise HTTPException(
+                    status_code=400, detail="مبلغ الخصم أكبر من إجمالي الطلب"
+                )
             amount = round(dval, 2)
         disc = {
-            "type": dtype, "value": dval, "amount": amount, "code": code,
+            "type": dtype,
+            "value": dval,
+            "amount": amount,
+            "code": code,
             "reason": data.reason,
-            "by": user.get("username") or user.get("email"), "at": _now(),
+            "by": user.get("username") or user.get("email"),
+            "at": _now(),
         }
-        await _orders().update_one({"id": order_id}, {"$set": {"discount": disc, "updated_at": _now()}})
+        await _orders().update_one(
+            {"id": order_id}, {"$set": {"discount": disc, "updated_at": _now()}}
+        )
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         return _order_out(updated)
@@ -3964,7 +6266,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     @router.delete("/kitchen-orders/{order_id}/discount")
     async def remove_discount(order_id: str, user: dict = Depends(get_current_user)):
         res = await _orders().update_one(
-            {"id": order_id}, {"$unset": {"discount": ""}, "$set": {"updated_at": _now()}})
+            {"id": order_id},
+            {"$unset": {"discount": ""}, "$set": {"updated_at": _now()}},
+        )
         if not res.matched_count:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         updated = await _orders().find_one({"id": order_id})
@@ -3976,14 +6280,23 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     async def list_scheduled_orders(user: dict = Depends(get_current_user)):
         # p409: نفس إصلاح p400 هنا — التفعيل الكسول يبث kitchen_order.created لكل طلب
         # وإلا فتح لوحة «قيد التجهيز» يُدخل الطلبات المستحقة للمطبخ بصمت (بلا تنبيه KDS ولا طباعة)
-        due = await _orders().find(
-            {"status": "scheduled", "scheduled_for": {"$lte": _now()}}).to_list(50)
+        due = (
+            await _orders()
+            .find({"status": "scheduled", "scheduled_for": {"$lte": _now()}})
+            .to_list(50)
+        )
         for d in due:
             await _orders().update_one(
-                {"id": d["id"]}, {"$set": {"status": "pending", "updated_at": _now()}})
+                {"id": d["id"]}, {"$set": {"status": "pending", "updated_at": _now()}}
+            )
             d["status"] = "pending"
             await _publish("kitchen_order.created", d, user)
-        rows = await _orders().find({"status": "scheduled"}).sort("scheduled_for", 1).to_list(200)
+        rows = (
+            await _orders()
+            .find({"status": "scheduled"})
+            .sort("scheduled_for", 1)
+            .to_list(200)
+        )
         out = []
         now = _now()
         for o in rows:
@@ -4013,26 +6326,50 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         def _yn(v):
             return "نعم" if v else "لا"
 
-        lines = ["الرمز,الطاولة,هاتف الزبون,الأصناف,الإجمالي,الموعد,تذكير قبل (يوم),قريب الاستحقاق,أُرسل التذكير"]
+        lines = [
+            "الرمز,الطاولة,هاتف الزبون,الأصناف,الإجمالي,الموعد,تذكير قبل (يوم),قريب الاستحقاق,أُرسل التذكير"
+        ]
         for o in rows:
             when = o.get("scheduled_for")
-            when_s = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else str(when or "")
-            lines.append(",".join([
-                _cell(o.get("code")), _cell(o.get("table_name")), _cell(o.get("customer_phone")),
-                _cell(len(o.get("items") or [])), _cell(o.get("total")),
-                _cell(when_s), _cell(int(o.get("remind_days") or 1)),
-                _cell(_yn(o.get("due_soon"))), _cell(_yn(o.get("reminder_sent")))]))
+            when_s = (
+                when.strftime("%Y-%m-%d %H:%M")
+                if hasattr(when, "strftime")
+                else str(when or "")
+            )
+            lines.append(
+                ",".join(
+                    [
+                        _cell(o.get("code")),
+                        _cell(o.get("table_name")),
+                        _cell(o.get("customer_phone")),
+                        _cell(len(o.get("items") or [])),
+                        _cell(o.get("total")),
+                        _cell(when_s),
+                        _cell(int(o.get("remind_days") or 1)),
+                        _cell(_yn(o.get("due_soon"))),
+                        _cell(_yn(o.get("reminder_sent"))),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="scheduled-orders.csv"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="scheduled-orders.csv"'
+            },
+        )
 
     @router.post("/scheduled-orders/{order_id}/activate")
-    async def activate_scheduled_order(order_id: str, user: dict = Depends(get_current_user)):
+    async def activate_scheduled_order(
+        order_id: str, user: dict = Depends(get_current_user)
+    ):
         res = await _orders().find_one_and_update(
             {"id": order_id, "status": "scheduled"},
             {"$set": {"status": "pending", "updated_at": _now()}},
@@ -4040,12 +6377,16 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not res:
             raise HTTPException(status_code=404, detail="الطلبية المجدولة غير موجودة")
         updated = await _orders().find_one({"id": order_id})
-        await _publish("kitchen_order.created", updated, user)  # تدخل المطبخ فورًا (والطبع التلقائي p338)
+        await _publish(
+            "kitchen_order.created", updated, user
+        )  # تدخل المطبخ فورًا (والطبع التلقائي p338)
         return _order_out(updated)
 
     # ---------- p428: تعديل الطلبية المجدولة قبل التفعيل (أصناف/موعد/تذكير/هاتف/ملاحظات) ----------
     @router.put("/scheduled-orders/{order_id}")
-    async def edit_scheduled_order(order_id: str, data: dict = None, user: dict = Depends(get_current_user)):
+    async def edit_scheduled_order(
+        order_id: str, data: dict = None, user: dict = Depends(get_current_user)
+    ):
         data = data or {}
         o = await _orders().find_one({"id": order_id, "status": "scheduled"})
         if not o:
@@ -4057,15 +6398,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 raise HTTPException(status_code=400, detail="أضف صنفًا واحدًا على الأقل")
             clean = []
             for it in items:
-                if not isinstance(it, dict) or not (it.get("product_name") or "").strip():
+                if (
+                    not isinstance(it, dict)
+                    or not (it.get("product_name") or "").strip()
+                ):
                     raise HTTPException(status_code=400, detail="صنف غير صالح")
-                clean.append({
-                    "product_id": it.get("product_id"),
-                    "product_name": str(it.get("product_name")).strip(),
-                    "quantity": max(1, int(it.get("quantity") or 1)),
-                    "unit_price": float(it.get("unit_price") or 0),
-                    "note": it.get("note") or None,
-                })
+                clean.append(
+                    {
+                        "product_id": it.get("product_id"),
+                        "product_name": str(it.get("product_name")).strip(),
+                        "quantity": max(1, int(it.get("quantity") or 1)),
+                        "unit_price": float(it.get("unit_price") or 0),
+                        "note": it.get("note") or None,
+                    }
+                )
             sets["items"] = clean
         if "scheduled_for" in data and data.get("scheduled_for"):
             try:
@@ -4076,13 +6422,17 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             except (TypeError, ValueError):
                 raise HTTPException(status_code=400, detail="موعد غير صالح")
             if sched <= _now():
-                raise HTTPException(status_code=400, detail="الموعد يجب أن يكون في المستقبل")
+                raise HTTPException(
+                    status_code=400, detail="الموعد يجب أن يكون في المستقبل"
+                )
             sets["scheduled_for"] = sched
             sets["reminder_sent"] = False
         if "remind_days" in data and data.get("remind_days") is not None:
             rd_ = int(data.get("remind_days"))
             if rd_ not in (1, 3):
-                raise HTTPException(status_code=400, detail="التذكير قبل يوم أو ثلاثة فقط")
+                raise HTTPException(
+                    status_code=400, detail="التذكير قبل يوم أو ثلاثة فقط"
+                )
             sets["remind_days"] = rd_
             sets["reminder_sent"] = False
         if "customer_phone" in data:
@@ -4096,7 +6446,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p425: تأجيل الطلبية المجدولة (+1/+3 أيام — يصفّر التذكير ليُعاد حسابه على الموعد الجديد) ----------
     @router.post("/scheduled-orders/{order_id}/postpone")
-    async def postpone_scheduled_order(order_id: str, data: dict = None, user: dict = Depends(get_current_user)):
+    async def postpone_scheduled_order(
+        order_id: str, data: dict = None, user: dict = Depends(get_current_user)
+    ):
         try:
             days = int((data or {}).get("days", 1))
         except (TypeError, ValueError):
@@ -4109,26 +6461,46 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         sched = o.get("scheduled_for") or _now()
         if getattr(sched, "tzinfo", None) is None:
             sched = sched.replace(tzinfo=timezone.utc)
-        await _orders().update_one({"id": order_id}, {"$set": {
-            "scheduled_for": sched + timedelta(days=days), "reminder_sent": False, "updated_at": _now()}})
+        await _orders().update_one(
+            {"id": order_id},
+            {
+                "$set": {
+                    "scheduled_for": sched + timedelta(days=days),
+                    "reminder_sent": False,
+                    "updated_at": _now(),
+                }
+            },
+        )
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         return _order_out(updated)
 
     # ---------- p424: إلغاء الطلبية المجدولة — نقطة مخصصة (العامة تحرر الطاولة وتدوّر QR خطأً لأن المجدولة لم تشغلها بعد) ----------
     @router.delete("/scheduled-orders/{order_id}")
-    async def cancel_scheduled_order(order_id: str, user: dict = Depends(get_current_user)):
+    async def cancel_scheduled_order(
+        order_id: str, user: dict = Depends(get_current_user)
+    ):
         o = await _orders().find_one({"id": order_id, "status": "scheduled"})
         if not o:
             raise HTTPException(status_code=404, detail="الطلبية المجدولة غير موجودة")
-        await _orders().update_one({"id": order_id}, {"$set": {
-            "status": "cancelled", "updated_at": _now(), "timestamps.cancelled": _now()}})
+        await _orders().update_one(
+            {"id": order_id},
+            {
+                "$set": {
+                    "status": "cancelled",
+                    "updated_at": _now(),
+                    "timestamps.cancelled": _now(),
+                }
+            },
+        )
         updated = await _orders().find_one({"id": order_id})
         await _publish("kitchen_order.updated", updated, user)
         return _order_out(updated)
 
     @router.post("/kitchen-orders/{order_id}/pay")
-    async def pay_kitchen_order(order_id: str, data: PayBody, user: dict = Depends(get_current_user)):
+    async def pay_kitchen_order(
+        order_id: str, data: PayBody, user: dict = Depends(get_current_user)
+    ):
         """p336: تأكيد دفع الطلب — p366: item_indexes لدفع جزء من العناصر (تقسيم الفاتورة)"""
         if data.method not in ("cash", "card", "debt"):
             raise HTTPException(status_code=400, detail="طريقة دفع غير صالحة")
@@ -4136,14 +6508,22 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         items_doc = o.get("items") or []
-        legacy_paid = o.get("payment_status") == "paid" and not o.get("payments")  # طلبات ما قبل p366
-        unpaid_idx = [i for i, it in enumerate(items_doc)
-                      if not it.get("paid") and not legacy_paid]
+        legacy_paid = o.get("payment_status") == "paid" and not o.get(
+            "payments"
+        )  # طلبات ما قبل p366
+        unpaid_idx = [
+            i
+            for i, it in enumerate(items_doc)
+            if not it.get("paid") and not legacy_paid
+        ]
         if data.item_indexes is not None:
             if not data.item_indexes:
                 raise HTTPException(status_code=400, detail="لم تُحدَّد عناصر للدفع")
-            bad = [i for i in data.item_indexes
-                   if not isinstance(i, int) or i < 0 or i >= len(items_doc)]
+            bad = [
+                i
+                for i in data.item_indexes
+                if not isinstance(i, int) or i < 0 or i >= len(items_doc)
+            ]
             if bad:
                 raise HTTPException(status_code=400, detail="فهرس عنصر غير صالح")
             sel = sorted(set(data.item_indexes))
@@ -4154,21 +6534,35 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not sel:
             return _order_out(o)  # الفاتورة مسددة بالكامل — إعادة الدفع لا تغيّر شيئاً
         if o.get("status") == "pending_payment" and len(sel) < len(unpaid_idx):
-            raise HTTPException(status_code=400, detail="الدفع المسبق يتطلب دفع كامل الفاتورة")
+            raise HTTPException(
+                status_code=400, detail="الدفع المسبق يتطلب دفع كامل الفاتورة"
+            )
         # p366: الخصم يُوزَّع تناسبياً على الدفعات، والدفعة الأخيرة تسدد الباقي بالضبط ليطابق final_total
-        total_all = round(sum(
-            float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
-            for i in items_doc), 2)
+        total_all = round(
+            sum(
+                float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                for i in items_doc
+            ),
+            2,
+        )
         disc = float((o.get("discount") or {}).get("amount") or 0)
         final_total = round(max(0.0, total_all - disc), 2)
         payments = list(o.get("payments") or [])
         paid_so_far = round(sum(float(p.get("amount") or 0) for p in payments), 2)
-        sub = round(sum(
-            float(items_doc[i].get("quantity") or 0) * float(items_doc[i].get("unit_price") or 0)
-            for i in sel), 2)
+        sub = round(
+            sum(
+                float(items_doc[i].get("quantity") or 0)
+                * float(items_doc[i].get("unit_price") or 0)
+                for i in sel
+            ),
+            2,
+        )
         last_part = len(sel) == len(unpaid_idx)
         ratio = (final_total / total_all) if total_all > 0 else 1.0
-        part = max(0.0, round(final_total - paid_so_far, 2) if last_part else round(sub * ratio, 2))
+        part = max(
+            0.0,
+            round(final_total - paid_so_far, 2) if last_part else round(sub * ratio, 2),
+        )
         part_disc = round(max(0.0, sub - part), 2)
         who = user.get("username") or user.get("email")
         set_fields = {"updated_at": _now(), "paid_at": _now(), "paid_by": who}
@@ -4180,9 +6574,16 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         else:
             set_fields["payment_status"] = "partial"  # p366
         if o.get("status") == "pending_payment":
-            set_fields["status"] = "pending"  # p336: المسبق يدخل المطبخ بعد اكتمال الدفع
-        payment_rec = {"method": data.method, "amount": part, "item_indexes": sel,
-                       "paid_by": who, "paid_at": _now()}
+            set_fields["status"] = (
+                "pending"  # p336: المسبق يدخل المطبخ بعد اكتمال الدفع
+            )
+        payment_rec = {
+            "method": data.method,
+            "amount": part,
+            "item_indexes": sel,
+            "paid_by": who,
+            "paid_at": _now(),
+        }
         sale_id = None
         # p362: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع حقيقية لكل دفعة (مخزون + صندوق + محاسبة)
         # — الآجل debt يبقى بلا قيد (يحتاج حساب زبون)
@@ -4191,25 +6592,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 from models.schemas import SaleCreate
                 from services.application.sales_service import create_sale_op
                 from services import pos_loyalty as _pl
-                phone = _clean_phone(data.customer_phone or o.get("customer_phone") or "")
+
+                phone = _clean_phone(
+                    data.customer_phone or o.get("customer_phone") or ""
+                )
                 cust = await _pl._resolve_customer(db, phone=phone) if phone else None
-                sitems = [{
-                    "product_id": items_doc[i].get("product_id"),
-                    "product_name": items_doc[i].get("product_name") or "",
-                    "quantity": float(items_doc[i].get("quantity") or 0),
-                    "unit_price": float(items_doc[i].get("unit_price") or 0),
-                    "total": round(float(items_doc[i].get("quantity") or 0) * float(items_doc[i].get("unit_price") or 0), 2),
-                    "note": items_doc[i].get("note") or "",
-                    "modifiers": items_doc[i].get("modifiers"),
-                } for i in sel]
+                sitems = [
+                    {
+                        "product_id": items_doc[i].get("product_id"),
+                        "product_name": items_doc[i].get("product_name") or "",
+                        "quantity": float(items_doc[i].get("quantity") or 0),
+                        "unit_price": float(items_doc[i].get("unit_price") or 0),
+                        "total": round(
+                            float(items_doc[i].get("quantity") or 0)
+                            * float(items_doc[i].get("unit_price") or 0),
+                            2,
+                        ),
+                        "note": items_doc[i].get("note") or "",
+                        "modifiers": items_doc[i].get("modifiers"),
+                    }
+                    for i in sel
+                ]
                 if sitems:
                     s = SaleCreate(
                         customer_id=(cust or {}).get("id"),
-                        items=sitems, subtotal=sub, discount=part_disc, total=part,
+                        items=sitems,
+                        subtotal=sub,
+                        discount=part_disc,
+                        total=part,
                         paid_amount=part,
                         payment_method="cash" if data.method == "cash" else "bank",
                         payment_type="cash",
-                        notes=f"طلب مطعم {o.get('code', '')} ({o.get('table_name') or 'سفري'}) — دفعة {len(payments) + 1}")
+                        notes=f"طلب مطعم {o.get('code', '')} ({o.get('table_name') or 'سفري'}) — دفعة {len(payments) + 1}",
+                    )
                     sale = await create_sale_op(db, s, user)
                     sale_id = sale["id"]
                     payment_rec["sale_id"] = sale_id
@@ -4219,7 +6634,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             except Exception:
                 pass  # القيد المحاسبي لا يُسقط الدفع — الدفعة تبقى مسجلة
         if sale_id and not o.get("sale_id"):
-            set_fields["sale_id"] = sale_id  # توافق p362: أول فاتورة تبقى في الحقل المفرد
+            set_fields["sale_id"] = (
+                sale_id  # توافق p362: أول فاتورة تبقى في الحقل المفرد
+            )
         upd = {"$set": set_fields, "$push": {"payments": payment_rec}}
         if sale_id:
             upd["$push"]["sale_ids"] = sale_id
@@ -4236,17 +6653,23 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         # p356: كسب نقاط الولاء عند الدفع الفعلي — فقط إن لم تُنشأ فاتورة (الفاتورة تكسب بنفسها)
         if data.method != "debt" and not sale_id and part > 0:
             from services import pos_loyalty
+
             earned = await pos_loyalty.earn_points(
-                db, amount=part,
-                ref_id=f"{order_id}#{len(payments) + 1}", ref_label=f"طلب مطعم {o.get('code', '')}",
+                db,
+                amount=part,
+                ref_id=f"{order_id}#{len(payments) + 1}",
+                ref_label=f"طلب مطعم {o.get('code', '')}",
                 user_name=user.get("username") or user.get("email", ""),
-                phone=data.customer_phone or o.get("customer_phone") or "")
+                phone=data.customer_phone or o.get("customer_phone") or "",
+            )
             if earned:
                 out["loyalty_earned"] = earned["points"]
         return out
 
     @router.post("/tables/{table_id}/checkout")
-    async def checkout_table(table_id: str, data: CheckoutBody, user: dict = Depends(get_current_user)):
+    async def checkout_table(
+        table_id: str, data: CheckoutBody, user: dict = Depends(get_current_user)
+    ):
         """Called after the POS sale completes: link the sale and free the table."""
         t = await _tables().find_one({"id": table_id})
         if not t:
@@ -4255,11 +6678,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if active_id:
             await _orders().update_one(
                 {"id": active_id},
-                {"$set": {"status": "served", "sale_id": data.sale_id,
-                          "payment_status": "paid", "paid_at": _now(), "updated_at": _now()}},  # p336
+                {
+                    "$set": {
+                        "status": "served",
+                        "sale_id": data.sale_id,
+                        "payment_status": "paid",
+                        "paid_at": _now(),
+                        "updated_at": _now(),
+                    }
+                },  # p336
             )
-        await _tables().update_one({"id": table_id}, {"$set": {
-            "status": "free", "active_order_id": None, "qr_token": secrets.token_hex(5)}})  # p323
+        await _tables().update_one(
+            {"id": table_id},
+            {
+                "$set": {
+                    "status": "free",
+                    "active_order_id": None,
+                    "qr_token": secrets.token_hex(5),
+                }
+            },
+        )  # p323
         return {"ok": True}
 
     @router.post("/tables/{table_id}/rotate-qr")
@@ -4277,7 +6715,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.get("/delivery-orders")
     async def list_delivery_orders(
-        status: Optional[str] = None, days: int = 30,
+        status: Optional[str] = None,
+        days: int = 30,
         user: dict = Depends(get_current_user),
     ):
         q = {}
@@ -4309,14 +6748,22 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p470: سجل التوصيلات الفاشلة/الملغاة CSV (تفصيلي بالأسباب — BOM لـ Excel) ----------
     @router.get("/failed-deliveries.csv")
-    async def failed_deliveries_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def failed_deliveries_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
-        cur = _delivery().find({"created_at": {"$gte": since}, "status": "cancelled"}).sort("created_at", -1).limit(300)
+        cur = (
+            _delivery()
+            .find({"created_at": {"$gte": since}, "status": "cancelled"})
+            .sort("created_at", -1)
+            .limit(300)
+        )
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         def _d(ca):
@@ -4324,7 +6771,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 return "—"
             if getattr(ca, "tzinfo", None) is None:
                 ca = ca.replace(tzinfo=timezone.utc)
-            return ca.astimezone(timezone(timedelta(hours=1))).strftime("%Y-%m-%d %H:%M")
+            return ca.astimezone(timezone(timedelta(hours=1))).strftime(
+                "%Y-%m-%d %H:%M"
+            )
 
         lines = ["الرمز,الزبون,الهاتف,السائق,سبب الإلغاء,القيمة,التاريخ"]
         n = 0
@@ -4332,19 +6781,31 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         async for o in cur:
             n += 1
             tot += float(o.get("total") or 0)
-            lines.append(",".join([
-                _cell(o.get("code") or o.get("id")),
-                _cell(o.get("customer_name") or "—"),
-                _cell(o.get("customer_phone") or "—"),
-                _cell((o.get("driver_name") or "").strip() or "بدون سائق"),
-                _cell((o.get("cancel_reason") or "").strip() or "بدون سبب"),
-                _cell(round(float(o.get("total") or 0), 2)),
-                _cell(_d(o.get("created_at")))]))
-        lines.append(",".join([_cell("المجموع ←"), _cell(n), "", "", "", _cell(round(tot, 2)), ""]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(o.get("code") or o.get("id")),
+                        _cell(o.get("customer_name") or "—"),
+                        _cell(o.get("customer_phone") or "—"),
+                        _cell((o.get("driver_name") or "").strip() or "بدون سائق"),
+                        _cell((o.get("cancel_reason") or "").strip() or "بدون سبب"),
+                        _cell(round(float(o.get("total") or 0), 2)),
+                        _cell(_d(o.get("created_at"))),
+                    ]
+                )
+            )
+        lines.append(
+            ",".join(
+                [_cell("المجموع ←"), _cell(n), "", "", "", _cell(round(tot, 2)), ""]
+            )
+        )
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "failed-deliveries-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p468: زمن التوصيل لكل سائق CSV (متوسط/أقصر/أطول بالدقائق — BOM لـ Excel) ----------
     @router.get("/delivery-time.csv")
@@ -4352,16 +6813,32 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since},
-                        "status": "delivered",
-                        "delivered_at": {"$ne": None}}},
-            {"$addFields": {"mins": {"$divide": [
-                {"$subtract": ["$delivered_at", "$created_at"]}, 60000]}}},
-            {"$group": {"_id": {"$ifNull": ["$driver_name", "غير مُسنَد"]},
-                        "n": {"$sum": 1},
-                        "avg": {"$avg": "$mins"},
-                        "mn": {"$min": "$mins"},
-                        "mx": {"$max": "$mins"}}},
+            {
+                "$match": {
+                    "created_at": {"$gte": since},
+                    "status": "delivered",
+                    "delivered_at": {"$ne": None},
+                }
+            },
+            {
+                "$addFields": {
+                    "mins": {
+                        "$divide": [
+                            {"$subtract": ["$delivered_at", "$created_at"]},
+                            60000,
+                        ]
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {"$ifNull": ["$driver_name", "غير مُسنَد"]},
+                    "n": {"$sum": 1},
+                    "avg": {"$avg": "$mins"},
+                    "mn": {"$min": "$mins"},
+                    "mx": {"$max": "$mins"},
+                }
+            },
             {"$sort": {"n": -1, "_id": 1}},
         ]
         rows = await _delivery().aggregate(pipeline).to_list(200)
@@ -4369,6 +6846,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["السائق,التوصيلات,متوسط الزمن (د),أقصر (د),أطول (د)"]
@@ -4378,32 +6856,66 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             n = int(r.get("n") or 0)
             tn += n
             tot_avg_num += float(r.get("avg") or 0) * n
-            lines.append(",".join([_cell(r.get("_id")), _cell(n),
-                                   _cell(round(float(r.get("avg") or 0), 1)),
-                                   _cell(round(float(r.get("mn") or 0), 1)),
-                                   _cell(round(float(r.get("mx") or 0), 1))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(r.get("_id")),
+                        _cell(n),
+                        _cell(round(float(r.get("avg") or 0), 1)),
+                        _cell(round(float(r.get("mn") or 0), 1)),
+                        _cell(round(float(r.get("mx") or 0), 1)),
+                    ]
+                )
+            )
         tot_avg = round(tot_avg_num / tn, 1) if tn else 0
         lines.append(",".join([_cell("المجموع ←"), _cell(tn), _cell(tot_avg), "", ""]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "delivery-time-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p446: أفضل زبائن التوصيل CSV (BOM لـ Excel) ----------
     @router.get("/delivery-customers.csv")
-    async def delivery_customers_csv(days: int = 90, user: dict = Depends(get_current_user)):
+    async def delivery_customers_csv(
+        days: int = 90, user: dict = Depends(get_current_user)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         pipeline = [
             {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "cancelled"}}},
-            {"$group": {"_id": {"phone": {"$ifNull": ["$customer_phone", ""]},
-                                "name": {"$ifNull": ["$customer_name", ""]}},
-                        "orders": {"$sum": 1},
-                        "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
-                        "spent": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]},
-                                                     {"$ifNull": ["$total", 0]}, 0]}},
-                        "fees": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]},
-                                                    {"$ifNull": ["$delivery_fee", 0]}, 0]}}}},
+            {
+                "$group": {
+                    "_id": {
+                        "phone": {"$ifNull": ["$customer_phone", ""]},
+                        "name": {"$ifNull": ["$customer_name", ""]},
+                    },
+                    "orders": {"$sum": 1},
+                    "delivered": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}
+                    },
+                    "spent": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$status", "delivered"]},
+                                {"$ifNull": ["$total", 0]},
+                                0,
+                            ]
+                        }
+                    },
+                    "fees": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$status", "delivered"]},
+                                {"$ifNull": ["$delivery_fee", 0]},
+                                0,
+                            ]
+                        }
+                    },
+                }
+            },
             {"$sort": {"orders": -1}},
             {"$limit": 100},
         ]
@@ -4412,18 +6924,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["الزبون,الهاتف,الطلبات,المُسلَّمة,إجمالي المنفق,رسوم التوصيل"]
         for r in rows:
-            lines.append(",".join([
-                _cell((r["_id"] or {}).get("name")), _cell((r["_id"] or {}).get("phone")),
-                _cell(r["orders"]), _cell(r["delivered"]),
-                _cell(round(float(r["spent"]), 2)), _cell(round(float(r["fees"]), 2))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell((r["_id"] or {}).get("name")),
+                        _cell((r["_id"] or {}).get("phone")),
+                        _cell(r["orders"]),
+                        _cell(r["delivered"]),
+                        _cell(round(float(r["spent"]), 2)),
+                        _cell(round(float(r["fees"]), 2)),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "delivery-customers-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p469: مقارنة السائقين الأسبوعية (آخر 7 أيام مقابل 7 قبلها — مساعد مشترك) ----------
     async def _drivers_weekly_rows():
@@ -4446,8 +6970,10 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             else:
                 a["pd"] += 1
                 a["pr"] += amt
-        rows = [(d, a["cd"], round(a["cr"], 2), a["pd"], round(a["pr"], 2))
-                for d, a in agg.items()]
+        rows = [
+            (d, a["cd"], round(a["cr"], 2), a["pd"], round(a["pr"], 2))
+            for d, a in agg.items()
+        ]
         rows.sort(key=lambda r: (-r[1], r[0]))
         return rows
 
@@ -4465,7 +6991,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -4480,8 +7008,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -4524,15 +7058,45 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _dash()
         tcd = tcr = tpd = tpr = 0
         for drv, cd, cr, pd_, pr in rows:
-            tcd += cd; tcr += cr; tpd += pd_; tpr += pr
-            _row(drv + " — " + str(cd) + " (" + str(cr) + ") | " + str(pd_) + " (" + str(pr) + ")")
+            tcd += cd
+            tcr += cr
+            tpd += pd_
+            tpr += pr
+            _row(
+                drv
+                + " — "
+                + str(cd)
+                + " ("
+                + str(cr)
+                + ") | "
+                + str(pd_)
+                + " ("
+                + str(pr)
+                + ")"
+            )
         _dash()
-        _row("المجموع — " + str(tcd) + " (" + str(round(tcr, 2)) + ") | " + str(tpd) + " (" + str(round(tpr, 2)) + ")", 11)
+        _row(
+            "المجموع — "
+            + str(tcd)
+            + " ("
+            + str(round(tcr, 2))
+            + ") | "
+            + str(tpd)
+            + " ("
+            + str(round(tpr, 2))
+            + ")",
+            11,
+        )
         c.showPage()
         c.save()
         buf.seek(0)
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="drivers-weekly.pdf"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": 'attachment; filename="drivers-weekly.pdf"'
+            },
+        )
 
     # ---------- p442: مساعد تجميع إحصائيات السائقين (مشترك بين CSV وPDF — صفر ازدواجية) ----------
     async def _driver_stats_rows(days: int):
@@ -4541,7 +7105,16 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         agg = {}
         async for o in _delivery().find({"created_at": {"$gte": since}}):
             drv = (o.get("driver_name") or "").strip() or "بدون سائق"
-            a = agg.setdefault(drv, {"total": 0, "delivered": 0, "cancelled": 0, "revenue": 0.0, "fees": 0.0})
+            a = agg.setdefault(
+                drv,
+                {
+                    "total": 0,
+                    "delivered": 0,
+                    "cancelled": 0,
+                    "revenue": 0.0,
+                    "fees": 0.0,
+                },
+            )
             a["total"] += 1
             if o.get("status") == "delivered":
                 a["delivered"] += 1
@@ -4549,33 +7122,60 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 a["fees"] += float(o.get("delivery_fee") or 0)
             elif o.get("status") == "cancelled":
                 a["cancelled"] += 1
-        rows = [(drv, a["total"], a["delivered"], a["cancelled"], round(a["revenue"], 2), round(a["fees"], 2))
-                for drv, a in agg.items()]
+        rows = [
+            (
+                drv,
+                a["total"],
+                a["delivered"],
+                a["cancelled"],
+                round(a["revenue"], 2),
+                round(a["fees"], 2),
+            )
+            for drv, a in agg.items()
+        ]
         rows.sort(key=lambda r: -r[2])
         return days, rows
 
     # ---------- p430: إحصائيات سائقي التوصيل CSV (BOM لـ Excel) ----------
     @router.get("/delivery-drivers.csv")
-    async def delivery_drivers_csv(days: int = 30, user: dict = Depends(get_current_user)):
+    async def delivery_drivers_csv(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days, rows = await _driver_stats_rows(days)  # p442: التجميع مشترك مع PDF
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["السائق,الطلبات,المُسلَّمة,الملغاة,إيراد المُسلَّمة,رسوم التوصيل"]
         for drv, tot, dlv, cxl, rev, fee in rows:
-            lines.append(",".join([_cell(drv), _cell(tot), _cell(dlv),
-                                   _cell(cxl), _cell(rev), _cell(fee)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(drv),
+                        _cell(tot),
+                        _cell(dlv),
+                        _cell(cxl),
+                        _cell(rev),
+                        _cell(fee),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "delivery-drivers-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p442: إحصائيات سائقي التوصيل PDF (نفس بيانات CSV عبر _driver_stats_rows) ----------
     @router.get("/delivery-drivers.pdf")
-    async def delivery_drivers_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+    async def delivery_drivers_pdf(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         days, rows = await _driver_stats_rows(days)
         import os as _os
         import io as _io
@@ -4587,7 +7187,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -4602,8 +7204,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -4651,19 +7259,36 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if rows:
             _center("السائق — الطلبات / المُسلَّمة / الملغاة — الإيراد — الرسوم", 10)
             for drv, tot, dlv, cxl, rev, fee in rows:
-                _row(drv, str(tot) + " / " + str(dlv) + " / " + str(cxl) + " — " + str(rev) + " دج — " + str(fee) + " دج")
+                _row(
+                    drv,
+                    str(tot)
+                    + " / "
+                    + str(dlv)
+                    + " / "
+                    + str(cxl)
+                    + " — "
+                    + str(rev)
+                    + " دج — "
+                    + str(fee)
+                    + " دج",
+                )
         else:
             _center("لا بيانات في الفترة", 10)
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "delivery-drivers-" + str(days) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p421: ملخص التوصيل PDF (نفس بيانات البطاقات — صفر ازدواجية) ----------
     @router.get("/delivery-summary.pdf")
-    async def delivery_summary_pdf(days: int = 30, user: dict = Depends(get_current_user)):
+    async def delivery_summary_pdf(
+        days: int = 30, user: dict = Depends(get_current_user)
+    ):
         d = await delivery_summary(days, user)
         import os as _os
         import io as _io
@@ -4675,7 +7300,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -4690,8 +7317,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": user.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -4728,7 +7361,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             y[0] -= 10
 
         bs = d.get("by_status") or {}
-        active = int(bs.get("pending") or 0) + int(bs.get("ready") or 0) + int(bs.get("out_for_delivery") or 0)
+        active = (
+            int(bs.get("pending") or 0)
+            + int(bs.get("ready") or 0)
+            + int(bs.get("out_for_delivery") or 0)
+        )
         if store:
             _center(store, 13)
         _center("ملخص طلبات التوصيل", 12)
@@ -4741,52 +7378,91 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _row("رسوم التوصيل", d.get("delivered_fees"))
         _dash()
         _center("تفصيل الحالات", 11)
-        slbl = {"pending": "قيد التحضير", "ready": "جاهز", "out_for_delivery": "في الطريق",
-                "delivered": "سُلّم", "cancelled": "ملغى"}
+        slbl = {
+            "pending": "قيد التحضير",
+            "ready": "جاهز",
+            "out_for_delivery": "في الطريق",
+            "delivered": "سُلّم",
+            "cancelled": "ملغى",
+        }
         for k in ("pending", "ready", "out_for_delivery", "delivered", "cancelled"):
             _row(slbl[k], bs.get(k) or 0)
         c.showPage()
         c.save()
         buf.seek(0)
         fname = "delivery-summary-" + str(d.get("days") or 0) + "d.pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p413: تصدير طلبات التوصيل CSV تفصيليًا (BOM لـ Excel) ----------
     @router.get("/delivery-orders.csv")
-    async def delivery_orders_csv(status: Optional[str] = None, days: int = 30,
-                                  user: dict = Depends(get_current_user)):
+    async def delivery_orders_csv(
+        status: Optional[str] = None,
+        days: int = 30,
+        user: dict = Depends(get_current_user),
+    ):
         rows = await list_delivery_orders(status, days, user)
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         dz = timezone(timedelta(hours=1))
-        lbl = {"pending": "قيد التحضير", "ready": "جاهز", "out_for_delivery": "في الطريق",
-               "delivered": "سُلّم", "cancelled": "ملغى"}
+        lbl = {
+            "pending": "قيد التحضير",
+            "ready": "جاهز",
+            "out_for_delivery": "في الطريق",
+            "delivered": "سُلّم",
+            "cancelled": "ملغى",
+        }
         lines = []
-        lines.append("الرمز,الزبون,الهاتف,العنوان,السائق,الحالة,المجموع الفرعي,رسوم التوصيل,الإجمالي,مُحصَّل,التاريخ")
+        lines.append(
+            "الرمز,الزبون,الهاتف,العنوان,السائق,الحالة,المجموع الفرعي,رسوم التوصيل,الإجمالي,مُحصَّل,التاريخ"
+        )
         for o in rows:
             when = o.get("created_at")
             try:
-                when_s = when.astimezone(dz).strftime("%Y-%m-%d %H:%M") if hasattr(when, "astimezone") else str(when)
+                when_s = (
+                    when.astimezone(dz).strftime("%Y-%m-%d %H:%M")
+                    if hasattr(when, "astimezone")
+                    else str(when)
+                )
             except Exception:
                 when_s = str(when or "")
-            lines.append(",".join([
-                _cell(o.get("code")), _cell(o.get("customer_name")), _cell(o.get("customer_phone")),
-                _cell(o.get("address")), _cell(o.get("driver_name")),
-                _cell(lbl.get(o.get("status"), o.get("status") or "")),
-                _cell(o.get("subtotal")), _cell(o.get("delivery_fee")), _cell(o.get("total")),
-                _cell("نعم" if o.get("payment_collected") else "لا"), _cell(when_s)]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(o.get("code")),
+                        _cell(o.get("customer_name")),
+                        _cell(o.get("customer_phone")),
+                        _cell(o.get("address")),
+                        _cell(o.get("driver_name")),
+                        _cell(lbl.get(o.get("status"), o.get("status") or "")),
+                        _cell(o.get("subtotal")),
+                        _cell(o.get("delivery_fee")),
+                        _cell(o.get("total")),
+                        _cell("نعم" if o.get("payment_collected") else "لا"),
+                        _cell(when_s),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "delivery-orders-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     @router.post("/delivery-orders")
-    async def create_delivery_order(data: DeliveryOrderCreate, user: dict = Depends(get_current_user)):
+    async def create_delivery_order(
+        data: DeliveryOrderCreate, user: dict = Depends(get_current_user)
+    ):
         if not data.items:
             raise HTTPException(status_code=400, detail="لا توجد عناصر في الطلب")
         if not (data.customer_name or "").strip():
@@ -4797,7 +7473,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             if not (0 < float(it.quantity or 0) <= 100):
                 raise HTTPException(status_code=400, detail="كمية غير صالحة")
             d = it.model_dump()
-            mod_extra = sum(float(m.get("price_delta") or 0) for m in (d.get("modifiers") or []))
+            mod_extra = sum(
+                float(m.get("price_delta") or 0) for m in (d.get("modifiers") or [])
+            )
             d["unit_price"] = round(float(d.get("unit_price") or 0) + mod_extra, 2)
             subtotal += d["unit_price"] * float(it.quantity)
             items.append(d)
@@ -4848,26 +7526,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ---------- p445: حذف طلب التوصيل الملغى نهائيًا ----------
     @router.delete("/delivery-orders/{order_id}")
-    async def delete_delivery_order(order_id: str, user: dict = Depends(get_current_user)):
+    async def delete_delivery_order(
+        order_id: str, user: dict = Depends(get_current_user)
+    ):
         o = await _delivery().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         if o.get("status") != "cancelled":
             raise HTTPException(status_code=400, detail="ألغِ الطلب أولًا قبل حذفه")
         if o.get("kitchen_order_id"):
-            await _orders().delete_one({"id": o["kitchen_order_id"], "status": "cancelled"})
+            await _orders().delete_one(
+                {"id": o["kitchen_order_id"], "status": "cancelled"}
+            )
         await _delivery().delete_one({"id": order_id})
         await _publish("delivery_order.deleted", o, user)
         return {"deleted": True, "id": order_id}
 
     # ---------- p440: تعديل طلب التوصيل (قبل الانطلاق وقبل بدء المطبخ) ----------
     @router.put("/delivery-orders/{order_id}")
-    async def update_delivery_order(order_id: str, data: DeliveryOrderCreate, user: dict = Depends(get_current_user)):
+    async def update_delivery_order(
+        order_id: str, data: DeliveryOrderCreate, user: dict = Depends(get_current_user)
+    ):
         o = await _delivery().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         if o.get("status") not in ("pending", "ready"):
-            raise HTTPException(status_code=400, detail="لا يمكن تعديل الطلب بعد الانطلاق")
+            raise HTTPException(
+                status_code=400, detail="لا يمكن تعديل الطلب بعد الانطلاق"
+            )
         if not (data.customer_name or "").strip():
             raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
         if not data.items:
@@ -4876,14 +7562,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if o.get("kitchen_order_id"):
             kdoc = await _orders().find_one({"id": o["kitchen_order_id"]})
             if kdoc and kdoc.get("status") != "pending":
-                raise HTTPException(status_code=400, detail="بدأ المطبخ التحضير — لا يمكن التعديل")
+                raise HTTPException(
+                    status_code=400, detail="بدأ المطبخ التحضير — لا يمكن التعديل"
+                )
         items = []
         subtotal = 0.0
         for it in data.items:
             if not (0 < float(it.quantity or 0) <= 100):
                 raise HTTPException(status_code=400, detail="كمية غير صالحة")
             d = it.model_dump()
-            mod_extra = sum(float(m.get("price_delta") or 0) for m in (d.get("modifiers") or []))
+            mod_extra = sum(
+                float(m.get("price_delta") or 0) for m in (d.get("modifiers") or [])
+            )
             d["unit_price"] = round(float(d.get("unit_price") or 0) + mod_extra, 2)
             subtotal += d["unit_price"] * float(it.quantity)
             items.append(d)
@@ -4902,17 +7592,28 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         }
         await _delivery().update_one({"id": order_id}, {"$set": upd})
         if kdoc:
-            await _orders().update_one({"id": kdoc["id"]}, {"$set": {
-                "items": items, "notes": data.notes,
-                "customer_phone": upd["customer_phone"],
-                "table_name": "توصيل — " + upd["customer_name"],
-                "updated_at": _now()}})
+            await _orders().update_one(
+                {"id": kdoc["id"]},
+                {
+                    "$set": {
+                        "items": items,
+                        "notes": data.notes,
+                        "customer_phone": upd["customer_phone"],
+                        "table_name": "توصيل — " + upd["customer_name"],
+                        "updated_at": _now(),
+                    }
+                },
+            )
         updated = await _delivery().find_one({"id": order_id})
         await _publish("delivery_order.updated", updated, user)
         return _delivery_out(updated)
 
     @router.put("/delivery-orders/{order_id}/status")
-    async def update_delivery_status(order_id: str, data: DeliveryStatusUpdate, user: dict = Depends(get_current_user)):
+    async def update_delivery_status(
+        order_id: str,
+        data: DeliveryStatusUpdate,
+        user: dict = Depends(get_current_user),
+    ):
         if data.status not in _DLV_STATUSES:
             raise HTTPException(status_code=400, detail="حالة غير صالحة")
         o = await _delivery().find_one({"id": order_id})
@@ -4932,7 +7633,10 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             upd["cancel_reason"] = (data.reason or "").strip() or None
             # ألغِ طلب المطبخ المرافق إن لم يُقدَّم بعد
             await _orders().update_one(
-                {"id": o.get("kitchen_order_id"), "status": {"$in": ["pending", "preparing"]}},
+                {
+                    "id": o.get("kitchen_order_id"),
+                    "status": {"$in": ["pending", "preparing"]},
+                },
                 {"$set": {"status": "cancelled", "updated_at": _now()}},
             )
         await _delivery().update_one({"id": order_id}, {"$set": upd})
@@ -4941,7 +7645,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _delivery_out(updated)
 
     @router.post("/delivery-orders/{order_id}/collect")
-    async def collect_delivery_order(order_id: str, data: DeliveryCollect, user: dict = Depends(get_current_user)):
+    async def collect_delivery_order(
+        order_id: str, data: DeliveryCollect, user: dict = Depends(get_current_user)
+    ):
         """بعد تسجيل البيع في POS: ربط الفاتورة وإنهاء الطلب (مثل checkout الطاولة)."""
         o = await _delivery().find_one({"id": order_id})
         if not o:
@@ -4950,14 +7656,28 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=400, detail="الطلب ملغى")
         await _delivery().update_one(
             {"id": order_id},
-            {"$set": {"sale_id": data.sale_id, "payment_collected": True,
-                      "status": "delivered", "delivered_at": _now(), "updated_at": _now()}},
+            {
+                "$set": {
+                    "sale_id": data.sale_id,
+                    "payment_collected": True,
+                    "status": "delivered",
+                    "delivered_at": _now(),
+                    "updated_at": _now(),
+                }
+            },
         )
         if o.get("kitchen_order_id"):
             await _orders().update_one(
                 {"id": o["kitchen_order_id"]},
-                {"$set": {"status": "served", "sale_id": data.sale_id,
-                          "payment_status": "paid", "paid_at": _now(), "updated_at": _now()}},  # p336
+                {
+                    "$set": {
+                        "status": "served",
+                        "sale_id": data.sale_id,
+                        "payment_status": "paid",
+                        "paid_at": _now(),
+                        "updated_at": _now(),
+                    }
+                },  # p336
             )
         updated = await _delivery().find_one({"id": order_id})
         await _publish("delivery_order.updated", updated, user)
@@ -4998,35 +7718,55 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         plabel = {"debt": "آجل", "cash": "كاش"}
         lines = ["الاسم,المدير,الهاتف,نمط الحساب,نسبة الخصم %,الرصيد,ملاحظات"]
         for n in rows:
-            lines.append(",".join([
-                _cell(n.get("name")), _cell(n.get("manager_name")), _cell(n.get("phone")),
-                _cell(plabel.get(n.get("payment"), n.get("payment") or "")),
-                _cell(n.get("discount_pct")), _cell(n.get("balance", 0)),
-                _cell(n.get("notes"))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(n.get("name")),
+                        _cell(n.get("manager_name")),
+                        _cell(n.get("phone")),
+                        _cell(plabel.get(n.get("payment"), n.get("payment") or "")),
+                        _cell(n.get("discount_pct")),
+                        _cell(n.get("balance", 0)),
+                        _cell(n.get("notes")),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="neighbors.csv"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="neighbors.csv"'},
+        )
 
     # ---------- p449: سجل تسديدات الجيران CSV (BOM لـ Excel) ----------
     @router.get("/neighbor-settlements.csv")
-    async def neighbor_settlements_csv(days: int = 90, admin: dict = Depends(get_tenant_admin)):
+    async def neighbor_settlements_csv(
+        days: int = 90, admin: dict = Depends(get_tenant_admin)
+    ):
         days = max(1, min(int(days), 365))
         since = _now() - timedelta(days=days)
         dz = timezone(timedelta(hours=1))
         nmap = {}
-        async for n in _neighbors().find({}, {"_id": 0, "id": 1, "name": 1, "phone": 1}):
+        async for n in _neighbors().find(
+            {}, {"_id": 0, "id": 1, "name": 1, "phone": 1}
+        ):
             nmap[n.get("id")] = n
-        rows = await db.neighbor_settlements.find(
-            {"created_at": {"$gte": since}}).sort("created_at", -1).to_list(2000)
+        rows = (
+            await db.neighbor_settlements.find({"created_at": {"$gte": since}})
+            .sort("created_at", -1)
+            .to_list(2000)
+        )
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         lines = ["التاريخ,الجار,الهاتف,المبلغ,ملاحظة,المُدخِل"]
@@ -5039,14 +7779,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             n = nmap.get(s.get("neighbor_id")) or {}
             amt = round(float(s.get("amount") or 0), 2)
             total += amt
-            lines.append(",".join([
-                _cell(dstr), _cell(n.get("name") or "—"), _cell(n.get("phone") or ""),
-                _cell(amt), _cell(s.get("notes") or ""), _cell(s.get("created_by") or "")]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(dstr),
+                        _cell(n.get("name") or "—"),
+                        _cell(n.get("phone") or ""),
+                        _cell(amt),
+                        _cell(s.get("notes") or ""),
+                        _cell(s.get("created_by") or ""),
+                    ]
+                )
+            )
         lines.append(",".join(["", "المجموع ←", "", _cell(round(total, 2)), "", ""]))
         body = "\ufeff" + "\r\n".join(lines) + "\r\n"
         fname = "neighbor-settlements-" + str(days) + "d.csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p432: تقرير أعمار ديون الجيران CSV (FIFO للتسديدات — BOM لـ Excel) ----------
     @router.get("/neighbors-aging.csv")
@@ -5056,6 +7808,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         def _bucket(age_days):
@@ -5067,16 +7820,30 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 return "b90"
             return "b91"
 
-        lines = ["الجار,الهاتف,0-7 أيام,8-30 يوم,31-90 يوم,+90 يوم,الإجمالي غير المسدد,الرصيد الحالي"]
+        lines = [
+            "الجار,الهاتف,0-7 أيام,8-30 يوم,31-90 يوم,+90 يوم,الإجمالي غير المسدد,الرصيد الحالي"
+        ]
         neighbors = await _neighbors().find({}).sort("created_at", 1).to_list(200)
         rows = []
         for n in neighbors:
             nid = n.get("id")
-            orders = await _orders().find(
-                {"neighbor_id": nid, "status": {"$ne": "cancelled"}, "payment_status": "debt"},
-                {"_id": 0, "items": 1, "created_at": 1}).sort("created_at", 1).to_list(2000)
+            orders = (
+                await _orders()
+                .find(
+                    {
+                        "neighbor_id": nid,
+                        "status": {"$ne": "cancelled"},
+                        "payment_status": "debt",
+                    },
+                    {"_id": 0, "items": 1, "created_at": 1},
+                )
+                .sort("created_at", 1)
+                .to_list(2000)
+            )
             settled = 0.0
-            async for s in db.neighbor_settlements.find({"neighbor_id": nid}, {"_id": 0, "amount": 1}):
+            async for s in db.neighbor_settlements.find(
+                {"neighbor_id": nid}, {"_id": 0, "amount": 1}
+            ):
                 settled += float(s.get("amount") or 0)
             if not orders and not settled and not n.get("balance"):
                 continue
@@ -5084,9 +7851,13 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             credit = settled
             unpaid_total = 0.0
             for o in orders:
-                tot = round(sum(
-                    float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
-                    for i in (o.get("items") or [])), 2)
+                tot = round(
+                    sum(
+                        float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                        for i in (o.get("items") or [])
+                    ),
+                    2,
+                )
                 if tot > 0 and credit >= tot:
                     credit -= tot
                     continue
@@ -5100,21 +7871,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 unpaid_total += rem
             rows.append((unpaid_total, n, b))
         for unpaid_total, n, b in sorted(rows, key=lambda r: -r[0]):
-            lines.append(",".join([
-                _cell(n.get("name")), _cell(n.get("phone")),
-                _cell(round(b["b7"], 2)), _cell(round(b["b30"], 2)),
-                _cell(round(b["b90"], 2)), _cell(round(b["b91"], 2)),
-                _cell(round(unpaid_total, 2)), _cell(round(float(n.get("balance") or 0), 2))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(n.get("name")),
+                        _cell(n.get("phone")),
+                        _cell(round(b["b7"], 2)),
+                        _cell(round(b["b30"], 2)),
+                        _cell(round(b["b90"], 2)),
+                        _cell(round(b["b91"], 2)),
+                        _cell(round(unpaid_total, 2)),
+                        _cell(round(float(n.get("balance") or 0), 2)),
+                    ]
+                )
+            )
         body = "﻿" + "\r\n".join(lines) + "\r\n"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="neighbors-aging.csv"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="neighbors-aging.csv"'
+            },
+        )
 
     @router.post("/neighbors", status_code=201)
-    async def create_neighbor(data: NeighborIn, admin: dict = Depends(get_tenant_admin)):
+    async def create_neighbor(
+        data: NeighborIn, admin: dict = Depends(get_tenant_admin)
+    ):
         if not data.name.strip():
             raise HTTPException(status_code=400, detail="اسم الجار مطلوب")
         if data.payment not in ("debt", "cash"):
-            raise HTTPException(status_code=400, detail="نمط الحساب غير صالح — debt أو cash")
+            raise HTTPException(
+                status_code=400, detail="نمط الحساب غير صالح — debt أو cash"
+            )
         doc = {
             "id": f"nbr_{uuid.uuid4().hex[:12]}",
             "token": "NBR-" + secrets.token_hex(10),
@@ -5123,7 +7912,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "phone": (data.phone or "").strip(),
             "payment": data.payment,
             "discount_pct": max(0.0, min(90.0, float(data.discount_pct or 0))),
-            "prices": {str(k): float(v) for k, v in (data.prices or {}).items() if v is not None},
+            "prices": {
+                str(k): float(v)
+                for k, v in (data.prices or {}).items()
+                if v is not None
+            },
             "balance": 0.0,
             "is_active": True,
             "notes": (data.notes or "").strip(),
@@ -5133,7 +7926,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _neighbor_out(doc)
 
     @router.put("/neighbors/{nid}")
-    async def update_neighbor(nid: str, data: NeighborUpdate, admin: dict = Depends(get_tenant_admin)):
+    async def update_neighbor(
+        nid: str, data: NeighborUpdate, admin: dict = Depends(get_tenant_admin)
+    ):
         n = await _neighbors().find_one({"id": nid})
         if not n:
             raise HTTPException(status_code=404, detail="الجار غير موجود")
@@ -5149,7 +7944,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if data.discount_pct is not None:
             upd["discount_pct"] = max(0.0, min(90.0, float(data.discount_pct)))
         if data.prices is not None:
-            upd["prices"] = {str(k): float(v) for k, v in data.prices.items() if v is not None}
+            upd["prices"] = {
+                str(k): float(v) for k, v in data.prices.items() if v is not None
+            }
         if data.is_active is not None:
             upd["is_active"] = bool(data.is_active)
         if upd:
@@ -5164,64 +7961,105 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return {"ok": True}
 
     @router.post("/neighbors/{nid}/settle")
-    async def settle_neighbor(nid: str, data: NeighborSettle, admin: dict = Depends(get_tenant_admin)):
+    async def settle_neighbor(
+        nid: str, data: NeighborSettle, admin: dict = Depends(get_tenant_admin)
+    ):
         """تسديد (جزء من) دين الجار — كاش من مدير العمال"""
         if data.amount <= 0:
             raise HTTPException(status_code=400, detail="مبلغ غير صالح")
         n = await _neighbors().find_one({"id": nid})
         if not n:
             raise HTTPException(status_code=404, detail="الجار غير موجود")
-        await db.neighbor_settlements.insert_one({
-            "id": f"stl_{uuid.uuid4().hex[:12]}",
-            "neighbor_id": nid,
-            "amount": float(data.amount),
-            "notes": (data.notes or "").strip(),
-            "created_by": admin.get("username") or admin.get("email"),
-            "created_at": _now(),
-        })
-        await _neighbors().update_one({"id": nid}, {"$inc": {"balance": -float(data.amount)}})
+        await db.neighbor_settlements.insert_one(
+            {
+                "id": f"stl_{uuid.uuid4().hex[:12]}",
+                "neighbor_id": nid,
+                "amount": float(data.amount),
+                "notes": (data.notes or "").strip(),
+                "created_by": admin.get("username") or admin.get("email"),
+                "created_at": _now(),
+            }
+        )
+        await _neighbors().update_one(
+            {"id": nid}, {"$inc": {"balance": -float(data.amount)}}
+        )
         return _neighbor_out(await _neighbors().find_one({"id": nid}))
 
     @router.get("/neighbors/{nid}/statement")
-    async def neighbor_statement(nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def neighbor_statement(
+        nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)
+    ):
         """الكشف الشهري: طلبات + تسديدات + الرصيد"""
         n = await _neighbors().find_one({"id": nid})
         if not n:
             raise HTTPException(status_code=404, detail="الجار غير موجود")
         since = _now() - timedelta(days=max(1, min(365, days)))
-        orders = await _orders().find(
-            {"neighbor_id": nid, "created_at": {"$gte": since}, "status": {"$ne": "cancelled"}},
-            {"_id": 0, "id": 1, "code": 1, "items": 1, "status": 1, "created_at": 1, "ordered_by": 1},
-        ).sort("created_at", -1).to_list(500)
+        orders = (
+            await _orders()
+            .find(
+                {
+                    "neighbor_id": nid,
+                    "created_at": {"$gte": since},
+                    "status": {"$ne": "cancelled"},
+                },
+                {
+                    "_id": 0,
+                    "id": 1,
+                    "code": 1,
+                    "items": 1,
+                    "status": 1,
+                    "created_at": 1,
+                    "ordered_by": 1,
+                },
+            )
+            .sort("created_at", -1)
+            .to_list(500)
+        )
         for o in orders:
-            o["total"] = round(sum(
-                float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
-                for i in (o.get("items") or [])), 2)
-        settlements = await db.neighbor_settlements.find(
-            {"neighbor_id": nid, "created_at": {"$gte": since}}, {"_id": 0},
-        ).sort("created_at", -1).to_list(500)
+            o["total"] = round(
+                sum(
+                    float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                    for i in (o.get("items") or [])
+                ),
+                2,
+            )
+        settlements = (
+            await db.neighbor_settlements.find(
+                {"neighbor_id": nid, "created_at": {"$gte": since}},
+                {"_id": 0},
+            )
+            .sort("created_at", -1)
+            .to_list(500)
+        )
         return {
             "neighbor": _neighbor_out(n),
             "days": days,
             "orders": orders,
             "orders_total": round(sum(o["total"] for o in orders), 2),
             "settlements": settlements,
-            "settlements_total": round(sum(float(s.get("amount") or 0) for s in settlements), 2),
+            "settlements_total": round(
+                sum(float(s.get("amount") or 0) for s in settlements), 2
+            ),
             "balance": n.get("balance") or 0,
         }
 
     # ---------- p420: كشف حساب الجار CSV (BOM لـ Excel — نفس بيانات JSON) ----------
     @router.get("/neighbors/{nid}/statement.csv")
-    async def neighbor_statement_csv(nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def neighbor_statement_csv(
+        nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)
+    ):
         d = await neighbor_statement(nid, days, admin)
         from fastapi.responses import Response
 
         def _cell(v):
             from utils.csv_safe import csv_cell
+
             return csv_cell(v)
 
         def _dt(v):
-            return v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
+            return (
+                v.strftime("%Y-%m-%d %H:%M") if hasattr(v, "strftime") else str(v or "")
+            )
 
         nb = d.get("neighbor") or {}
         lines = []
@@ -5235,28 +8073,54 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         lines.append("")
         lines.append("الطلبات")
         lines.append("التاريخ,الرمز,الحالة,الإجمالي")
-        slbl = {"pending": "قيد التحضير", "preparing": "قيد التحضير", "ready": "جاهز",
-                "served": "قُدّم", "paid": "مدفوع", "cancelled": "ملغى", "scheduled": "مجدول"}
+        slbl = {
+            "pending": "قيد التحضير",
+            "preparing": "قيد التحضير",
+            "ready": "جاهز",
+            "served": "قُدّم",
+            "paid": "مدفوع",
+            "cancelled": "ملغى",
+            "scheduled": "مجدول",
+        }
         for o in d.get("orders") or []:
-            lines.append(",".join([_cell(_dt(o.get("created_at"))), _cell(o.get("code")),
-                                   _cell(slbl.get(o.get("status"), o.get("status") or "")),
-                                   _cell(o.get("total"))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(_dt(o.get("created_at"))),
+                        _cell(o.get("code")),
+                        _cell(slbl.get(o.get("status"), o.get("status") or "")),
+                        _cell(o.get("total")),
+                    ]
+                )
+            )
         lines.append("الإجمالي,,," + _cell(d.get("orders_total")))
         lines.append("")
         lines.append("التسديدات")
         lines.append("التاريخ,المبلغ,ملاحظة")
         for s in d.get("settlements") or []:
-            lines.append(",".join([_cell(_dt(s.get("created_at"))), _cell(s.get("amount")),
-                                   _cell(s.get("notes"))]))
+            lines.append(
+                ",".join(
+                    [
+                        _cell(_dt(s.get("created_at"))),
+                        _cell(s.get("amount")),
+                        _cell(s.get("notes")),
+                    ]
+                )
+            )
         lines.append("الإجمالي,," + _cell(d.get("settlements_total")))
         body = "﻿" + "\r\n".join(lines) + "\r\n"
         fname = "neighbor-statement-" + nid + ".csv"
-        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return Response(
+            body.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p412: كشف حساب الجار PDF — نفس بيانات الكشف قابلة للطباعة والأرشفة ----------
     @router.get("/neighbors/{nid}/statement.pdf")
-    async def neighbor_statement_pdf(nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def neighbor_statement_pdf(
+        nid: str, days: int = 30, admin: dict = Depends(get_tenant_admin)
+    ):
         d = await neighbor_statement(nid, days, admin)
         import os as _os
         import io as _io
@@ -5268,7 +8132,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         from bidi.algorithm import get_display
         from fastapi.responses import StreamingResponse
 
-        font_path = _os.path.join(_os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf")
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
         try:
             pdfmetrics.getFont("Arabic")
         except Exception:
@@ -5283,8 +8149,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         store = ""
         try:
             from config.database import main_db as _mdb
-            tdoc = await _mdb.saas_tenants.find_one(
-                {"id": admin.get("tenant_id")}, {"_id": 0, "company_name": 1, "name": 1}) or {}
+
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": admin.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
             store = tdoc.get("company_name") or tdoc.get("name") or ""
         except Exception:
             pass
@@ -5337,7 +8209,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             for o in orders:
                 when = o.get("created_at")
                 try:
-                    when_s = when.astimezone(dz).strftime("%d/%m %H:%M") if hasattr(when, "astimezone") else str(when)
+                    when_s = (
+                        when.astimezone(dz).strftime("%d/%m %H:%M")
+                        if hasattr(when, "astimezone")
+                        else str(when)
+                    )
                 except Exception:
                     when_s = str(when or "")
                 _row("{} — {}".format(when_s, o.get("code") or ""), o.get("total"), 9)
@@ -5348,7 +8224,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             for s in settles:
                 when = s.get("created_at")
                 try:
-                    when_s = when.astimezone(dz).strftime("%d/%m %H:%M") if hasattr(when, "astimezone") else str(when)
+                    when_s = (
+                        when.astimezone(dz).strftime("%d/%m %H:%M")
+                        if hasattr(when, "astimezone")
+                        else str(when)
+                    )
                 except Exception:
                     when_s = str(when or "")
                 _row(when_s, s.get("amount"), 9)
@@ -5356,8 +8236,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         c.save()
         buf.seek(0)
         fname = "neighbor-statement-" + str(nid) + ".pdf"
-        return StreamingResponse(buf, media_type="application/pdf",
-                                 headers={"Content-Disposition": 'attachment; filename="' + fname + '"'})
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="' + fname + '"'},
+        )
 
     # ---------- p311: QR table ordering (public — no auth) ----------
     # Security notes: tenant must have the restaurant feature ON; prices and
@@ -5381,11 +8264,18 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return {"payment_mode": await _payment_mode()}
 
     @router.put("/settings/orders")
-    async def put_order_settings(data: OrderSettingsIn, admin: dict = Depends(get_tenant_admin)):
+    async def put_order_settings(
+        data: OrderSettingsIn, admin: dict = Depends(get_tenant_admin)
+    ):
         if data.payment_mode not in ("prepaid", "postpaid"):
-            raise HTTPException(status_code=400, detail="نمط دفع غير صالح — prepaid أو postpaid")
+            raise HTTPException(
+                status_code=400, detail="نمط دفع غير صالح — prepaid أو postpaid"
+            )
         await db.restaurant_settings.update_one(
-            {"_id": "order_settings"}, {"$set": {"payment_mode": data.payment_mode}}, upsert=True)
+            {"_id": "order_settings"},
+            {"$set": {"payment_mode": data.payment_mode}},
+            upsert=True,
+        )
         return {"ok": True, "payment_mode": data.payment_mode}
 
     # ---------- p360: إعدادات الكشك الذاتي داخل المحل ----------
@@ -5396,21 +8286,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.get("/settings/kiosk")
     async def get_kiosk_settings(admin: dict = Depends(get_tenant_admin)):
-        doc = await db.restaurant_settings.find_one({"_id": "kiosk_settings"}, {"_id": 0}) or {}
-        return {"enabled": bool(doc.get("enabled")),
-                "counter_name": doc.get("counter_name") or "كشك",
-                "require_phone": bool(doc.get("require_phone"))}
+        doc = (
+            await db.restaurant_settings.find_one({"_id": "kiosk_settings"}, {"_id": 0})
+            or {}
+        )
+        return {
+            "enabled": bool(doc.get("enabled")),
+            "counter_name": doc.get("counter_name") or "كشك",
+            "require_phone": bool(doc.get("require_phone")),
+        }
 
     @router.put("/settings/kiosk")
-    async def put_kiosk_settings(data: KioskSettingsIn, admin: dict = Depends(get_tenant_admin)):
-        payload = {"enabled": bool(data.enabled),
-                   "counter_name": ((data.counter_name or "").strip()[:30] or "كشك"),
-                   "require_phone": bool(data.require_phone)}
-        await db.restaurant_settings.update_one({"_id": "kiosk_settings"}, {"$set": payload}, upsert=True)
+    async def put_kiosk_settings(
+        data: KioskSettingsIn, admin: dict = Depends(get_tenant_admin)
+    ):
+        payload = {
+            "enabled": bool(data.enabled),
+            "counter_name": ((data.counter_name or "").strip()[:30] or "كشك"),
+            "require_phone": bool(data.require_phone),
+        }
+        await db.restaurant_settings.update_one(
+            {"_id": "kiosk_settings"}, {"$set": payload}, upsert=True
+        )
         return {"ok": True, **payload}
 
     # ---------- p334: روابط التواصل الاجتماعي (إعدادات المطعم) ----------
-    SOCIAL_KEYS = ("instagram", "facebook", "tiktok", "google_maps", "whatsapp", "website")
+    SOCIAL_KEYS = (
+        "instagram",
+        "facebook",
+        "tiktok",
+        "google_maps",
+        "whatsapp",
+        "website",
+    )
 
     def _social_out(doc):
         doc = doc or {}
@@ -5422,21 +8330,35 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return _social_out(doc)
 
     @router.put("/settings/social")
-    async def put_social_links(data: SocialLinksIn, admin: dict = Depends(get_tenant_admin)):
+    async def put_social_links(
+        data: SocialLinksIn, admin: dict = Depends(get_tenant_admin)
+    ):
         clean = {}
         for k in SOCIAL_KEYS:
             v = (getattr(data, k) or "").strip()
             if v and not v.startswith(("http://", "https://")):
-                raise HTTPException(status_code=400, detail=f"رابط غير صالح: {k} — يجب أن يبدأ بـ https://")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"رابط غير صالح: {k} — يجب أن يبدأ بـ https://",
+                )
             clean[k] = v
-        await db.restaurant_settings.update_one({"_id": "social_links"}, {"$set": clean}, upsert=True)
+        await db.restaurant_settings.update_one(
+            {"_id": "social_links"}, {"$set": clean}, upsert=True
+        )
         return {"ok": True, **_social_out(clean)}
 
     async def _qr_tenant(tenant_id: str):
         from config.database import main_db as _mdb
+
         t = await _mdb.saas_tenants.find_one(
             {"id": tenant_id},
-            {"_id": 0, "name": 1, "company_name": 1, "features_override": 1, "is_active": 1},
+            {
+                "_id": 0,
+                "name": 1,
+                "company_name": 1,
+                "features_override": 1,
+                "is_active": 1,
+            },
         )
         if not t or t.get("is_active") is False:
             raise HTTPException(status_code=404, detail="غير موجود")
@@ -5447,30 +8369,55 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     @router.get("/public/menu/{tenant_id}")
     async def qr_public_menu(tenant_id: str):
         from config.database import get_tenant_db
+
         t = await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
-        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+        fams = {
+            f["id"]: (f.get("name_ar") or f.get("name") or "")
+            for f in await tdb.families.find(
+                {}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}
+            ).to_list(500)
+        }
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "dietary_tags": 1, "image_url": 1},
+            {
+                "_id": 0,
+                "id": 1,
+                "name": 1,
+                "name_ar": 1,
+                "name_en": 1,
+                "retail_price": 1,
+                "family_id": 1,
+                "modifier_groups": 1,
+                "dietary_tags": 1,
+                "image_url": 1,
+            },
         ).to_list(1000)
-        items = [{
-            "id": p["id"],
-            "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-            "name_en": p.get("name_en") or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
-            "price": p.get("retail_price") or 0,
-            "family": fams.get(p.get("family_id")) or "",
-            "modifier_groups": p.get("modifier_groups") or [],
-            "dietary_tags": p.get("dietary_tags") or [],
-            "image_url": p.get("image_url"),
-        } for p in prods]
-        return {"restaurant_name": t.get("company_name") or t.get("name") or "", "items": items}
+        items = [
+            {
+                "id": p["id"],
+                "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                "name_en": p.get("name_en")
+                or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
+                "price": p.get("retail_price") or 0,
+                "family": fams.get(p.get("family_id")) or "",
+                "modifier_groups": p.get("modifier_groups") or [],
+                "dietary_tags": p.get("dietary_tags") or [],
+                "image_url": p.get("image_url"),
+            }
+            for p in prods
+        ]
+        return {
+            "restaurant_name": t.get("company_name") or t.get("name") or "",
+            "items": items,
+        }
 
     @router.get("/public/table-session/{tenant_id}/{table_id}")
     async def qr_table_session(tenant_id: str, table_id: str):
         """p325: رمز QR المطبوع على الطاولة دائم — كل مسح يسترجع (أو ينشئ كسلًا) رابط الطلب المؤقت الحالي.
         الرابط المؤقت نفسه (qr_token) يدور عند تحرير الطاولة/الدفع كما في p323."""
         from config.database import get_tenant_db
+
         await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
         table = await tdb.restaurant_tables.find_one({"id": table_id})
@@ -5479,36 +8426,65 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         tok = table.get("qr_token")
         if not tok:  # طاولات قديمة بلا رمز — إنشاء كسول
             tok = secrets.token_hex(5)
-            await tdb.restaurant_tables.update_one({"id": table_id}, {"$set": {"qr_token": tok}})
+            await tdb.restaurant_tables.update_one(
+                {"id": table_id}, {"$set": {"qr_token": tok}}
+            )
         return {"token": tok, "table_name": table.get("name") or ""}
 
     @router.get("/public/table-menu/{tenant_id}/{table_id}/{token}")
     async def qr_table_menu(tenant_id: str, table_id: str, token: str):
         """p323: قائمة الطاولة برابط مؤقت — 410 إن دُوّر الرابط (انتهت الزيارة) أو زُوّر"""
         from config.database import get_tenant_db
+
         t = await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
         table = await tdb.restaurant_tables.find_one({"id": table_id})
         if not table:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
         if not table.get("qr_token") or table["qr_token"] != token:
-            raise HTTPException(status_code=410, detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي")
-        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+            raise HTTPException(
+                status_code=410,
+                detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي",
+            )
+        fams = {
+            f["id"]: (f.get("name_ar") or f.get("name") or "")
+            for f in await tdb.families.find(
+                {}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}
+            ).to_list(500)
+        }
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "dietary_tags": 1, "image_url": 1},
+            {
+                "_id": 0,
+                "id": 1,
+                "name": 1,
+                "name_ar": 1,
+                "name_en": 1,
+                "retail_price": 1,
+                "family_id": 1,
+                "modifier_groups": 1,
+                "dietary_tags": 1,
+                "image_url": 1,
+            },
         ).to_list(1000)
-        items = [{
-            "id": p["id"],
-            "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-            "name_en": p.get("name_en") or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
-            "price": p.get("retail_price") or 0,
-            "family": fams.get(p.get("family_id")) or "",
-            "modifier_groups": p.get("modifier_groups") or [],
-            "dietary_tags": p.get("dietary_tags") or [],
-            "image_url": p.get("image_url"),
-        } for p in prods]
-        _soc = await tdb.restaurant_settings.find_one({"_id": "social_links"}, {"_id": 0}) or {}
+        items = [
+            {
+                "id": p["id"],
+                "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                "name_en": p.get("name_en")
+                or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
+                "price": p.get("retail_price") or 0,
+                "family": fams.get(p.get("family_id")) or "",
+                "modifier_groups": p.get("modifier_groups") or [],
+                "dietary_tags": p.get("dietary_tags") or [],
+                "image_url": p.get("image_url"),
+            }
+            for p in prods
+        ]
+        _soc = (
+            await tdb.restaurant_settings.find_one({"_id": "social_links"}, {"_id": 0})
+            or {}
+        )
         _soc = {k: v for k, v in _soc.items() if isinstance(v, str) and v}
         return {
             "restaurant_name": t.get("company_name") or t.get("name") or "",
@@ -5521,6 +8497,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     async def qr_public_order(tenant_id: str, table_id: str, data: QrOrderCreate):
         import time as _time
         from config.database import get_tenant_db
+
         await _qr_tenant(tenant_id)
         if not data.items or len(data.items) > 20:
             raise HTTPException(status_code=400, detail="طلب غير صالح")
@@ -5530,30 +8507,43 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _last = await tdb["_qr_throttle"].find_one({"_id": table_id})
         if _last and now_ts - float(_last.get("last") or 0) < 10:
             raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
-        await tdb["_qr_throttle"].update_one({"_id": table_id}, {"$set": {"last": now_ts}}, upsert=True)
+        await tdb["_qr_throttle"].update_one(
+            {"_id": table_id}, {"$set": {"last": now_ts}}, upsert=True
+        )
         table = await tdb.restaurant_tables.find_one({"id": table_id})
         if not table:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
         # p323: الرابط المؤقت — طلب بلا توكن أو بتوكن مُدوَّر يُرفض
         if not table.get("qr_token") or table["qr_token"] != (data.token or ""):
-            raise HTTPException(status_code=410, detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي")
+            raise HTTPException(
+                status_code=410,
+                detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي",
+            )
         items = []
         for it in data.items:
             if not (0 < float(it.quantity or 0) <= 20):
                 raise HTTPException(status_code=400, detail="كمية غير صالحة")
             p = await tdb.products.find_one(
                 {"id": it.product_id},
-                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "modifier_groups": 1},
+                {
+                    "_id": 0,
+                    "id": 1,
+                    "name": 1,
+                    "name_ar": 1,
+                    "name_en": 1,
+                    "retail_price": 1,
+                    "modifier_groups": 1,
+                },
             )
             if not p:
                 raise HTTPException(status_code=400, detail="منتج غير موجود")
             mods = []
             extra = 0.0
             groups = p.get("modifier_groups") or []
-            for m in (it.modifiers or []):
+            for m in it.modifiers or []:
                 hit = None
                 for g in groups:
-                    for opt in (g.get("options") or []):
+                    for opt in g.get("options") or []:
                         if opt.get("name") == (m.get("option") or ""):
                             hit = (g, opt)
                             break
@@ -5563,24 +8553,38 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     raise HTTPException(status_code=400, detail="خيار غير صالح")
                 g, opt = hit
                 delta = float(opt.get("price_delta") or 0)
-                mods.append({"group": g.get("name"), "option": opt.get("name"),
-                             "price_delta": delta, "product_id": opt.get("product_id"),
-                             "qty": opt.get("qty") or 1})
+                mods.append(
+                    {
+                        "group": g.get("name"),
+                        "option": opt.get("name"),
+                        "price_delta": delta,
+                        "product_id": opt.get("product_id"),
+                        "qty": opt.get("qty") or 1,
+                    }
+                )
                 extra += delta
-            items.append({
-                "product_id": p["id"],
-                "product_name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-                "quantity": float(it.quantity),
-                "unit_price": (p.get("retail_price") or 0) + extra,
-                "note": it.note,
-                "modifiers": mods or None,
-            })
+            items.append(
+                {
+                    "product_id": p["id"],
+                    "product_name": p.get("name_ar")
+                    or p.get("name")
+                    or p.get("name_en"),
+                    "quantity": float(it.quantity),
+                    "unit_price": (p.get("retail_price") or 0) + extra,
+                    "note": it.note,
+                    "modifiers": mods or None,
+                }
+            )
         pseudo = {"tenant_id": tenant_id, "email": "qr@table", "username": "QR"}
         _mode = await _payment_mode(tdb)  # p336
         active_id = table.get("active_order_id")
         if active_id:
             existing = await tdb.kitchen_orders.find_one(
-                {"id": active_id, "status": {"$in": ["pending", "preparing", "pending_payment"]}})  # p336
+                {
+                    "id": active_id,
+                    "status": {"$in": ["pending", "preparing", "pending_payment"]},
+                }
+            )  # p336
             if existing:
                 _set = {"updated_at": _now()}
                 if existing.get("status") != "pending_payment":
@@ -5597,7 +8601,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 _out["payment_mode"] = _mode  # p336
                 return _out
         day = _now().strftime("%Y%m%d")
-        count = await tdb.kitchen_orders.count_documents({"code": {"$regex": f"^KCH-{day}-"}})
+        count = await tdb.kitchen_orders.count_documents(
+            {"code": {"$regex": f"^KCH-{day}-"}}
+        )
         doc = {
             "id": f"kch_{uuid.uuid4().hex[:12]}",
             "code": f"KCH-{day}-{count + 1:04d}",
@@ -5607,7 +8613,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "notes": data.notes,
             "customer_phone": _clean_phone(data.customer_phone),  # p315
             "status": "pending_payment" if _mode == "prepaid" else "pending",  # p336
-            "payment_status": "unpaid" if _mode == "prepaid" else None,        # p336
+            "payment_status": "unpaid" if _mode == "prepaid" else None,  # p336
             "sale_id": None,
             "source": "qr",
             "created_by": "QR",
@@ -5627,9 +8633,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ---------- p360: الكشك الذاتي داخل المحل (عمومي — بلا حساب، يُفعَّل من الإعدادات) ----------
     async def _kiosk_ctx(tenant_id: str):
         from config.database import get_tenant_db
+
         t = await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
-        ks = await tdb.restaurant_settings.find_one({"_id": "kiosk_settings"}, {"_id": 0}) or {}
+        ks = (
+            await tdb.restaurant_settings.find_one(
+                {"_id": "kiosk_settings"}, {"_id": 0}
+            )
+            or {}
+        )
         if not ks.get("enabled"):
             raise HTTPException(status_code=404, detail="غير موجود")
         return t, tdb, ks
@@ -5643,59 +8655,94 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     @router.get("/public/kiosk/{tenant_id}")
     async def public_kiosk_menu(tenant_id: str):
         t, tdb, ks = await _kiosk_ctx(tenant_id)
-        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+        fams = {
+            f["id"]: (f.get("name_ar") or f.get("name") or "")
+            for f in await tdb.families.find(
+                {}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}
+            ).to_list(500)
+        }
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "modifier_groups": 1, "dietary_tags": 1, "image_url": 1},
+            {
+                "_id": 0,
+                "id": 1,
+                "name": 1,
+                "name_ar": 1,
+                "name_en": 1,
+                "retail_price": 1,
+                "family_id": 1,
+                "modifier_groups": 1,
+                "dietary_tags": 1,
+                "image_url": 1,
+            },
         ).to_list(1000)
-        items = [{
-            "id": p["id"],
-            "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-            "name_en": p.get("name_en") or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
-            "price": p.get("retail_price") or 0,
-            "family": fams.get(p.get("family_id")) or "",
-            "modifier_groups": p.get("modifier_groups") or [],
-            "dietary_tags": p.get("dietary_tags") or [],
-            "image_url": p.get("image_url"),
-        } for p in prods]
-        return {"restaurant_name": t.get("company_name") or t.get("name") or "",
-                "counter_name": ks.get("counter_name") or "كشك",
-                "require_phone": bool(ks.get("require_phone")),
-                "payment_mode": await _payment_mode(tdb),
-                "items": items}
+        items = [
+            {
+                "id": p["id"],
+                "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                "name_en": p.get("name_en")
+                or "",  # p368: مفتاح اللغة الثانية في القوائم العامة
+                "price": p.get("retail_price") or 0,
+                "family": fams.get(p.get("family_id")) or "",
+                "modifier_groups": p.get("modifier_groups") or [],
+                "dietary_tags": p.get("dietary_tags") or [],
+                "image_url": p.get("image_url"),
+            }
+            for p in prods
+        ]
+        return {
+            "restaurant_name": t.get("company_name") or t.get("name") or "",
+            "counter_name": ks.get("counter_name") or "كشك",
+            "require_phone": bool(ks.get("require_phone")),
+            "payment_mode": await _payment_mode(tdb),
+            "items": items,
+        }
 
     @router.post("/public/kiosk/{tenant_id}/order")
     async def public_kiosk_order(tenant_id: str, data: KioskOrderCreate):
         import time as _time
+
         t, tdb, ks = await _kiosk_ctx(tenant_id)
         if not data.items or len(data.items) > 20:
             raise HTTPException(status_code=400, detail="طلب غير صالح")
         phone = _clean_phone(data.customer_phone)
         if ks.get("require_phone") and not phone:
-            raise HTTPException(status_code=400, detail="رقم الهاتف مطلوب للطلب من الكشك")
+            raise HTTPException(
+                status_code=400, detail="رقم الهاتف مطلوب للطلب من الكشك"
+            )
         now_ts = _time.time()
         # نفس درع QR: طلب واحد كل 10 ثوانٍ (DB — يعمل عبر عمال uvicorn الأربعة)
         _last = await tdb["_qr_throttle"].find_one({"_id": "kiosk"})
         if _last and now_ts - float(_last.get("last") or 0) < 10:
             raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
-        await tdb["_qr_throttle"].update_one({"_id": "kiosk"}, {"$set": {"last": now_ts}}, upsert=True)
+        await tdb["_qr_throttle"].update_one(
+            {"_id": "kiosk"}, {"$set": {"last": now_ts}}, upsert=True
+        )
         items = []
         for it in data.items:
             if not (0 < float(it.quantity or 0) <= 20):
                 raise HTTPException(status_code=400, detail="كمية غير صالحة")
             p = await tdb.products.find_one(
                 {"id": it.product_id},
-                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "modifier_groups": 1},
+                {
+                    "_id": 0,
+                    "id": 1,
+                    "name": 1,
+                    "name_ar": 1,
+                    "name_en": 1,
+                    "retail_price": 1,
+                    "modifier_groups": 1,
+                },
             )
             if not p:
                 raise HTTPException(status_code=400, detail="منتج غير موجود")
             mods = []
             extra = 0.0
             groups = p.get("modifier_groups") or []
-            for m in (it.modifiers or []):
+            for m in it.modifiers or []:
                 hit = None
                 for g in groups:
-                    for opt in (g.get("options") or []):
+                    for opt in g.get("options") or []:
                         if opt.get("name") == (m.get("option") or ""):
                             hit = (g, opt)
                             break
@@ -5705,22 +8752,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     raise HTTPException(status_code=400, detail="خيار غير صالح")
                 g, opt = hit
                 delta = float(opt.get("price_delta") or 0)
-                mods.append({"group": g.get("name"), "option": opt.get("name"),
-                             "price_delta": delta, "product_id": opt.get("product_id"),
-                             "qty": opt.get("qty") or 1})
+                mods.append(
+                    {
+                        "group": g.get("name"),
+                        "option": opt.get("name"),
+                        "price_delta": delta,
+                        "product_id": opt.get("product_id"),
+                        "qty": opt.get("qty") or 1,
+                    }
+                )
                 extra += delta
-            items.append({
-                "product_id": p["id"],
-                "product_name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-                "quantity": float(it.quantity),
-                "unit_price": (p.get("retail_price") or 0) + extra,
-                "note": it.note,
-                "modifiers": mods or None,
-            })
+            items.append(
+                {
+                    "product_id": p["id"],
+                    "product_name": p.get("name_ar")
+                    or p.get("name")
+                    or p.get("name_en"),
+                    "quantity": float(it.quantity),
+                    "unit_price": (p.get("retail_price") or 0) + extra,
+                    "note": it.note,
+                    "modifiers": mods or None,
+                }
+            )
         pseudo = {"tenant_id": tenant_id, "email": "kiosk@counter", "username": "KIOSK"}
         _mode = await _payment_mode(tdb)  # p336
         day = _now().strftime("%Y%m%d")
-        count = await tdb.kitchen_orders.count_documents({"code": {"$regex": f"^KCH-{day}-"}})
+        count = await tdb.kitchen_orders.count_documents(
+            {"code": {"$regex": f"^KCH-{day}-"}}
+        )
         doc = {
             "id": f"kch_{uuid.uuid4().hex[:12]}",
             "code": f"KCH-{day}-{count + 1:04d}",
@@ -5731,7 +8790,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "customer_name": (data.customer_name or "").strip()[:60] or None,
             "customer_phone": phone,
             "status": "pending_payment" if _mode == "prepaid" else "pending",  # p336
-            "payment_status": "unpaid" if _mode == "prepaid" else None,        # p336
+            "payment_status": "unpaid" if _mode == "prepaid" else None,  # p336
             "sale_id": None,
             "source": "kiosk",
             "created_by": "KIOSK",
@@ -5747,6 +8806,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ---------- p335: واجهة الجار العمومية (بلا حساب — برابط/QR خاص دائم) ----------
     async def _qr_neighbor(tenant_id: str, token: str):
         from config.database import get_tenant_db
+
         t = await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
         n = await tdb.neighbor_accounts.find_one({"token": token})
@@ -5758,23 +8818,39 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
     async def public_neighbor_menu(tenant_id: str, token: str):
         """قائمة الجار بأسعاره الخاصة"""
         t, tdb, n = await _qr_neighbor(tenant_id, token)
-        fams = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)}
+        fams = {
+            f["id"]: (f.get("name_ar") or f.get("name") or "")
+            for f in await tdb.families.find(
+                {}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}
+            ).to_list(500)
+        }
         prods = await tdb.products.find(
             {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1, "image_url": 1},
+            {
+                "_id": 0,
+                "id": 1,
+                "name": 1,
+                "name_ar": 1,
+                "name_en": 1,
+                "retail_price": 1,
+                "family_id": 1,
+                "image_url": 1,
+            },
         ).to_list(1000)
         items = []
         for p in prods:
             base = float(p.get("retail_price") or 0)
             price = _nbr_price(n, p["id"], base)
-            items.append({
-                "id": p["id"],
-                "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-                "price": price,
-                "base_price": base if price != base else None,
-                "family": fams.get(p.get("family_id")) or "",
-                "image_url": p.get("image_url"),
-            })
+            items.append(
+                {
+                    "id": p["id"],
+                    "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                    "price": price,
+                    "base_price": base if price != base else None,
+                    "family": fams.get(p.get("family_id")) or "",
+                    "image_url": p.get("image_url"),
+                }
+            )
         return {
             "restaurant_name": t.get("company_name") or t.get("name") or "",
             "neighbor_name": n.get("name"),
@@ -5783,9 +8859,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         }
 
     @router.post("/public/neighbor-order/{tenant_id}/{token}")
-    async def public_neighbor_order(tenant_id: str, token: str, data: NeighborOrderCreate):
+    async def public_neighbor_order(
+        tenant_id: str, token: str, data: NeighborOrderCreate
+    ):
         """طلب الجار — يدخل المطبخ مباشرة بوسم «جار»؛ الدين يتراكم في رصيده"""
         import time as _time
+
         t, tdb, n = await _qr_neighbor(tenant_id, token)
         if not data.items or len(data.items) > 30:
             raise HTTPException(status_code=400, detail="طلب غير صالح")
@@ -5794,7 +8873,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         _last = await tdb["_nbr_throttle"].find_one({"_id": n["id"]})
         if _last and now_ts - float(_last.get("last") or 0) < 10:
             raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
-        await tdb["_nbr_throttle"].update_one({"_id": n["id"]}, {"$set": {"last": now_ts}}, upsert=True)
+        await tdb["_nbr_throttle"].update_one(
+            {"_id": n["id"]}, {"$set": {"last": now_ts}}, upsert=True
+        )
         items = []
         total = 0.0
         for it in data.items:
@@ -5802,21 +8883,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 raise HTTPException(status_code=400, detail="كمية غير صالحة")
             p = await tdb.products.find_one(
                 {"id": it.product_id},
-                {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1},
+                {
+                    "_id": 0,
+                    "id": 1,
+                    "name": 1,
+                    "name_ar": 1,
+                    "name_en": 1,
+                    "retail_price": 1,
+                },
             )
             if not p:
                 raise HTTPException(status_code=400, detail="منتج غير موجود")
             price = _nbr_price(n, p["id"], float(p.get("retail_price") or 0))
             total += price * float(it.quantity)
-            items.append({
-                "product_id": p["id"],
-                "product_name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-                "quantity": float(it.quantity),
-                "unit_price": price,
-                "note": it.note,
-            })
+            items.append(
+                {
+                    "product_id": p["id"],
+                    "product_name": p.get("name_ar")
+                    or p.get("name")
+                    or p.get("name_en"),
+                    "quantity": float(it.quantity),
+                    "unit_price": price,
+                    "note": it.note,
+                }
+            )
         day = _now().strftime("%Y%m%d")
-        count = await tdb.kitchen_orders.count_documents({"code": {"$regex": f"^KCH-{day}-"}})
+        count = await tdb.kitchen_orders.count_documents(
+            {"code": {"$regex": f"^KCH-{day}-"}}
+        )
         doc = {
             "id": f"kch_{uuid.uuid4().hex[:12]}",
             "code": f"KCH-{day}-{count + 1:04d}",
@@ -5836,8 +8930,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         }
         await tdb.kitchen_orders.insert_one(doc)
         if n.get("payment") == "debt":
-            await tdb.neighbor_accounts.update_one({"id": n["id"]}, {"$inc": {"balance": round(total, 2)}})
-        pseudo = {"tenant_id": tenant_id, "email": "neighbor@b2b", "username": "NEIGHBOR"}
+            await tdb.neighbor_accounts.update_one(
+                {"id": n["id"]}, {"$inc": {"balance": round(total, 2)}}
+            )
+        pseudo = {
+            "tenant_id": tenant_id,
+            "email": "neighbor@b2b",
+            "username": "NEIGHBOR",
+        }
         await _publish("kitchen_order.created", doc, pseudo)
         out = _order_out(doc)
         out["payment"] = n.get("payment") or "debt"
@@ -5848,6 +8948,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         """p314: لوحة أرقام الطلبات للعرض العام (تلفاز المحل) — أكواد وحالات فقط،
         بلا أسعار ولا أسماء. طلبات اليوم غير الملغاة."""
         from config.database import get_tenant_db
+
         await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
         day = _now().strftime("%Y%m%d")
@@ -5870,16 +8971,34 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         منتج مخزوني بلا وصفة → متاح إن كانت الكمية > 0 (والباقي = الكمية)
         أسماء/أسعار/توفر فقط — بلا تكاليف ولا بيانات حساسة."""
         from config.database import get_tenant_db
+
         t = await _qr_tenant(tenant_id)
         tdb = get_tenant_db(tenant_id)
         fams = {
             f["id"]: (f.get("name_ar") or f.get("name") or "")
-            for f in await tdb.families.find({}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}).to_list(500)
+            for f in await tdb.families.find(
+                {}, {"_id": 0, "id": 1, "name": 1, "name_ar": 1}
+            ).to_list(500)
         }
         prods = await tdb.products.find(
-            {"retail_price": {"$gt": 0}, "is_active": {"$ne": False}, "is_blocked": {"$ne": True}},
-            {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1, "retail_price": 1,
-             "family_id": 1, "image_url": 1, "images": 1, "is_non_stockable": 1, "quantity": 1},
+            {
+                "retail_price": {"$gt": 0},
+                "is_active": {"$ne": False},
+                "is_blocked": {"$ne": True},
+            },
+            {
+                "_id": 0,
+                "id": 1,
+                "name": 1,
+                "name_ar": 1,
+                "name_en": 1,
+                "retail_price": 1,
+                "family_id": 1,
+                "image_url": 1,
+                "images": 1,
+                "is_non_stockable": 1,
+                "quantity": 1,
+            },
         ).to_list(1000)
         recipes = {
             r["product_id"]: r
@@ -5903,7 +9022,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             r = recipes.get(p["id"])
             if r:
                 batches = None
-                for c in (r.get("components") or []):
+                for c in r.get("components") or []:
                     q = float(c.get("quantity") or 0)
                     if q <= 0:
                         continue
@@ -5919,16 +9038,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             else:
                 qty = int(p.get("quantity") or 0)
                 available, remaining = qty > 0, qty
-            items.append({
-                "id": p["id"],
-                "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
-                "price": p.get("retail_price") or 0,
-                "family": fams.get(p.get("family_id")) or "",
-                "image_url": p.get("image_url") or "",
-                "images": [i for i in (p.get("images") or []) if i][:5],  # p321: معرض الصور لشرائح التلفاز
-                "available": available,
-                "remaining": remaining,
-            })
+            items.append(
+                {
+                    "id": p["id"],
+                    "name": p.get("name_ar") or p.get("name") or p.get("name_en"),
+                    "price": p.get("retail_price") or 0,
+                    "family": fams.get(p.get("family_id")) or "",
+                    "image_url": p.get("image_url") or "",
+                    "images": [i for i in (p.get("images") or []) if i][
+                        :5
+                    ],  # p321: معرض الصور لشرائح التلفاز
+                    "available": available,
+                    "remaining": remaining,
+                }
+            )
         items.sort(key=lambda x: (x["family"], x["name"] or ""))
         return {
             "restaurant_name": t.get("company_name") or t.get("name") or "",

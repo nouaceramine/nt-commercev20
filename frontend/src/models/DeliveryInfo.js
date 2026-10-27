@@ -53,7 +53,7 @@ export class DeliveryInfo {
     };
   }
 
-  toApiPayload(language) {
+  toApiPayload(_language) {
     if (!this.enabled) return null;
     return {
       enabled: true,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import _React, { useEffect, useState, useCallback } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Layout } from '../../components/Layout';

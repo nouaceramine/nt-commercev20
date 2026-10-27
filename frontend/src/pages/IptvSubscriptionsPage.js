@@ -75,7 +75,7 @@ export default function IptvSubscriptionsPage() {
       setPanelBalance(pb.data?.balance || 0);
       const rawBoxes = Array.isArray(bx.data) ? bx.data : (bx.data?.items || []);
       setCashBoxes(rawBoxes.filter((b) => b.id !== 'personal'));
-    } catch (err) {
+    } catch (_err) {
       // interceptor
     } finally {
       setLoading(false);

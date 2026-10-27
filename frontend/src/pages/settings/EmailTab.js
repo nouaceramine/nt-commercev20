@@ -24,7 +24,7 @@ export default function EmailTab({ initialSettings }) {
       
       await apiClient.put(`/email/settings`, settings);
       toast.success(language === 'ar' ? 'تم حفظ إعدادات البريد الإلكتروني' : 'Paramètres email enregistrés');
-    } catch (error) { toast.error(language === 'ar' ? 'خطأ' : 'Error'); }
+    } catch (_error) { toast.error(language === 'ar' ? 'خطأ' : 'Error'); }
     finally { setSaving(false); }
   };
 

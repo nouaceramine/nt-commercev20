@@ -4,7 +4,7 @@ import apiClient from '../lib/apiClient';
 import { startRealtime, onEvent } from '../lib/realtime';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -50,7 +50,7 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
-import { Badge } from '../components/ui/badge';
+import { Badge as _Badge } from '../components/ui/badge';
 
 export default function SuppliersPage() {
   const { t, language, isRTL } = useLanguage();
@@ -143,7 +143,7 @@ export default function SuppliersPage() {
       setFamilyDialogOpen(false);
       setNewFamilyName('');
       fetchSupplierFamilies();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'حدث خطأ' : 'Une erreur est survenue');
     } finally {
       setSavingFamily(false);
@@ -213,14 +213,14 @@ export default function SuppliersPage() {
           try {
             const codeRes = await apiClient.get(`/suppliers/generate-code`);
             setFormData(prev => ({ ...prev, code: codeRes.data.code }));
-          } catch (e) {}
+          } catch (_e) {}
         } else {
           setDialogOpen(false);
           resetForm();
         }
       }
       fetchSuppliers();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
   };
@@ -232,7 +232,7 @@ export default function SuppliersPage() {
       setDeleteDialogOpen(false);
       setSelectedSupplier(null);
       fetchSuppliers();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
   };
@@ -256,7 +256,7 @@ export default function SuppliersPage() {
     try {
       const response = await apiClient.get(`/suppliers/generate-code`);
       setFormData({ name: '', phone: '', email: '', address: '', notes: '', family_id: '', code: response.data.code });
-    } catch (error) {
+    } catch (_error) {
       setFormData({ name: '', phone: '', email: '', address: '', notes: '', family_id: '', code: '' });
     }
   };
@@ -325,7 +325,7 @@ export default function SuppliersPage() {
                         gainNode.gain.value = 0.3;
                         oscillator.start();
                         setTimeout(() => oscillator.stop(), 100);
-                      } catch (e) {}
+                      } catch (_e) {}
                     }
                   }}
                   className={`h-11 ${isRTL ? 'pr-10' : 'pl-10'}`}

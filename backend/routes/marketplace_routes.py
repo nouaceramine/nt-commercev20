@@ -103,12 +103,12 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
     async def my_listings(user: dict = Depends(require_permission("products.view"))):
         listings = await db.marketplace_listings.find(
             {"active": True}, {"_id": 0}).sort("published_at", -1).to_list(500)
-        pids = [l["product_id"] for l in listings]
+        pids = [listing["product_id"] for listing in listings]
         products = {p["id"]: p async for p in db.products.find(
             {"id": {"$in": pids}},
             {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "quantity": 1, "image_url": 1})}
-        for l in listings:
-            l["product"] = products.get(l["product_id"], {})
+        for listing in listings:
+            listing["product"] = products.get(listing["product_id"], {})
         return {"total": len(listings), "listings": listings}
 
     # ── public side (no auth — feeds the future mall frontend) ─────────────

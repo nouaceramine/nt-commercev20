@@ -5,7 +5,6 @@ Analyzes sales data to recommend optimal prices, detects slow-moving products
 import asyncio
 from datetime import datetime, timezone, timedelta
 import logging
-import uuid
 from core.db_naming import resolve_db_name  # p348
 
 logger = logging.getLogger(__name__)

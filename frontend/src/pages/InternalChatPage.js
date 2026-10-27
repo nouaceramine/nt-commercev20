@@ -54,7 +54,7 @@ export default function InternalChatPage() {
       setRoomName('');
       fetchRooms();
       setActiveRoom(res.data);
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   const sendMessage = async () => {
@@ -63,7 +63,7 @@ export default function InternalChatPage() {
       await apiClient.post(`/chat/rooms/${activeRoom.id}/messages`, { content: newMsg }, { headers });
       setNewMsg('');
       fetchMessages(activeRoom.id);
-    } catch (e) { toast.error('Error'); }
+    } catch (_e) { toast.error('Error'); }
   };
 
   return (

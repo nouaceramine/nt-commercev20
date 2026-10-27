@@ -2,7 +2,7 @@ import "@/App.css";
 import { RefreshCw } from "lucide-react";  // p273: suspense fallback
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
-import { toast } from "sonner";
+import { toast as _toast } from "sonner";
 import { useEffect, useState, lazy, Suspense } from "react";  // p273
 import { LanguageProvider } from "./contexts/LanguageContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -130,7 +130,7 @@ const EcomAnalyticsPage = lazy(() => import("./pages/ecom/EcomAnalyticsPage"));
 const EcomWorkersPage = lazy(() => import("./pages/ecom/EcomWorkersPage"));  // p293
 const WorkerLoginPage = lazy(() => import("./pages/worker/WorkerLoginPage"));  // p293
 const WorkerWorkspacePage = lazy(() => import("./pages/worker/WorkerWorkspacePage"));  // p293  // p273
-const EcomStoreTab = lazy(() => import("./pages/ecom/EcomStoreTab"));  // p273
+const _EcomStoreTab = lazy(() => import("./pages/ecom/EcomStoreTab"));  // p273
 const DigitalServicesPage = lazy(() => import("./pages/digital/DigitalServicesPage"));  // p273
 const DigitalAdminPage = lazy(() => import("./pages/digital/DigitalAdminPage"));  // p273
 const EcomAdsTab = lazy(() => import("./pages/ecom/EcomAdsTab"));  // p273
@@ -205,7 +205,7 @@ const DailyReportPage = lazy(() => import("./pages/DailyReportPage"));  // p273
 
 // Protected Route Component
 const ProtectedRoute = ({ children, adminOnly = false, tenantOnly = false, superAdminOnly = false, cashierBlocked = false, featureKey = null }) => {
-  const { isAuthenticated, loading, isAdmin, isSuperAdmin, isEffectiveSuperAdmin, isTenant, isCashier, user, isFeatureEnabled } = useAuth();
+  const { isAuthenticated, loading, isAdmin, isSuperAdmin, isEffectiveSuperAdmin, isTenant, isCashier, user: _user, isFeatureEnabled } = useAuth();
 
   if (loading) {
     return (
@@ -259,36 +259,6 @@ const ProtectedRoute = ({ children, adminOnly = false, tenantOnly = false, super
   // Feature gate: super admins bypass this check (isFeatureEnabled already handles it)
   if (featureKey && !isFeatureEnabled(featureKey)) {
     return <FeatureDisabledPage />;
-  }
-
-  return children;
-};
-
-// Public Route Component (redirect if authenticated)
-const PublicRoute = ({ children }) => {
-  const { isAuthenticated, loading, isSuperAdmin, isTenant, isAgent, user } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="spinner" />
-      </div>
-    );
-  }
-
-  if (isAuthenticated) {
-    // Redirect based on user type
-    if (isSuperAdmin) {
-      return <Navigate to="/saas-admin" replace />;
-    }
-    if (isAgent) {
-      return <Navigate to="/agent/dashboard" replace />;
-    }
-    if (isTenant) {
-      return <Navigate to="/" replace />;
-    }
-    // Default redirect
-    return <Navigate to="/" replace />;
   }
 
   return children;
@@ -354,7 +324,7 @@ const HomeRouter = () => {
 // Previously this path did not exist, so post-login redirects to /dashboard
 // fell into the catch-all "*" route and bounced users back to "/".
 const DashboardRouter = () => {
-  const { isAuthenticated, loading, isSuperAdmin, isAgent, isTenant } = useAuth();
+  const { isAuthenticated, loading, isSuperAdmin, isAgent, isTenant: _isTenant } = useAuth();
 
   if (loading) {
     return (

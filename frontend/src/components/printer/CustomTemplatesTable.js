@@ -56,7 +56,7 @@ export default function CustomTemplatesTable({
         toast.info(ar ? 'القوالب العصرية مضافة مسبقاً' : 'Modèles modernes déjà présents');
       }
       if (onImported) onImported();
-    } catch (e) {
+    } catch (_e) {
       toast.error(ar ? 'فشل استيراد القوالب' : 'Échec de l\'import');
     } finally {
       setImporting(false);

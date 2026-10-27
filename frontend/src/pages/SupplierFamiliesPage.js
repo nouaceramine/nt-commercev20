@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription as _CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -71,7 +71,7 @@ export default function SupplierFamiliesPage() {
     try {
       const response = await apiClient.get(`/supplier-families`);
       setFamilies(response.data);
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في جلب البيانات' : 'Erreur lors du chargement');
     } finally {
       setLoading(false);

@@ -122,7 +122,7 @@ export default function WalletPage() {
       const res = await apiClient.put('/wallet/auto-pay', { enabled: !wallet?.auto_pay_subscription });
       setWallet(w => ({ ...w, auto_pay_subscription: res.data.auto_pay_subscription }));
       toast.success(isAr ? 'تم التحديث' : 'Updated');
-    } catch (e) { toast.error(isAr ? 'فشل' : 'Failed'); }
+    } catch (_e) { toast.error(isAr ? 'فشل' : 'Failed'); }
     finally { setBusy(false); }
   };
 
@@ -133,7 +133,7 @@ export default function WalletPage() {
       toast.success(isAr ? 'تم حفظ الإعدادات' : 'Settings saved');
       setShowSettings(false);
       fetchData();
-    } catch (e) { toast.error(isAr ? 'فشل' : 'Failed'); }
+    } catch (_e) { toast.error(isAr ? 'فشل' : 'Failed'); }
     finally { setBusy(false); }
   };
 
@@ -191,7 +191,7 @@ export default function WalletPage() {
     try {
       await apiClient.put(`/wallet/services/${svc.id}`, { is_active: !(svc.is_active !== false) });
       fetchData();
-    } catch (e) { toast.error(isAr ? 'فشل' : 'Failed'); }
+    } catch (_e) { toast.error(isAr ? 'فشل' : 'Failed'); }
     finally { setBusy(false); }
   };
 

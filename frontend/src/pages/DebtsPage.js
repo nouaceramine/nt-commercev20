@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { Receipt, Plus, DollarSign, Calendar, TrendingUp, TrendingDown } from 'lucide-react';
 
 export default function DebtsPage() {
-  const { t, language } = useLanguage();
+  const { t, language: _language } = useLanguage();
   const [debts, setDebts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -51,7 +51,7 @@ export default function DebtsPage() {
       setAddDialogOpen(false);
       setFormData({ type: 'receivable', party_type: 'customer', party_id: '', amount: '', due_date: '', notes: '' });
       fetchData();
-    } catch (e) { toast.error(t.somethingWentWrong); }
+    } catch (_e) { toast.error(t.somethingWentWrong); }
   };
 
   const handlePay = async (e) => {

@@ -51,7 +51,7 @@ export default function TenantDialogs({
       } else {
         alert(response.data.error || 'فشل توليد الوصف');
       }
-    } catch (error) {
+    } catch (_error) {
       alert('فشل الاتصال بـ AI');
     } finally {
       setAiLoading(false);

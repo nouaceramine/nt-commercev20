@@ -24,7 +24,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from config.database import client, main_db, get_tenant_db
+from config.database import main_db, get_tenant_db
 from core import registry, modules_map
 from core.logging_config import get_module_logger
 

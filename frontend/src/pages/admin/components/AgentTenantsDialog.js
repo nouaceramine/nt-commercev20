@@ -36,7 +36,7 @@ export function AgentTenantsDialog({ open, onOpenChange, agent, onSaved }) {
     try {
       const res = await apiClient.get('/saas/tenants');
       setAllTenants(res.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error('خطأ في تحميل المستأجرين');
     }
     setLoading(false);

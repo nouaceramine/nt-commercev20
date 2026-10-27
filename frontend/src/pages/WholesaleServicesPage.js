@@ -5,8 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
-import { toast } from 'sonner';
+import { Badge as _Badge } from '../components/ui/badge';
+import { toast as _toast } from 'sonner';
 import {
   Wallet,
   CreditCard,
@@ -14,7 +14,7 @@ import {
   Wifi,
   Gift,
   TrendingUp,
-  AlertTriangle,
+  AlertTriangle as _AlertTriangle,
   ShoppingBag,
   ArrowLeft,
   Sparkles
@@ -23,13 +23,13 @@ import { Link } from 'react-router-dom';
 
 export default function WholesaleServicesPage() {
   const { language } = useLanguage();
-  const { user } = useAuth();
+  const { user: _user } = useAuth();
   const [stats, setStats] = useState({
     balance: 0,
     debts: 0,
     profits: 0
   });
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchStats = async () => {

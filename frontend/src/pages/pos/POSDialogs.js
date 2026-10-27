@@ -1,7 +1,7 @@
 import { errText } from '../../lib/errorText';
 import { getTierPrice } from '../../lib/priceTiers';
 import { useState, useEffect } from 'react';
-import { useLanguage } from '../../contexts/LanguageContext';
+import { useLanguage as _useLanguage } from '../../contexts/LanguageContext';
 import apiClient from '../../lib/apiClient';
 import SaleDetailDialog from '../../components/sales/SaleDetailDialog';
 import { Button } from '../../components/ui/button';
@@ -20,7 +20,7 @@ import {
 } from '../../components/ui/table';
 import { toast } from 'sonner';
 import {
-  Search, Plus, UserPlus, Printer, FileText, Play, StopCircle, Banknote, BarChart3, CreditCard, TrendingUp,
+  Search, Plus, UserPlus, Printer, FileText, Play, StopCircle, Banknote, BarChart3, CreditCard as _CreditCard, TrendingUp as _TrendingUp,
   PackagePlus, X, FolderTree,
 } from 'lucide-react';
 

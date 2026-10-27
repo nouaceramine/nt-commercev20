@@ -2,30 +2,22 @@
 NT Commerce 12.0 - Legendary Build
 Main application entry point with modular architecture
 """
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, File, UploadFile, Header, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-from contextvars import ContextVar
 import os
 import logging
+from importlib.util import find_spec
 
 logger = logging.getLogger(__name__)
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List, Optional, Literal
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
-import io
-import requests as http_requests
 import asyncio
-import shutil
-import base64
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -39,13 +31,11 @@ try:
 except ImportError:
     RESEND_AVAILABLE = False
 
-# Import SendGrid
-try:
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content, HtmlContent
-    SENDGRID_AVAILABLE = True
-except ImportError:
-    SENDGRID_AVAILABLE = False
+# SendGrid is optional; detect availability without importing unused client classes.
+SENDGRID_AVAILABLE = (
+    find_spec("sendgrid") is not None
+    and find_spec("sendgrid.helpers.mail") is not None
+)
 
 # Stripe is implemented with the official SDK in routes.stripe_routes.
 
@@ -61,9 +51,7 @@ from config.database import (
     client,
     main_db,
     db,
-    _tenant_db_ctx,
     get_tenant_db,
-    set_tenant_context,
     init_tenant_database,
 )
 
@@ -108,11 +96,6 @@ setup_logging(
 
 # Rate limiter
 from middleware.rate_limit import limiter
-from middleware.security_headers import SecurityHeadersMiddleware
-from middleware.monitoring import MonitoringMiddleware
-from services.tenant_throttle import tenant_throttle
-from middleware.input_sanitization import InputSanitizationMiddleware
-from audit.middleware import AuditMiddleware
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -164,10 +147,9 @@ from robots.robot_manager import RobotManager
 from services.notification_service import NotificationService
 from services.sms_service import SMSService
 from services.email_service import EmailService
-from services.cache_service import cache
 from core.diagnostics import set_robot_manager as _set_robot_manager_in_diagnostics
 from core.feature_flags import (
-    FeatureFlagManager, PLATFORM_FEATURES, CATEGORY_LABELS,
+    PLATFORM_FEATURES, CATEGORY_LABELS,
     set_feature_flag_manager, get_feature_flag_manager,
 )
 
@@ -175,56 +157,17 @@ from core.feature_flags import (
 from routes.saas_routes import get_super_admin
 from routes.auth_routes import router as auth_router
 from routes.audit_routes import router as audit_router
-from routes.performance_routes import record_request_time
-from utils.permissions import create_permission_checker, create_cashier_block
+from utils.permissions import create_cashier_block
 
 # ============ IMPORT MODELS FROM MODULES ============
 from models.schemas import (
     UserCreate, UserLogin, UserUpdate, PasswordUpdate, UserResponse,
-    PlanCreate, PlanUpdate, PlanResponse,
-    TenantCreate, TenantUpdate, TenantResponse,
-    AgentCreate, AgentUpdate, AgentResponse, AgentTransaction, AgentTransactionResponse,
-    SubscriptionPayment, SubscriptionPaymentResponse,
     TokenResponse,
-    ProductCreate, ProductUpdate, ProductResponse,
-    CustomerCreate, CustomerUpdate, CustomerResponse,
-    SupplierCreate, SupplierUpdate, SupplierResponse,
-    SaleItem, DeliveryInfo, SaleCreate, SaleResponse,
-    PurchaseItem, PurchaseCreate, PurchaseResponse,
-    CashBoxResponse, TransactionCreate, TransactionResponse,
-    EmployeeCreate, EmployeeAlertSettings,
-    WarehouseCreate, WarehouseUpdate, WarehouseResponse,
-    StockTransferCreate, StockTransferResponse,
     PriceHistoryResponse,
-    EmployeeUpdate, EmployeeResponse,
-    AttendanceCreate, AttendanceResponse,
-    AdvanceCreate, AdvanceResponse,
-    DebtCreate, DebtPaymentCreate, DebtResponse, DebtPaymentResponse,
     ApiKeyCreate, ApiKeyResponse,
     RechargeCreate, RechargeResponse,
-    ProductFamilyCreate, ProductFamilyUpdate, ProductFamilyResponse,
-    OCRRequest, OCRResponse,
-    DEFAULT_PERMISSIONS, ROLE_DESCRIPTIONS, PERMISSION_CATEGORIES, RECHARGE_CONFIG,
-)
-from models.accounting.schemas import (
-    AccountCreate, AccountResponse,
-    JournalEntryLineCreate, JournalEntryCreate, JournalEntryResponse,
-    InvoiceItemCreate, InvoiceCreate, InvoiceResponse,
-    PaymentCreate, PaymentResponse,
-    ExpenseCreate, ExpenseResponse,
-    TaxRateCreate, TaxRateResponse,
-    BudgetCreate, BudgetResponse,
-    ReconciliationCreate, ReconciliationResponse,
-    AuditLogCreate, AuditLogResponse,
-)
-from models.ai.schemas import (
-    AIInsightCreate, AIInsightResponse,
-    ChatMessageCreate, ChatSessionCreate, ChatSessionResponse,
-    ChatRequest, ChatResponse,
-    AIAgentTaskCreate, AIAgentTaskResponse,
-    AIAgentConfigCreate, AIAgentConfigResponse,
-    InvoiceOCRRequest, InvoiceOCRResponse,
-    WhatsAppMessageCreate, WhatsAppMessageResponse,
+    OCRResponse,
+    DEFAULT_PERMISSIONS, RECHARGE_CONFIG,
 )
 
 # ============ INITIALIZE SERVICES & ROBOT MANAGER ============
@@ -236,13 +179,7 @@ _set_robot_manager_in_diagnostics(robot_manager)
 
 # ============ IMPORT EXTRA MODELS ============
 from models.extra_schemas import (
-    DailySessionCreate, DailySessionClose, DailySessionResponse,
-    RepairCreate, RepairUpdate, RepairResponse,
-    SparePartCreate, SparePartResponse,
-    NotificationCreate, NotificationResponse,
-    PhoneDirectoryCreate, PhoneDirectoryResponse,
-    RechargeTransactionCreate, RechargeTransactionResponse,
-    ChatMessage, ImageOCRRequest,
+    ImageOCRRequest,
 )
 
 from utils.enhanced_indexes import create_all_enhanced_indexes
@@ -444,7 +381,6 @@ async def init_cash_boxes() -> dict:
         {"id": "personal", "name": "المال الخاص", "name_fr": "Argent personnel", "type": "personal", "balance": 0},  # p68
         {"id": "ecom_store", "name": "محفظة المتجر الإلكتروني", "name_fr": "Boutique en ligne", "type": "ecom", "balance": 0}  # p86: COD money held by the courier until payout
     ]
-    from services.code_generator import generate_code
     for box in boxes:
         existing = await db.cash_boxes.find_one({"id": box["id"]})
         if not existing:
@@ -668,7 +604,7 @@ async def startup_event():
         logger.warning("db_naming loader: %s", e)
 
     try:
-        from core.feature_flags import FeatureFlagManager, PLATFORM_FEATURES
+        from core.feature_flags import FeatureFlagManager
         from utils.super_admin_seed import ensure_super_admin
         await ensure_super_admin()
         ffm = FeatureFlagManager(main_db)

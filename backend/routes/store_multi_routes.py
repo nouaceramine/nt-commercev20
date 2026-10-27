@@ -119,7 +119,7 @@ async def list_stores(user: dict = Depends(require_tenant)):
 
 @router.put("/store/multi/{store_id}")
 async def update_store(store_id: str, body: StoreUpdate, user: dict = Depends(require_tenant)):
-    store = await _get_store(store_id)
+    _store = await _get_store(store_id)
     updates = {"updated_at": _now()}
     if body.name is not None:
         name = body.name.strip()
@@ -149,7 +149,7 @@ async def update_store(store_id: str, body: StoreUpdate, user: dict = Depends(re
 
 @router.delete("/store/multi/{store_id}")
 async def delete_store(store_id: str, user: dict = Depends(require_tenant)):
-    store = await _get_store(store_id)
+    _store = await _get_store(store_id)
     # detach (not delete) catalog entries — products themselves are untouched
     await db.store_products.delete_many({"store_id": store_id})
     await db.stores.delete_one({"id": store_id})

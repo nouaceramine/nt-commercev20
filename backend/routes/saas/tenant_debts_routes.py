@@ -9,7 +9,6 @@ Endpoints (super-admin only):
 """
 import io
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -21,7 +20,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
 )
 
 from config.database import main_db

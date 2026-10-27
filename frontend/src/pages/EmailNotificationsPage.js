@@ -19,12 +19,12 @@ import {
   Package, 
   FileText,
   Calendar,
-  CheckCircle,
+  CheckCircle as _CheckCircle,
   AlertTriangle
 } from 'lucide-react';
 
 export default function EmailNotificationsPage() {
-  const { t, language } = useLanguage();
+  const { t: _t, language } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -49,7 +49,7 @@ export default function EmailNotificationsPage() {
 
   const fetchSettings = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.get(`/notifications/sendgrid/settings`);
       setSettings(prev => ({ ...prev, ...response.data }));
     } catch (error) {
@@ -62,7 +62,7 @@ export default function EmailNotificationsPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       await apiClient.put(`/notifications/sendgrid/settings`, settings);
       toast.success(language === 'ar' ? 'تم حفظ الإعدادات بنجاح' : 'Settings saved successfully');
     } catch (error) {
@@ -75,7 +75,7 @@ export default function EmailNotificationsPage() {
   const handleTest = async () => {
     setTesting(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.post(`/notifications/sendgrid/test`, {});
       toast.success(response.data.message);
     } catch (error) {
@@ -88,7 +88,7 @@ export default function EmailNotificationsPage() {
   const handleSendDailyReport = async () => {
     setSendingReport(true);
     try {
-      const token = localStorage.getItem('token');
+      const _token = localStorage.getItem('token');
       const response = await apiClient.post(`/notifications/send-daily-report`, {});
       toast.success(response.data.message);
     } catch (error) {

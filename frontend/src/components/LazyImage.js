@@ -12,7 +12,7 @@ export function LazyImage({
 }) {
   const [imageSrc, setImageSrc] = useState(placeholder);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const [_hasError, setHasError] = useState(false);
   const imgRef = useRef(null);
 
   useEffect(() => {

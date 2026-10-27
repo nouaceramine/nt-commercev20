@@ -1,4 +1,4 @@
-import React from 'react';
+import _React from 'react';
 
 // p276 — جدول متجاوب: جدول حقيقي على md+ وبطاقات مكدسة على الجوال.
 // columns: [{ header, key?, render?(row), className?, thClassName?, cardHidden?, cardFull? }]

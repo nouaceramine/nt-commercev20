@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../lib/apiClient';
 import { startRealtime, onEvent } from '../../lib/realtime';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff, BarChart3, Truck, MessageCircle, Printer } from 'lucide-react';  // p289: +Truck/MessageCircle/Printer
+import { Plus, Search, RefreshCcw, Inbox, ShoppingBag, TrendingUp, Wallet as _Wallet, Eye, Link2, AlertCircle, BookOpen, Bell, BellOff, BarChart3, Truck, MessageCircle, Printer } from 'lucide-react';  // p289: +Truck/MessageCircle/Printer
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CHANNELS, ORDER_STATUSES } from './ecomConstants';
@@ -268,7 +268,7 @@ export default function EcomHubPage() {
     try {
       const res = await apiClient.get(`/ecom/orders/${selectedOrder.id}`);
       setSelectedOrder(res.data);
-    } catch (e) {
+    } catch (_e) {
       /* silent — list refresh below will surface failures */
     }
     loadAll();

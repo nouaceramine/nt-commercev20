@@ -32,7 +32,7 @@ export default function WaiterPage() {
       ]);
       setTables(t.data || []);
       setProducts(p.data || []);
-    } catch (e) { /* صامت */ }
+    } catch (_e) { /* صامت */ }
   }, []);
   useEffect(() => {
     fetchAll();

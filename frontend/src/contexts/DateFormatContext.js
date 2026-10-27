@@ -2,9 +2,9 @@
  * Date Format Context - سياق تنسيق التاريخ لكامل التطبيق
  * يضمن استخدام الأرقام الغربية في جميع أنحاء النظام
  */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import _React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
-import globalDateFormatter, {
+import _globalDateFormatter, {
   formatShortDate,
   formatLongDate,
   formatTime,
@@ -16,7 +16,7 @@ import globalDateFormatter, {
   formatPercent,
   convertToWesternNumerals,
   setConfig,
-  getConfig
+  getConfig as _getConfig
 } from '../utils/globalDateFormatter';
 
 // القيم الافتراضية
@@ -78,7 +78,7 @@ export function DateFormatProvider({ children }) {
       
       setSettings(serverSettings);
       setConfig(serverSettings);
-    } catch (error) {
+    } catch (_error) {
       // استخدام الإعدادات الافتراضية عند الفشل
       setConfig(defaultSettings);
     } finally {

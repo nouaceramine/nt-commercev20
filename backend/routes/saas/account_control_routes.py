@@ -14,7 +14,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from config.database import db, client, get_tenant_db
+from config.database import db, get_tenant_db
 from utils.auth import create_access_token
 from .helpers import get_super_admin
 

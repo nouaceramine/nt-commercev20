@@ -5,17 +5,17 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useDateFormat } from '../contexts/DateFormatContext';
 import { Layout } from '../components/Layout';
 import SaleDetailDialog from '../components/sales/SaleDetailDialog';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import PrintButton from '../components/print/PrintButton';
 import { toast } from 'sonner';
 import { 
   Receipt, 
-  Printer,
+  Printer as _Printer,
   RotateCcw,
   Eye,
-  FileText
+  FileText as _FileText
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import { Pagination } from '../components/Pagination';
@@ -34,7 +34,7 @@ import {
 
 export default function SalesHistoryPage() {
   const { t, language } = useLanguage();
-  const { formatDate, formatDateTime, formatCurrency } = useDateFormat();
+  const { formatDate, formatDateTime: _formatDateTime, formatCurrency } = useDateFormat();
   
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -108,7 +108,7 @@ export default function SalesHistoryPage() {
       toast.success(t.saleReturned);
       setReturnDialogOpen(false);
       fetchSales();
-    } catch (error) {
+    } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
   };

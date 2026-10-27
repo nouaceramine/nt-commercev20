@@ -57,11 +57,11 @@ export function trackPixel(event, params = {}, options = {}) {
       if (options.eventID) window.fbq('track', event, params, { eventID: String(options.eventID) });
       else window.fbq('track', event, params);
     }
-  } catch (e) { /* never break the storefront on tracking errors */ }
+  } catch (_e) { /* never break the storefront on tracking errors */ }
   try {
     if (ttReady && window.ttq) {
       const mapped = event === 'Purchase' ? 'CompletePayment' : event;
       window.ttq.track(mapped, params);
     }
-  } catch (e) { /* noop */ }
+  } catch (_e) { /* noop */ }
 }

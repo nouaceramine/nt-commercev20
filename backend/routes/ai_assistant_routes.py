@@ -3,7 +3,7 @@ AI Assistant Routes — LLM-backed when a provider is configured, otherwise a
 local data-driven Arabic assistant (queries the store DB and answers common
 intents: sales, stock, debts, customers, products).
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone, timedelta

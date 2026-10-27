@@ -322,7 +322,7 @@ def import_masters(db, src_dir, cb=None):
 # ───────────────────────── step 3: transactions ─────────────────────────
 def import_transactions(db, src_dir, maps, cb=None):
     """Sales (+FIFO debt allocation), purchases, sessions, counts, adjustments."""
-    prod_map, cust_map, sup_map, emp_map = maps["prod"], maps["cust"], maps["sup"], maps["emp"]
+    _prod_map, cust_map, sup_map, emp_map = maps["prod"], maps["cust"], maps["sup"], maps["emp"]
 
     prod_name = {}
     for p in db.products.find({"import_source": SRC}, {"id": 1, "legacy_id": 1, "name": 1}):

@@ -3,7 +3,6 @@ from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timezone, timedelta
 import jwt
-import os
 
 from config.database import db, main_db
 

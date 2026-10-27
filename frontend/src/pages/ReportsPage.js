@@ -32,7 +32,7 @@ import {
   TrendingDown,
   Package, 
   Users, 
-  DollarSign, 
+  DollarSign as _DollarSign,
   Download,
   ShoppingBag,
   ShoppingCart,
@@ -40,10 +40,10 @@ import {
   PieChart,
   ArrowUpRight,
   ArrowDownRight,
-  Calculator,
+  Calculator as _Calculator,
   Receipt,
-  Calendar,
-  Target
+  Calendar as _Calendar,
+  Target as _Target
 } from 'lucide-react';
 
 export default function ReportsPage() {
@@ -52,7 +52,7 @@ export default function ReportsPage() {
   const [purchasesData, setPurchasesData] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
-  const [profitData, setProfitData] = useState(null);
+  const [_profitData, setProfitData] = useState(null);
   const [period, setPeriod] = useState('30');
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');

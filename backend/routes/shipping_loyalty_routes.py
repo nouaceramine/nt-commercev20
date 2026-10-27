@@ -1,13 +1,11 @@
 """
 Shipping Loyalty Routes - Extracted from legacy_inline_routes.py
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Literal
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime, timezone
 import uuid
-import os
 import logging
 
 

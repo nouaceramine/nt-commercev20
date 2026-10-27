@@ -34,7 +34,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { Users, Trash2, Shield, User, Plus, Eye, EyeOff, UserPlus, KeyRound } from 'lucide-react';
+import { Users, Trash2, Shield, User, Plus as _Plus, Eye, EyeOff, UserPlus, KeyRound } from 'lucide-react';
 
 export default function UsersPage() {
   const { t, language } = useLanguage();

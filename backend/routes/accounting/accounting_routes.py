@@ -4,14 +4,14 @@ Handles journal entries, invoices, payments, and financial reports
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Depends, Query
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends
 import uuid
 
 from config.database import db
 from utils.auth import get_current_user
 from services.accounting_auto import (
-    ensure_accounts, already_posted, _insert_entry, _line, BOX_ACCOUNT,
+    ensure_accounts, _insert_entry, _line, BOX_ACCOUNT,
 )
 from pymongo.errors import DuplicateKeyError
 
@@ -566,11 +566,11 @@ async def get_cash_flow_report(
     inv_net = fin_net = 0.0
     async for entry in cursor:
         lines = entry.get("lines", [])
-        box = round(sum(l.get("debit", 0) - l.get("credit", 0)
-                        for l in lines if str(l.get("account_code", "")).startswith("5")), 2)
+        box = round(sum(line.get("debit", 0) - line.get("credit", 0)
+                        for line in lines if str(line.get("account_code", "")).startswith("5")), 2)
         if not box:
             continue
-        counters = [l for l in lines if not str(l.get("account_code", "")).startswith("5")]
+        counters = [line for line in lines if not str(line.get("account_code", "")).startswith("5")]
         classes = {str(c.get("account_code", ""))[:1] for c in counters}
         if "1" in classes:
             fin_net += box
@@ -925,8 +925,8 @@ async def opening_balance_preview(user=Depends(get_current_user)):
     return {
         **{k: v for k, v in calc.items() if k != "deltas"},
         "lines": lines,
-        "total_debit": round(sum(l["debit"] for l in lines), 2),
-        "total_credit": round(sum(l["credit"] for l in lines), 2),
+        "total_debit": round(sum(line["debit"] for line in lines), 2),
+        "total_credit": round(sum(line["credit"] for line in lines), 2),
         "in_sync": not lines,
         "already_applied": openings > 0,
         "opening_entries": openings,

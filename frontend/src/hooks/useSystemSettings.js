@@ -26,7 +26,7 @@ export function useSystemSettings() {
   const [systemSettings, setSystemSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
   const [brandingSettings, setBrandingSettings] = useState(DEFAULT_BRANDING);
   const [backupList, setBackupList] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, _setLoading] = useState(false);
   const [savingSystem, setSavingSystem] = useState(false);
   const [savingBranding, setSavingBranding] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);

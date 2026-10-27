@@ -3,8 +3,7 @@ Customer Routes - Extracted from server.py
 Full CRUD, pagination, blacklist management
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 import uuid
 
@@ -17,7 +16,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Create Customer ──
     @router.post("", status_code=201)
     async def create_customer(customer: dict, user: dict = Depends(require_permission("customers.view"))):
-        from models.schemas import CustomerCreate, CustomerResponse
+        from models.schemas import CustomerCreate
         c = CustomerCreate(**customer)
         customer_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()

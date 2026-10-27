@@ -4,7 +4,6 @@ Extracted from server.py
 """
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
-from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter
 import uuid

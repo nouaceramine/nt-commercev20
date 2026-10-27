@@ -11,7 +11,7 @@ import {
   BarChart, Bar, Cell,
 } from 'recharts';
 import apiClient from '../../lib/apiClient';
-import { Layout } from '../../components/Layout';
+import { Layout as _Layout } from '../../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -596,7 +596,7 @@ export default function EcomAnalyticsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {funnel.stages.map((s, idx) => (
+                {funnel.stages.map((s, _idx) => (
                   <div key={s.key} className="flex items-center gap-3">
                     <span className="w-32 text-sm text-end">{s.label_ar}</span>
                     <div className="flex-1 h-7 bg-muted rounded-md overflow-hidden relative">

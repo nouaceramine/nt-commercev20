@@ -2,7 +2,7 @@
 Push Notification Routes
 Web Push notification management - subscribe, unsubscribe, send notifications.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone

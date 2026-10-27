@@ -2,8 +2,7 @@
 Ultra Search System Routes
 Collections: search_history, search_suggestions
 """
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
 import uuid
 import time

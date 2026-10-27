@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';  // p325: navigate لاستبدال المسح بالرابط المؤقت
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
+import { Badge as _Badge } from '../components/ui/badge';
 import { ShoppingCart, Plus, Minus, Trash2, CheckCircle2, Loader2, Share2, Check, Instagram, Facebook, Music2, MapPin, MessageCircle, Globe } from 'lucide-react';  // p334
 
 const fmt = (n) => new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 2 }).format(n || 0);
@@ -23,9 +23,9 @@ export default function QrMenuPage() {
   const [showCart, setShowCart] = useState(false);
   const [copied, setCopied] = useState(false);  // p334
   // p368: مفتاح اللغة عربي/إنجليزي — يُحفظ محلياً ويشمل أسماء الأطباق (name_en) والنصوص
-  const [lang, setLang] = useState(() => { try { return localStorage.getItem('pub_lang') || 'ar'; } catch (e) { return 'ar'; } });
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem('pub_lang') || 'ar'; } catch (_e) { return 'ar'; } });
   const isAr = lang !== 'en';
-  const setL = (l) => { setLang(l); try { localStorage.setItem('pub_lang', l); } catch (e) {} };
+  const setL = (l) => { setLang(l); try { localStorage.setItem('pub_lang', l); } catch (_e) {} };
   const dname = (x) => (!isAr && x && x.name_en) ? x.name_en : (x ? x.name : '');
   const STR = isAr ? {
     subtitle: 'اطلب مباشرة من طاولتك', menu: 'القائمة', items: 'عنصر', cur: 'دج',
@@ -108,9 +108,9 @@ export default function QrMenuPage() {
     const url = `${window.location.origin}/r/${tenantId}/${tableId}`;
     const text = `اطلب معي من ${(menu?.restaurant_name) || 'المطعم'} — ${(menu?.table_name) || 'طاولتنا'}`;
     if (navigator.share) {
-      try { await navigator.share({ title: (menu?.restaurant_name) || 'قائمة الطعام', text, url }); return; } catch (e) { /* أُلغيت المشاركة */ }
+      try { await navigator.share({ title: (menu?.restaurant_name) || 'قائمة الطعام', text, url }); return; } catch (_e) { /* أُلغيت المشاركة */ }
     }
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch (e) {}
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch (_e) {}
   };
 
   const SOCIAL_META = [  // p334

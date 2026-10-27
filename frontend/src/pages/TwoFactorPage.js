@@ -1,6 +1,6 @@
 import { errText } from '../lib/errorText';
 import { useState, useEffect } from 'react';
-import { Layout } from '../components/Layout';
+import { Layout as _Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -28,7 +28,7 @@ export default function TwoFactorPage() {
       const res = await apiClient.get(`/2fa/status`, { headers });
       setStatus(res.data);
       setStep(res.data.is_enabled ? 'enabled' : 'check');
-    } catch (e) {
+    } catch (_e) {
       setStatus({ is_enabled: false });
       setStep('check');
     }
@@ -48,7 +48,7 @@ export default function TwoFactorPage() {
   const verifySetup = async () => {
     if (verifyCode.length !== 6) return toast.error(isAr ? 'الكود يجب أن يكون 6 أرقام' : 'Le code doit être de 6 chiffres');
     try {
-      const res = await apiClient.post(`/2fa/verify`, { code: verifyCode }, { headers });
+      const _res = await apiClient.post(`/2fa/verify`, { code: verifyCode }, { headers });
       toast.success(isAr ? 'تم تفعيل المصادقة الثنائية' : '2FA activé avec succès');
       setStep('enabled');
       checkStatus();

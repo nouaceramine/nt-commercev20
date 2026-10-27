@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { formatShortDate } from '../utils/globalDateFormatter';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader as _CardHeader, CardTitle as _CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -42,10 +42,10 @@ import {
   Tag,
   Clock,
   CheckCircle,
-  XCircle,
+  XCircle as _XCircle,
   RefreshCw,
   FileText,
-  Filter,
+  Filter as _Filter,
   RotateCcw
 } from 'lucide-react';
 
@@ -165,7 +165,7 @@ export function DefectiveProducts() {
       await apiClient.put(`/defective-products/${id}`, { status: newStatus }, { headers });
       toast.success(language === 'ar' ? 'تم تحديث الحالة' : 'Statut mis à jour');
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في التحديث' : 'Erreur de mise à jour');
     }
   };
@@ -178,7 +178,7 @@ export function DefectiveProducts() {
         : (restoreStock ? 'Supprimé et stock restauré' : 'Supprimé'));
       setShowDetailsDialog(false);
       fetchData();
-    } catch (error) {
+    } catch (_error) {
       toast.error(language === 'ar' ? 'خطأ في الحذف' : 'Erreur de suppression');
     }
   };

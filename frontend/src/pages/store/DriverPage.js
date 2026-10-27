@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Package, Truck, CheckCircle, AlertCircle, Phone, MapPin, Camera, XCircle, RefreshCw } from 'lucide-react';
+import { Package, Truck as _Truck, CheckCircle, AlertCircle as _AlertCircle, Phone, MapPin, Camera, XCircle, RefreshCw } from 'lucide-react';
 
 function normalizeScanned(text) {
   if (!text) return '';

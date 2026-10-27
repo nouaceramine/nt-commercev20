@@ -14,7 +14,6 @@ Public API:
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from config.database import client, main_db, get_tenant_db
 from core.db_naming import resolve_db_name  # p347

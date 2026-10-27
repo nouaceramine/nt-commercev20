@@ -13,7 +13,6 @@ Three pillars (report §4.1):
 from datetime import datetime, timezone, timedelta
 import logging
 import re
-import uuid
 
 logger = logging.getLogger("autoheal_level1")
 

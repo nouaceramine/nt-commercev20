@@ -31,7 +31,7 @@ import {
   Edit,
   Trash2,
   TrendingUp,
-  TrendingDown,
+  TrendingDown as _TrendingDown,
   Wallet,
   Calculator,
   History,

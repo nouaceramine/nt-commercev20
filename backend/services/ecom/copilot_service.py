@@ -8,7 +8,6 @@ Stateless: each call rebuilds the analytics context fresh so answers always
 reflect live data. Session id allows multi-turn conversation memory inside
 a single user session (not persisted server-side).
 """
-import os
 import json
 import logging
 import uuid

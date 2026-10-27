@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 export default function DailyReportPage() {
-  const { language, isRTL } = useLanguage();
+  const { language, isRTL: _isRTL } = useLanguage();
   const { formatCurrency } = useDateFormat();
   const ar = language === 'ar';
 

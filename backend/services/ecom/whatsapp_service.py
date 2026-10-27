@@ -7,7 +7,6 @@ Two-way:
 Docs: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks
 """
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 import httpx
 

@@ -1,14 +1,14 @@
 /** Per-product profitability analysis card. */
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
-import { Label } from "../../../components/ui/label";
-import { Badge } from "../../../components/ui/badge";
+import { Button as _Button } from "../../../components/ui/button";
+import { Input as _Input } from "../../../components/ui/input";
+import { Label as _Label } from "../../../components/ui/label";
+import { Badge as _Badge } from "../../../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select";
 import { toast } from "sonner";
 import apiClient from "../../../lib/apiClient";
-import { Loader2, Search, TrendingUp, TrendingDown, Package, Users, Wallet } from "lucide-react";
+import { Loader2, Search as _Search, TrendingUp, TrendingDown, Package, Users, Wallet } from "lucide-react";
 import { KpiCard } from "./KpiCard";
 import { fmt } from "./format";
 

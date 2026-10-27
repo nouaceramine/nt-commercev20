@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import apiClient from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { Bell, Check, CheckCheck, Trash2, X } from 'lucide-react';
-import { Badge } from './ui/badge';
+import { Badge as _Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { formatShortDate } from '../utils/globalDateFormatter';
 
@@ -38,7 +38,7 @@ export function NotificationBell() {
     try {
       const res = await apiClient.get(`/notifications/unread-count`, { headers: getHeaders() });
       setUnreadCount(res.data.count);
-    } catch (err) {
+    } catch (_err) {
       // silent
     }
   };
@@ -49,7 +49,7 @@ export function NotificationBell() {
     try {
       const res = await apiClient.get(`/notifications/?limit=20`, { headers: getHeaders() });
       setNotifications(res.data);
-    } catch (err) {
+    } catch (_err) {
       // silent
     } finally {
       setLoading(false);
@@ -66,7 +66,7 @@ export function NotificationBell() {
       await apiClient.put(`/notifications/${id}/read`, {}, { headers: getHeaders() });
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
       setUnreadCount((c) => Math.max(0, c - 1));
-    } catch (err) {}
+    } catch (_err) {}
   };
 
   const markAllRead = async () => {
@@ -74,14 +74,14 @@ export function NotificationBell() {
       await apiClient.put(`/notifications/read-all`, {}, { headers: getHeaders() });
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
-    } catch (err) {}
+    } catch (_err) {}
   };
 
   const deleteNotif = async (id) => {
     try {
       await apiClient.delete(`/notifications/${id}`, { headers: getHeaders() });
       setNotifications((prev) => prev.filter((n) => n.id !== id));
-    } catch (err) {}
+    } catch (_err) {}
   };
 
   const typeColors = {

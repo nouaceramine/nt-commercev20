@@ -7,21 +7,21 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { NotificationBell } from './NotificationBell';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
+import { Badge as _Badge } from './ui/badge';
 import { SidebarReorder } from './SidebarReorder';
 import { MobileBottomBar } from './MobileBottomBar';
 import { 
   LayoutDashboard,
-  Megaphone, 
+  Megaphone as _Megaphone,
   Package, 
-  PlusCircle, 
+  PlusCircle as _PlusCircle,
   LogOut, 
   Menu, 
   X,
-  Search,
+  Search as _Search,
   Globe,
   Inbox,
-  Link2,
+  Link2 as _Link2,
   BookOpen,
   Shield,
   Users,
@@ -41,8 +41,8 @@ import {
   ChevronsDown,
   ChevronsUp,
   GripVertical,
-  PanelLeftClose,
-  PanelLeft,
+  PanelLeftClose as _PanelLeftClose,
+  PanelLeft as _PanelLeft,
   DollarSign,
   ShoppingBag,
   BarChart3,
@@ -86,7 +86,7 @@ import { GlobalSearchModal } from './GlobalSearchModal';
 import { defaultMenuSections } from '../config/sidebarMenu';
 
 // Helper function to determine AI context based on current page
-const getAIContext = (pathname) => {
+const _getAIContext = (pathname) => {
   if (pathname.includes('/pos') || pathname.includes('/sales')) return 'sales';
   if (pathname.includes('/products') || pathname.includes('/inventory') || pathname.includes('/warehouses')) return 'inventory';
   if (pathname.includes('/customers')) return 'customers';
@@ -134,10 +134,10 @@ export const Layout = ({ children }) => {
     const saved = localStorage.getItem('expandedSections');
     return saved ? JSON.parse(saved) : ['الرئيسية', 'Accueil'];
   });
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
+  const [_notifications, setNotifications] = useState([]);
+  const [_showNotifications, _setShowNotifications] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [showInstallBtn, setShowInstallBtn] = useState(false);
+  const [_showInstallBtn, setShowInstallBtn] = useState(false);
   const [customSidebarOrder, setCustomSidebarOrder] = useState(null);
   const [reorderMode, setReorderMode] = useState(false);
   const [branding, setBranding] = useState({ name: '', logo_url: '' });
@@ -195,7 +195,7 @@ export const Layout = ({ children }) => {
       try {
         const res = await apiClient.get('/settings/tenant-branding');
         setBranding({ name: res.data?.name || '', logo_url: res.data?.logo_url || '' });
-      } catch (e) {
+      } catch (_e) {
         // keep defaults
       }
     };
@@ -346,7 +346,7 @@ export const Layout = ({ children }) => {
     localStorage.setItem('sidebarCollapsed', sidebarCollapsed);
   }, [sidebarCollapsed]);
 
-  const markAllRead = async () => {
+  const _markAllRead = async () => {
     try {
       await apiClient.put(`/notifications/read-all`);
       setNotifications([]);
