@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -216,11 +216,9 @@ export default function SparePartsPage() {
     fetchSpareFamilies();  // p286
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    filterParts();
-  }, [searchQuery, categoryFilter, brandFilter, parts]);
 
-  const filterParts = () => {
+
+  const filterParts = useCallback(() => {
     let filtered = [...parts];
 
     if (searchQuery) {
@@ -242,7 +240,11 @@ export default function SparePartsPage() {
     }
 
     setFilteredParts(filtered);
-  };
+  }, [parts, searchQuery, categoryFilter, brandFilter]);
+
+  useEffect(() => {
+    filterParts();
+  }, [filterParts]);
 
   const getCategoryLabel = (categoryId) => {
     const category = PART_CATEGORIES.find(c => c.id === categoryId);

@@ -30,7 +30,7 @@ export default function TvCatalogPage({ tenantIdProp, forceSlider, screenToken, 
     return () => { clearInterval(t); clearInterval(c); };
   }, [fetchCatalog]);
 
-  const items = data?.items || [];
+  const items = useMemo(() => data?.items || [], [data]);
 
   const slides = useMemo(() => {
     const out = [];

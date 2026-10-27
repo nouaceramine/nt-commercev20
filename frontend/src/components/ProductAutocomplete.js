@@ -86,6 +86,18 @@ export function ProductAutocomplete({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   
+  // Handle product selection
+  const handleSelect = useCallback((product) => {
+    if (onSelect) {
+      onSelect(product);
+    }
+    if (clearOnSelect) {
+      setQuery('');
+    }
+    setIsOpen(false);
+    setSelectedIndex(-1);
+  }, [onSelect, clearOnSelect]);
+
   // Barcode Scanner Support - detects rapid keyboard input
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
@@ -160,7 +172,7 @@ export function ProductAutocomplete({
         clearTimeout(barcodeTimeoutRef.current);
       }
     };
-  }, [barcodeBuffer]);
+  }, [barcodeBuffer, handleSelect]);
 
   // Handle keyboard navigation
   const handleKeyDown = (e) => {
@@ -195,17 +207,7 @@ export function ProductAutocomplete({
     }
   };
   
-  // Handle product selection
-  const handleSelect = (product) => {
-    if (onSelect) {
-      onSelect(product);
-    }
-    if (clearOnSelect) {
-      setQuery('');
-    }
-    setIsOpen(false);
-    setSelectedIndex(-1);
-  };
+
   
   // Clear search
   const handleClear = () => {

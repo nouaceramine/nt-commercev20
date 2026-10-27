@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -58,7 +58,7 @@ export default function EventBusDashboard() {
   const [typeFilter, setTypeFilter] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     try {
       const [s, p, d, m, a] = await Promise.all([
         apiClient.get("/admin/event-bus/stats"),
@@ -79,17 +79,17 @@ export default function EventBusDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, typeFilter]);
 
   useEffect(() => {
     loadAll();
-  }, [statusFilter, typeFilter]);
+  }, [loadAll]);
 
   useEffect(() => {
     if (!autoRefresh) return;
     const id = setInterval(loadAll, 5000);
     return () => clearInterval(id);
-  }, [autoRefresh, statusFilter, typeFilter]);
+  }, [autoRefresh, loadAll]);
 
   const replay = async (eventId) => {
     try {

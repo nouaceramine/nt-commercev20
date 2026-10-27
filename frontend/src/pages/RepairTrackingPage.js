@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { buildCustomTemplateHTML } from '../lib/customTemplateRenderer';
 import { escapeHtml } from '../lib/escape';
@@ -210,9 +210,7 @@ export default function RepairTrackingPage() {
     fetchStats();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    filterRepairs();
-  }, [searchQuery, statusFilter, repairs]);
+
 
   // p286: search maintenance stock only (families flagged is_spare_parts + legacy parts)
   const searchProducts = async (query) => {
@@ -274,7 +272,7 @@ export default function RepairTrackingPage() {
     }));
   };
 
-  const filterRepairs = () => {
+  const filterRepairs = useCallback(() => {
     let filtered = [...repairs];
 
     if (searchQuery) {
@@ -293,7 +291,11 @@ export default function RepairTrackingPage() {
     }
 
     setFilteredRepairs(filtered);
-  };
+  }, [repairs, searchQuery, statusFilter]);
+
+  useEffect(() => {
+    filterRepairs();
+  }, [filterRepairs]);
 
   const getStatusInfo = (statusId) => {
     return REPAIR_STATUSES.find(s => s.id === statusId) || REPAIR_STATUSES[0];

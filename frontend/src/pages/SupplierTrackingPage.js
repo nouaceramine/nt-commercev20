@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
@@ -28,7 +28,8 @@ export default function SupplierTrackingPage() {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     try {
       const [gRes, oRes, sRes] = await Promise.all([
         apiClient.get(`/supplier-tracking/goods`, { headers }),
@@ -40,9 +41,9 @@ export default function SupplierTrackingPage() {
       setStats(sRes.data);
     } catch (e) { console.error(e); }
     setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const addGoods = async () => {
     try {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import apiClient from '../../lib/apiClient';
 import { initPixels, trackPixel } from '../../lib/pixel';
@@ -1048,16 +1048,6 @@ export default function PublicStorePage({ overrideSlug } = {}) {
     if (!store?.online_payment_enabled) setPaymentMethod('cod');
   }, [store]);
 
-  // Load cart from localStorage
-  useEffect(() => {
-    captureUtm();  // p78: capture campaign params from landing URL
-    fetchStore();
-    const saved = localStorage.getItem(`cart_${slug}`);
-    if (saved) {
-      try { setCart(JSON.parse(saved)); } catch (e) {}
-    }
-  }, [slug]);
-
   useEffect(() => {
     localStorage.setItem(`cart_${slug}`, JSON.stringify(cart));
   }, [cart, slug]);
@@ -1078,7 +1068,7 @@ export default function PublicStorePage({ overrideSlug } = {}) {
     return () => clearTimeout(t);
   }, [customerInfo.phone, customerInfo.name, cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchStore = async () => {
+  const fetchStore = useCallback(async () => {
     setLoading(true);
     try {
       const response = await apiClient.get(`/shop/${slug}`);
@@ -1099,7 +1089,17 @@ export default function PublicStorePage({ overrideSlug } = {}) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [slug]);
+
+  // Load cart from localStorage
+  useEffect(() => {
+    captureUtm();  // p78: capture campaign params from landing URL
+    fetchStore();
+    const saved = localStorage.getItem(`cart_${slug}`);
+    if (saved) {
+      try { setCart(JSON.parse(saved)); } catch (e) {}
+    }
+  }, [slug, fetchStore]);
 
   const addToCart = (product) => {
     const existing = cart.find(item => item.product_id === product.id);

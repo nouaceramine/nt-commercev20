@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
@@ -62,7 +62,7 @@ export default function ReportsPage() {
   const [allPurchases, setAllPurchases] = useState([]);
   const [cashBoxes, setCashBoxes] = useState([]);
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     setLoading(true);
     try {
       const [salesRes, productsRes, customersRes, profitRes, allSalesRes, allPurchasesRes, cashRes] = await Promise.all([
@@ -95,9 +95,9 @@ export default function ReportsPage() {
       setPurchasesData(Object.values(purchasesByDate).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-parseInt(period)));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  };
+  }, [period]);
 
-  useEffect(() => { fetchReports(); }, [period]);
+  useEffect(() => { fetchReports(); }, [fetchReports]);
 
   const handleBackup = async () => {
     try {

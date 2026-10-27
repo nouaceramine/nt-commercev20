@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
@@ -25,24 +25,26 @@ export default function InternalChatPage() {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchRooms = async () => {
+  const fetchRooms = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     try {
       const res = await apiClient.get(`/chat/rooms`, { headers });
       setRooms(res.data);
     } catch (e) { console.error(e); }
     setLoading(false);
-  };
+  }, []);
 
-  const fetchMessages = async (roomId) => {
+  const fetchMessages = useCallback(async (roomId) => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     try {
       const res = await apiClient.get(`/chat/rooms/${roomId}/messages`, { headers });
       setMessages(res.data.reverse());
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (e) { console.error(e); }
-  };
+  }, []);
 
-  useEffect(() => { fetchRooms(); }, []);
-  useEffect(() => { if (activeRoom) fetchMessages(activeRoom.id); }, [activeRoom]);
+  useEffect(() => { fetchRooms(); }, [fetchRooms]);
+  useEffect(() => { if (activeRoom) fetchMessages(activeRoom.id); }, [activeRoom, fetchMessages]);
 
   const createRoom = async () => {
     try {

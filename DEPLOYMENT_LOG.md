@@ -1,3 +1,10 @@
+## 2026-10-27 — p483: إزالة تحذيرات React Hooks وsource maps وبناء بلا تحذيرات
+- **React Hooks**: معالجة 33 تحذيرًا في 28 ملفًا عبر `useCallback`/`useMemo` وتبعيات صحيحة، وتثبيت تحميل البيانات والتصفية والجلسة، والتقاط عنصر ref للتنظيف، دون تعليقات suppression جديدة ودون تغيير JSX أو التصميم.
+- **source maps**: استثناء حزمة `html5-qrcode` وحدها من `source-map-loader` لأن حزمتها المنشورة تشير إلى ملفات TypeScript غير مضمنة؛ بقي فحص خرائط مصادر التطبيق وبقية الاعتماديات دون تعطيل. اختفت 23 تحذيرًا من البناء و46 من وضع التطوير السابق.
+- **staging**: فحص الصياغة لجميع الملفات المعدلة ناجح؛ Jest **134/134 عبر 14 حزمة**؛ `npm run build` أصبح **Compiled successfully** مع **0 Hooks / 0 source maps / 0 ESLint warnings**؛ خادم التطوير compiled وHTTP 200 وإيقاف سليم و0 source-map warnings؛ مراجع البناء الأربعة موجودة وnpm audit الكامل وruntime **0/0**.
+- **النشر والإنتاج**: نسخة `/opt/ntcommerce/backups/p483/production_20261027_004338`؛ بناء مستقل `frontend_p483_20261027_004457` ثم نشر تراكمي دون حذف الحزم القديمة. الإنتاج بناء بلا تحذيرات، والواجهة `main.c1b832a5.js` مع CSS `main.818b1bb1.css`؛ index الحي يطابق الإصدار، والأصول وhealth=200، و**2848 ملفًا قديمًا/0 مفقود**، وnpm audit الكامل وruntime **0/0**.
+- **السلامة**: لا تغييرات Backend أو قاعدة بيانات أو تكاملات خارجية؛ لم يُمس NT-0004. مرجع الكنيس والعزل السليم يبقى p481: **1734/1734** و48/48 وTEST-P residue=0.
+
 ## 2026-10-27 — p482: تصفير تحذيرات اعتماديات CRA/CRACO وتوافق خادم التطوير
 - **الاعتماديات**: ترقية `@svgr/webpack` و`@svgr/plugin-svgo` إلى 8.1.0 و`webpack-dev-server` إلى 5.2.6 و`selfsigned` إلى 5.5.0 عبر overrides/resolutions؛ SVGO الفعلي 3.3.5 واختفاء `node-forge` من شجرة التثبيت. رُفض webpack-dev-server 6 لأنه يتطلب Node 22 بينما البيئة Node 20.20.2، ولم يُستخدم `--force`.
 - **توافق CRACO**: إضافة محوّلات محدودة لخيارات react-scripts 5 القديمة: `onBeforeSetupMiddleware/onAfterSetupMiddleware` إلى `setupMiddlewares`، و`https` إلى `server`، واسم `close()` المتوافق مع `stopCallback()` عند الإيقاف. لا تغيير في شيفرة الصفحات أو التصميم.

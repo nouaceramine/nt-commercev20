@@ -82,7 +82,10 @@ export function usePOSCart({ language, toast }) {
 
     if (existingItem && overrideQty == null && !bypassExisting) {
       const newQty = returnMode ? existingItem.quantity - 1 : existingItem.quantity + 1;
-      if (newQty <= 0) { removeItem(existingItem.cart_item_id); return; }
+      if (newQty <= 0) {
+        setCart(prev => prev.filter(item => item.cart_item_id !== existingItem.cart_item_id));
+        return;
+      }
       setCart(prev => prev.map(item =>
         item.cart_item_id === existingItem.cart_item_id
           ? { ...item, quantity: newQty, total: newQty * item.unit_price }

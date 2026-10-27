@@ -67,7 +67,7 @@ export function EcomOrderDetailDialog({ open, onOpenChange, order, onUpdated }) 
     apiClient.get(`/ecom/orders/${order.id}/financials`)
       .then(res => setFin(res.data))
       .catch(() => setFin(null));
-  }, [open, order?.id]);
+  }, [open, order?.id, order?.packaging_cost]);
 
   if (!order) return null;
 

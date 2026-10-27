@@ -68,13 +68,13 @@ export default function QrMenuPage() {
       })
       .then(setMenu)
       .catch((e) => setError(e.message));
-  }, [tenantId, tableId, token]);  // p323
+  }, [tenantId, tableId, token, navigate]);  // p323
 
   const families = useMemo(() => {
     const m = {};
     (menu?.items || []).forEach((it) => { (m[it.family || STR.menu] = m[it.family || STR.menu] || []).push(it); });
     return m;
-  }, [menu, lang]);  // p368: إعادة التجميع عند تبديل اللغة (اسم العائلة الاحتياطي)
+  }, [menu, STR.menu]);  // p368: إعادة التجميع عند تبديل اللغة (اسم العائلة الاحتياطي)
 
   const addPlain = (it) => {
     setCart((prev) => {

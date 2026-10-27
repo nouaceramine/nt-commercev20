@@ -30,7 +30,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider } = {}) {  // p32
     return () => { clearInterval(t); clearInterval(c); };
   }, [fetchMenu]);
 
-  const items = data?.items || [];
+  const items = useMemo(() => data?.items || [], [data]);
 
   // p321: شرائح الصور — المنتجات المتوفرة ذات الصور فقط، صورة لكل عنصر من المعرض
   const slides = useMemo(() => {

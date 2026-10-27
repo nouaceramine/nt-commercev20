@@ -124,7 +124,7 @@ const ProductionPage = () => {
     apiClient.get('/suppliers').then(r => {
       const list = Array.isArray(r.data) ? r.data : (r.data?.suppliers || r.data?.items || []);
       setSuppliers(list);
-      if (list.length && !poSupplier) setPoSupplier(list[0].id);
+      if (list.length) setPoSupplier(current => current || list[0].id);
     }).catch(() => {});
   }, []);
 

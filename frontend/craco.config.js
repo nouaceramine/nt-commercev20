@@ -58,6 +58,14 @@ const webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+      for (const rule of webpackConfig.module?.rules || []) {
+        if (rule.enforce === 'pre' && rule.loader?.includes('source-map-loader')) {
+          const existingExcludes = rule.exclude
+            ? (Array.isArray(rule.exclude) ? rule.exclude : [rule.exclude])
+            : [];
+          rule.exclude = [...existingExcludes, /node_modules[\/]html5-qrcode[\/]/];
+        }
+      }
 
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {

@@ -22,7 +22,7 @@ export default function NeighborOrderPage() {
       .catch(() => setError('invalid'));
   }, [tenantId, token]);
 
-  const items = menu?.items || [];
+  const items = useMemo(() => menu?.items || [], [menu]);
   const cartList = useMemo(
     () => items.filter((i) => cart[i.id] > 0).map((i) => ({ ...i, qty: cart[i.id] })),
     [items, cart]

@@ -77,7 +77,7 @@ export default function KioskPage() {
     const m = {};
     (menu?.items || []).forEach((it) => { (m[it.family || STR.menu] = m[it.family || STR.menu] || []).push(it); });
     return m;
-  }, [menu, lang]);  // p368
+  }, [menu, STR.menu]);  // p368
 
   const addPlain = (it) => {
     setCart((prev) => {

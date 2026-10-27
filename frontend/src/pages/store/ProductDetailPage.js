@@ -52,7 +52,7 @@ export default function ProductDetailPage() {
     } else {
       setAvailableCommunes([]);
     }
-  }, [customerInfo.wilaya, wilayasData]);
+  }, [customerInfo.wilaya, customerInfo.commune, wilayasData]);
 
   useEffect(() => {
     fetchProduct();

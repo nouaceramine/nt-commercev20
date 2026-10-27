@@ -1,5 +1,5 @@
 import { errText } from '../lib/errorText';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
@@ -28,7 +28,8 @@ export default function DefectiveGoodsPage() {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     try {
       const [itemsRes, statsRes, catsRes] = await Promise.all([
         apiClient.get(`/defective/goods`, { headers, params: { status: filterStatus === 'all' ? undefined : filterStatus, search: search || undefined } }),
@@ -40,9 +41,9 @@ export default function DefectiveGoodsPage() {
       setCategories(catsRes.data);
     } catch (e) { console.error(e); }
     setLoading(false);
-  };
+  }, [filterStatus, search]);
 
-  useEffect(() => { fetchData(); }, [filterStatus, search]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const createItem = async () => {
     try {

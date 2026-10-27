@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
@@ -64,10 +64,7 @@ export default function DateTimeSettingsPage() {
     fetchSettings();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   
-  useEffect(() => {
-    // Update preview when settings change
-    updatePreview();
-  }, [settings]);
+
   
   const fetchSettings = async () => {
     try {
@@ -80,7 +77,7 @@ export default function DateTimeSettingsPage() {
     }
   };
   
-  const updatePreview = async () => {
+  const updatePreview = useCallback(async () => {
     try {
       const params = new URLSearchParams({
         short_date_format: settings.short_date_format,
@@ -113,7 +110,12 @@ export default function DateTimeSettingsPage() {
         globalDateFormatter.setConfig(prevConfig);
       }
     }
-  };
+  }, [settings]);
+
+  useEffect(() => {
+    // Update preview when settings change
+    updatePreview();
+  }, [updatePreview]);
   
   const saveSettings = async () => {
     setSaving(true);

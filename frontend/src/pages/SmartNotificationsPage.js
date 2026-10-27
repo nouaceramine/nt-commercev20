@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Button } from '../components/ui/button';
@@ -19,7 +19,8 @@ export default function SmartNotificationsPage() {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     try {
       const params = {};
       if (filter === 'unread') params.read = false;
@@ -32,9 +33,9 @@ export default function SmartNotificationsPage() {
       setStats(sRes.data);
     } catch (e) { console.error(e); }
     setLoading(false);
-  };
+  }, [filter]);
 
-  useEffect(() => { fetchData(); }, [filter]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const markRead = async (id) => {
     try {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -34,17 +34,19 @@ export default function SystemLogsPage() {
   const [level, setLevel] = useState("all");
   const [source, setSource] = useState("all");
   const [search, setSearch] = useState("");
+  const searchRef = useRef(search);
+  searchRef.current = search;
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [expanded, setExpanded] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
       if (level !== "all") params.level = level;
       if (source !== "all") params.source = source;
-      if (search.trim()) params.search = search.trim();
+      if (searchRef.current.trim()) params.search = searchRef.current.trim();
       const [logsRes, statsRes] = await Promise.all([
         apiClient.get("/system-logs", { params }),
         apiClient.get("/system-logs/stats"),
@@ -56,9 +58,9 @@ export default function SystemLogsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [level, source]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [level, source]);
+  useEffect(() => { load(); }, [load]);
 
   const handleDownload = async () => {
     try {

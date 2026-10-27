@@ -1,5 +1,5 @@
 import { errText } from '../lib/errorText';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -17,6 +17,8 @@ import {
   Landmark, Plus, ArrowUpRight, ArrowDownRight, RefreshCw,
   Wallet, Building2, CreditCard, TrendingUp, Edit, Trash2
 } from 'lucide-react';
+
+const getHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 export default function BankingPage() {
   const [summary, setSummary] = useState(null);
@@ -37,11 +39,8 @@ export default function BankingPage() {
     bank_account_id: '', statement_balance: 0, statement_date: new Date().toISOString().split('T')[0],
   });
 
-  useEffect(() => { fetchData(); }, []);
 
-  const getHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [summaryRes, txRes] = await Promise.all([
         apiClient.get(`/banking/summary`, { headers: getHeaders() }),
@@ -54,7 +53,9 @@ export default function BankingPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const createAccount = async () => {
     try {

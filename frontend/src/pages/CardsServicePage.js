@@ -64,7 +64,7 @@ export default function CardsServicePage() {
     }
   }, [operator, statusFilter]);
 
-  const loadSales = useCallback(async (page = salesPage, query = salesSearch, since = salesSince, until = salesUntil) => {
+  const loadSales = useCallback(async (page, query, since, until) => {
     setSalesLoading(true);
     try {
       const params = new URLSearchParams();

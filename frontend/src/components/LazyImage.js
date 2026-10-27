@@ -33,16 +33,17 @@ export function LazyImage({
       }
     );
 
-    if (imgRef.current) {
-      observer.observe(imgRef.current);
+    const img = imgRef.current;
+    if (img) {
+      observer.observe(img);
     }
 
     return () => {
-      if (imgRef.current) {
-        observer.unobserve(imgRef.current);
+      if (img) {
+        observer.unobserve(img);
       }
     };
-  }, [src, fallback]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [src, fallback]);
 
   const handleLoad = () => {
     setIsLoaded(true);

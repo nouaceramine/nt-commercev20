@@ -70,6 +70,7 @@ export default function POSPage() {
 
   // === Extracted: Session State (was 150+ lines inline) ===
   const session = usePOSSession({ language, toast, apiClient });
+  const { currentSession, fetchSessionStats } = session;
 
   // === Product & Catalog Data ===
   const [products, setProducts] = useState([]);
@@ -91,7 +92,7 @@ export default function POSPage() {
     if (!selectedCustomer) return;
     const cust = customers.find(c => c.id === selectedCustomer);
     if (cust?.price_tier && cust.price_tier !== priceType) setPriceType(cust.price_tier);
-  }, [selectedCustomer]);
+  }, [selectedCustomer, customers, priceType]);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef(null);
 
@@ -195,9 +196,9 @@ export default function POSPage() {
     persistQueue(remaining);
     if (synced > 0) toast.success(language === 'ar' ? `تمت مزامنة ${synced} بيع أوفلاين` : `${synced} vente(s) synchronisee(s)`);
     if (failed > 0) toast.error(language === 'ar' ? `فشلت مزامنة ${failed} بيع` : `${failed} vente(s) echouee(s)`);
-    if (synced > 0) { fetchProducts(); fetchSaleCode(); if (session.currentSession) session.fetchSessionStats(session.currentSession.id); }
+    if (synced > 0) { fetchProducts(); fetchSaleCode(); if (currentSession) fetchSessionStats(currentSession.id); }
     setSyncingQueue(false);
-  }, [syncingQueue, language, session.currentSession]);
+  }, [syncingQueue, language, currentSession, fetchSessionStats]);
   useEffect(() => {
     const goOffline = () => setIsOffline(true);
     const goOnline = () => { setIsOffline(false); syncOfflineSales(); };

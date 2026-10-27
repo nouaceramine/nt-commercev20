@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import apiClient from '../../lib/apiClient';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Layout } from '../../components/Layout';
@@ -42,13 +42,13 @@ const DigitalAdminPage = () => {
   const [stats, setStats] = useState(null);
   const loadStats = async () => { const r = await apiClient.get('/digital/stats'); setStats(r.data); };
   const loadProducts = async () => { const r = await apiClient.get('/digital/products/all'); setProducts(r.data || []); };
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     const params = statusFilter !== 'all' ? { status: statusFilter } : {};
     const r = await apiClient.get('/digital/orders', { params });
     setOrders(r.data || []);
-  };
+  }, [statusFilter]);
   useEffect(() => { loadProducts().catch(() => {}); loadStats().catch(() => {}); }, []);
-  useEffect(() => { loadOrders().catch(() => {}); }, [statusFilter]);
+  useEffect(() => { loadOrders().catch(() => {}); }, [loadOrders]);
 
   const saveProduct = async () => {
     try {
