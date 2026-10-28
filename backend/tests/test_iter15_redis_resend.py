@@ -5,8 +5,8 @@ import requests
 import pytest
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://nt-v16-staging.preview.emergentagent.com").rstrip("/")
-ADMIN_EMAIL = "admin@ntcommerce.com"
-ADMIN_PASSWORD = "Admin@2024"
+ADMIN_EMAIL = os.environ.get("TEST_SUPER_ADMIN_EMAIL", "admin@ntcommerce.com")
+ADMIN_PASSWORD = os.environ.get("TEST_SUPER_ADMIN_PASSWORD", "Admin@2024")
 
 
 @pytest.fixture(scope="module")
@@ -23,6 +23,11 @@ def admin_token():
 @pytest.fixture
 def admin_headers(admin_token):
     return {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
+
+
+@pytest.fixture(scope="module")
+def tenant_with_debt(p486_tenant_factory):
+    return p486_tenant_factory("iter15-debt", debt=100)
 
 
 # ── P1: Redis caching ──
@@ -67,16 +72,10 @@ class TestEmailProvider:
         ok = asyncio.run(send_email(to="test@example.com", subject="TEST_iter15", body="hello"))
         assert ok is True
 
-    def test_debt_reminder_email_does_not_crash(self, admin_headers):
-        # Find a tenant with credit_debt
-        r = requests.get(f"{BASE_URL}/api/saas/tenant-debts", headers=admin_headers, timeout=15)
-        assert r.status_code == 200
-        debts = r.json()
-        items = debts if isinstance(debts, list) else debts.get("items", debts.get("debts", []))
-        if not items:
-            pytest.skip("no tenant debts available")
-        tenant_id = items[0].get("tenant_id") or items[0].get("id")
-        assert tenant_id
+    def test_debt_reminder_email_does_not_crash(self, admin_headers, tenant_with_debt):
+        from services.email_service import get_email_provider
+        assert get_email_provider() == "mock", "External email delivery is forbidden in this test"
+        tenant_id = tenant_with_debt["id"]
         r = requests.post(
             f"{BASE_URL}/api/saas/tenant-debts/{tenant_id}/remind",
             headers=admin_headers,
@@ -126,20 +125,13 @@ class TestRegressionRoutes:
         r = requests.get(f"{BASE_URL}/api/saas/agents", headers=admin_headers, timeout=15)
         assert r.status_code == 200
 
-    def test_settle_debt_flow(self, admin_headers):
-        r = requests.get(f"{BASE_URL}/api/saas/tenant-debts", headers=admin_headers, timeout=15)
-        assert r.status_code == 200
-        debts = r.json()
-        items = debts if isinstance(debts, list) else debts.get("items", debts.get("debts", []))
-        if not items:
-            pytest.skip("no tenant debts")
-        tenant_id = items[0].get("tenant_id") or items[0].get("id")
-        # Settle 1 DZD — endpoint expects entity_id
+    def test_settle_debt_flow(self, admin_headers, tenant_with_debt):
+        tenant_id = tenant_with_debt["id"]
         r = requests.post(
             f"{BASE_URL}/api/wallet/settle-credit",
             headers=admin_headers,
             json={"entity_id": tenant_id, "amount": 1, "description": "TEST_iter15 regression"},
             timeout=15,
         )
-        assert r.status_code in (200, 201, 400), f"settle-credit unexpected: {r.status_code} {r.text[:200]}"
-        # 400 is acceptable if debt already 0 from prior tests; 200 is the success path
+        assert r.status_code in (200, 201), f"settle-credit unexpected: {r.status_code} {r.text[:200]}"
+        assert r.json()["credit_debt_remaining"] == pytest.approx(99.0)

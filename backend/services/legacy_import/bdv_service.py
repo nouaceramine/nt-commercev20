@@ -15,6 +15,7 @@ import csv
 import io
 import json
 import os
+import shutil
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -126,11 +127,12 @@ def export_access(dblx_path, out_dir, cb=None):
     os.makedirs(out_dir, exist_ok=True)
     if not detect_access_file(dblx_path):
         raise RuntimeError("الملف ليس قاعدة بيانات Access صالحة (rlynx/BDV10)")
-    try:
-        proc = subprocess.run(["mdb-tables", "-1", dblx_path],
-                              capture_output=True, text=True, timeout=120)
-    except FileNotFoundError:
+    mdb_tables = shutil.which("mdb-tables")
+    mdb_export = shutil.which("mdb-export")
+    if not mdb_tables or not mdb_export:
         raise RuntimeError("أداة mdbtools غير مثبتة على الخادم")
+    proc = subprocess.run([mdb_tables, "-1", dblx_path],
+                          capture_output=True, text=True, timeout=120)
     if proc.returncode != 0:
         raise RuntimeError(f"تعذرت قراءة قاعدة البيانات: {proc.stderr.strip()[:200]}")
     available = {t.strip() for t in proc.stdout.splitlines() if t.strip()}
@@ -144,7 +146,7 @@ def export_access(dblx_path, out_dir, cb=None):
         if cb:
             cb("export", f"تفريغ جدول {table}", i, total)
         try:
-            res = subprocess.run(["mdb-export", dblx_path, table],
+            res = subprocess.run([mdb_export, dblx_path, table],
                                  capture_output=True, timeout=300)
             text = res.stdout.decode("utf-8", errors="replace")
             rows = []

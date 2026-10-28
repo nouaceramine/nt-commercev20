@@ -9,13 +9,25 @@ import json
 import csv
 import io
 import os
+import shutil
 from datetime import datetime
+
+
+def mdb_tool(name: str) -> str:
+    """Resolve an allow-listed mdbtools executable without relying on PATH lookup."""
+    if name not in {'mdb-export', 'mdb-tables'}:
+        raise ValueError(f"Unsupported mdbtools executable: {name}")
+    executable = shutil.which(name)
+    if not executable:
+        raise RuntimeError(f"Required mdbtools executable is not installed: {name}")
+    return executable
+
 
 def run_mdb_export(db_path: str, table_name: str) -> list:
     """Export a table from Access database to list of dictionaries."""
     try:
         result = subprocess.run(
-            ['mdb-export', db_path, table_name],
+            [mdb_tool('mdb-export'), db_path, table_name],
             capture_output=True,
             text=True,
             timeout=120
@@ -234,7 +246,7 @@ def convert_database(db_path: str, output_path: str = None) -> dict:
     print(f"Converting database: {db_path}")
     
     # Get all tables
-    result = subprocess.run(['mdb-tables', '-1', db_path], capture_output=True, text=True)
+    result = subprocess.run([mdb_tool('mdb-tables'), '-1', db_path], capture_output=True, text=True, timeout=120)
     tables = result.stdout.strip().split('\n')
     print(f"Found {len(tables)} tables: {tables}")
     

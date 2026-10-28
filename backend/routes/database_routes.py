@@ -14,6 +14,7 @@ import io
 import shutil
 import uuid
 import subprocess
+import sys
 import logging
 from pathlib import Path
 
@@ -458,7 +459,7 @@ async def convert_access_database(
         
         # Run conversion script with safe arguments (no shell=True)
         result = subprocess.run(
-            ['python', '/app/backend/scripts/convert_access_db.py', str(temp_db_path), str(output_path)],
+            [sys.executable, '/app/scripts/convert_access_db.py', str(temp_db_path), str(output_path)],
             capture_output=True,
             text=True,
             timeout=300  # 5 minutes timeout

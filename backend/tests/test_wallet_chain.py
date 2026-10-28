@@ -50,6 +50,12 @@ def base():
     return get_base_url()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def isolated_plans(p486_default_plans):
+    """Ensure plan resolution never falls back to a stale hard-coded ID."""
+    return p486_default_plans
+
+
 @pytest.fixture(scope="module")
 def admin_token(base):
     r = requests.post(f"{base}/api/auth/login", json={
@@ -699,9 +705,9 @@ class TestTenantSaleDebit:
         rw_before = requests.get(f"{base}/api/wallet", headers=chain_tenant["headers"])
         bal_before = rw_before.json()["balance"]
 
-        # Skip if tenant has no balance left (previous tests consumed it)
-        if bal_before <= 0:
-            pytest.skip("Tenant wallet empty; skipping conservation check")
+        # The isolated chain fixture funds this tenant with 2,000 DZD and the
+        # only prior purchase costs 300 DZD, so this invariant is deterministic.
+        assert bal_before > 0, f"Isolated chain fixture left an empty wallet: {bal_before}"
 
         print(f"✓ Full-chain conservation snapshot: {snapshot}")
         # Key invariant: within the closed set {platform_main, agent, tenant},

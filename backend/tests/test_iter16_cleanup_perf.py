@@ -11,10 +11,8 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
-ADMIN_EMAIL = "admin@ntcommerce.com"
-ADMIN_PASSWORD = "Admin@2024"
-TENANT_EMAIL = "TEST_tenant_0e54f6b5@example.com"
-TENANT_PASSWORD = "TenantPass@2024"
+ADMIN_EMAIL = os.environ.get("TEST_SUPER_ADMIN_EMAIL", "admin@ntcommerce.com")
+ADMIN_PASSWORD = os.environ.get("TEST_SUPER_ADMIN_PASSWORD", "Admin@2024")
 
 
 # ── Auth fixtures ────────────────────────────────────────────────────
@@ -25,9 +23,10 @@ def admin_token():
         json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
         timeout=15,
     )
-    if r.status_code != 200:
-        pytest.skip(f"super-admin login failed: {r.status_code} {r.text[:200]}")
-    return r.json().get("access_token") or r.json().get("token")
+    assert r.status_code == 200, f"super-admin login failed: {r.status_code} {r.text[:200]}"
+    token = r.json().get("access_token") or r.json().get("token")
+    assert token, "super-admin login returned no token"
+    return token
 
 
 @pytest.fixture(scope="module")
@@ -39,15 +38,15 @@ def admin_client(admin_token):
 
 
 @pytest.fixture(scope="module")
-def tenant_token():
-    r = requests.post(
-        f"{BASE_URL}/api/saas/tenant-login",
-        json={"email": TENANT_EMAIL, "password": TENANT_PASSWORD},
-        timeout=15,
-    )
-    if r.status_code != 200:
-        pytest.skip(f"tenant login failed: {r.status_code} {r.text[:200]}")
-    return r.json().get("access_token") or r.json().get("token")
+def tenant_info(p486_tenant_factory):
+    return p486_tenant_factory("iter16-cache", debt=100, card_sales=60)
+
+
+@pytest.fixture(scope="module")
+def tenant_token(tenant_info):
+    token = tenant_info["headers"]["Authorization"].removeprefix("Bearer ")
+    assert token
+    return token
 
 
 @pytest.fixture(scope="module")
@@ -88,24 +87,17 @@ class TestTenantDebtsCache:
         assert r2.status_code == 200
         assert r2.json().get("cached") is True, "2nd call should be cached"
 
-    def test_settle_credit_invalidates_cache(self, admin_client):
+    def test_settle_credit_invalidates_cache(self, admin_client, tenant_info):
         # warm
         admin_client.get(f"{BASE_URL}/api/saas/tenant-debts", timeout=15)
         time.sleep(0.3)
-        # find a tenant with debt
-        debts = admin_client.get(
-            f"{BASE_URL}/api/saas/tenant-debts", timeout=15
-        ).json()
-        items = debts.get("items", [])
-        tenant_with_debt = next(
-            (i for i in items if i.get("credit_debt", 0) > 0), None
-        )
-        if not tenant_with_debt:
-            pytest.skip("no tenant with credit_debt available to test invalidation")
-        # settle 1 dz
+        warm = admin_client.get(f"{BASE_URL}/api/saas/tenant-debts", timeout=15)
+        assert warm.status_code == 200
+        assert warm.json().get("cached") is True
+        # settle 1 DZD on this module's isolated debtor
         settle = admin_client.post(
             f"{BASE_URL}/api/wallet/settle-credit",
-            json={"entity_id": tenant_with_debt["tenant_id"], "amount": 1},
+            json={"entity_id": tenant_info["id"], "amount": 1},
             timeout=15,
         )
         # tolerant — some implementations need entity_type; if 400 ask payload
@@ -114,7 +106,7 @@ class TestTenantDebtsCache:
             settle = admin_client.post(
                 f"{BASE_URL}/api/wallet/settle-credit",
                 json={
-                    "entity_id": tenant_with_debt["tenant_id"],
+                    "entity_id": tenant_info["id"],
                     "entity_type": "tenant",
                     "amount": 1,
                 },

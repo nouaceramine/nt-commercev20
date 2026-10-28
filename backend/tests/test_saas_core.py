@@ -10,7 +10,6 @@ Covers:
 - Tenant login + tenant's products endpoint returns empty list
 """
 import os
-import uuid
 import requests
 import pytest
 
@@ -27,8 +26,8 @@ if not BASE_URL:
         pass
 BASE_URL = (BASE_URL or "").rstrip("/")
 
-SUPER_ADMIN_EMAIL = "admin@ntcommerce.com"
-SUPER_ADMIN_PASSWORD = "Admin@2024"
+SUPER_ADMIN_EMAIL = os.environ.get("TEST_SUPER_ADMIN_EMAIL", "admin@ntcommerce.com")
+SUPER_ADMIN_PASSWORD = os.environ.get("TEST_SUPER_ADMIN_PASSWORD", "Admin@2024")
 
 
 # ---------------- Fixtures ----------------
@@ -47,9 +46,10 @@ def super_admin_token(api_client):
         json={"email": SUPER_ADMIN_EMAIL, "password": SUPER_ADMIN_PASSWORD},
         timeout=15,
     )
-    if r.status_code != 200:
-        pytest.skip(f"Super admin login failed: {r.status_code} {r.text[:200]}")
-    return r.json()["access_token"]
+    assert r.status_code == 200, f"Super admin login failed: {r.status_code} {r.text[:200]}"
+    token = r.json().get("access_token")
+    assert token, "Super admin login returned no access token"
+    return token
 
 
 @pytest.fixture(scope="session")
@@ -62,11 +62,28 @@ def admin_client(api_client, super_admin_token):
     return s
 
 
-@pytest.fixture(scope="session")
-def plans(api_client):
+@pytest.fixture(scope="module")
+def plans(api_client, p486_default_plans):
     r = api_client.get(f"{BASE_URL}/api/saas/plans", timeout=15)
     assert r.status_code == 200
     return r.json()
+
+
+@pytest.fixture(scope="module")
+def created_tenant(p486_tenant_factory):
+    return p486_tenant_factory("saas-core")
+
+
+@pytest.fixture(scope="module")
+def tenant_token(api_client, created_tenant):
+    payload = {"email": created_tenant["email"], "password": created_tenant["password"]}
+    response = api_client.post(f"{BASE_URL}/api/auth/login", json=payload, timeout=15)
+    if response.status_code != 200:
+        response = api_client.post(f"{BASE_URL}/api/saas/tenant-login", json=payload, timeout=15)
+    assert response.status_code == 200, f"Tenant login failed: {response.status_code} {response.text[:300]}"
+    token = response.json().get("access_token")
+    assert token, "Tenant login returned no access token"
+    return token
 
 
 # ---------------- Health ----------------
@@ -144,76 +161,36 @@ class TestProductsAuthRequired:
 # ---------------- Tenants CRUD ----------------
 
 class TestTenantsCRUD:
-    created_tenant = {}
-
     def test_list_tenants(self, admin_client):
         r = admin_client.get(f"{BASE_URL}/api/saas/tenants", timeout=15)
         assert r.status_code == 200
         assert isinstance(r.json(), list)
 
-    def test_create_tenant(self, admin_client, plans):
-        starter = next((p for p in plans if p["name"] == "Starter"), plans[0])
-        suffix = uuid.uuid4().hex[:8]
-        email = f"TEST_tenant_{suffix}@example.com"
-        password = "TenantPass@2024"
-        payload = {
-            "name": f"TEST Tenant {suffix}",
-            "email": email,
-            "password": password,
-            "phone": "0555000000",
-            "company_name": f"TEST Co {suffix}",
-            "plan_id": starter["id"],
-            "subscription_type": "monthly",
-            "business_type": "retailer",
-        }
-        r = admin_client.post(f"{BASE_URL}/api/saas/tenants", json=payload, timeout=30)
-        assert r.status_code == 200, f"Create tenant failed: {r.status_code} {r.text[:300]}"
-        data = r.json()
-        assert data["email"] == email.lower()
-        assert data["name"] == payload["name"]
-        assert "id" in data
-        TestTenantsCRUD.created_tenant = {
-            "id": data["id"],
-            "email": email,
-            "password": password,
-        }
+    def test_create_tenant(self, created_tenant):
+        # The fixture performs the actual POST and owns cascade cleanup.
+        assert created_tenant["id"]
+        assert created_tenant["email"].startswith("test-p486-saas-core-")
+        assert created_tenant["db_name"]
 
-    def test_created_tenant_appears_in_list(self, admin_client):
-        if not TestTenantsCRUD.created_tenant:
-            pytest.skip("Tenant not created")
+    def test_created_tenant_appears_in_list(self, admin_client, created_tenant):
         r = admin_client.get(f"{BASE_URL}/api/saas/tenants", timeout=15)
         assert r.status_code == 200
         ids = [t["id"] for t in r.json()]
-        assert TestTenantsCRUD.created_tenant["id"] in ids
+        assert created_tenant["id"] in ids
 
 
 # ---------------- Tenant login + products ----------------
 
 class TestTenantLogin:
-    def test_tenant_can_login(self, api_client):
-        info = TestTenantsCRUD.created_tenant
-        if not info:
-            pytest.skip("No tenant created in previous step")
-        # Try common endpoints
-        login_payload = {"email": info["email"], "password": info["password"]}
-        # Primary endpoint based on auth_users_routes / unified login
-        r = api_client.post(f"{BASE_URL}/api/auth/login", json=login_payload, timeout=15)
-        if r.status_code != 200:
-            # Fallback to dedicated tenant-login route
-            r = api_client.post(f"{BASE_URL}/api/saas/tenant-login", json=login_payload, timeout=15)
-        assert r.status_code == 200, f"Tenant login failed: {r.status_code} {r.text[:300]}"
-        data = r.json()
-        assert "access_token" in data
-        TestTenantLogin.tenant_token = data["access_token"]
+    def test_tenant_can_login(self, tenant_token):
+        assert isinstance(tenant_token, str)
+        assert len(tenant_token.split(".")) == 3
 
-    def test_tenant_products_empty(self, api_client):
-        token = getattr(TestTenantLogin, "tenant_token", None)
-        if not token:
-            pytest.skip("Tenant login not available")
+    def test_tenant_products_empty(self, api_client, tenant_token):
         s = requests.Session()
         s.headers.update({
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {tenant_token}",
         })
         r = s.get(f"{BASE_URL}/api/products", timeout=15)
         assert r.status_code == 200, f"Products GET failed: {r.status_code} {r.text[:300]}"

@@ -13,6 +13,13 @@ MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 DB_NAME = os.environ.get('DB_NAME', 'nt_commerce')
 
 async def init_production() -> dict:
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@ntcommerce.com')
+    admin_password = os.environ.get('ADMIN_PASSWORD')
+    if not admin_password:
+        raise RuntimeError("ADMIN_PASSWORD is required; refusing to initialize with a default password")
+    if len(admin_password) < 12:
+        raise ValueError("ADMIN_PASSWORD must contain at least 12 characters")
+
     print("=" * 50)
     print("تهيئة نظام الإنتاج...")
     print("=" * 50)
@@ -139,8 +146,6 @@ async def init_production() -> dict:
     # 2. Create or update super admin
     print("\n2. إعداد حساب المدير الأعلى...")
     
-    admin_email = "admin@ntcommerce.com"
-    admin_password = "Admin@2024"  # Change this in production!
     hashed_password = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
     existing_admin = await db.users.find_one({"role": "super_admin"})

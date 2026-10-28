@@ -5,10 +5,8 @@ import requests
 import pytest
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://nt-v16-staging.preview.emergentagent.com").rstrip("/")
-ADMIN_EMAIL = "admin@ntcommerce.com"
-ADMIN_PASSWORD = "Admin@2024"
-TENANT_EMAIL = "TEST_tenant_0e54f6b5@example.com"
-TENANT_PASSWORD = "TenantPass@2024"
+ADMIN_EMAIL = os.environ.get("TEST_SUPER_ADMIN_EMAIL", "admin@ntcommerce.com")
+ADMIN_PASSWORD = os.environ.get("TEST_SUPER_ADMIN_PASSWORD", "Admin@2024")
 
 
 @pytest.fixture(scope="module")
@@ -25,12 +23,15 @@ def admin_headers(admin_token):
 
 
 @pytest.fixture(scope="module")
-def tenant_token():
-    r = requests.post(f"{BASE_URL}/api/saas/tenant-login",
-                      json={"email": TENANT_EMAIL, "password": TENANT_PASSWORD}, timeout=15)
-    if r.status_code != 200:
-        pytest.skip(f"tenant login failed: {r.status_code} {r.text}")
-    return r.json().get("access_token") or r.json().get("token")
+def tenant_info(p486_tenant_factory):
+    return p486_tenant_factory("iter17-cache", debt=100, card_sales=60)
+
+
+@pytest.fixture(scope="module")
+def tenant_token(tenant_info):
+    token = tenant_info["headers"]["Authorization"].removeprefix("Bearer ")
+    assert token
+    return token
 
 
 @pytest.fixture(scope="module")
@@ -71,16 +72,14 @@ def test_tenant_debts_cached_warm(admin_headers):
     assert "served_at" in warm
 
 
-def test_tenant_debts_cache_invalidation_on_add_funds(admin_headers):
+def test_tenant_debts_cache_invalidation_on_add_funds(admin_headers, tenant_info):
+    from services.email_service import get_email_provider
+    assert get_email_provider() == "mock", "External email delivery is forbidden in this test"
     # warm
     requests.get(f"{BASE_URL}/api/saas/tenant-debts", headers=admin_headers, timeout=15)
     w = requests.get(f"{BASE_URL}/api/saas/tenant-debts", headers=admin_headers, timeout=15).json()
     assert w.get("cached") is True
-    # pick a tenant id from existing debts list
-    items = w.get("items") or w.get("debts") or []
-    if not items:
-        pytest.skip("no debts to test invalidation against")
-    tenant_id = items[0].get("tenant_id") or items[0].get("id")
+    tenant_id = tenant_info["id"]
     # Use the remind endpoint which is documented as a cache-buster
     r = requests.post(f"{BASE_URL}/api/saas/tenant-debts/{tenant_id}/remind",
                       headers=admin_headers, json={}, timeout=15)

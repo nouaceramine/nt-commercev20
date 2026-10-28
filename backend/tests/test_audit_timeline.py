@@ -18,9 +18,8 @@ import pytest
 from datetime import datetime
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://nt-v16-staging.preview.emergentagent.com").rstrip("/")
-SUPER_ADMIN_EMAIL = "admin@ntcommerce.com"
-SUPER_ADMIN_PASSWORD = "Admin@2024"
-SAMPLE_TENANT_ID = "b4fde9b7-d1f2-46ec-b62a-f0971ca3deba"
+SUPER_ADMIN_EMAIL = os.environ.get("TEST_SUPER_ADMIN_EMAIL", "admin@ntcommerce.com")
+SUPER_ADMIN_PASSWORD = os.environ.get("TEST_SUPER_ADMIN_PASSWORD", "Admin@2024")
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
@@ -40,11 +39,14 @@ def admin_headers(admin_token):
     return {"Authorization": f"Bearer {admin_token}"}
 
 
-@pytest.fixture(scope="session")
-def tenant_token():
-    """Pick any existing tenant from /api/saas/tenants for negative-auth test."""
-    # Will be skipped silently if we can't get a tenant (negative test isn't core).
-    return None
+@pytest.fixture(scope="module")
+def tenant_info(p486_tenant_factory):
+    return p486_tenant_factory("audit-timeline", debt=25, audit_events=2)
+
+
+@pytest.fixture(scope="module")
+def tenant_token(tenant_info):
+    return tenant_info["headers"]["Authorization"].removeprefix("Bearer ")
 
 
 # ── module: auth/authorization ───────────────────────────────────────────────
@@ -56,6 +58,13 @@ class TestAuditTimelineAuth:
     def test_super_admin_can_access(self, admin_headers):
         r = requests.get(f"{BASE_URL}/api/saas/audit-timeline", headers=admin_headers, timeout=30)
         assert r.status_code == 200, r.text[:300]
+
+    def test_tenant_token_rejected(self, tenant_token):
+        r = requests.get(
+            f"{BASE_URL}/api/saas/audit-timeline",
+            headers={"Authorization": f"Bearer {tenant_token}"}, timeout=15,
+        )
+        assert r.status_code in (401, 403), r.text[:300]
 
 
 # ── module: response schema ──────────────────────────────────────────────────
@@ -71,13 +80,18 @@ class TestAuditTimelineSchema:
         assert isinstance(data["summary"]["total"], int)
         assert data["summary"]["total"] == len(data["events"])
 
-    def test_event_fields_and_id_prefix(self, admin_headers):
-        r = requests.get(f"{BASE_URL}/api/saas/audit-timeline", headers=admin_headers, timeout=30)
+    def test_event_fields_and_id_prefix(self, admin_headers, tenant_info):
+        r = requests.get(
+            f"{BASE_URL}/api/saas/audit-timeline?tenant_id={tenant_info['id']}",
+            headers=admin_headers, timeout=30,
+        )
         data = r.json()
-        if not data["events"]:
-            pytest.skip("no events in DB — seed data missing")
-        valid_types = {"impersonation", "reminder", "wallet_topup"}
-        prefix_for = {"impersonation": "imp:", "reminder": "rem:", "wallet_topup": "top:"}
+        assert len(data["events"]) == 2, data
+        valid_types = {"impersonation", "reminder", "wallet_topup", "password_reset", "data_access"}
+        prefix_for = {
+            "impersonation": "imp:", "reminder": "rem:", "wallet_topup": "top:",
+            "password_reset": "sec:", "data_access": "acc:",
+        }
         valid_sev = {"info", "warning", "critical"}
         for ev in data["events"]:
             assert ev["type"] in valid_types, ev
@@ -87,11 +101,13 @@ class TestAuditTimelineSchema:
             assert "summary" in ev and isinstance(ev["summary"], str)
             assert "details" in ev and isinstance(ev["details"], dict)
 
-    def test_events_sorted_desc(self, admin_headers):
-        r = requests.get(f"{BASE_URL}/api/saas/audit-timeline?limit=200", headers=admin_headers, timeout=30)
+    def test_events_sorted_desc(self, admin_headers, tenant_info):
+        r = requests.get(
+            f"{BASE_URL}/api/saas/audit-timeline?tenant_id={tenant_info['id']}&limit=200",
+            headers=admin_headers, timeout=30,
+        )
         events = r.json()["events"]
-        if len(events) < 2:
-            pytest.skip("need ≥2 events to verify sort")
+        assert len(events) == 2, events
 
         def parse(ts):
             if not ts:
@@ -131,16 +147,16 @@ class TestAuditTimelineFilters:
         for ev in r.json()["events"]:
             assert ev["type"] in {"impersonation", "wallet_topup"}, ev
 
-    def test_filter_tenant_id(self, admin_headers):
+    def test_filter_tenant_id(self, admin_headers, tenant_info):
         r = requests.get(
-            f"{BASE_URL}/api/saas/audit-timeline?tenant_id={SAMPLE_TENANT_ID}",
+            f"{BASE_URL}/api/saas/audit-timeline?tenant_id={tenant_info['id']}",
             headers=admin_headers, timeout=30,
         )
         assert r.status_code == 200
-        for ev in r.json()["events"]:
-            # tenant_id may be None for events without a tenant; this filter must
-            # return only events whose tenant_id matches.
-            assert ev.get("tenant_id") == SAMPLE_TENANT_ID, ev
+        events = r.json()["events"]
+        assert len(events) == 2, events
+        for ev in events:
+            assert ev.get("tenant_id") == tenant_info["id"], ev
 
     def test_limit_param(self, admin_headers):
         r = requests.get(

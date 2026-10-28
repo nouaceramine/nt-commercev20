@@ -1,190 +1,142 @@
-"""Iter-19 bug-fix regression tests.
+"""Iter-19 regressions using only an isolated TEST-P486 tenant.
 
-Covers 4 fixes:
-  (1) /ecom-hub/channels render fix — backend supports listing channels (catalogue).
-  (2) Manual order Wilaya+Commune from algeriaGeo (FE only, smoke via order create).
-  (3) Manual order accepts items with `product_id` and the GET response carries it back.
-  (4) POST /api/purchases syncs purchase_price AND selling_price on products when
-      items[].selling_price > 0 (price-sync on purchase).
+Covers e-commerce channel catalogue, manual-order product links and purchase
+price synchronization without reading or mutating any production tenant.
 """
-import uuid
-import pytest
+import os
+
 import httpx
+import pytest
+import requests
 
-BASE_URL = "http://localhost:8001/api"
-SUPER_EMAIL = "admin@ntcommerce.com"
-SUPER_PASS = "Admin@2024"
-FOAD_TENANT_ID = "f2e36d2d-2a58-47c1-bdf5-c87f4bd7ae54"
-
-
-async def _login(email: str, password: str) -> str:
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"{BASE_URL}/auth/login", json={"email": email, "password": password})
-        assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
-        return r.json()["access_token"]
+BASE_URL = (
+    os.environ.get("P486_BASE")
+    or os.environ.get("REACT_APP_BACKEND_URL")
+    or "http://localhost:8001"
+).rstrip("/") + "/api"
 
 
-async def _impersonate_foad() -> dict:
-    super_token = await _login(SUPER_EMAIL, SUPER_PASS)
-    super_h = {"Authorization": f"Bearer {super_token}"}
-    async with httpx.AsyncClient(timeout=20) as client:
-        # Ensure feature flag is ON for FOAD tenant
-        await client.put(
-            f"{BASE_URL}/saas/tenants/{FOAD_TENANT_ID}/features",
-            headers=super_h,
-            json={"ecommerce_hub": True},
-        )
-        r = await client.post(f"{BASE_URL}/saas/impersonate/{FOAD_TENANT_ID}", headers=super_h)
-        assert r.status_code == 200, r.text
-        data = r.json()
-        return {
-            "Authorization": f"Bearer {data['access_token']}",
-        }
+@pytest.fixture(scope="module")
+def tenant_info(p486_tenant_factory):
+    return p486_tenant_factory("iter19-pos", ecommerce_hub=True)
 
 
-# (1) /ecom-hub/channels backend smoke
+@pytest.fixture(scope="module")
+def tenant_h(tenant_info):
+    return tenant_info["headers"]
+
+
+@pytest.fixture(scope="module")
+def test_product(tenant_h):
+    response = requests.post(
+        f"{BASE_URL}/products", headers=tenant_h,
+        json={
+            "name_en": "TEST-P486 Product",
+            "name_ar": "TEST-P486 Product",
+            "purchase_price": 100,
+            "retail_price": 200,
+            "quantity": 10,
+            "barcode": "TEST-P486-PRODUCT",
+        },
+        timeout=20,
+    )
+    assert response.status_code == 201, response.text[:400]
+    product = response.json()
+    assert product["id"]
+    return product
+
+
+@pytest.fixture(scope="module")
+def test_supplier(tenant_h):
+    response = requests.post(
+        f"{BASE_URL}/suppliers", headers=tenant_h,
+        json={"name": "TEST-P486 Supplier", "phone": "0555000486"}, timeout=20,
+    )
+    assert response.status_code in (200, 201), response.text[:400]
+    supplier = response.json()
+    assert supplier["id"]
+    return supplier
+
+
 @pytest.mark.asyncio
-async def test_ecom_channels_catalogue_includes_all_supported():
-    tenant_h = await _impersonate_foad()
+async def test_ecom_channels_catalogue_includes_all_supported(tenant_h):
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{BASE_URL}/ecom/channels", headers=tenant_h)
-        assert r.status_code == 200, r.text
-        keys = [c["key"] for c in r.json()["channels"]]
+        response = await client.get(f"{BASE_URL}/ecom/channels", headers=tenant_h)
+        assert response.status_code == 200, response.text
+        keys = [channel["key"] for channel in response.json()["channels"]]
         for expected in ("shopify", "facebook", "instagram", "tiktok", "whatsapp", "telegram", "viber"):
             assert expected in keys, f"missing sales channel: {expected}"
 
 
-# (3) Manual order accepts product_id and persists it
 @pytest.mark.asyncio
-async def test_manual_order_links_pos_product_id():
-    tenant_h = await _impersonate_foad()
+async def test_manual_order_links_pos_product_id(tenant_h, test_product):
     async with httpx.AsyncClient(timeout=20) as client:
-        # Fetch one POS product from this tenant
-        rp = await client.get(f"{BASE_URL}/products", headers=tenant_h)
-        assert rp.status_code == 200, rp.text
-        products = rp.json()
-        if not products:
-            pytest.skip("FOAD tenant has no POS products to link")
-        prod = products[0]
-        prod_id = prod["id"]
-
         payload = {
             "channel": "manual",
             "customer": {
-                "name": "TEST_iter19 ProductLink",
-                "phone": "0555000111",
+                "name": "TEST-P486 ProductLink",
+                "phone": "0555000486",
                 "wilaya": "الجزائر",
                 "city": "الجزائر الوسطى",
-                "address": "rue test",
+                "address": "TEST-P486",
             },
             "items": [{
-                "name": prod.get("name_ar") or prod.get("name_en") or "Test",
-                "sku": prod.get("barcode") or "",
+                "name": test_product.get("name_ar") or test_product["name_en"],
+                "sku": test_product.get("barcode") or "",
                 "qty": 1,
-                "price": float(prod.get("retail_price") or 100),
-                "product_id": prod_id,
+                "price": float(test_product.get("retail_price") or 100),
+                "product_id": test_product["id"],
             }],
             "shipping_fee": 0,
-            "notes": "iter-19 product_id link test",
+            "notes": "TEST-P486 product_id link",
         }
-        rc = await client.post(f"{BASE_URL}/ecom/orders", headers=tenant_h, json=payload)
-        assert rc.status_code == 200, rc.text
-        order = rc.json()
+        created = await client.post(f"{BASE_URL}/ecom/orders", headers=tenant_h, json=payload)
+        assert created.status_code == 200, created.text
+        order = created.json()
         order_id = order["id"]
-        # product_id must round-trip
-        assert order["items"][0].get("product_id") == prod_id, \
-            f"product_id not retained: {order['items'][0]}"
-
-        # GET to re-confirm persistence
-        rg = await client.get(f"{BASE_URL}/ecom/orders/{order_id}", headers=tenant_h)
-        assert rg.status_code == 200
-        got = rg.json()
-        assert got["items"][0].get("product_id") == prod_id
-
-        # Cleanup: cancel + delete
-        await client.put(
-            f"{BASE_URL}/ecom/orders/{order_id}/status",
-            headers=tenant_h,
-            json={"status": "cancelled"},
-        )
-        await client.delete(f"{BASE_URL}/ecom/orders/{order_id}", headers=tenant_h)
-
-
-# (4) Purchases price-sync (purchase_price AND selling_price)
-@pytest.mark.asyncio
-async def test_purchase_syncs_both_prices_on_product():
-    tenant_h = await _impersonate_foad()
-    async with httpx.AsyncClient(timeout=20) as client:
-        # Pick a product
-        rp = await client.get(f"{BASE_URL}/products", headers=tenant_h)
-        assert rp.status_code == 200
-        products = rp.json()
-        if not products:
-            pytest.skip("FOAD tenant has no products")
-        prod = products[0]
-        prod_id = prod["id"]
-        original_purchase_price = prod.get("purchase_price")
-        original_selling_price = prod.get("selling_price") or prod.get("retail_price")
-
-        # Need a supplier — fetch or create
-        rs = await client.get(f"{BASE_URL}/suppliers", headers=tenant_h)
-        suppliers = rs.json() if rs.status_code == 200 else []
-        if not suppliers:
-            cs = await client.post(
-                f"{BASE_URL}/suppliers",
-                headers=tenant_h,
-                json={"name": f"TEST_iter19_supplier_{uuid.uuid4().hex[:6]}", "phone": "0555"},
+        try:
+            assert order["items"][0].get("product_id") == test_product["id"]
+            fetched = await client.get(f"{BASE_URL}/ecom/orders/{order_id}", headers=tenant_h)
+            assert fetched.status_code == 200, fetched.text
+            assert fetched.json()["items"][0].get("product_id") == test_product["id"]
+        finally:
+            await client.put(
+                f"{BASE_URL}/ecom/orders/{order_id}/status",
+                headers=tenant_h, json={"status": "cancelled"},
             )
-            assert cs.status_code in (200, 201), cs.text
-            supplier_id = cs.json()["id"]
-        else:
-            supplier_id = suppliers[0]["id"]
+            await client.delete(f"{BASE_URL}/ecom/orders/{order_id}", headers=tenant_h)
 
-        # Use a unique new purchase price + selling price
-        new_purchase_price = 999.99
-        new_selling_price = 1499.99
 
-        # Need a cash_box for payment_method
-        rcb = await client.get(f"{BASE_URL}/cash-boxes", headers=tenant_h)
-        cash_boxes = rcb.json() if rcb.status_code == 200 else []
+@pytest.mark.asyncio
+async def test_purchase_syncs_both_prices_on_product(tenant_h, test_product, test_supplier):
+    async with httpx.AsyncClient(timeout=20) as client:
+        cash_boxes_response = await client.get(f"{BASE_URL}/cash-boxes", headers=tenant_h)
+        assert cash_boxes_response.status_code == 200, cash_boxes_response.text
+        cash_boxes = cash_boxes_response.json()
         payment_method = cash_boxes[0]["id"] if cash_boxes else "cash"
-
+        new_purchase_price = 999.99
+        new_retail_price = 1499.99
         purchase_payload = {
-            "supplier_id": supplier_id,
+            "supplier_id": test_supplier["id"],
             "items": [{
-                "product_id": prod_id,
-                "product_name": prod.get("name_ar") or prod.get("name_en") or "TEST_iter19",
+                "product_id": test_product["id"],
+                "product_name": test_product.get("name_ar") or test_product["name_en"],
                 "quantity": 1,
                 "unit_price": new_purchase_price,
                 "total": new_purchase_price,
-                "selling_price": new_selling_price,
+                "retail_price": new_retail_price,
                 "update_product_prices": True,
             }],
             "total": new_purchase_price,
             "paid_amount": 0,
             "payment_method": payment_method,
-            "notes": "TEST_iter19_price_sync",
+            "notes": "TEST-P486 price sync",
         }
-        rpost = await client.post(f"{BASE_URL}/purchases", headers=tenant_h, json=purchase_payload)
-        assert rpost.status_code in (200, 201), rpost.text
+        created = await client.post(f"{BASE_URL}/purchases", headers=tenant_h, json=purchase_payload)
+        assert created.status_code in (200, 201), created.text
 
-        # Re-GET the product
-        rget = await client.get(f"{BASE_URL}/products/{prod_id}", headers=tenant_h)
-        assert rget.status_code == 200
-        updated = rget.json()
-
-        assert float(updated["purchase_price"]) == pytest.approx(new_purchase_price, rel=1e-3), \
-            f"purchase_price did not sync: {updated.get('purchase_price')}"
-        assert float(updated["selling_price"]) == pytest.approx(new_selling_price, rel=1e-3), \
-            f"selling_price did not sync: {updated.get('selling_price')}"
-
-        # Restore (best-effort)
-        if original_purchase_price is not None and original_selling_price is not None:
-            try:
-                await client.put(
-                    f"{BASE_URL}/products/{prod_id}",
-                    headers=tenant_h,
-                    json={"purchase_price": original_purchase_price, "selling_price": original_selling_price},
-                )
-            except Exception:
-                pass
+        updated_response = await client.get(f"{BASE_URL}/products/{test_product['id']}", headers=tenant_h)
+        assert updated_response.status_code == 200, updated_response.text
+        updated = updated_response.json()
+        assert float(updated["purchase_price"]) == pytest.approx(new_purchase_price, rel=1e-3)
+        assert float(updated["retail_price"]) == pytest.approx(new_retail_price, rel=1e-3)

@@ -6448,3 +6448,37 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 
 **النشر:** release 20260825_000806، main.8afde5ad.js.
 
+
+
+## p486 — إغلاق نتائج Bandit واستقلال الاختبارات ومنتج POS المخصص (2026-10-28)
+
+**النطاق:** 18 ملف مصدر فقط؛ لا تغيير على تصميم سطح المكتب أو ألوانه أو خطوطه أو تخطيطه.
+
+**الإصلاحات:**
+- `database_routes.py`: تشغيل محوّل Access عبر `sys.executable` وتصحيح مساره داخل الحاوية إلى `/app/scripts/convert_access_db.py`؛ أثبت التحقق وجود المسار.
+- `convert_access_db.py` و`bdv_service.py`: حصر أدوات `mdb-tables` و`mdb-export`، وحلّ مساراتها المطلقة عبر `shutil.which`، والفشل المغلق عند غيابها، ومهل للعمليات؛ دون `shell=True` أو تثبيت جديد لـ`emergentintegrations`.
+- `init_production.py`: إزالة كلمة المرور الافتراضية؛ أصبح `ADMIN_PASSWORD` إلزاميًا وبحد أدنى 12 حرفًا، ويفشل قبل الاتصال أو التعديل عند غيابه.
+- `wallet_billing_routes.py`: تصحيح عقد `settle-credit` لإرجاع كائن `transaction` الفعلي مع الرسالة والدين المتبقي بدل إضعاف الاختبار.
+- `usePOSCart.js`: نقل منطق المنتج المخصص إلى `addCustomItem` مع التحقق من الاسم والسعر والكمية ودعم وضع الإرجاع؛ `POSPage.js` يستهلك الـhook فقط، دون تغيير JSX أو التصميم.
+- الاختبارات: fixtures مستقلة موسومة `TEST-P486` بدل التجاوزات الشرطية والاعتماد على FOAD أو NT-0004 أو بيانات حقيقية؛ اختبارات الأسعار تستخدم `retail_price` canonical.
+
+**الفحوص على staging:**
+- Jest: 142/142 عبر 14 حزمة؛ ESLint الكامل: 0 أخطاء و0 تحذيرات.
+- Ruff الكامل وAST لـ393 ملف Python وcompileall وpip check وimport main: ناجحة.
+- اختبارات الأمن: 13/13؛ التكامل المعدل: 120/120؛ العزل: 48/48.
+- الكنيس: 1734 PASS / 0 FAIL عبر 85 حزمة في 653 ثانية.
+- Semgrep: 450 قاعدة على 757 ملفًا و0 findings؛ أُغلق timeoutا `restaurant_routes.py` بفحص مستهدف ناجح 291 قاعدة و0 findings و0 errors.
+- Bandit لكود التشغيل دون tests: 0 high و0 medium و304 low و0 errors (B110=172، B112=12، B105=100، B404=3، B603=5، B311=12). لم تُضف `nosec` أو suppressions.
+- `TEST-P486` residue=0؛ قواعد legacy الثلاث في staging بقيت كما هي، وmarked orphan=0.
+
+**نقاط ضعف متبقية موثقة ولم تُخفَ:**
+- `dnspython==2.8.0`: CVE-2026-114605 / GHSA-45c3-73f7-pv4m؛ الإصلاح المتاح 2.9.0. ظهر في تدقيق متطلبات staging وفي تدقيق `pip freeze` الفعلي للإنتاج؛ لم يُرفع الإصدار في p486.
+- npm audit: 15 نتيجة low في اعتماديات التطوير، و0 في runtime. السلسلة الأساسية `deepmerge` عبر react-scripts/Jest/SVGR/workbox؛ لم تُطبق ترقيات major/downgrade عمياء.
+
+**النشر والتحقق الإنتاجي:**
+- نسخ احتياطية في `/opt/ntcommerce/backups/p486/`، وواجهة مستقلة في `/opt/ntcommerce/releases/frontend_p486_20261028` (713 ملفًا).
+- الحزمة الحية `main.f2e8e88a.js`؛ CSS بقي `main.818b1bb1.css`؛ الحزمة السابقة `main.b2f0ab89.js` محفوظة وتستجيب 200. ملفات webroot قبل 2957 وبعد 2962، وفقد الملفات القديمة=0.
+- Backend health=200 وimport main ناجح بعد النشر؛ الموقع والحزمة الجديدة والقديمة كلها 200.
+- الكنيس الإنتاجي النهائي: **1734 PASS / 0 FAIL عبر 85 حزمة في 1791 ثانية**، و`SWEEP_DONE ALL_OK`، ومنه العزل 48/48.
+- بعد الكنيس: TEST tenant=0، TEST plan=0، active tenant databases=28، legacy orphan databases=122 دون تغيير أو حذف، marked orphan=0. حُذفت رموز الاختبار المؤقتة.
+- NT-0004 (`a24f0b7e-88ea-43c0-9f27-b5d459fe28d6`) موجود ونشط؛ `features_override` بقي كما هو، بما فيه `ecommerce_hub=true`، ولم تُمس بياناته.

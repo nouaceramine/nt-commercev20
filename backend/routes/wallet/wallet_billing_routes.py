@@ -190,6 +190,6 @@ def create_wallet_billing_routes(db, main_db, get_current_user, get_super_admin)
             await invalidate_tenant_debts_cache()
         except Exception:
             pass
-        return {"message": "تم التسديد", "credit_debt_remaining": new_debt}
+        return {"message": "تم التسديد", "credit_debt_remaining": new_debt, "transaction": txn}
 
     return router

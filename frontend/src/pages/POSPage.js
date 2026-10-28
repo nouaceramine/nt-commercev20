@@ -1102,7 +1102,12 @@ export default function POSPage() {
           setShowSessionDetailsDialog={session.setShowSessionDetailsDialog} t={t}
           showCustomProductDialog={showCustomProductDialog}
           setShowCustomProductDialog={setShowCustomProductDialog} customProduct={customProduct}
-          setCustomProduct={setCustomProduct} addCustomProductToCart={() => { /* TODO: move to hook */ }}
+          setCustomProduct={setCustomProduct} addCustomProductToCart={() => {
+            if (cart.addCustomItem(customProduct)) {
+              setShowCustomProductDialog(false);
+              setCustomProduct({ name: '', price: '', qty: 1 });
+            }
+          }}
           showPosReportsDialog={showPosReportsDialog} setShowPosReportsDialog={setShowPosReportsDialog}
           customerFamilyFilter={customerFamilyFilter} customerFamilies={customerFamilies}
         />

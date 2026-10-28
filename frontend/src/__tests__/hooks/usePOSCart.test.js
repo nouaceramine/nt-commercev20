@@ -99,6 +99,57 @@ describe('usePOSCart', () => {
     });
   });
 
+  // ── addCustomItem ────────────────────────────────────────────────
+  describe('addCustomItem', () => {
+    it('should add a validated custom product without a catalog product id', () => {
+      const { result } = renderHook(() => usePOSCart(defaultProps));
+
+      let added;
+      act(() => {
+        added = result.current.addCustomItem({ name: '  خدمة تركيب  ', price: '250.50', qty: 2 });
+      });
+
+      expect(added).toBe(true);
+      expect(result.current.cart).toHaveLength(1);
+      expect(result.current.cart[0]).toMatchObject({
+        product_id: null,
+        product_name: 'خدمة تركيب',
+        quantity: 2,
+        unit_price: 250.50,
+        total: 501,
+        is_custom: true,
+      });
+    });
+
+    it.each([
+      [{ name: ' ', price: 100, qty: 1 }],
+      [{ name: 'خدمة', price: '', qty: 1 }],
+      [{ name: 'خدمة', price: -1, qty: 1 }],
+      [{ name: 'خدمة', price: 100, qty: 0 }],
+      [{ name: 'خدمة', price: 100, qty: 1.5 }],
+    ])('should reject invalid custom product input %#', (input) => {
+      const { result } = renderHook(() => usePOSCart(defaultProps));
+
+      let added;
+      act(() => { added = result.current.addCustomItem(input); });
+
+      expect(added).toBe(false);
+      expect(result.current.cart).toHaveLength(0);
+      expect(mockToast.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('should use a negative quantity in return mode', () => {
+      const { result } = renderHook(() => usePOSCart(defaultProps));
+
+      act(() => { result.current.toggleReturnMode(); });
+      act(() => { result.current.addCustomItem({ name: 'خدمة', price: 100, qty: 2 }); });
+
+      expect(result.current.cart[0].quantity).toBe(-2);
+      expect(result.current.cart[0].total).toBe(-200);
+      expect(result.current.cart[0].is_return).toBe(true);
+    });
+  });
+
   // ── removeItem ───────────────────────────────────────────────────
   describe('removeItem', () => {
     it('should remove an item from cart', () => {

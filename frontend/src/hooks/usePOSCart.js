@@ -112,11 +112,45 @@ export function usePOSCart({ language, toast }) {
         available_stock: variant ? variant.quantity : product.quantity,
         is_return: returnMode,
         is_fixed_price: product.fixed_price || false,
+        is_custom: product.is_custom || false,
         serial_number: serialNumber || '',
       }]);
     }
     playBeep(returnMode ? 800 : 1200);
   }, [cart, returnMode, playBeep]);
+
+  const addCustomItem = useCallback(({ name, price, qty }) => {
+    const trimmedName = String(name || '').trim();
+    const numericPrice = Number(price);
+    const numericQty = Number(qty);
+
+    if (!trimmedName) {
+      toast.error(language === 'ar' ? 'أدخل اسم المنتج' : 'Saisissez le nom du produit');
+      return false;
+    }
+    if (price === '' || price == null || !Number.isFinite(numericPrice) || numericPrice < 0) {
+      toast.error(language === 'ar' ? 'أدخل سعراً صحيحاً' : 'Saisissez un prix valide');
+      return false;
+    }
+    if (!Number.isInteger(numericQty) || numericQty <= 0) {
+      toast.error(language === 'ar' ? 'أدخل كمية صحيحة' : 'Saisissez une quantité valide');
+      return false;
+    }
+
+    addItem({
+      id: null,
+      name: trimmedName,
+      barcode: '',
+      article_code: '',
+      quantity: null,
+      retail_price: numericPrice,
+      is_custom: true,
+    }, {
+      overrideQty: returnMode ? -numericQty : numericQty,
+      overridePrice: numericPrice,
+    });
+    return true;
+  }, [addItem, returnMode, language, toast]);
 
   const removeItem = useCallback((cartItemId) => {
     setCart(prev => prev.filter(item => item.cart_item_id !== cartItemId));
@@ -238,7 +272,7 @@ export function usePOSCart({ language, toast }) {
     // Computed
     subtotal,
     // Actions
-    addItem, removeItem, updateItemQuantity, updateItemPrice,
+    addItem, addCustomItem, removeItem, updateItemQuantity, updateItemPrice,
     updateItemDiscount, updateItemNote, clear, parkCart,
     resumeParkedCart, deleteParkedCart, toggleReturnMode,
     playBeep,

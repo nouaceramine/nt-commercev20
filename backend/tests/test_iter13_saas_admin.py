@@ -9,8 +9,8 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://nt-v16-staging.preview.emergentagent.com").rstrip("/")
-ADMIN_EMAIL = "admin@ntcommerce.com"
-ADMIN_PASSWORD = "Admin@2024"
+ADMIN_EMAIL = os.environ.get("TEST_SUPER_ADMIN_EMAIL", "admin@ntcommerce.com")
+ADMIN_PASSWORD = os.environ.get("TEST_SUPER_ADMIN_PASSWORD", "Admin@2024")
 
 
 @pytest.fixture(scope="session")
@@ -63,15 +63,9 @@ class TestPlatformStatsServices:
 # ─── Settle Debt flow ───
 class TestSettleCredit:
     @pytest.fixture(scope="class")
-    def tenant_with_debt(self, admin_headers):
-        # Look up tenants with credit_debt > 0 via /api/wallet/all
-        r = requests.get(f"{BASE_URL}/api/wallet/all", headers=admin_headers, timeout=15)
-        assert r.status_code == 200, r.text
-        wallets = r.json()
-        debtors = [w for w in wallets if float(w.get("credit_debt") or 0) > 0 and w.get("entity_type") == "tenant"]
-        if not debtors:
-            pytest.skip("No tenant wallet with credit_debt > 0 available for test")
-        return debtors[0]
+    def tenant_with_debt(self, p486_tenant_factory):
+        tenant = p486_tenant_factory("iter13-debt", debt=100)
+        return {"entity_id": tenant["id"], "credit_debt": 100.0}
 
     def test_settle_credit_happy_path(self, admin_headers, tenant_with_debt):
         entity_id = tenant_with_debt["entity_id"]
