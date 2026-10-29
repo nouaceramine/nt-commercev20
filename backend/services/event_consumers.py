@@ -435,6 +435,30 @@ async def handle_purchase_recorded(event: Event) -> None:
         log.warning("auto-accounting purchase %s failed: %s", p.get("purchase_id"), exc)
 
 
+async def handle_purchase_payment_adjusted(event: Event) -> None:
+    """Tenant purchase payment changed → balanced cash/AP adjustment."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_purchase_payment_adjustment
+        await post_purchase_payment_adjustment(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting purchase payment %s failed: %s", p.get("purchase_id"), exc)
+
+
+async def handle_purchase_deleted(event: Event) -> None:
+    """Tenant purchase deleted → reverse its net accounting effect exactly once."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_purchase_reversal
+        await post_purchase_reversal(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting purchase delete %s failed: %s", p.get("purchase_id"), exc)
+
+
 async def handle_expense_created(event: Event) -> None:
     """Tenant expense created → auto journal entry (Dr expenses / Cr cash-box)."""
     p = event.payload or {}
@@ -777,6 +801,8 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("sale.refunded", handle_sale_refunded)
     bus.register("sale.deleted", handle_sale_deleted)  # p190
     bus.register("purchase.recorded", handle_purchase_recorded)  # p193
+    bus.register("purchase.payment_adjusted", handle_purchase_payment_adjusted)  # p488
+    bus.register("purchase.deleted", handle_purchase_deleted)  # p488
     bus.register("expense.created", handle_expense_created)  # p193
     bus.register("expense.deleted", handle_expense_deleted)  # p193
     bus.register("expense.updated", handle_expense_updated)  # p201

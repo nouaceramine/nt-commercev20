@@ -549,19 +549,44 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
 
 
 async def return_sale_op(db, sale_id: str, user: dict) -> None:
-    """p189: ACID wrapper — full reversal commits atomically in one transaction."""
+    """ACID, idempotent return; a concurrent retry re-reads the claimed state."""
+    import asyncio
     from config.database import client
-    async with await client.start_session() as _tx_session:
-        async with _tx_session.start_transaction():
-            await _return_sale_impl(db, sale_id, user, _tx_session)
+    from pymongo.errors import PyMongoError
+    for _attempt in range(5):
+        try:
+            async with await client.start_session() as _tx_session:
+                async with _tx_session.start_transaction():
+                    await _return_sale_impl(db, sale_id, user, _tx_session)
+            return
+        except PyMongoError as exc:
+            if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                raise
+            # A competing request may already have committed the return. Do
+            # not retry its stock/cash effects; report the same idempotent 409
+            # as a sequential second return. Otherwise back off before retry.
+            existing = await db.sales.find_one({"id": sale_id}, {"_id": 0, "status": 1})
+            if existing and existing.get("status") == "returned":
+                raise HTTPException(status_code=409, detail="Sale already returned")
+            await asyncio.sleep(0.02 * (2 ** _attempt))
 
 
 async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
     """Return a sale: restore stock, revert customer stats, reverse cash."""
-    sale = await db.sales.find_one({"id": sale_id})
-    if not sale:
-        raise HTTPException(status_code=404, detail="Sale not found")
     now = datetime.now(timezone.utc).isoformat()
+    # Claim the return atomically before reversing anything. The transaction
+    # rolls this status back if any later effect fails; an already returned
+    # sale can never restore stock, customer mirrors or cash a second time.
+    sale = await db.sales.find_one_and_update(
+        {"id": sale_id, "status": {"$ne": "returned"}},
+        {"$set": {"status": "returned", "updated_at": now}},
+        session=_tx,
+    )
+    if sale is None:
+        existing = await db.sales.find_one({"id": sale_id}, {"_id": 0, "status": 1}, session=_tx)
+        if existing:
+            raise HTTPException(status_code=409, detail="Sale already returned")
+        raise HTTPException(status_code=404, detail="Sale not found")
 
     for item in sale["items"]:
         await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
@@ -603,8 +628,6 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
             "reference_type": "return", "reference_id": sale_id,
             "created_at": now, "created_by": user["name"]
         }, session=_tx)
-
-    await db.sales.update_one({"id": sale_id}, {"$set": {"status": "returned"}}, session=_tx)
 
     # p189: outbox event (same transaction)
     from services.outbox import outbox_write

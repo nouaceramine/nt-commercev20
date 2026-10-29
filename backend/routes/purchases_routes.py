@@ -30,7 +30,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         notes: Optional[str] = None
 
     # ── Create Purchase ──
-    async def _sync_item_extras(product, item: dict, ref: str, now: str, admin_name: str):
+    async def _sync_item_extras(product, item: dict, ref: str, now: str, admin_name: str, session=None):
         # p168: sale price entered on the purchase → canonical retail_price + price_history;
         #        expiry date → auto-create a product lot (feeds expiry notifications).
         pid = product.get("id")
@@ -40,7 +40,9 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             old_rp = float(product.get("retail_price") or 0)
             new_rp = float(rp)
             if new_rp != old_rp:
-                await db.products.update_one({"id": pid}, {"$set": {"retail_price": new_rp, "updated_at": now}})
+                await db.products.update_one(
+                    {"id": pid}, {"$set": {"retail_price": new_rp, "updated_at": now}}, session=session
+                )
                 await db.price_history.insert_one({
                     "id": str(uuid.uuid4()),
                     "product_id": pid,
@@ -54,7 +56,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     "source": "purchase",
                     "reference": ref,
                     "created_at": now,
-                })
+                }, session=session)
         exp = (item.get("expiry_date") or "").strip()
         if exp:
             await db.product_lots.insert_one({
@@ -65,36 +67,101 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 "quantity": float(item.get("quantity", 0) or 0),
                 "alert_days": int(item.get("alert_days") or 30),
                 "created_at": now,
-            })
+            }, session=session)
 
-    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "", admin_name: str = ""):
-        # sign=+1 confirm stock, sign=-1 reverse
-        price_changes = []  # p359: انحراف كلفة الوصفات
+    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "", admin_name: str = "", session=None):
+        # Shared by direct creation and draft confirmation so every stock
+        # activation applies the same price, history, lot and alert semantics.
+        price_changes = []
         for item in items:
             pid = item.get("product_id")
             qty = item.get("quantity", 0)
             if not pid or not qty:
                 continue
-            product = await db.products.find_one({"id": pid})
+            product = await db.products.find_one({"id": pid}, session=session)
             if not product:
                 continue
+            old_quantity = float(product.get("quantity", 0) or 0)
             updates = {"$inc": {"quantity": sign * qty}}
-            if sign > 0 and sync_prices:
-                # p171: purchase_price always syncs; sale price goes ONLY to retail_price via _sync_item_extras
-                updates["$set"] = {"purchase_price": float(item.get("unit_price", 0) or 0), "updated_at": now}
-                # p359: capture price change BEFORE it lands
-                old_pp = float(product.get("purchase_price") or 0)
-                new_pp = float(item.get("unit_price", 0) or 0)
+            sync_item_price = sync_prices and item.get("update_product_prices") is not False
+            old_pp = float(product.get("purchase_price") or 0)
+            new_pp = float(item.get("unit_price", 0) or 0)
+            if sign > 0 and sync_item_price:
+                updates["$set"] = {"purchase_price": new_pp, "updated_at": now}
                 if old_pp > 0 and abs(new_pp - old_pp) > 1e-9:
                     price_changes.append({"product_id": pid, "name": product.get("name_ar") or product.get("name_en") or pid,
                                           "old_price": old_pp, "new_price": new_pp})
-            await db.products.update_one({"id": pid}, updates)
+            await db.products.update_one({"id": pid}, updates, session=session)
             if sign > 0:
-                await _sync_item_extras(product, item, ref, now, admin_name)
-        # p359: recipe cost-drift alerts (confirm path)
+                if sync_item_price and abs(new_pp - old_pp) > 1e-9:
+                    await db.price_history.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "product_id": pid,
+                        "product_name": product.get("name_ar") or product.get("name_en") or "",
+                        "old_price": old_pp,
+                        "new_price": new_pp,
+                        "price_type": "purchase_price",
+                        "change_percent": round(((new_pp - old_pp) / old_pp) * 100, 2) if old_pp else 0.0,
+                        "changed_by": admin_name,
+                        "changed_by_name": admin_name,
+                        "source": "purchase",
+                        "reference": ref,
+                        "created_at": now,
+                    }, session=session)
+                await _sync_item_extras(product, item, ref, now, admin_name, session=session)
+                if old_quantity == 0 and qty > 0:
+                    await db.notifications.insert_one({
+                        "id": str(uuid.uuid4()), "type": "restock",
+                        "message_en": f"Product '{product.get('name_en')}' is back in stock!",
+                        "message_ar": f"المنتج '{product.get('name_ar')}' متوفر مرة أخرى!",
+                        "product_id": pid, "read": False, "created_at": now,
+                    }, session=session)
         if price_changes:
             from services.cost_drift import check_cost_drift
             await check_cost_drift(db, price_changes, ref_label=ref, user_name=admin_name)
+
+    async def _activate_purchase_financials(purchase_doc: dict, admin: dict, session=None):
+        # Financial activation is separate from stock activation: an
+        # unconfirmed draft remains inert, while confirmation activates both.
+        await adjust_supplier_mirror(
+            db, purchase_doc["supplier_id"],
+            total_purchases=purchase_doc.get("total", 0),
+            balance=purchase_doc.get("remaining", 0),
+            session=session,
+        )
+        paid = float(purchase_doc.get("paid_amount", 0) or 0)
+        if paid > 0:
+            method = purchase_doc.get("payment_method", "cash")
+            await db.cash_boxes.update_one(
+                {"id": method},
+                {"$inc": {"balance": -paid}, "$set": {"updated_at": purchase_doc.get("updated_at") or purchase_doc.get("created_at")}},
+                session=session,
+            )
+            await db.transactions.insert_one({
+                "id": str(uuid.uuid4()), "cash_box_id": method,
+                "type": "expense", "amount": paid,
+                "description": f"مشتريات - فاتورة {purchase_doc.get('invoice_number', '')}",
+                "reference_type": "purchase", "reference_id": purchase_doc["id"],
+                "created_at": purchase_doc.get("updated_at") or purchase_doc.get("created_at"),
+                "created_by": admin.get("name", ""),
+            }, session=session)
+        from services.outbox import outbox_write
+        from config.database import main_db as _main_db
+        await outbox_write(
+            _main_db, "purchase.recorded",
+            {
+                "purchase_id": purchase_doc["id"],
+                "invoice_number": purchase_doc.get("invoice_number", ""),
+                "total": purchase_doc.get("total", 0),
+                "paid_amount": paid,
+                "remaining": purchase_doc.get("remaining", 0),
+                "payment_method": purchase_doc.get("payment_method", "cash"),
+                "supplier_id": purchase_doc.get("supplier_id"),
+            },
+            tenant_id=admin.get("tenant_id") or "platform",
+            source="purchases_routes",
+            session=session,
+        )
 
     @router.post("", status_code=201)
     async def create_purchase(purchase: dict, admin: dict = Depends(require_permission("purchases.add"))):
@@ -132,87 +199,18 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 purchase_doc["warehouse_name"] = wh.get("name", purchase_doc["warehouse_name"])
         confirm_stock = purchase.get("confirm_stock", True)
         purchase_doc["stock_status"] = "confirmed" if confirm_stock else "draft"
+        purchase_doc["financial_status"] = "active" if confirm_stock else "inactive"
         await db.purchases.insert_one(purchase_doc)
 
         if not confirm_stock:
             purchase_doc.pop("_id", None)
             return purchase_doc
 
-        price_changes = []  # p359: انحراف كلفة الوصفات
-        for item in p.items:
-            product = await db.products.find_one({"id": item.product_id})
-            old_quantity = product.get("quantity", 0) if product else 0
-
-            # ── Build product update: quantity + optionally prices ──
-            product_updates: dict = {"$inc": {"quantity": item.quantity}}
-            set_fields: dict = {}
-            if product and item.product_id and (item.update_product_prices is None or item.update_product_prices):
-                # Always sync purchase_price to the latest unit_price on purchase
-                set_fields["purchase_price"] = float(item.unit_price)
-                # p171: sale price syncs ONLY to retail_price (see _sync_item_extras) — selling_price is dead
-                set_fields["updated_at"] = now
-            if set_fields:
-                product_updates["$set"] = set_fields
-                # p359: capture price change BEFORE it lands
-                old_pp = float((product or {}).get("purchase_price") or 0)
-                new_pp = float(item.unit_price or 0)
-                if product and old_pp > 0 and abs(new_pp - old_pp) > 1e-9:
-                    price_changes.append({"product_id": item.product_id,
-                                          "name": product.get("name_ar") or product.get("name_en") or item.product_id,
-                                          "old_price": old_pp, "new_price": new_pp})
-
-            await db.products.update_one({"id": item.product_id}, product_updates)
-
-            if product:
-                await _sync_item_extras(product, item.model_dump(), invoice_number, now, admin.get("name", ""))
-
-            if old_quantity == 0 and item.quantity > 0 and product:
-                await db.notifications.insert_one({
-                    "id": str(uuid.uuid4()), "type": "restock",
-                    "message_en": f"Product '{product.get('name_en')}' is back in stock!",
-                    "message_ar": f"المنتج '{product.get('name_ar')}' متوفر مرة أخرى!",
-                    "product_id": item.product_id, "read": False, "created_at": now
-                })
-
-        # p359: recipe cost-drift alerts (create path)
-        if price_changes:
-            from services.cost_drift import check_cost_drift
-            await check_cost_drift(db, price_changes, ref_label=invoice_number, user_name=admin.get("name", ""))
-
-        await adjust_supplier_mirror(db, p.supplier_id,
-            total_purchases=p.total, balance=remaining)
-
-        # p62: "personal" (مالي الخاص) lives outside business cash boxes — no deduction
-        if p.paid_amount > 0:  # p68: personal box tracks it too
-            await db.cash_boxes.update_one(
-                {"id": p.payment_method},
-                {"$inc": {"balance": -p.paid_amount}, "$set": {"updated_at": now}}
-            )
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()), "cash_box_id": p.payment_method,
-                "type": "expense", "amount": p.paid_amount,
-                "description": f"مشتريات - فاتورة {invoice_number}",
-                "reference_type": "purchase", "reference_id": purchase_id,
-                "created_at": now, "created_by": admin["name"]
-            })
-
-        # p193: transactional outbox → auto journal entry (purchase.recorded)
-        from services.outbox import outbox_write
-        from config.database import main_db as _main_db
-        await outbox_write(
-            _main_db, "purchase.recorded",
-            {
-                "purchase_id": purchase_id,
-                "invoice_number": invoice_number,
-                "total": p.total,
-                "paid_amount": p.paid_amount,
-                "remaining": max(0, remaining),
-                "payment_method": p.payment_method,
-                "supplier_id": p.supplier_id,
-            },
-            tenant_id=admin.get("tenant_id") or "platform",
-            source="purchases_routes",
+        await _apply_purchase_stock(
+            [item.model_dump() for item in p.items], +1, now,
+            ref=invoice_number, admin_name=admin.get("name", ""),
         )
+        await _activate_purchase_financials(purchase_doc, admin)
 
         purchase_doc.pop("_id", None)
         return purchase_doc
@@ -364,15 +362,62 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Get Single Purchase ──
     @router.post("/{purchase_id}/confirm-stock")
     async def confirm_purchase_stock(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
-        purchase_doc = await db.purchases.find_one({"id": purchase_id})
-        if not purchase_doc:
-            raise HTTPException(status_code=404, detail="Purchase not found")
-        if purchase_doc.get("stock_status") == "confirmed":
-            return {"message": "المخزون مؤكد مسبقاً", "stock_status": "confirmed"}
-        now = datetime.now(timezone.utc).isoformat()
-        await _apply_purchase_stock(purchase_doc.get("items", []), +1, now, ref=purchase_doc.get("invoice_number", ""), admin_name=admin.get("name", ""))
-        await db.purchases.update_one({"id": purchase_id}, {"$set": {"stock_status": "confirmed", "updated_at": now}})
-        return {"message": "تم تأكيد المخزون", "stock_status": "confirmed"}
+        # Claim and activate in one transaction. Concurrent confirmations retry
+        # the write conflict, then observe the committed state without applying
+        # stock, supplier, cash, price-history or accounting effects twice.
+        import asyncio
+        from config.database import client
+        from pymongo.errors import PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        now = datetime.now(timezone.utc).isoformat()
+                        purchase_doc = await db.purchases.find_one_and_update(
+                            {"id": purchase_id, "stock_status": {"$ne": "confirmed"}},
+                            {"$set": {"stock_status": "confirmed", "updated_at": now}},
+                            session=tx_session,
+                        )
+                        if purchase_doc is None:
+                            existing = await db.purchases.find_one(
+                                {"id": purchase_id}, {"_id": 0, "stock_status": 1, "financial_status": 1},
+                                session=tx_session,
+                            )
+                            if not existing:
+                                raise HTTPException(status_code=404, detail="Purchase not found")
+                            return {
+                                "message": "المخزون مؤكد مسبقاً", "stock_status": "confirmed",
+                                "financial_status": existing.get("financial_status"),
+                            }
+                        await _apply_purchase_stock(
+                            purchase_doc.get("items", []), +1, now,
+                            ref=purchase_doc.get("invoice_number", ""), admin_name=admin.get("name", ""),
+                            session=tx_session,
+                        )
+                        financial_status = purchase_doc.get("financial_status", "inactive")
+                        if financial_status == "inactive":
+                            financial_doc = {**purchase_doc, "updated_at": now}
+                            await _activate_purchase_financials(financial_doc, admin, session=tx_session)
+                            financial_status = "active"
+                            await db.purchases.update_one(
+                                {"id": purchase_id}, {"$set": {"financial_status": "active"}}, session=tx_session
+                            )
+                        return {
+                            "message": "تم تأكيد المخزون", "stock_status": "confirmed",
+                            "financial_status": financial_status,
+                        }
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                existing = await db.purchases.find_one(
+                    {"id": purchase_id}, {"_id": 0, "stock_status": 1, "financial_status": 1}
+                )
+                if existing and existing.get("stock_status") == "confirmed":
+                    return {
+                        "message": "المخزون مؤكد مسبقاً", "stock_status": "confirmed",
+                        "financial_status": existing.get("financial_status"),
+                    }
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     @router.post("/{purchase_id}/reopen")
     async def reopen_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
@@ -402,88 +447,146 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
 
         now = datetime.now(timezone.utc).isoformat()
         update_dict = {"updated_at": now, "updated_by": admin["name"]}
-        old_paid = purchase.get("paid_amount", 0)
-        old_total = purchase.get("total", 0)
-        old_remaining = purchase.get("remaining", 0)
+        old_paid = float(purchase.get("paid_amount", 0) or 0)
+        old_total = float(purchase.get("total", 0) or 0)
+        old_remaining = float(purchase.get("remaining", 0) or 0)
+        payment_diff = 0.0
+        financial_active = purchase.get("financial_status") == "active" or (
+            "financial_status" not in purchase and purchase.get("stock_status", "confirmed") == "confirmed"
+        )
 
         if update_data.paid_amount is not None:
-            new_paid = update_data.paid_amount
+            new_paid = float(update_data.paid_amount)
+            if new_paid < 0 or new_paid > old_total + 0.001:
+                raise HTTPException(status_code=400, detail="Paid amount must be between zero and the purchase total")
             new_remaining = max(0, old_total - new_paid)
             new_status = "paid" if new_remaining <= 0 else ("partial" if new_paid > 0 else "unpaid")
             update_dict.update({"paid_amount": new_paid, "remaining": new_remaining, "status": new_status})
-
-            balance_diff = old_remaining - new_remaining
-            if purchase.get("stock_status", "confirmed") == "confirmed":
-                await adjust_supplier_mirror(db, purchase["supplier_id"], balance=-balance_diff)
-
             payment_diff = new_paid - old_paid
-            # p62: personal money never touches cash boxes
-            if payment_diff > 0:  # p68
-                await db.cash_boxes.update_one(
-                    {"id": purchase.get("payment_method", "cash")},
-                    {"$inc": {"balance": -payment_diff}, "$set": {"updated_at": now}}
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()), "cash_box_id": purchase.get("payment_method", "cash"),
-                    "type": "expense", "amount": payment_diff,
-                    "description": f"دفعة إضافية للمشتريات - فاتورة {purchase.get('invoice_number', '')}",
-                    "reference_type": "purchase", "reference_id": purchase_id,
-                    "created_at": now, "created_by": admin["name"]
-                })
+
+            if financial_active:
+                balance_diff = old_remaining - new_remaining
+                await adjust_supplier_mirror(db, purchase["supplier_id"], balance=-balance_diff)
+                if abs(payment_diff) > 1e-9:
+                    method = purchase.get("payment_method", "cash")
+                    adjustment_id = str(uuid.uuid4())
+                    await db.cash_boxes.update_one(
+                        {"id": method},
+                        {"$inc": {"balance": -payment_diff}, "$set": {"updated_at": now}},
+                    )
+                    await db.transactions.insert_one({
+                        "id": adjustment_id, "cash_box_id": method,
+                        "type": "expense" if payment_diff > 0 else "income",
+                        "amount": abs(payment_diff),
+                        "description": f"تعديل دفعة المشتريات - فاتورة {purchase.get('invoice_number', '')}",
+                        "reference_type": "purchase", "reference_id": purchase_id,
+                        "created_at": now, "created_by": admin["name"],
+                    })
+                    from services.outbox import outbox_write
+                    from config.database import main_db as _main_db
+                    await outbox_write(
+                        _main_db, "purchase.payment_adjusted",
+                        {
+                            "adjustment_id": adjustment_id,
+                            "purchase_id": purchase_id,
+                            "invoice_number": purchase.get("invoice_number", ""),
+                            "payment_diff": payment_diff,
+                            "payment_method": method,
+                        },
+                        tenant_id=admin.get("tenant_id") or "platform",
+                        source="purchases_routes",
+                    )
 
         if update_data.notes is not None:
             update_dict["notes"] = update_data.notes
 
-        await db.purchases.update_one({"id": purchase_id}, {"$set": update_dict})
+        update_operation = {"$set": update_dict}
+        if abs(payment_diff) > 1e-9:
+            update_operation["$push"] = {"payments": {
+                "amount": payment_diff, "method": purchase.get("payment_method", "cash"), "at": now,
+            }}
+        await db.purchases.update_one({"id": purchase_id}, update_operation)
         updated_purchase = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
         return {"message": "تم تحديث المشتريات بنجاح", "purchase": updated_purchase}
 
     # ── Delete Purchase ──
-    @router.delete("/{purchase_id}")
-    async def delete_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.delete"))):
-        purchase = await db.purchases.find_one({"id": purchase_id})
+    async def _delete_purchase_impl(purchase_id: str, admin: dict, session):
+        # Removing the document is the atomic claim. The transaction restores
+        # it if any reversal fails, and a concurrent delete can only see 404.
+        purchase = await db.purchases.find_one_and_delete({"id": purchase_id}, session=session)
         if not purchase:
             raise HTTPException(status_code=404, detail="Purchase not found")
-
         now = datetime.now(timezone.utc).isoformat()
-        # Reverse stock only if it was actually confirmed (avoid double reversal for drafts)
+        financial_active = purchase.get("financial_status") == "active" or (
+            "financial_status" not in purchase and purchase.get("stock_status", "confirmed") == "confirmed"
+        )
         if purchase.get("stock_status", "confirmed") == "confirmed":
             for item in purchase.get("items", []):
-                await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}})
+                await db.products.update_one(
+                    {"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}}, session=session
+                )
 
-        if purchase.get("stock_status", "confirmed") == "confirmed":
-            await adjust_supplier_mirror(db, purchase["supplier_id"],
-                total_purchases=-purchase.get("total", 0), balance=-purchase.get("remaining", 0))
-
-        # p67: refund each payment to the box it actually came from (debt payments may use other boxes)
-        payments_log = purchase.get("payments") or []
-        if payments_log:
-            for pay in payments_log:
-                m = pay.get("method", "cash")
-                if pay.get("amount", 0) > 0 and m:  # p68: refund personal box too
-                    await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": pay["amount"]}, "$set": {"updated_at": now}})
-                    await db.transactions.insert_one({
-                        "id": str(uuid.uuid4()), "cash_box_id": m,
-                        "type": "income", "amount": pay["amount"],
-                        "description": f"إلغاء مشتريات - فاتورة {purchase.get('invoice_number', '')}",
-                        "reference_type": "purchase_reversal", "reference_id": purchase_id,
-                        "created_at": now, "created_by": admin["name"]
-                    })
-        # p62: refund only if the payment actually came from a business box (legacy docs without payments log)
-        elif purchase.get("paid_amount", 0) > 0 and purchase.get("payment_method", "cash") != "personal":
-            await db.cash_boxes.update_one(
-                {"id": purchase.get("payment_method", "cash")},
-                {"$inc": {"balance": purchase["paid_amount"]}, "$set": {"updated_at": now}}
+        if financial_active:
+            await adjust_supplier_mirror(
+                db, purchase["supplier_id"],
+                total_purchases=-purchase.get("total", 0),
+                balance=-purchase.get("remaining", 0),
+                session=session,
             )
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()), "cash_box_id": purchase.get("payment_method", "cash"),
-                "type": "income", "amount": purchase["paid_amount"],
-                "description": f"إلغاء مشتريات - فاتورة {purchase.get('invoice_number', '')}",
-                "reference_type": "purchase_reversal", "reference_id": purchase_id,
-                "created_at": now, "created_by": admin["name"]
-            })
-
-        await db.purchases.delete_one({"id": purchase_id})
+            payments_by_method = {}
+            for pay in purchase.get("payments") or []:
+                method = pay.get("method", "cash")
+                payments_by_method[method] = payments_by_method.get(method, 0.0) + float(pay.get("amount", 0) or 0)
+            if not payments_by_method and float(purchase.get("paid_amount", 0) or 0) != 0:
+                payments_by_method[purchase.get("payment_method", "cash")] = float(purchase.get("paid_amount", 0) or 0)
+            for method, net_paid in payments_by_method.items():
+                if not method or abs(net_paid) < 1e-9:
+                    continue
+                await db.cash_boxes.update_one(
+                    {"id": method}, {"$inc": {"balance": net_paid}, "$set": {"updated_at": now}}, session=session
+                )
+                await db.transactions.insert_one({
+                    "id": str(uuid.uuid4()), "cash_box_id": method,
+                    "type": "income" if net_paid > 0 else "expense",
+                    "amount": abs(net_paid),
+                    "description": f"إلغاء مشتريات - فاتورة {purchase.get('invoice_number', '')}",
+                    "reference_type": "purchase_reversal", "reference_id": purchase_id,
+                    "created_at": now, "created_by": admin["name"],
+                }, session=session)
+            from services.outbox import outbox_write
+            from config.database import main_db as _main_db
+            await outbox_write(
+                _main_db, "purchase.deleted",
+                {
+                    "purchase_id": purchase_id,
+                    "invoice_number": purchase.get("invoice_number", ""),
+                    "total": purchase.get("total", 0),
+                    "paid_amount": purchase.get("paid_amount", 0),
+                    "remaining": purchase.get("remaining", 0),
+                    "payment_method": purchase.get("payment_method", "cash"),
+                    "supplier_id": purchase.get("supplier_id"),
+                },
+                tenant_id=admin.get("tenant_id") or "platform",
+                source="purchases_routes",
+                session=session,
+            )
         return {"message": "تم حذف المشتريات بنجاح", "deleted_id": purchase_id}
+
+    @router.delete("/{purchase_id}")
+    async def delete_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.delete"))):
+        import asyncio
+        from config.database import client
+        from pymongo.errors import PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        return await _delete_purchase_impl(purchase_id, admin, tx_session)
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                if not await db.purchases.find_one({"id": purchase_id}, {"_id": 1}):
+                    raise HTTPException(status_code=404, detail="Purchase not found")
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     return router

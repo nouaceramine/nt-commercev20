@@ -234,6 +234,76 @@ async def post_purchase_entry(tdb, payload: dict):
     )
 
 
+async def post_purchase_payment_adjustment(tdb, payload: dict):
+    """purchase.payment_adjusted → move the paid/debt split without touching inventory."""
+    purchase_id = payload.get("purchase_id")
+    adjustment_id = payload.get("adjustment_id")
+    diff = float(payload.get("payment_diff", 0) or 0)
+    if not purchase_id or not adjustment_id or abs(diff) < 1e-9:
+        return None
+    tag = f"purchase_payment:{adjustment_id}"
+    if await already_posted(tdb, purchase_id, tag):
+        return None
+    accounts = await ensure_accounts(tdb)
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    amount = abs(diff)
+    if diff > 0:
+        # More paid now: less supplier debt and less cash.
+        lines = [_line(accounts["401"], debit=amount), _line(accounts[box_code], credit=amount)]
+    else:
+        # Payment reduced: restore cash and restore supplier debt.
+        lines = [_line(accounts[box_code], debit=amount), _line(accounts["401"], credit=amount)]
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("invoice_number", ""),
+        reference_id=purchase_id,
+        source_tag=tag,
+        description=f"تسوية دفعة شراء {payload.get('invoice_number', '')}",
+        lines=lines,
+    )
+
+
+async def post_purchase_reversal(tdb, payload: dict):
+    """purchase.deleted → reverse the net of the original and all payment adjustments."""
+    purchase_id = payload.get("purchase_id")
+    if not purchase_id or await already_posted(tdb, purchase_id, "purchase_delete"):
+        return None
+    entries = await tdb.journal_entries.find({
+        "reference_id": purchase_id,
+        "$or": [{"source_tag": "purchase"}, {"source_tag": {"$regex": "^purchase_payment:"}}],
+    }).to_list(10000)
+    net_by_account = {}
+    for entry in entries:
+        for line in entry.get("lines") or []:
+            account_id = line.get("account_id")
+            if not account_id:
+                continue
+            row = net_by_account.setdefault(account_id, {
+                "id": account_id,
+                "code": line.get("account_code"),
+                "name_ar": line.get("account_name"),
+                "net": 0.0,
+            })
+            row["net"] += float(line.get("debit") or 0) - float(line.get("credit") or 0)
+    lines = []
+    for row in net_by_account.values():
+        net = round(row["net"], 2)
+        if abs(net) < 0.001:
+            continue
+        account = {"id": row["id"], "code": row["code"], "name_ar": row["name_ar"]}
+        lines.append(_line(account, credit=net) if net > 0 else _line(account, debit=-net))
+    if not lines:
+        return None
+    return await _insert_entry(
+        tdb,
+        reference=payload.get("invoice_number", ""),
+        reference_id=purchase_id,
+        source_tag="purchase_delete",
+        description=f"قيد عكسي تلقائي — حذف فاتورة شراء {payload.get('invoice_number', '')}",
+        lines=lines,
+    )
+
+
 async def post_expense_entry(tdb, payload: dict):
     """expense.created → Dr operating expenses / Cr cash-box."""
     expense_id = payload.get("expense_id")
