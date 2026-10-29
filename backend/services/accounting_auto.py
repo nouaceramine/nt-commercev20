@@ -263,14 +263,49 @@ async def post_purchase_payment_adjustment(tdb, payload: dict):
     )
 
 
-async def post_purchase_reversal(tdb, payload: dict):
-    """purchase.deleted → reverse the net of the original and all payment adjustments."""
+async def post_purchase_reactivation(tdb, payload: dict):
+    """purchase.reactivated → activate the current financial values after a reopen."""
     purchase_id = payload.get("purchase_id")
-    if not purchase_id or await already_posted(tdb, purchase_id, "purchase_delete"):
+    activation_id = payload.get("activation_id")
+    if not purchase_id or not activation_id:
+        return None
+    tag = f"purchase_reactivate:{activation_id}"
+    if await already_posted(tdb, purchase_id, tag):
+        return None
+    accounts = await ensure_accounts(tdb)
+    total = float(payload.get("total", 0) or 0)
+    paid = float(payload.get("paid_amount", 0) or 0)
+    remaining = float(payload.get("remaining", max(0.0, total - paid)) or 0)
+    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    lines = []
+    if total > 0:
+        lines.append(_line(accounts["380"], debit=total))
+    if paid > 0:
+        lines.append(_line(accounts[box_code], credit=paid))
+    if remaining > 0:
+        lines.append(_line(accounts["401"], credit=remaining))
+    if not lines:
+        return None
+    return await _insert_entry(
+        tdb, reference=payload.get("invoice_number", ""), reference_id=purchase_id,
+        source_tag=tag, description=f"قيد إعادة تنشيط شراء {payload.get('invoice_number', '')}",
+        lines=lines,
+    )
+
+
+async def _post_purchase_net_reversal(tdb, payload: dict, tag: str, description: str):
+    """Reverse the currently active net across every purchase lifecycle cycle."""
+    purchase_id = payload.get("purchase_id")
+    if not purchase_id or await already_posted(tdb, purchase_id, tag):
         return None
     entries = await tdb.journal_entries.find({
         "reference_id": purchase_id,
-        "$or": [{"source_tag": "purchase"}, {"source_tag": {"$regex": "^purchase_payment:"}}],
+        "$or": [
+            {"source_tag": "purchase"},
+            {"source_tag": {"$regex": "^purchase_payment:"}},
+            {"source_tag": {"$regex": "^purchase_reopen:"}},
+            {"source_tag": {"$regex": "^purchase_reactivate:"}},
+        ],
     }).to_list(10000)
     net_by_account = {}
     for entry in entries:
@@ -279,10 +314,8 @@ async def post_purchase_reversal(tdb, payload: dict):
             if not account_id:
                 continue
             row = net_by_account.setdefault(account_id, {
-                "id": account_id,
-                "code": line.get("account_code"),
-                "name_ar": line.get("account_name"),
-                "net": 0.0,
+                "id": account_id, "code": line.get("account_code"),
+                "name_ar": line.get("account_name"), "net": 0.0,
             })
             row["net"] += float(line.get("debit") or 0) - float(line.get("credit") or 0)
     lines = []
@@ -295,12 +328,27 @@ async def post_purchase_reversal(tdb, payload: dict):
     if not lines:
         return None
     return await _insert_entry(
-        tdb,
-        reference=payload.get("invoice_number", ""),
-        reference_id=purchase_id,
-        source_tag="purchase_delete",
-        description=f"قيد عكسي تلقائي — حذف فاتورة شراء {payload.get('invoice_number', '')}",
-        lines=lines,
+        tdb, reference=payload.get("invoice_number", ""), reference_id=purchase_id,
+        source_tag=tag, description=description, lines=lines,
+    )
+
+
+async def post_purchase_reopen(tdb, payload: dict):
+    """purchase.reopened → reverse the active net, including earlier lifecycle cycles."""
+    reversal_id = payload.get("reversal_id")
+    if not reversal_id:
+        return None
+    return await _post_purchase_net_reversal(
+        tdb, payload, f"purchase_reopen:{reversal_id}",
+        f"قيد عكسي تلقائي — إعادة فتح فاتورة شراء {payload.get('invoice_number', '')}",
+    )
+
+
+async def post_purchase_reversal(tdb, payload: dict):
+    """purchase.deleted → reverse the active net of the complete purchase lifecycle."""
+    return await _post_purchase_net_reversal(
+        tdb, payload, "purchase_delete",
+        f"قيد عكسي تلقائي — حذف فاتورة شراء {payload.get('invoice_number', '')}",
     )
 
 

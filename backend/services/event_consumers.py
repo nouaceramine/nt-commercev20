@@ -447,6 +447,30 @@ async def handle_purchase_payment_adjusted(event: Event) -> None:
         log.warning("auto-accounting purchase payment %s failed: %s", p.get("purchase_id"), exc)
 
 
+async def handle_purchase_reopened(event: Event) -> None:
+    """Tenant purchase reopened → reverse the active accounting net exactly once."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_purchase_reopen
+        await post_purchase_reopen(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting purchase reopen %s failed: %s", p.get("purchase_id"), exc)
+
+
+async def handle_purchase_reactivated(event: Event) -> None:
+    """Tenant purchase reconfirmed → post a new, uniquely tagged activation."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_purchase_reactivation
+        await post_purchase_reactivation(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting purchase reactivation %s failed: %s", p.get("purchase_id"), exc)
+
+
 async def handle_purchase_deleted(event: Event) -> None:
     """Tenant purchase deleted → reverse its net accounting effect exactly once."""
     p = event.payload or {}
@@ -802,6 +826,8 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("sale.deleted", handle_sale_deleted)  # p190
     bus.register("purchase.recorded", handle_purchase_recorded)  # p193
     bus.register("purchase.payment_adjusted", handle_purchase_payment_adjusted)  # p488
+    bus.register("purchase.reopened", handle_purchase_reopened)  # p489
+    bus.register("purchase.reactivated", handle_purchase_reactivated)  # p489
     bus.register("purchase.deleted", handle_purchase_deleted)  # p488
     bus.register("expense.created", handle_expense_created)  # p193
     bus.register("expense.deleted", handle_expense_deleted)  # p193
