@@ -10,6 +10,7 @@ import os
 import socket
 import httpx
 import logging
+from pymongo.errors import DuplicateKeyError
 from urllib.parse import urlparse
 from utils.auth import email_ci
 from utils.ids import new_id
@@ -278,9 +279,11 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
                 detail=f"تم بلوغ الحدّ الأقصى للمستأجرين على المنصّة ({cap}).",
             )
 
-    existing = await db.saas_tenants.find_one({"email": tenant.email})
+    existing = await db.saas_tenants.find_one({"email": email_ci(tenant.email)})
     if existing:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+    from utils.identity import assert_email_globally_free
+    await assert_email_globally_free(tenant.email)
 
     plan = await db.saas_plans.find_one({"id": tenant.plan_id}, {"_id": 0})
     if not plan:
@@ -338,14 +341,28 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
         "created_at": now.isoformat()
     }
 
-    await db.saas_tenants.insert_one(tenant_doc)
-    register_db_name(tenant_id, _db_name)  # p347: publish BEFORE any DB touch
+    from utils.identity import reserve_identity, remove_identity
+    await reserve_identity(tenant.email, "owner", tenant_id, tenant_id=tenant_id, name=tenant.name)
     try:
-        await copy_template_to_tenant(tenant_id)
-    except Exception as _tpl_err:
-        print(f"[TENANT] template re-init failed, legacy seeding: {_tpl_err}")
-        await init_tenant_database(tenant_id)
-    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
+        await db.saas_tenants.insert_one(tenant_doc)
+        register_db_name(tenant_id, _db_name)  # p347: publish BEFORE any DB touch
+        try:
+            await copy_template_to_tenant(tenant_id)
+        except Exception as _tpl_err:
+            print(f"[TENANT] template re-init failed, legacy seeding: {_tpl_err}")
+            await init_tenant_database(tenant_id)
+        await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
+    except DuplicateKeyError:
+        await db.saas_tenants.delete_one({"id": tenant_id})
+        await remove_identity(user_id=tenant_id)
+        await client.drop_database(_db_name)
+        raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+    except Exception:
+        # Provisioning is all-or-nothing for the newly reserved identity and DB.
+        await db.saas_tenants.delete_one({"id": tenant_id})
+        await remove_identity(user_id=tenant_id)
+        await client.drop_database(_db_name)
+        raise
 
     # p183: apply the chosen business-activity profile (features + starter families)
     try:
@@ -425,7 +442,37 @@ async def update_tenant(tenant_id: str, updates: TenantUpdate, admin: dict = Dep
     update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": update_data})
+    new_email = update_data.get("email")
+    email_changed = bool(new_email and new_email != tenant.get("email"))
+    if not email_changed:
+        await db.saas_tenants.update_one({"id": tenant_id}, {"$set": update_data})
+    else:
+        existing_email = await db.saas_tenants.find_one({
+            "id": {"$ne": tenant_id}, "email": email_ci(new_email),
+        }, {"_id": 0, "id": 1})
+        if existing_email:
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+        from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
+        await assert_email_globally_free(new_email, exclude_user_id=tenant_id)
+        await reserve_identity(new_email, "owner", tenant_id, tenant_id=tenant_id, name=update_data.get("name", tenant.get("name", "")))
+        try:
+            async with await client.start_session() as session:
+                async with session.start_transaction():
+                    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": update_data}, session=session)
+                    await get_tenant_db(tenant_id).users.update_many(
+                        {"email": email_ci(tenant.get("email", ""))},
+                        {"$set": {"email": new_email}}, session=session,
+                    )
+                    await main_db.identity_registry.delete_one(
+                        {"email": (tenant.get("email") or "").strip().lower(),
+                         "kind": "owner", "user_id": tenant_id}, session=session,
+                    )
+        except DuplicateKeyError:
+            await main_db.identity_registry.delete_one({"email": new_email, "kind": "owner", "user_id": tenant_id})
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+        except Exception:
+            await main_db.identity_registry.delete_one({"email": new_email, "kind": "owner", "user_id": tenant_id})
+            raise
 
     # p183: changing the activity re-adapts the tenant's features automatically
     if update_data.get("business_type") and update_data["business_type"] != tenant.get("business_type"):

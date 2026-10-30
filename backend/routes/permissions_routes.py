@@ -315,8 +315,13 @@ def create_permissions_routes(db, main_db, get_current_user, get_tenant_admin) -
     @router.delete("/roles/{role_id}")
     async def delete_role(role_id: str, admin: dict = Depends(get_tenant_admin)):
         role = await db.roles.find_one({"id": role_id}, {"_id": 0})
-        if role and role.get("is_system"):
+        if not role:
+            raise HTTPException(status_code=404, detail="الدور غير موجود")
+        if role.get("is_system"):
             raise HTTPException(status_code=400, detail="لا يمكن حذف الأدوار الأساسية")
+        assigned = await db.users.count_documents({"$or": [{"role_id": role_id}, {"custom_role_id": role_id}]})
+        if assigned:
+            raise HTTPException(status_code=400, detail="لا يمكن حذف دور معيّن لمستخدمين؛ أعد تعيينهم أولاً")
         await db.roles.delete_one({"id": role_id})
         return {"message": "تم حذف الدور"}
 
@@ -327,7 +332,12 @@ def create_permissions_routes(db, main_db, get_current_user, get_tenant_admin) -
         role = await db.roles.find_one({"id": role_id}, {"_id": 0})
         if not role:
             raise HTTPException(status_code=404, detail="الدور غير موجود")
-        await db.users.update_one({"id": user_id}, {"$set": {"role_id": role_id, "role_name": role.get("name_ar", "")}})
+        updated_user = await db.users.find_one_and_update(
+            {"id": user_id},
+            {"$set": {"role_id": role_id, "role_name": role.get("name_ar", "")}},
+        )
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
         return {"message": "تم تعيين الدور", "role": role.get("name_ar")}
 
     # ── Check Permission ──

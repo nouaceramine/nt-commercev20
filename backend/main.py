@@ -351,7 +351,7 @@ async def get_tenant_admin(current_user: dict = Depends(get_current_user)) -> di
     # Platform-level admins (main_db users) act on the main DB
     if not current_user.get("tenant_id") and current_user.get("role") not in ["admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="هذا الإجراء متاح فقط لمشتركي المنصة")
-    if current_user.get("role") not in ["admin", "manager", "user", "tenant_admin", "super_admin"]:
+    if current_user.get("role") not in ["admin", "manager", "tenant_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="صلاحيات غير كافية")
     return current_user
 

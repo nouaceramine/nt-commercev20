@@ -6,8 +6,12 @@ Every account-creation path must: assert_email_globally_free() THEN register_ide
 Every delete/deactivate path must: remove_identity() / set_identity_active().
 """
 from datetime import datetime, timezone
+import logging
 from fastapi import HTTPException
+from pymongo.errors import DuplicateKeyError
 from config.database import main_db
+
+logger = logging.getLogger(__name__)
 
 COLLECTION = "identity_registry"
 
@@ -20,11 +24,13 @@ _KIND_AR = {
 
 
 async def ensure_identity_index():
-    """Unique email index — hard DB-level guarantee. Idempotent."""
+    """Unique email index — hard DB-level guarantee. Idempotent and fail-closed."""
     try:
         await main_db[COLLECTION].create_index("email", unique=True)
-    except Exception:
-        pass
+        return True
+    except Exception as exc:
+        logger.error("identity email unique index unavailable: %s", type(exc).__name__)
+        return False
 
 
 def _norm(email: str) -> str:
@@ -40,6 +46,23 @@ async def assert_email_globally_free(email: str, exclude_user_id: str = None):
     if hit and hit.get("user_id") != exclude_user_id:
         kind_ar = _KIND_AR.get(hit.get("kind"), "حساب آخر")
         raise HTTPException(status_code=400, detail=f"هذا البريد مستخدم مسبقاً في المنصة ({kind_ar})")
+
+
+async def reserve_identity(email: str, kind: str, user_id: str, tenant_id: str = None, name: str = "", is_active: bool = True):
+    """Atomically reserve a new identity; concurrent creators cannot overwrite one another."""
+    e = _norm(email)
+    if not e or not user_id:
+        raise HTTPException(status_code=400, detail="بيانات الهوية غير صالحة")
+    if not await ensure_identity_index():
+        raise HTTPException(status_code=503, detail="خدمة التحقق من الهوية غير متاحة مؤقتاً")
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        await main_db[COLLECTION].insert_one({
+            "email": e, "kind": kind, "user_id": user_id, "tenant_id": tenant_id,
+            "name": name, "is_active": is_active, "created_at": now, "updated_at": now,
+        })
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail="هذا البريد مستخدم مسبقاً في المنصة")
 
 
 async def register_identity(email: str, kind: str, user_id: str, tenant_id: str = None, name: str = "", is_active: bool = True):

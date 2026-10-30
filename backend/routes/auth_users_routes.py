@@ -377,13 +377,17 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         logger.info(f"Database initialized successfully for tenant {tenant_id}")
 
                     # Look up the actual user record in the tenant DB to get the correct user_id
+                    tenant_user_projection = {
+                        "_id": 0, "id": 1, "role": 1, "name": 1, "email": 1,
+                        "two_fa_enabled": 1, "two_fa_secret": 1, "two_fa_email_enabled": 1,
+                    }
                     tenant_user = await tenant_db_conn.users.find_one(
-                        {"email": email}, {"_id": 0, "id": 1, "role": 1, "name": 1}
+                        {"email": email}, tenant_user_projection
                     )
                     if not tenant_user:
                         # Fallback: find by role admin
                         tenant_user = await tenant_db_conn.users.find_one(
-                            {"role": "admin"}, {"_id": 0, "id": 1, "role": 1, "name": 1}
+                            {"role": "admin"}, tenant_user_projection
                         )
                     # If still missing (db was initialized but admin user was never seeded),
                     # create one on-the-fly so tenant-scoped endpoints can locate the user.
@@ -417,7 +421,13 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     features = {**plan.get("features", {}), **tenant.get("features_override", {})} if plan else {}
                     limits = {**plan.get("limits", {}), **tenant.get("limits_override", {})} if plan else {}
 
-                    return await _2fa_gate(tenant, {
+                    # 2FA is enrolled on the tenant DB user, not on saas_tenants.
+                    # Preserve legacy tenant-level flags only when the user has none.
+                    gate_user = dict(tenant_user)
+                    for flag in ("two_fa_enabled", "two_fa_secret", "two_fa_email_enabled"):
+                        if flag not in gate_user and tenant.get(flag) is not None:
+                            gate_user[flag] = tenant[flag]
+                    return await _2fa_gate(gate_user, {
                         "access_token": access_token,
                         "user_type": "tenant",
                         "redirect_to": "/tenant/dashboard",
@@ -741,7 +751,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         if existing:
             raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
         # p120: platform-wide uniqueness (owner/agent/employee/platform)
-        from utils.identity import assert_email_globally_free, register_identity
+        from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
         await assert_email_globally_free(norm_email)
 
         if len(user_data.password) < 4:
@@ -759,8 +769,12 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             "created_at": now
         }
 
-        await db.users.insert_one(new_user)
-        await register_identity(norm_email, "employee", new_user["id"], tenant_id=admin.get("tenant_id"), name=user_data.name)
+        await reserve_identity(norm_email, "employee", new_user["id"], tenant_id=admin.get("tenant_id"), name=user_data.name)
+        try:
+            await db.users.insert_one(new_user)
+        except Exception:
+            await remove_identity(user_id=new_user["id"])
+            raise
 
         # Return without password
         del new_user["password"]
