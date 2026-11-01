@@ -258,3 +258,28 @@ async def test_utils_admin_gate_rejects_ordinary_user():
     with pytest.raises(HTTPException) as exc:
         await get_admin_user({"id": "u1", "role": "user", "is_active": True})
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", ["is_active", "active"])
+async def test_legacy_login_rejects_disabled_user_without_token(monkeypatch, flag):
+    import inspect
+    from routes.simple_auth_routes import LoginRequest, create_auth_routes
+    from services.auth_service import AuthService
+
+    async def current_user():
+        return {"id": "admin", "role": "admin"}
+
+    async def admin_user():
+        return {"id": "admin", "role": "admin"}
+
+    async def disabled_user(self, email, password):
+        return {"id": "u1", "email": email, "role": "user", flag: False}
+
+    monkeypatch.setattr(AuthService, "authenticate", disabled_user)
+    router = create_auth_routes(_RegisterDB(_RegisterUsers()), current_user, admin_user)
+    endpoint = next(route.endpoint for route in router.routes
+                    if route.path == "/auth/login" and "POST" in route.methods)
+    with pytest.raises(HTTPException) as exc:
+        await inspect.unwrap(endpoint)(None, LoginRequest(email="disabled@example.com", password="secret"))
+    assert exc.value.status_code == 403

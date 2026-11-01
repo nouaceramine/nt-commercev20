@@ -4,8 +4,9 @@ from datetime import datetime, timezone, timedelta
 import os
 import uuid
 import bcrypt
+from pymongo.errors import DuplicateKeyError
 
-from config.database import db, init_tenant_database
+from config.database import db, client, init_tenant_database, get_tenant_db
 from services.tenant_template import copy_template_to_tenant
 from utils.auth import email_ci
 from utils.ids import new_id
@@ -114,7 +115,7 @@ async def register_tenant(tenant: TenantCreate):
     stale_agent = await db.saas_agents.find_one({"email": email_ci(tenant.email)})
     if stale_agent:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل في حساب وكيل")
-    from utils.identity import assert_email_globally_free, register_identity
+    from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
     await assert_email_globally_free(tenant.email)
     tenant.email = tenant.email.strip().lower()
 
@@ -156,17 +157,47 @@ async def register_tenant(tenant: TenantCreate):
         "created_at": now.isoformat()
     }
 
-    await db.saas_tenants.insert_one(tenant_doc)
-    register_db_name(tenant_id, _db_name)  # p347
-    await register_identity(tenant.email, "owner", tenant_id, tenant_id=tenant_id, name=tenant.name)
-    # Golden template provisioning (p31): full collections/indexes/seeds;
-    # legacy seeding kept as fallback if the template is missing/broken
+    # Reserve first: concurrent public registrations cannot both create a tenant.
+    await reserve_identity(tenant.email, "owner", tenant_id, tenant_id=tenant_id, name=tenant.name)
     try:
-        await copy_template_to_tenant(tenant_id)
-    except Exception as _tpl_err:
-        print(f"[REG] template copy failed, legacy seeding: {_tpl_err}")
-        await init_tenant_database(tenant_id)
-    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
+        await db.saas_tenants.insert_one(tenant_doc)
+        register_db_name(tenant_id, _db_name)  # p347
+        # Golden template provisioning (p31): full collections/indexes/seeds;
+        # legacy seeding kept as fallback if the template is missing/broken.
+        try:
+            await copy_template_to_tenant(tenant_id)
+        except Exception as _tpl_err:
+            print(f"[REG] template copy failed, legacy seeding: {_tpl_err}")
+            await init_tenant_database(tenant_id)
+
+        # A public subscriber needs the same real owner record as an admin-created
+        # tenant; the identity registry alone is not a tenant user account.
+        tenant_db = get_tenant_db(tenant_id)
+        owner_user = await tenant_db.users.find_one({"email": email_ci(tenant.email)}, {"_id": 0, "id": 1})
+        if not owner_user:
+            await tenant_db.users.insert_one({
+                "id": tenant_id,
+                "name": tenant.name,
+                "full_name": tenant.name,
+                "email": tenant.email,
+                "hashed_password": hashed_password,
+                "role": "admin",
+                "permissions": {},
+                "is_active": True,
+                "created_at": now.isoformat(),
+            })
+        await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"database_initialized": True}})
+    except DuplicateKeyError:
+        await db.saas_tenants.delete_one({"id": tenant_id})
+        await remove_identity(user_id=tenant_id)
+        await client.drop_database(_db_name)
+        raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+    except Exception:
+        # Public provisioning is all-or-nothing for its owned artifacts.
+        await db.saas_tenants.delete_one({"id": tenant_id})
+        await remove_identity(user_id=tenant_id)
+        await client.drop_database(_db_name)
+        raise
 
     # p183: apply the chosen business-activity profile — feature overrides on the
     # tenant doc (menus/routes adapt at first login) + starter product families
@@ -216,17 +247,9 @@ async def register_tenant(tenant: TenantCreate):
     # p156: email the verification code — login stays blocked until confirmed
     await _send_verification_code(tenant_id, tenant.email, tenant.name)
 
-    access_token = create_access_token({
-        "sub": tenant_id,
-        "email": tenant.email,
-        "role": "admin",
-        "type": "tenant",
-        "tenant_id": tenant_id
-    })
-
+    # Never issue an access token before the subscriber proves email ownership.
+    # The UI verifies the code and then authenticates through /saas/tenant-login.
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
         "tenant_id": tenant_id,
         "requires_email_verification": True,  # p156
         "message": "تم إنشاء حسابك بنجاح! أرسلنا رمز تأكيد إلى بريدك الإلكتروني.",

@@ -139,10 +139,20 @@ export default function RegisterPage() {
       await apiClient.post(`/saas/verify-email`, { email: formData.email, code: verifyCode.trim() });
       toast.success('تم تأكيد بريدك الإلكتروني بنجاح!');
       if (regToken) {
-        localStorage.setItem('token', regToken.access_token);
-        localStorage.setItem('tenant_id', regToken.tenant_id);
+        // Registration intentionally issues no access token before verification.
+        // Authenticate with the password only after the email is confirmed.
+        const loginResponse = await apiClient.post(`/saas/tenant-login`, {
+          email: formData.email,
+          password: formData.password
+        });
+        localStorage.setItem('token', loginResponse.data.access_token);
+        localStorage.setItem('tenant_id', loginResponse.data.tenant_id);
+        // Reinitialize AuthContext with the newly issued token; SPA navigation
+        // alone keeps the anonymous state captured before registration.
+        window.location.replace('/');
+      } else {
+        navigate('/tenant-login');
       }
-      navigate('/');
     } catch (error) {
       toast.error(errText(error) || 'رمز التحقق غير صحيح');
     } finally {
