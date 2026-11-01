@@ -15,9 +15,11 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    full_name: str
+    name: str | None = None
+    full_name: str | None = None
+    role: str = "user"
 
-def create_auth_routes(db, get_current_user):
+def create_auth_routes(db, get_current_user, get_admin_user):
     auth_service = AuthService(db)
     router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -32,17 +34,41 @@ def create_auth_routes(db, get_current_user):
 
     @router.post("/register")
     @limiter.limit("5/minute")
-    async def register(request: Request, body: RegisterRequest):
+    async def register(request: Request, body: RegisterRequest, admin=Depends(get_admin_user)):
+        """Admin-only compatibility alias for user creation; never logs in the new user."""
+        full_name = (body.name or body.full_name or "").strip()
+        if not full_name:
+            raise HTTPException(status_code=400, detail="الاسم مطلوب")
+        if len(body.password) < 4:
+            raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 4 أحرف على الأقل")
+        role = (body.role or "user").strip().lower()
+        if role in {"super_admin", "saas_admin", "superadmin"} and admin.get("role") != "super_admin":
+            raise HTTPException(status_code=403, detail="لا يمكن إنشاء حساب بصلاحية سوبر أدمين")
+
         norm_email = body.email.strip().lower()
         existing = await auth_service.get_user_by_email(norm_email)
         if existing:
-            raise HTTPException(status_code=400, detail="Email already registered")
-        from utils.identity import assert_email_globally_free, register_identity
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+
+        import uuid
+        from utils.identity import assert_email_globally_free, remove_identity, reserve_identity
         await assert_email_globally_free(norm_email)
-        user = await auth_service.create_user(norm_email, body.password, body.full_name, role="admin")
-        await register_identity(norm_email, "platform", user["id"], name=body.full_name)
-        token = auth_service.create_access_token({"sub": user["id"], "email": user["email"], "role": user.get("role", "user")})
-        return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}}
+        user_id = str(uuid.uuid4())
+        tenant_id = admin.get("tenant_id")
+        kind = "employee" if tenant_id else "platform"
+        await reserve_identity(norm_email, kind, user_id, tenant_id=tenant_id, name=full_name)
+        try:
+            user = await auth_service.create_user(
+                norm_email, body.password, full_name, role=role, user_id=user_id,
+            )
+        except Exception:
+            await remove_identity(user_id=user_id)
+            raise
+        return {"user": {
+            "id": user["id"], "email": user["email"], "name": full_name,
+            "full_name": full_name, "role": user.get("role", "user"),
+            "tenant_id": tenant_id, "features": user.get("features"),
+        }}
 
     @router.get("/me")
     async def me(user=Depends(get_current_user)):

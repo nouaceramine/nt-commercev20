@@ -86,13 +86,9 @@ export const AuthProvider = ({ children }) => {
       name,
       role 
     });
-    const { access_token, user: userData } = response.data;
-    
-    localStorage.setItem('token', access_token);
-    setToken(access_token);
-    setUser(userData);
-    
-    return userData;
+    // Administrative user creation must never replace the current session
+    // with a token for the newly created account.
+    return response.data.user;
   };
   
   const logout = () => {

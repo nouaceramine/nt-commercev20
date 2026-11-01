@@ -92,35 +92,35 @@ export function usePermissions() {
     } catch { return false; }
   }, []);
 
-  const addUser = useCallback(async () => {
+  const addUser = useCallback(async (userData) => {
     setAddingUser(true);
     try {
-      await apiClient.post('/auth/register', newUserData);
+      await apiClient.post('/users', userData);
       setNewUserData({ name: '', email: '', password: '', role: 'seller' });
       return true;
     } catch { return false; }
     finally { setAddingUser(false); }
-  }, [newUserData]);
+  }, []);
 
-  const editUser = useCallback(async () => {
+  const editUser = useCallback(async (updates) => {
     if (!editingUser) return false;
     setSavingEditUser(true);
     try {
-      await apiClient.put(`/users/${editingUser.id}`, editUserData);
+      await apiClient.put(`/users/${editingUser.id}`, updates);
       return true;
     } catch { return false; }
     finally { setSavingEditUser(false); }
-  }, [editingUser, editUserData]);
+  }, [editingUser]);
 
-  const changePassword = useCallback(async () => {
-    if (!passwordUser || newPassword.length < 4) return false;
+  const changePassword = useCallback(async (password) => {
+    if (!passwordUser || password.length < 4) return false;
     setSavingPassword(true);
     try {
-      await apiClient.put(`/users/${passwordUser.id}/password`, { new_password: newPassword });
+      await apiClient.put(`/users/${passwordUser.id}/password`, { new_password: password });
       return true;
     } catch { return false; }
     finally { setSavingPassword(false); }
-  }, [passwordUser, newPassword]);
+  }, [passwordUser]);
 
   return {
     loading, users, setUsers, roles, defaultPermissions,

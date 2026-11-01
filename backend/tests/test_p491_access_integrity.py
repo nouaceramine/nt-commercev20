@@ -136,3 +136,125 @@ async def test_identity_reservation_fails_closed_without_unique_index(monkeypatc
         await identity.reserve_identity("user@example.com", "owner", "t1")
     assert exc.value.status_code == 503
     assert collection.inserted == 0
+
+
+class _RegisterUsers:
+    def __init__(self, existing=None, fail_insert=False):
+        self.existing = existing
+        self.fail_insert = fail_insert
+        self.documents = []
+
+    async def find_one(self, query, projection=None):
+        return self.existing
+
+    async def insert_one(self, document):
+        if self.fail_insert:
+            raise RuntimeError("injected insert failure")
+        self.documents.append(dict(document))
+        return type("Result", (), {"inserted_id": "test-object-id"})()
+
+
+class _RegisterDB:
+    def __init__(self, users):
+        self.users = users
+
+
+def _register_endpoint(db):
+    import inspect
+    from routes.simple_auth_routes import create_auth_routes
+
+    async def current_user():
+        return {"id": "admin", "role": "admin"}
+
+    async def admin_user():
+        return {"id": "admin", "role": "admin"}
+
+    router = create_auth_routes(db, current_user, admin_user)
+    endpoint = next(route.endpoint for route in router.routes
+                    if route.path == "/auth/register" and "POST" in route.methods)
+    return inspect.unwrap(endpoint)
+
+
+def _register_body(**overrides):
+    from routes.simple_auth_routes import RegisterRequest
+
+    values = {"email": "new@example.com", "password": "valid-password", "name": "New User"}
+    values.update(overrides)
+    return RegisterRequest(**values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name_field", ["name", "full_name"])
+async def test_register_is_admin_user_creation_without_token(monkeypatch, name_field):
+    users = _RegisterUsers()
+    endpoint = _register_endpoint(_RegisterDB(users))
+    reserved = []
+    removed = []
+
+    async def assert_free(email):
+        return None
+
+    async def reserve(email, kind, user_id, tenant_id=None, name="", is_active=True):
+        reserved.append({"email": email, "kind": kind, "user_id": user_id,
+                         "tenant_id": tenant_id, "name": name})
+
+    async def remove(user_id):
+        removed.append(user_id)
+
+    monkeypatch.setattr(identity, "assert_email_globally_free", assert_free)
+    monkeypatch.setattr(identity, "reserve_identity", reserve)
+    monkeypatch.setattr(identity, "remove_identity", remove)
+    body = _register_body(**{name_field: "Compatible Name", "name" if name_field == "full_name" else "full_name": None})
+    result = await endpoint(None, body, {"id": "owner", "role": "admin", "tenant_id": "tenant-a"})
+    assert result["user"]["role"] == "user"
+    assert result["user"]["name"] == "Compatible Name"
+    assert "access_token" not in result
+    assert len(users.documents) == 1
+    assert users.documents[0]["name"] == "Compatible Name"
+    assert reserved[0]["kind"] == "employee"
+    assert reserved[0]["tenant_id"] == "tenant-a"
+    assert removed == []
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_super_admin_for_non_super_admin():
+    users = _RegisterUsers()
+    endpoint = _register_endpoint(_RegisterDB(users))
+    with pytest.raises(HTTPException) as exc:
+        await endpoint(None, _register_body(role="super_admin"),
+                       {"id": "owner", "role": "admin", "tenant_id": "tenant-a"})
+    assert exc.value.status_code == 403
+    assert users.documents == []
+
+
+@pytest.mark.asyncio
+async def test_register_removes_reserved_identity_when_insert_fails(monkeypatch):
+    users = _RegisterUsers(fail_insert=True)
+    endpoint = _register_endpoint(_RegisterDB(users))
+    reserved = []
+    removed = []
+
+    async def assert_free(email):
+        return None
+
+    async def reserve(email, kind, user_id, tenant_id=None, name="", is_active=True):
+        reserved.append(user_id)
+
+    async def remove(user_id):
+        removed.append(user_id)
+
+    monkeypatch.setattr(identity, "assert_email_globally_free", assert_free)
+    monkeypatch.setattr(identity, "reserve_identity", reserve)
+    monkeypatch.setattr(identity, "remove_identity", remove)
+    with pytest.raises(RuntimeError):
+        await endpoint(None, _register_body(), {"id": "admin", "role": "admin"})
+    assert removed == reserved
+
+
+@pytest.mark.asyncio
+async def test_utils_admin_gate_rejects_ordinary_user():
+    from utils.auth import get_admin_user
+
+    with pytest.raises(HTTPException) as exc:
+        await get_admin_user({"id": "u1", "role": "user", "is_active": True})
+    assert exc.value.status_code == 403

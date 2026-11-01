@@ -16,6 +16,7 @@ class UserLogin(BaseModel):
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     permissions: Optional[dict] = None
 

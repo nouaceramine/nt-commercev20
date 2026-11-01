@@ -49,12 +49,13 @@ class AuthService:
             return None
         return user
 
-    async def create_user(self, email: str, password: str, full_name: str, role: str = "admin") -> dict:
+    async def create_user(self, email: str, password: str, full_name: str, role: str = "user", user_id: str | None = None) -> dict:
         hashed = self.hash_password(password)
         user = {
-            "id": str(__import__('uuid').uuid4()),
+            "id": user_id or str(__import__('uuid').uuid4()),
             "email": email,
             "password": hashed,
+            "name": full_name,
             "full_name": full_name,
             "role": role,
             "is_active": True,

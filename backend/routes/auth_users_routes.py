@@ -724,7 +724,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         if admin.get("role") == "super_admin" or admin.get("user_type") == "super_admin":
             query = {}
         users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
-        return [UserResponse(**u) for u in users]
+        # Legacy accounts may only have full_name; normalize the response
+        # without rewriting or reactivating any existing account.
+        return [UserResponse(**{**u, "name": u.get("name") or u.get("full_name") or ""}) for u in users]
 
     class UserCreateLocal(BaseModel):
         name: str
@@ -804,10 +806,75 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             )
 
         update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
-        if update_data:
+        old_email = (user.get("email") or "").strip().lower()
+        new_email = (updates.email or "").strip().lower() if updates.email is not None else None
+        email_changed = bool(new_email and new_email != old_email)
+        if updates.email is not None:
+            if not new_email or "@" not in new_email:
+                raise HTTPException(status_code=400, detail="البريد الإلكتروني غير صالح")
+            update_data["email"] = new_email
+
+        if update_data and not email_changed:
             await db.users.update_one({"id": user_id}, {"$set": update_data})
+            if update_data.get("name"):
+                await main_db.identity_registry.update_many(
+                    {"user_id": user_id}, {"$set": {"name": update_data["name"]}})
+        elif update_data:
+            # Reserve the new global identity first, then atomically move the
+            # user/directory/old identity. The old-email predicate makes
+            # concurrent edits fail closed instead of leaving a stale identity.
+            existing_email = await db.users.find_one({
+                "id": {"$ne": user_id}, "email": email_ci(new_email)}, {"_id": 0, "id": 1})
+            if existing_email:
+                raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+            from pymongo.errors import DuplicateKeyError
+            from utils.identity import assert_email_globally_free, reserve_identity
+            await assert_email_globally_free(new_email, exclude_user_id=user_id)
+            tenant_id = admin.get("tenant_id")
+            kind = "employee" if tenant_id else "platform"
+            identity_name = update_data.get("name") or user.get("name") or user.get("full_name") or ""
+            claim_id = str(uuid.uuid4())
+            claimed = await db.users.find_one_and_update(
+                {"id": user_id, "email": email_ci(old_email)},
+                {"$set": {"_email_change_claim": claim_id}})
+            if not claimed:
+                raise HTTPException(status_code=409, detail="تم تعديل الحساب بالفعل، أعد المحاولة")
+            try:
+                await reserve_identity(new_email, kind, user_id, tenant_id=tenant_id, name=identity_name)
+            except Exception:
+                await db.users.update_one(
+                    {"id": user_id, "_email_change_claim": claim_id},
+                    {"$unset": {"_email_change_claim": ""}})
+                raise
+            try:
+                async with await main_db.client.start_session() as session:
+                    async with session.start_transaction():
+                        result = await db.users.update_one(
+                            {"id": user_id, "email": email_ci(old_email),
+                             "_email_change_claim": claim_id},
+                            {"$set": update_data, "$unset": {"_email_change_claim": ""}}, session=session)
+                        if result.matched_count != 1:
+                            raise HTTPException(status_code=409, detail="تم تعديل الحساب بالفعل، أعد المحاولة")
+                        await main_db.identity_registry.delete_one(
+                            {"email": old_email, "user_id": user_id}, session=session)
+                        await main_db.tenant_user_directory.update_one(
+                            {"user_id": user_id, "email": old_email},
+                            {"$set": {"email": new_email}}, session=session)
+            except DuplicateKeyError:
+                await main_db.identity_registry.delete_one({"email": new_email, "user_id": user_id})
+                await db.users.update_one(
+                    {"id": user_id, "_email_change_claim": claim_id},
+                    {"$unset": {"_email_change_claim": ""}})
+                raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+            except Exception:
+                await main_db.identity_registry.delete_one({"email": new_email, "user_id": user_id})
+                await db.users.update_one(
+                    {"id": user_id, "_email_change_claim": claim_id},
+                    {"$unset": {"_email_change_claim": ""}})
+                raise
+
         updated = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        return UserResponse(**updated)
+        return UserResponse(**{**updated, "name": updated.get("name") or updated.get("full_name") or ""})
 
     @router.delete("/users/{user_id}")
     async def delete_user(user_id: str, admin: dict = Depends(get_admin_user)):

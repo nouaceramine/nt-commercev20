@@ -11,7 +11,8 @@ async def test_auth_service_create_user(auth_service, mock_db):
     user = await auth_service.create_user("new@user.com", "password", "New User")
     assert user["email"] == "new@user.com"
     assert user["full_name"] == "New User"
-    assert user["role"] == "admin"
+    assert user["role"] == "user"
+    assert user["name"] == "New User"
 
 @pytest.mark.asyncio
 async def test_auth_service_authenticate_success(auth_service):
