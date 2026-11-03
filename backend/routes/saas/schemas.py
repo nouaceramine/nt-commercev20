@@ -187,11 +187,26 @@ class TenantResponse(BaseModel):
 
 
 class SubscriptionPayment(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, allow_inf_nan=False)
     payment_method: str = "cash"
     subscription_type: str = "monthly"
     notes: str = ""
     transaction_id: str = ""
+
+    @field_validator("subscription_type")
+    @classmethod
+    def validate_subscription_type(cls, value: str) -> str:
+        if value not in {"monthly", "6months", "yearly"}:
+            raise ValueError("Unsupported subscription type")
+        return value
+
+    @field_validator("transaction_id")
+    @classmethod
+    def normalize_transaction_id(cls, value: str) -> str:
+        value = (value or "").strip()
+        if len(value) > 128:
+            raise ValueError("Transaction ID is too long")
+        return value
 
 
 class SubscriptionPaymentResponse(BaseModel):

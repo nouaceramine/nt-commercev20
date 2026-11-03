@@ -10,7 +10,7 @@ import os
 import socket
 import httpx
 import logging
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 from urllib.parse import urlparse
 from utils.auth import email_ci
 from utils.ids import new_id
@@ -901,16 +901,10 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
         new_end = start_date + timedelta(days=30)
     elif payment.subscription_type == "6months":
         new_end = start_date + timedelta(days=180)
-    else:
+    else:  # subscription_type is schema-validated: monthly, 6months or yearly.
         new_end = start_date + timedelta(days=365)
 
-    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {
-        "subscription_type": payment.subscription_type,
-        "subscription_ends_at": new_end.isoformat(),
-        "is_active": True,
-        "is_trial": False
-    }})
-
+    transaction_id = (payment.transaction_id or "").strip()
     payment_doc = {
         "id": str(uuid.uuid4()),
         "tenant_id": tenant_id,
@@ -921,14 +915,56 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
         "period_start": start_date.isoformat(),
         "period_end": new_end.isoformat(),
         "notes": payment.notes or "",
-        "transaction_id": payment.transaction_id or "",
+        "transaction_id": transaction_id,
         "created_by": admin.get("id", ""),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     # p266: every recorded subscription payment gets an atomic code
     from services.code_generator import public_order_code as _poc
     payment_doc["payment_code"] = await _poc(db, "saas_payments", "PAY", 6, field="payment_code")
-    await db.saas_payments.insert_one(payment_doc)
+
+    # The subscription update, payment and idempotency claim commit together.
+    # The claim's unique _id closes the concurrent duplicate-transaction race
+    # without requiring a migration over historical saas_payments rows.
+    try:
+        for attempt in range(3):
+            try:
+                async with await client.start_session() as session:
+                    async with session.start_transaction():
+                        if transaction_id:
+                            import hashlib
+                            claim_id = hashlib.sha256(f"{tenant_id}\0{transaction_id}".encode()).hexdigest()
+                            await db.saas_payment_claims.insert_one({
+                                "_id": claim_id,
+                                "tenant_id": tenant_id,
+                                "transaction_id": transaction_id,
+                                "created_at": payment_doc["created_at"],
+                            }, session=session)
+                        update_result = await db.saas_tenants.update_one(
+                            {"id": tenant_id},
+                            {"$set": {
+                                "subscription_type": payment.subscription_type,
+                                "subscription_ends_at": new_end.isoformat(),
+                                "is_active": True,
+                                "is_trial": False,
+                            }},
+                            session=session,
+                        )
+                        if update_result.matched_count != 1:
+                            raise HTTPException(status_code=404, detail="Tenant not found")
+                        await db.saas_payments.insert_one(payment_doc, session=session)
+                break
+            except OperationFailure as exc:
+                # Competing inserts of the same claim may surface as a
+                # transient WiredTiger write conflict. Retry the transaction;
+                # the next attempt deterministically hits the duplicate claim.
+                if exc.has_error_label("TransientTransactionError") and attempt < 2:
+                    import asyncio
+                    await asyncio.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="Duplicate payment transaction")
 
     return {"new_subscription_ends_at": new_end.isoformat()}
 

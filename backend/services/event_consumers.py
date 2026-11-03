@@ -352,14 +352,19 @@ async def handle_tenant_subscription_expired(event: Event) -> None:
             "expired_notified_at": _utc_now_iso(),
         }},
     )
-    # Audit
-    await main_db.inventory_movements.insert_one({
-        "id": event.event_id,
-        "event_type": "tenant.subscription.expired",
-        "tenant_id": tenant_id,
-        "created_at": _utc_now_iso(),
-        "correlation_id": event.metadata.correlation_id,
-    })
+    # Audit: at-least-once delivery can re-enter after a later handler step
+    # fails. setOnInsert keeps one stable audit row across those retries.
+    await main_db.inventory_movements.update_one(
+        {"id": event.event_id},
+        {"$setOnInsert": {
+            "id": event.event_id,
+            "event_type": "tenant.subscription.expired",
+            "tenant_id": tenant_id,
+            "created_at": _utc_now_iso(),
+            "correlation_id": event.metadata.correlation_id,
+        }},
+        upsert=True,
+    )
     # Email notification (best-effort — handler must not crash on email failure)
     try:
         tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "email": 1, "name": 1, "company_name": 1})
@@ -397,13 +402,17 @@ async def handle_tenant_subscription_renewed(event: Event) -> None:
         }},
     )
     try:
-        await main_db.inventory_movements.insert_one({
-            "id": event.event_id,
-            "event_type": "tenant.subscription.renewed",
-            "tenant_id": tenant_id,
-            "created_at": _utc_now_iso(),
-            "correlation_id": event.metadata.correlation_id,
-        })
+        await main_db.inventory_movements.update_one(
+            {"id": event.event_id},
+            {"$setOnInsert": {
+                "id": event.event_id,
+                "event_type": "tenant.subscription.renewed",
+                "tenant_id": tenant_id,
+                "created_at": _utc_now_iso(),
+                "correlation_id": event.metadata.correlation_id,
+            }},
+            upsert=True,
+        )
     except Exception:
         pass
 
