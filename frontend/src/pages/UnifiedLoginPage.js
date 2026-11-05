@@ -195,9 +195,14 @@ export default function UnifiedLoginPage() {
     localStorage.removeItem('is_impersonating');
     localStorage.removeItem('impersonation_session_id');
     localStorage.setItem('token', result.access_token);
-    localStorage.setItem('user', JSON.stringify(result.user));
+    var userType = result.user_type || (result.user && result.user.user_type) || '';
+    var normalizedUser = Object.assign({}, result.user || {}, userType ? { user_type: userType } : {});
+    if (userType === 'agent' && !normalizedUser.role) normalizedUser.role = 'agent';
+    localStorage.setItem('user', JSON.stringify(normalizedUser));
+    if (userType) localStorage.setItem('user_type', userType);
+    else localStorage.removeItem('user_type');
     toast.success(T.loginOk);
-    var role = (result.user && result.user.role) || 'admin';
+    var role = normalizedUser.role || 'admin';
     var target = '/dashboard';
     if (result.redirect_to) {
       target = result.redirect_to;

@@ -103,9 +103,11 @@ async def get_org_tree(admin: dict = Depends(get_super_admin)):
 @router.put("/saas/agent/my-tenants/{tenant_id}/features/{gate}")
 async def agent_toggle_feature(tenant_id: str, gate: str, body: dict,
                                agent: dict = Depends(get_current_agent)):
-    """Delegated per-gate toggle for agents (requires can_toggle_features)."""
+    """Delegated per-gate toggle using the published permission key."""
     perms = agent.get("permissions") or {}
-    if not perms.get("can_toggle_features"):
+    # can_toggle_features is accepted for legacy agent records only; the
+    # permissions schema/template and management UI publish can_manage_features.
+    if not (perms.get("can_manage_features") or perms.get("can_toggle_features")):
         raise HTTPException(status_code=403, detail="غير مسموح لك بتعديل ميزات المشتركين")
 
     gate_keys = {g["gate"] for g in modules_map.gates_catalog()}

@@ -3,8 +3,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 import uuid
 import bcrypt
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
-from config.database import db
+from config.database import client, db
 from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import get_current_agent, create_access_token, next_tenant_short_id
@@ -15,14 +16,19 @@ from typing import Optional
 COMMISSION_CHARGEBACK_DAYS = 7
 
 
-async def _create_agent_commission(agent: dict, tenant_id: str, tenant_name: str, plan: dict, subscription_type: str):
+async def _create_agent_commission(agent: dict, tenant_id: str, tenant_name: str, plan: dict,
+                                   subscription_type: str, session=None):
     """Create a PENDING commission record for an agent when they enroll a new tenant."""
     try:
         _rate = plan.get("commission_rate")
         plan_commission_rate = 10.0 if _rate is None else float(_rate)
         commission_fixed = agent.get("commission_fixed", 0) or 0
-        price_map = {"monthly": plan.get("price_monthly", 0), "6months": plan.get("price_6months", 0), "yearly": plan.get("price_yearly", 0)}
-        subscription_price = price_map.get(subscription_type, plan.get("price_monthly", 0)) or 0
+        price_map = {
+            "monthly": plan.get("monthly_price", plan.get("price_monthly", 0)) or 0,
+            "6months": plan.get("six_month_price", plan.get("price_6months", 0)) or 0,
+            "yearly": plan.get("yearly_price", plan.get("price_yearly", 0)) or 0,
+        }
+        subscription_price = price_map.get(subscription_type, 0) or 0
         amount = (subscription_price * plan_commission_rate / 100) + commission_fixed
         if amount <= 0:
             return
@@ -43,7 +49,7 @@ async def _create_agent_commission(agent: dict, tenant_id: str, tenant_name: str
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
-        await db.agent_commissions.insert_one(rec)
+        await db.agent_commissions.insert_one(rec, session=session)
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning(f"Failed to create commission record: {exc}")
@@ -100,13 +106,21 @@ async def get_my_stats(agent: dict = Depends(get_current_agent)):
     }
 
 
+@router.get("/saas/agent/transactions")
+async def get_my_agent_transactions(agent: dict = Depends(get_current_agent)):
+    """Return only the authenticated agent's commission/payout ledger."""
+    return await db.saas_agent_transactions.find(
+        {"agent_id": agent["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+
+
 @router.post("/saas/agent/create-tenant")
 async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_current_agent)):
     perms = agent.get("permissions", {})
     if not perms.get("can_create_tenants", False):
         raise HTTPException(status_code=403, detail="ليس لديك صلاحية إنشاء مستأجرين")
 
-    existing = await db.saas_tenants.find_one({"email": tenant.email})
+    existing = await db.saas_tenants.find_one({"email": email_ci(tenant.email)}, {"_id": 0, "id": 1})
     if existing:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
 
@@ -147,21 +161,45 @@ async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_cu
         "created_at": now.isoformat()
     }
 
-    await db.saas_tenants.insert_one(tenant_doc)
-    register_db_name(tenant_id, _dbn)  # p347
-    await db.saas_agents.update_one(
-        {"id": agent["id"]},
-        {"$addToSet": {"assigned_tenant_ids": tenant_id}}
-    )
-
-    # Create a PENDING commission for this agent
-    await _create_agent_commission(
-        agent=agent,
-        tenant_id=tenant_id,
-        tenant_name=tenant.name,
-        plan=plan,
-        subscription_type=tenant.subscription_type or "monthly",
-    )
+    # A globally reserved owner identity makes cross-kind duplicates and
+    # concurrent requests fail before a tenant can be orphaned. The tenant,
+    # reverse agent link and pending commission share one transaction.
+    from utils.identity import remove_identity, reserve_identity
+    await reserve_identity(tenant.email, "owner", tenant_id, tenant_id=tenant_id, name=tenant.name)
+    try:
+        for attempt in range(3):
+            try:
+                async with await client.start_session() as session:
+                    async with session.start_transaction():
+                        await db.saas_tenants.insert_one(tenant_doc, session=session)
+                        result = await db.saas_agents.update_one(
+                            {"id": agent["id"]},
+                            {"$addToSet": {"assigned_tenant_ids": tenant_id}},
+                            session=session,
+                        )
+                        if result.matched_count != 1:
+                            raise HTTPException(status_code=404, detail="Agent not found")
+                        await _create_agent_commission(
+                            agent=agent, tenant_id=tenant_id, tenant_name=tenant.name,
+                            plan=plan, subscription_type=tenant.subscription_type or "monthly",
+                            session=session,
+                        )
+                break
+            except OperationFailure as exc:
+                if exc.has_error_label("TransientTransactionError") and attempt < 2:
+                    import asyncio
+                    await asyncio.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+        register_db_name(tenant_id, _dbn)  # publish only after the transaction commits
+    except DuplicateKeyError:
+        await remove_identity(user_id=tenant_id)
+        await client.drop_database(_dbn)
+        raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
+    except Exception:
+        await remove_identity(user_id=tenant_id)
+        await client.drop_database(_dbn)
+        raise
 
     tenant_doc.pop("_id", None)
     tenant_doc.pop("password", None)

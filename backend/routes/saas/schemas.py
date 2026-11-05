@@ -250,26 +250,51 @@ class AgentCreate(BaseModel):
     email: str
     password: str
     phone: str = ""
+    company_name: str = ""
+    address: str = ""
     agent_type: str = "assistant"
-    commission_rate: float = 10.0
+    commission_rate: float = Field(default=10.0, ge=0, le=100, allow_inf_nan=False)
+    commission_fixed: float = Field(default=0, ge=0, allow_inf_nan=False)
+    credit_limit: float = Field(default=100000, ge=0, allow_inf_nan=False)
     region: str = ""
     permissions: Optional[dict] = None
     assigned_tenant_ids: List[str] = []
     notes: str = ""
     is_active: bool = True
 
+    @field_validator("email")
+    @classmethod
+    def _validate_agent_email(cls, value: str) -> str:
+        return _validate_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def _validate_agent_password(cls, value: str) -> str:
+        if not value or len(value) < 8:
+            raise ValueError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+        return value
+
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    company_name: Optional[str] = None
+    address: Optional[str] = None
     agent_type: Optional[str] = None
-    commission_rate: Optional[float] = None
+    commission_rate: Optional[float] = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    commission_fixed: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+    credit_limit: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     region: Optional[str] = None
     permissions: Optional[dict] = None
     assigned_tenant_ids: Optional[List[str]] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+
+    @field_validator("email")
+    @classmethod
+    def _validate_agent_update_email(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_email(value)
 
 
 class AgentResponse(BaseModel):
@@ -278,8 +303,12 @@ class AgentResponse(BaseModel):
     name: str
     email: str
     phone: str = ""
+    company_name: str = ""
+    address: str = ""
     agent_type: str = "assistant"
     commission_rate: float = 10.0
+    commission_fixed: float = 0
+    credit_limit: float = 100000
     region: str = ""
     permissions: dict = {}
     assigned_tenant_ids: list = []
@@ -296,9 +325,16 @@ class AgentResponse(BaseModel):
 
 class AgentTransactionCreate(BaseModel):
     type: str
-    amount: float
+    amount: float = Field(gt=0, allow_inf_nan=False)
     tenant_id: Optional[str] = None
     notes: str = ""
+
+    @field_validator("type")
+    @classmethod
+    def _validate_transaction_type(cls, value: str) -> str:
+        if value not in {"commission", "payout"}:
+            raise ValueError("نوع الحركة غير مدعوم")
+        return value
 
 
 class AgentTransactionResponse(BaseModel):

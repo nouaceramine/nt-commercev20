@@ -41,12 +41,14 @@ export const AuthProvider = ({ children }) => {
       }
       
       try {
-        const response = await apiClient.get(`/auth/me`);
-        // Merge with localStorage data to get user_type
         const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const isAgentSession = localStorage.getItem('user_type') === 'agent'
+          || storedUser.user_type === 'agent' || storedUser.role === 'agent';
+        const response = await apiClient.get(isAgentSession ? `/saas/agent/me` : `/auth/me`);
+        // Merge with localStorage data to get user_type
         const userData = {
           ...response.data,
-          user_type: response.data.user_type || storedUser.user_type
+          user_type: response.data.user_type || storedUser.user_type || (isAgentSession ? 'agent' : undefined)
         };
         setUser(userData);
         // Set features and limits from response
@@ -165,23 +167,28 @@ export const AuthProvider = ({ children }) => {
   // Treat the impersonating user as super-admin for platform-page access (motherboard, etc.)
   const isEffectiveSuperAdmin = isSuperAdmin || isImpersonating;
 
-  const stopImpersonation = () => {
+  const stopImpersonation = async () => {
     const origToken = localStorage.getItem('super_admin_token');
     const origUser = localStorage.getItem('super_admin_user');
     const sessionId = localStorage.getItem('impersonation_session_id');
-    // Fire-and-forget: close the audit log entry (uses super-admin token via apiClient interceptor)
-    if (sessionId) {
-      // We must call BEFORE we wipe localStorage because apiClient needs super_admin_token
-      apiClient.post(`/saas/impersonate/${sessionId}/stop`).catch(() => {});
+    // Close the audit session before navigating; an immediate full-page redirect
+    // can cancel a fire-and-forget request and leave the log active forever.
+    try {
+      if (sessionId) {
+        await apiClient.post(`/saas/impersonate/${sessionId}/stop`);
+      }
+    } catch (_error) {
+      // Restore the administrator even if the audit-stop request fails.
+    } finally {
+      if (origToken) localStorage.setItem('token', origToken);
+      if (origUser) localStorage.setItem('user', origUser);
+      localStorage.removeItem('super_admin_token');
+      localStorage.removeItem('super_admin_user');
+      localStorage.removeItem('is_impersonating');
+      localStorage.removeItem('user_type');
+      localStorage.removeItem('impersonation_session_id');
+      window.location.href = '/saas-admin';
     }
-    if (origToken) localStorage.setItem('token', origToken);
-    if (origUser) localStorage.setItem('user', origUser);
-    localStorage.removeItem('super_admin_token');
-    localStorage.removeItem('super_admin_user');
-    localStorage.removeItem('is_impersonating');
-    localStorage.removeItem('user_type');
-    localStorage.removeItem('impersonation_session_id');
-    window.location.href = '/saas-admin';
   };
 
   const value = {

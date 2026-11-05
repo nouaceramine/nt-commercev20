@@ -6,6 +6,7 @@ import { errText } from '../lib/errorText';
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
+import { useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -80,6 +81,7 @@ const AlertCard = ({ alert }) => {
 
 export default function AgentDashboardPage() {
   const navigate = useNavigate();
+  const { isImpersonating, stopImpersonation } = useAuth();
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState(null);
   const [plans, setPlans] = useState([]);
@@ -122,11 +124,11 @@ export default function AgentDashboardPage() {
     plan_id: '', subscription_type: 'monthly', business_type: 'retail', notes: ''
   });
 
-  const agentData = JSON.parse(localStorage.getItem('agentData') || '{}');
+  const agentData = JSON.parse(localStorage.getItem('agentData') || localStorage.getItem('user') || '{}');
   const permissions = agentData.permissions || {};
 
   useEffect(() => {
-    const token = localStorage.getItem('agentToken');
+    const token = localStorage.getItem('token') || localStorage.getItem('agentToken');
     if (!token) {
       navigate('/portal');
       return;
@@ -138,7 +140,7 @@ export default function AgentDashboardPage() {
   }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('agentToken')}`
+    Authorization: `Bearer ${localStorage.getItem('token') || localStorage.getItem('agentToken')}`
   });
 
   const fetchDashboard = async () => {
@@ -170,7 +172,9 @@ export default function AgentDashboardPage() {
 
       // Update local agentData with latest permissions
       if (agentInfo.permissions) {
-        localStorage.setItem('agentData', JSON.stringify(agentInfo));
+        const nextAgentInfo = { ...agentInfo, user_type: 'agent' };
+        localStorage.setItem('agentData', JSON.stringify(nextAgentInfo));
+        localStorage.setItem('user', JSON.stringify(nextAgentInfo));
       }
     } catch (error) {
       if (error.response?.status === 401) {
@@ -309,8 +313,7 @@ export default function AgentDashboardPage() {
 
   const fetchAllTransactions = async () => {
     try {
-      const agentId = agentData.id;
-      const response = await apiClient.get(`/saas/agents/${agentId}/transactions`, { headers: getHeaders() });
+      const response = await apiClient.get(`/saas/agent/transactions`, { headers: getHeaders() });
       setTransactions(response.data);
       setViewTransactionsDialogOpen(true);
     } catch (_error) {
@@ -319,8 +322,15 @@ export default function AgentDashboardPage() {
   };
 
   const handleLogout = () => {
+    if (isImpersonating) {
+      stopImpersonation();
+      return;
+    }
     localStorage.removeItem('agentToken');
     localStorage.removeItem('agentData');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('user_type');
     navigate('/portal');
     toast.success('تم تسجيل الخروج');
   };
@@ -348,9 +358,9 @@ export default function AgentDashboardPage() {
   const getPlanPrice = (planId, subType) => {
     const plan = plans.find(p => p.id === planId);
     if (!plan) return 0;
-    if (subType === 'monthly') return plan.price_monthly;
-    if (subType === '6months') return plan.price_6months;
-    return plan.price_yearly;
+    if (subType === 'monthly') return plan.monthly_price ?? plan.price_monthly ?? 0;
+    if (subType === '6months') return plan.six_month_price ?? plan.price_6months ?? 0;
+    return plan.yearly_price ?? plan.price_yearly ?? 0;
   };
 
   const openTenantDetails = (tenant) => {
@@ -414,7 +424,7 @@ export default function AgentDashboardPage() {
     const agent = dashboard?.agent || agentData;
     const tenantCount = dashboard?.stats?.total_tenants || 0;
     
-    if (tenantCount >= 10 && agent.current_balance >= 0) return 'excellent';
+    if (tenantCount >= 10 && (agent.current_balance ?? agent.pending_earnings ?? 0) >= 0) return 'excellent';
     if (tenantCount >= 5) return 'good';
     if (tenantCount >= 1) return 'average';
     return 'new';
@@ -432,6 +442,7 @@ export default function AgentDashboardPage() {
   }
 
   const agent = dashboard?.agent || agentData;
+  const currentBalance = agent.current_balance ?? agent.pending_earnings ?? 0;
   const stats = dashboard?.stats || {};
 
   return (
@@ -469,7 +480,7 @@ export default function AgentDashboardPage() {
             </div>
             <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2">
               <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">خروج</span>
+              <span className="hidden sm:inline">{isImpersonating ? 'إنهاء الانتحال' : 'خروج'}</span>
             </Button>
           </div>
         </div>
@@ -502,7 +513,7 @@ export default function AgentDashboardPage() {
                   <p className="text-blue-100 text-xs mb-1">نسبة العمولة</p>
                   <div className="flex items-center gap-1">
                     <Percent className="h-4 w-4 opacity-80" />
-                    <p className="text-2xl font-bold">{agent.commission_percent}%</p>
+                    <p className="text-2xl font-bold">{agent.commission_percent ?? agent.commission_rate ?? 0}%</p>
                   </div>
                 </div>
                 <div>
@@ -537,16 +548,16 @@ export default function AgentDashboardPage() {
               <div className="space-y-4">
                 <div className="text-center p-6 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border">
                   <p className="text-sm text-muted-foreground mb-2">الرصيد الحالي</p>
-                  <p className={`text-4xl font-bold ${(agent.current_balance || 0) < 0 ? 'text-red-500' : 'text-green-500'}`}>
-                    {(agent.current_balance || 0).toLocaleString()} <span className="text-lg">دج</span>
+                  <p className={`text-4xl font-bold ${(currentBalance) < 0 ? 'text-red-500' : 'text-green-500'}`}>
+                    {(currentBalance).toLocaleString()} <span className="text-lg">دج</span>
                   </p>
-                  {(agent.current_balance || 0) < 0 && (
+                  {(currentBalance) < 0 && (
                     <Badge variant="destructive" className="mt-3">
                       <AlertTriangle className="h-3 w-3 me-1" />
                       دين
                     </Badge>
                   )}
-                  {(agent.current_balance || 0) >= 0 && (
+                  {(currentBalance) >= 0 && (
                     <Badge variant="default" className="mt-3 bg-green-500">
                       <CheckCircle className="h-3 w-3 me-1" />
                       رصيد إيجابي
@@ -561,8 +572,8 @@ export default function AgentDashboardPage() {
                   </div>
                   <div className="flex justify-between p-2 rounded-lg bg-muted/50">
                     <span className="text-muted-foreground">المتبقي من الحد</span>
-                    <span className={`font-medium ${((agent.credit_limit || 0) + (agent.current_balance || 0)) < (agent.credit_limit || 0) * 0.2 ? 'text-red-500' : 'text-green-600'}`}>
-                      {((agent.credit_limit || 0) + (agent.current_balance || 0)).toLocaleString()} دج
+                    <span className={`font-medium ${((agent.credit_limit || 0) + (currentBalance)) < (agent.credit_limit || 0) * 0.2 ? 'text-red-500' : 'text-green-600'}`}>
+                      {((agent.credit_limit || 0) + (currentBalance)).toLocaleString()} دج
                     </span>
                   </div>
                 </div>
@@ -1295,32 +1306,36 @@ export default function AgentDashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {transactions.slice(0, 5).map(tx => (
+                {transactions.slice(0, 5).map(tx => {
+                  const type = tx.type || tx.transaction_type || '';
+                  const isDebit = type === 'payout' || type === 'subscription_sale';
+                  return (
                   <TableRow key={tx.id} className="hover:bg-muted/30">
                     <TableCell className="text-sm">
                       {new Date(tx.created_at).toLocaleDateString('ar-DZ')}
                     </TableCell>
                     <TableCell>
                       <Badge variant={
-                        tx.transaction_type === 'payment' ? 'default' : 
-                        tx.transaction_type === 'commission' ? 'secondary' : 'outline'
-                      } className={tx.transaction_type === 'payment' ? 'bg-green-500' : tx.transaction_type === 'commission' ? 'bg-blue-500' : ''}>
-                        {tx.transaction_type === 'payment' ? 'دفعة' : tx.transaction_type === 'commission' ? 'عمولة' : 'بيع اشتراك'}
+                        type === 'payment' || type === 'payout' ? 'default' :
+                        type === 'commission' ? 'secondary' : 'outline'
+                      } className={type === 'payment' ? 'bg-green-500' : type === 'commission' ? 'bg-blue-500' : ''}>
+                        {type === 'payment' || type === 'payout' ? 'دفعة' : type === 'commission' ? 'عمولة' : type === 'subscription_sale' ? 'بيع اشتراك' : type || '—'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm">{tx.description}</TableCell>
+                    <TableCell className="text-sm">{tx.notes || tx.description || '—'}</TableCell>
                     <TableCell>
-                      <span className={`font-semibold flex items-center gap-1 ${tx.transaction_type === 'subscription_sale' ? 'text-red-500' : 'text-green-500'}`}>
-                        {tx.transaction_type === 'subscription_sale' ? (
+                      <span className={`font-semibold flex items-center gap-1 ${isDebit ? 'text-red-500' : 'text-green-500'}`}>
+                        {isDebit ? (
                           <><ArrowDownRight className="h-4 w-4" /> -{tx.amount?.toLocaleString()}</>
                         ) : (
                           <><ArrowUpRight className="h-4 w-4" /> +{tx.amount?.toLocaleString()}</>
                         )} دج
                       </span>
                     </TableCell>
-                    <TableCell className="font-medium">{tx.balance_after?.toLocaleString()} دج</TableCell>
+                    <TableCell className="font-medium">{tx.balance_after != null ? `${tx.balance_after.toLocaleString()} دج` : '—'}</TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
                 {transactions.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
@@ -1415,12 +1430,12 @@ export default function AgentDashboardPage() {
             </div>
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>رصيدك الحالي:</span>
-              <span className={(agent.current_balance || 0) < 0 ? 'text-red-500' : 'text-green-600'}>{(agent.current_balance || 0).toLocaleString()} دج</span>
+              <span className={(currentBalance) < 0 ? 'text-red-500' : 'text-green-600'}>{(currentBalance).toLocaleString()} دج</span>
             </div>
             <div className="flex justify-between text-sm text-muted-foreground border-t mt-2 pt-2">
               <span>الرصيد بعد الخصم:</span>
-              <span className={(agent.current_balance || 0) - getPlanPrice(tenantForm.plan_id, tenantForm.subscription_type) < 0 ? 'text-red-500' : 'text-green-600'}>
-                {((agent.current_balance || 0) - getPlanPrice(tenantForm.plan_id, tenantForm.subscription_type)).toLocaleString()} دج
+              <span className={(currentBalance) - getPlanPrice(tenantForm.plan_id, tenantForm.subscription_type) < 0 ? 'text-red-500' : 'text-green-600'}>
+                {((currentBalance) - getPlanPrice(tenantForm.plan_id, tenantForm.subscription_type)).toLocaleString()} دج
               </span>
             </div>
           </div>
@@ -1570,8 +1585,8 @@ export default function AgentDashboardPage() {
           <DialogHeader>
             <DialogTitle>جميع المعاملات</DialogTitle>
             <DialogDescription>
-              الرصيد الحالي: <span className={`font-bold ${agent.current_balance < 0 ? 'text-red-500' : 'text-green-500'}`}>
-                {agent.current_balance?.toLocaleString()} دج
+              الرصيد الحالي: <span className={`font-bold ${currentBalance < 0 ? 'text-red-500' : 'text-green-500'}`}>
+                {currentBalance.toLocaleString()} دج
               </span>
             </DialogDescription>
           </DialogHeader>
@@ -1586,30 +1601,34 @@ export default function AgentDashboardPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transactions.map(tx => (
+              {transactions.map(tx => {
+                const type = tx.type || tx.transaction_type || '';
+                const isDebit = type === 'payout' || type === 'subscription_sale';
+                return (
                 <TableRow key={tx.id} className="hover:bg-muted/30">
                   <TableCell className="text-sm">{new Date(tx.created_at).toLocaleDateString('ar-DZ')}</TableCell>
                   <TableCell>
                     <Badge variant={
-                      tx.transaction_type === 'payment' ? 'default' : 
-                      tx.transaction_type === 'commission' ? 'secondary' : 'outline'
-                    } className={tx.transaction_type === 'payment' ? 'bg-green-500' : tx.transaction_type === 'commission' ? 'bg-blue-500' : ''}>
-                      {tx.transaction_type === 'payment' ? 'دفعة' : tx.transaction_type === 'commission' ? 'عمولة' : 'بيع اشتراك'}
+                      type === 'payment' || type === 'payout' ? 'default' :
+                      type === 'commission' ? 'secondary' : 'outline'
+                    } className={type === 'payment' ? 'bg-green-500' : type === 'commission' ? 'bg-blue-500' : ''}>
+                      {type === 'payment' || type === 'payout' ? 'دفعة' : type === 'commission' ? 'عمولة' : type === 'subscription_sale' ? 'بيع اشتراك' : type || '—'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm">{tx.description}</TableCell>
+                  <TableCell className="text-sm">{tx.notes || tx.description || '—'}</TableCell>
                   <TableCell>
-                    <span className={`font-semibold flex items-center gap-1 ${tx.transaction_type === 'subscription_sale' ? 'text-red-500' : 'text-green-500'}`}>
-                      {tx.transaction_type === 'subscription_sale' ? (
+                    <span className={`font-semibold flex items-center gap-1 ${isDebit ? 'text-red-500' : 'text-green-500'}`}>
+                      {isDebit ? (
                         <><ArrowDownRight className="h-4 w-4" /> -{tx.amount?.toLocaleString()}</>
                       ) : (
                         <><ArrowUpRight className="h-4 w-4" /> +{tx.amount?.toLocaleString()}</>
                       )} دج
                     </span>
                   </TableCell>
-                  <TableCell className="font-medium">{tx.balance_after?.toLocaleString()} دج</TableCell>
+                  <TableCell className="font-medium">{tx.balance_after != null ? `${tx.balance_after.toLocaleString()} دج` : '—'}</TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </DialogContent>

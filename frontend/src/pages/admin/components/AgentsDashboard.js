@@ -123,7 +123,7 @@ export const AgentsDashboard = () => {
   });
   
   const [paymentForm, setPaymentForm] = useState({
-    amount: 0, transaction_type: 'payment', description: '', notes: ''
+    amount: 0, type: 'payout', description: 'دفعة نقدية', notes: ''
   });
   
   const [_notificationForm, _setNotificationForm] = useState({
@@ -142,6 +142,7 @@ export const AgentsDashboard = () => {
       // Enhance agents data with computed stats
       const enhancedAgents = response.data.map(agent => ({
         ...agent,
+        current_balance: agent.current_balance ?? agent.pending_earnings ?? 0,
         // Calculate performance score
         performance_score: calculatePerformanceScore(agent),
         // Mock monthly data for charts (in production, fetch from API)
@@ -162,8 +163,9 @@ export const AgentsDashboard = () => {
     // Tenants count contributes 40%
     score += Math.min((agent.tenants_count || 0) * 10, 40);
     // Positive balance contributes 30%
-    if (agent.current_balance >= 0) score += 30;
-    else score += Math.max(0, 30 - Math.abs(agent.current_balance) / 1000);
+    const currentBalance = agent.current_balance ?? agent.pending_earnings ?? 0;
+    if (currentBalance >= 0) score += 30;
+    else score += Math.max(0, 30 - Math.abs(currentBalance) / 1000);
     // Active status contributes 20%
     if (agent.is_active) score += 20;
     // Total earnings contributes 10%
@@ -231,9 +233,9 @@ export const AgentsDashboard = () => {
         name: agent.name, email: agent.email, password: '', phone: agent.phone,
         company_name: agent.company_name || '', address: agent.address || '',
         agent_type: agent.agent_type || 'assistant', region: agent.region || '',
-        commission_percent: agent.commission_percent || agent.commission_rate || 10,
-        commission_fixed: agent.commission_fixed || 0,
-        credit_limit: agent.credit_limit || 100000,
+        commission_percent: agent.commission_percent ?? agent.commission_rate ?? 10,
+        commission_fixed: agent.commission_fixed ?? 0,
+        credit_limit: agent.credit_limit ?? 100000,
         notes: agent.notes || ''
       });
     } else {
@@ -251,14 +253,15 @@ export const AgentsDashboard = () => {
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
+      const { commission_percent, ...formData } = agentForm;
+      const payload = { ...formData, commission_rate: commission_percent };
       
       if (editingAgent) {
-        const updateData = { ...agentForm };
-        if (!updateData.password) delete updateData.password;
-        await apiClient.put(`/saas/agents/${editingAgent.id}`, updateData, { headers });
+        if (!payload.password) delete payload.password;
+        await apiClient.put(`/saas/agents/${editingAgent.id}`, payload, { headers });
         toast.success('تم تحديث الوكيل بنجاح');
       } else {
-        await apiClient.post(`/saas/agents`, agentForm, { headers });
+        await apiClient.post(`/saas/agents`, payload, { headers });
         toast.success('تم إنشاء الوكيل بنجاح');
       }
       setAgentDialogOpen(false);
@@ -340,14 +343,19 @@ export const AgentsDashboard = () => {
   // Payment
   const openPaymentDialog = (agent) => {
     setSelectedAgent(agent);
-    setPaymentForm({ amount: 0, transaction_type: 'payment', description: 'دفعة نقدية', notes: '' });
+    setPaymentForm({ amount: 0, type: 'payout', description: 'دفعة نقدية', notes: '' });
     setPaymentDialogOpen(true);
   };
 
   const savePayment = async () => {
     try {
-      await apiClient.post(`/saas/agents/${selectedAgent.id}/transactions`, paymentForm);
-      toast.success('تم تسجيل الدفعة بنجاح');
+      const payload = {
+        type: paymentForm.type,
+        amount: paymentForm.amount,
+        notes: [paymentForm.description, paymentForm.notes].filter(Boolean).join(' — '),
+      };
+      await apiClient.post(`/saas/agents/${selectedAgent.id}/transactions`, payload);
+      toast.success('تم تسجيل الحركة بنجاح');
       setPaymentDialogOpen(false);
       fetchAgents();
     } catch (error) {
@@ -630,7 +638,7 @@ export const AgentsDashboard = () => {
                     <div className="text-sm">
                       <div className="flex items-center justify-center gap-1">
                         <Percent className="h-3 w-3 text-muted-foreground" />
-                        <span className="font-semibold">{agent.commission_percent}%</span>
+                        <span className="font-semibold">{agent.commission_percent ?? agent.commission_rate ?? 0}%</span>
                       </div>
                       {agent.commission_fixed > 0 && (
                         <p className="text-xs text-muted-foreground">+{agent.commission_fixed.toLocaleString()} دج</p>
@@ -873,7 +881,7 @@ export const AgentsDashboard = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Percent className="h-4 w-4 text-muted-foreground" />
-                  <span>عمولة: {selectedAgent.commission_percent}% + {selectedAgent.commission_fixed} دج</span>
+                  <span>عمولة: {selectedAgent.commission_percent ?? selectedAgent.commission_rate ?? 0}% + {selectedAgent.commission_fixed ?? 0} دج</span>
                 </div>
               </div>
               
@@ -938,15 +946,15 @@ export const AgentsDashboard = () => {
               {agentTransactions.map((tx, i) => (
                 <TableRow key={tx.id || tx._id || `tx-${i}`}>
                   <TableCell>
-                    <Badge variant={tx.transaction_type === 'payment' ? 'default' : tx.transaction_type === 'commission' ? 'secondary' : 'outline'}>
-                      {tx.transaction_type === 'payment' ? 'دفعة' : tx.transaction_type === 'commission' ? 'عمولة' : tx.transaction_type}
+                    <Badge variant={tx.type === 'payout' ? 'default' : tx.type === 'commission' ? 'secondary' : 'outline'}>
+                      {tx.type === 'payout' ? 'دفعة' : tx.type === 'commission' ? 'عمولة' : tx.type}
                     </Badge>
                   </TableCell>
                   <TableCell className={tx.amount > 0 ? 'text-green-600' : 'text-red-600'}>
                     {tx.amount > 0 ? '+' : ''}{tx.amount?.toLocaleString()} دج
                   </TableCell>
-                  <TableCell className="text-sm">{tx.description}</TableCell>
-                  <TableCell className="font-medium">{tx.balance_after?.toLocaleString()} دج</TableCell>
+                  <TableCell className="text-sm">{tx.notes}</TableCell>
+                  <TableCell className="font-medium">{tx.balance_after != null ? `${tx.balance_after.toLocaleString()} دج` : '—'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatShortDate(tx.created_at)}
                   </TableCell>
@@ -980,15 +988,13 @@ export const AgentsDashboard = () => {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>نوع المعاملة</Label>
-              <Select value={paymentForm.transaction_type} onValueChange={v => setPaymentForm({...paymentForm, transaction_type: v})}>
+              <Select value={paymentForm.type} onValueChange={v => setPaymentForm({...paymentForm, type: v})}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="payment">دفعة (إيداع)</SelectItem>
+                  <SelectItem value="payout">دفعة (صرف)</SelectItem>
                   <SelectItem value="commission">عمولة</SelectItem>
-                  <SelectItem value="refund">استرداد</SelectItem>
-                  <SelectItem value="deduction">خصم</SelectItem>
                 </SelectContent>
               </Select>
             </div>

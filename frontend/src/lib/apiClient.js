@@ -5,7 +5,8 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+// Same-origin is the safe default for staging and production builds without .env.
+const API = process.env.REACT_APP_BACKEND_URL || '';
 
 const apiClient = axios.create({
   baseURL: `${API}/api`,
@@ -24,7 +25,10 @@ apiClient.interceptors.request.use((config) => {
   const impersonating = localStorage.getItem('is_impersonating') === '1';
   const superToken = impersonating ? localStorage.getItem('super_admin_token') : null;
   const url = config.url || '';
-  if (superToken && SUPER_ADMIN_PATHS.some((p) => url.startsWith(p))) {
+  // Agent self-service must keep the impersonated agent token. The preserved
+  // super-admin token is only for platform administration and stop-impersonation.
+  const isAgentSelfService = url.startsWith('/saas/agent/') || url.startsWith('/saas/agent-login');
+  if (superToken && !isAgentSelfService && SUPER_ADMIN_PATHS.some((p) => url.startsWith(p))) {
     config.headers.Authorization = `Bearer ${superToken}`;
     return config;
   }
