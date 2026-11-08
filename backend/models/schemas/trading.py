@@ -97,6 +97,14 @@ class PurchaseItem(BaseModel):
     def validate_line_total(self):
         if abs(self.total - self.quantity * self.unit_price) > 0.01:
             raise ValueError("إجمالي الصنف يجب أن يساوي الكمية × سعر الوحدة")
+        if self.expiry_date:
+            from datetime import date
+            try:
+                parsed_expiry = date.fromisoformat(self.expiry_date)
+            except (TypeError, ValueError):
+                raise ValueError("تاريخ انتهاء الصلاحية يجب أن يكون بصيغة YYYY-MM-DD")
+            if parsed_expiry.isoformat() != self.expiry_date:
+                raise ValueError("تاريخ انتهاء الصلاحية يجب أن يكون بصيغة YYYY-MM-DD")
         return self
 
 class PurchaseCreate(BaseModel):

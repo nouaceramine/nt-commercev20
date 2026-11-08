@@ -649,14 +649,17 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         in_sale = await db.sales.find_one({"items.product_id": product_id}, {"_id": 1}, session=tx_session)
                         if in_purchase or in_sale:
                             raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': منتج حقيقي له حركات شراء/بيع مسجلة")
+                        product_lots = await db.product_lots.find({"product_id": product_id}, {"_id": 0}, session=tx_session).to_list(None)
                         await db.store_products.delete_many({"product_id": product_id}, session=tx_session)
                         archived = dict(full_doc)
+                        archived["product_lots"] = product_lots
                         archived["deleted_at"] = datetime.now(timezone.utc).isoformat()
                         archived["deleted_by"] = admin.get("full_name") or admin.get("email", "")
                         await db.deleted_products.update_one({"id": product_id}, {"$set": archived}, upsert=True, session=tx_session)
                         result = await db.products.delete_one({"id": product_id}, session=tx_session)
                         if result.deleted_count == 0:
                             raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                        await db.product_lots.delete_many({"product_id": product_id}, session=tx_session)
                         await db.product_identity_claims.delete_many({"product_id": product_id}, session=tx_session)
                         await _audit_product("delete", product_id, pname, admin, {}, session=tx_session)
                         return {"message": "تم حذف المنتج بنجاح"}
@@ -683,11 +686,14 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                             raise HTTPException(status_code=400, detail="منتج بنفس المعرّف موجود حالياً")
                         archived.pop("deleted_at", None)
                         archived.pop("deleted_by", None)
+                        product_lots = archived.pop("product_lots", [])
                         archived["restored_at"] = datetime.now(timezone.utc).isoformat()
                         archived["restored_by"] = admin.get("full_name") or admin.get("email", "")
                         await _assert_product_identities_available(archived, product_id, tx_session)
                         await _claim_product_identities(product_id, archived, tx_session)
                         await db.products.insert_one(archived, session=tx_session)
+                        if product_lots:
+                            await db.product_lots.insert_many(product_lots, session=tx_session)
                         await db.deleted_products.delete_one({"id": product_id}, session=tx_session)
                         await _audit_product("restore", product_id, archived.get("name_ar") or archived.get("name_en") or "", admin, {}, session=tx_session)
                         return {"message": "تمت استعادة المنتج من سلة المحذوفات", "product_id": product_id}
@@ -778,16 +784,19 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     @router.post("/{product_id}/lots", status_code=201)
     async def add_product_lot(product_id: str, lot: dict, admin: dict = Depends(require_permission("products.edit"))):
+        from models.schemas import ProductLotCreate
+        validated = ProductLotCreate(**lot)
         product = await db.products.find_one({"id": product_id})
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
         lot_doc = {
             "id": str(uuid.uuid4()),
             "product_id": product_id,
-            "lot_number": lot.get("lot_number", ""),
-            "expiry_date": lot.get("expiry_date", ""),
-            "quantity": float(lot.get("quantity", 0)),
-            "alert_days": int(lot.get("alert_days", 30)),
+            "lot_number": validated.lot_number or "",
+            "expiry_date": validated.expiry_date,
+            "quantity": validated.quantity,
+            "alert_days": validated.alert_days,
+            "source": "manual",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         await db.product_lots.insert_one(lot_doc)

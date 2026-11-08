@@ -4,7 +4,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from models.schemas.catalog import ProductCreate, ProductUpdate
+from models.schemas.catalog import ProductCreate, ProductLotCreate, ProductUpdate
 from models.schemas.trading import PurchaseCreate
 from services.cost_drift import check_cost_drift
 
@@ -64,6 +64,32 @@ def test_purchase_accepts_consistent_totals():
 def test_purchase_rejects_invalid_totals_payment_and_items(overrides):
     with pytest.raises(ValidationError):
         PurchaseCreate(**purchase_payload(**overrides))
+
+
+@pytest.mark.parametrize("expiry", ["not-a-date", "2026-02-30", "2026-11-08T00:00:00", "08/11/2026"])
+def test_purchase_rejects_invalid_expiry(expiry):
+    payload = purchase_payload()
+    payload["items"][0]["expiry_date"] = expiry
+    with pytest.raises(ValidationError):
+        PurchaseCreate(**payload)
+
+
+def test_lot_accepts_valid_expiry_and_zero_alert():
+    lot = ProductLotCreate(expiry_date="2026-11-28", quantity=0, alert_days=0)
+    assert lot.expiry_date == "2026-11-28"
+    assert lot.alert_days == 0
+
+
+@pytest.mark.parametrize("overrides", [
+    {"quantity": -1}, {"quantity": float("nan")}, {"quantity": float("inf")},
+    {"alert_days": -1}, {"alert_days": 3651},
+    {"expiry_date": ""}, {"expiry_date": "not-a-date"}, {"expiry_date": "2026-02-30"},
+])
+def test_lot_rejects_invalid_quantity_alert_and_expiry(overrides):
+    payload = {"expiry_date": "2026-11-28", "quantity": 1, "alert_days": 30}
+    payload.update(overrides)
+    with pytest.raises(ValidationError):
+        ProductLotCreate(**payload)
 
 
 class EmptyCursor:

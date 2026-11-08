@@ -1,6 +1,26 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional
 # ============ PRODUCT MODELS ============
+
+class ProductLotCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    lot_number: Optional[str] = ""
+    expiry_date: str
+    quantity: float = Field(ge=0, allow_inf_nan=False)
+    alert_days: int = Field(default=30, ge=0, le=3650)
+
+    @field_validator("expiry_date")
+    @classmethod
+    def validate_expiry_date(cls, value):
+        from datetime import date
+        try:
+            parsed = date.fromisoformat(value)
+        except (TypeError, ValueError):
+            raise ValueError("تاريخ انتهاء الصلاحية يجب أن يكون بصيغة YYYY-MM-DD")
+        if parsed.isoformat() != value:
+            raise ValueError("تاريخ انتهاء الصلاحية يجب أن يكون بصيغة YYYY-MM-DD")
+        return value
+
 
 class ProductCreate(BaseModel):
     name_en: str  # اسم المنتج (إلزامي)

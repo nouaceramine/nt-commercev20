@@ -31,7 +31,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         notes: Optional[str] = None
 
     # ── Create Purchase ──
-    async def _sync_item_extras(product, item: dict, ref: str, now: str, admin_name: str, session=None):
+    async def _sync_item_extras(product, item: dict, ref: str, now: str, admin_name: str, item_index: int = 0, session=None):
         # p168: sale price entered on the purchase → canonical retail_price + price_history;
         #        expiry date → auto-create a product lot (feeds expiry notifications).
         pid = product.get("id")
@@ -60,21 +60,49 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 }, session=session)
         exp = (item.get("expiry_date") or "").strip()
         if exp:
-            await db.product_lots.insert_one({
-                "id": str(uuid.uuid4()),
-                "product_id": pid,
-                "lot_number": ref,
-                "expiry_date": exp,
-                "quantity": float(item.get("quantity", 0) or 0),
-                "alert_days": int(item.get("alert_days") or 30),
-                "created_at": now,
+            # A purchase lot is part of the purchase effect, not an independent
+            # notification. A stable id makes reconfirmation exactly once.
+            lot_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"purchase-lot:{ref}:{pid}:{item_index}"))
+            await db.product_lots.delete_many({
+                "product_id": pid, "lot_number": ref, "id": {"$ne": lot_id},
+                "$or": [{"source": {"$exists": False}}, {"source": "purchase"}],
             }, session=session)
+            alert_days = item.get("alert_days") if item.get("alert_days") is not None else 30
+            await db.product_lots.update_one(
+                {"id": lot_id},
+                {
+                    "$set": {
+                        "product_id": pid, "lot_number": ref, "expiry_date": exp,
+                        "quantity": float(item.get("quantity", 0) or 0),
+                        "alert_days": int(alert_days), "source": "purchase",
+                        "purchase_ref": ref, "purchase_item_index": item_index,
+                    },
+                    "$setOnInsert": {"created_at": now},
+                },
+                upsert=True, session=session,
+            )
+
+    async def _reverse_item_extras(product, item: dict, ref: str, item_index: int = 0, session=None):
+        """Reverse only purchase-created lots, preserving independent manual lots."""
+        exp = (item.get("expiry_date") or "").strip()
+        if not exp:
+            return
+        pid = product.get("id")
+        lot_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"purchase-lot:{ref}:{pid}:{item_index}"))
+        await db.product_lots.delete_many({
+            "product_id": pid, "lot_number": ref,
+            "$or": [
+                {"id": lot_id},
+                {"source": "purchase"},
+                {"source": {"$exists": False}},  # legacy purchase lots
+            ],
+        }, session=session)
 
     async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "", admin_name: str = "", session=None):
         # Shared by direct creation and draft confirmation so every stock
         # activation applies the same price, history, lot and alert semantics.
         price_changes = []
-        for item in items:
+        for item_index, item in enumerate(items):
             pid = item.get("product_id")
             qty = item.get("quantity", 0)
             if not pid or not qty:
@@ -109,7 +137,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                         "reference": ref,
                         "created_at": now,
                     }, session=session)
-                await _sync_item_extras(product, item, ref, now, admin_name, session=session)
+                await _sync_item_extras(product, item, ref, now, admin_name, item_index=item_index, session=session)
                 if old_quantity == 0 and qty > 0:
                     await db.notifications.insert_one({
                         "id": str(uuid.uuid4()), "type": "restock",
@@ -117,6 +145,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                         "message_ar": f"المنتج '{product.get('name_ar')}' متوفر مرة أخرى!",
                         "product_id": pid, "read": False, "created_at": now,
                     }, session=session)
+            else:
+                await _reverse_item_extras(product, item, ref, item_index=item_index, session=session)
         if price_changes:
             from services.cost_drift import check_cost_drift
             await check_cost_drift(db, price_changes, ref_label=ref, user_name=admin_name, session=session)
@@ -461,7 +491,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 "financial_status": existing.get("financial_status", "inactive"),
             }
         await _apply_purchase_stock(
-            purchase_doc.get("items", []), -1, now, sync_prices=False, session=session
+            purchase_doc.get("items", []), -1, now, sync_prices=False,
+            ref=purchase_doc.get("invoice_number", ""), admin_name=admin["name"], session=session,
         )
         financial_active = purchase_doc.get("financial_status") == "active" or (
             "financial_status" not in purchase_doc
@@ -640,9 +671,13 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             "financial_status" not in purchase and purchase.get("stock_status", "confirmed") == "confirmed"
         )
         if purchase.get("stock_status", "confirmed") == "confirmed":
-            for item in purchase.get("items", []):
+            for item_index, item in enumerate(purchase.get("items", [])):
                 await db.products.update_one(
                     {"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}}, session=session
+                )
+                await _reverse_item_extras(
+                    {"id": item["product_id"]}, item, purchase.get("invoice_number", ""),
+                    item_index=item_index, session=session,
                 )
 
         if financial_active:
