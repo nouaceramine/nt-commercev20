@@ -79,8 +79,9 @@ class ProductCreate(BaseModel):
     @field_validator('purchase_price', 'wholesale_price', 'retail_price', 'super_wholesale_price')
     @classmethod
     def validate_prices(cls, v) -> bool:
-        if v is not None and v < 0:
-            raise ValueError('السعر يجب أن يكون صفر أو أكثر')
+        import math
+        if v is not None and (not math.isfinite(v) or v < 0):
+            raise ValueError('السعر يجب أن يكون رقمًا منتهيًا يساوي صفر أو أكثر')
         return v or 0
     
     @field_validator('images')
@@ -93,8 +94,9 @@ class ProductCreate(BaseModel):
     @field_validator('quantity', 'low_stock_threshold')
     @classmethod
     def validate_quantity(cls, v) -> bool:
-        if v is not None and v < 0:
-            raise ValueError('الكمية يجب أن تكون صفر أو أكثر')
+        import math
+        if v is not None and (not math.isfinite(v) or v < 0):
+            raise ValueError('الكمية يجب أن تكون رقمًا منتهيًا يساوي صفر أو أكثر')
         return v or 0
 
 class ProductUpdate(BaseModel):
@@ -152,15 +154,17 @@ class ProductUpdate(BaseModel):
     @field_validator('purchase_price', 'wholesale_price', 'retail_price', 'super_wholesale_price')
     @classmethod
     def validate_update_prices(cls, v):
-        if v is not None and v < 0:
-            raise ValueError('السعر يجب أن يكون صفر أو أكثر')
+        import math
+        if v is not None and (not math.isfinite(v) or v < 0):
+            raise ValueError('السعر يجب أن يكون رقمًا منتهيًا يساوي صفر أو أكثر')
         return v
 
     @field_validator('quantity', 'low_stock_threshold')
     @classmethod
     def validate_update_quantity(cls, v):
-        if v is not None and v < 0:
-            raise ValueError('الكمية يجب أن تكون صفر أو أكثر')
+        import math
+        if v is not None and (not math.isfinite(v) or v < 0):
+            raise ValueError('الكمية يجب أن تكون رقمًا منتهيًا يساوي صفر أو أكثر')
         return v
 
 class ProductResponse(BaseModel):

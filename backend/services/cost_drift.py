@@ -14,7 +14,7 @@ def _fmt(v):
     return f"{v:,.0f}".replace(",", " ") if float(v) == int(v) else f"{v:,.2f}".replace(",", " ")
 
 
-async def check_cost_drift(db, price_changes, *, ref_label: str = "", user_name: str = ""):
+async def check_cost_drift(db, price_changes, *, ref_label: str = "", user_name: str = "", session=None):
     """price_changes: [{product_id, name, old_price, new_price}] — مكوّنات تغيّر سعر شرائها.
     يعيد [{recipe_id, dish_name, drift_pct, ...}] للتنبيهات المُنشأة. لا يرفع استثناءً أبداً."""
     alerts = []
@@ -27,7 +27,7 @@ async def check_cost_drift(db, price_changes, *, ref_label: str = "", user_name:
         by_id = {c["product_id"]: c for c in changes}
         now = datetime.now(timezone.utc).isoformat()
 
-        cursor = db.recipes.find({"components.product_id": {"$in": list(by_id)}})
+        cursor = db.recipes.find({"components.product_id": {"$in": list(by_id)}}, session=session)
         async for r in cursor:
             old_total = 0.0
             new_total = 0.0
@@ -40,7 +40,7 @@ async def check_cost_drift(db, price_changes, *, ref_label: str = "", user_name:
                     op, np_ = float(ch["old_price"]), float(ch["new_price"])
                     causes.append(f"{ch.get('name') or pid} ({_fmt(op)} ← {_fmt(np_)})")
                 else:
-                    comp = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
+                    comp = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1}, session=session)
                     np_ = float((comp or {}).get("purchase_price") or c.get("unit_cost") or 0)
                     op = np_
                 old_total += qty * op
@@ -55,7 +55,7 @@ async def check_cost_drift(db, price_changes, *, ref_label: str = "", user_name:
             old_unit = round(old_total / out_qty, 2)
             new_unit = round(new_total / out_qty, 2)
             dish = await db.products.find_one({"id": r.get("product_id")},
-                                              {"_id": 0, "name_ar": 1, "name_en": 1, "retail_price": 1})
+                                              {"_id": 0, "name_ar": 1, "name_en": 1, "retail_price": 1}, session=session)
             dish = dish or {}
             dish_name = dish.get("name_ar") or dish.get("name_en") or r.get("name") or r.get("product_id")
             price = float(dish.get("retail_price") or 0)
@@ -89,10 +89,10 @@ async def check_cost_drift(db, price_changes, *, ref_label: str = "", user_name:
                 "created_by": user_name or "system",
                 "created_at": now,
             }
-            await db.notifications.insert_one(doc)
+            await db.notifications.insert_one(doc, session=session)
             log_doc = {k: v for k, v in doc.items() if k not in ("user_id", "is_read", "title", "type")}
             log_doc["at"] = now
-            await db.cost_drift_log.insert_one(log_doc)
+            await db.cost_drift_log.insert_one(log_doc, session=session)
             doc.pop("_id", None)
             alerts.append(doc)
     except Exception:

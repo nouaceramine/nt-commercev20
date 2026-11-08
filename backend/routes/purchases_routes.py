@@ -15,13 +15,14 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
     require_permission = create_permission_checker(db, get_current_user)
     router = APIRouter(prefix="/purchases", tags=["purchases"])
 
-    async def _generate_invoice_number(prefix: str) -> str:
+    async def _generate_invoice_number(prefix: str, session=None) -> str:
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         count = await db.counters.find_one_and_update(
             {"_id": f"{prefix}_{today}"},
             {"$inc": {"seq": 1}},
             upsert=True,
-            return_document=True
+            return_document=True,
+            session=session,
         )
         return f"{prefix}-{today}-{count['seq']:04d}"
 
@@ -80,7 +81,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 continue
             product = await db.products.find_one({"id": pid}, session=session)
             if not product:
-                continue
+                raise HTTPException(status_code=404, detail=f"المنتج المرتبط بالشراء غير موجود: {pid}")
             old_quantity = float(product.get("quantity", 0) or 0)
             updates = {"$inc": {"quantity": sign * qty}}
             sync_item_price = sync_prices and item.get("update_product_prices") is not False
@@ -118,7 +119,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     }, session=session)
         if price_changes:
             from services.cost_drift import check_cost_drift
-            await check_cost_drift(db, price_changes, ref_label=ref, user_name=admin_name)
+            await check_cost_drift(db, price_changes, ref_label=ref, user_name=admin_name, session=session)
 
     async def _activate_purchase_financials(
         purchase_doc: dict, admin: dict, session=None,
@@ -174,51 +175,60 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         p = PurchaseCreate(**purchase)
         purchase_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        invoice_number = await _generate_invoice_number("PUR")
 
-        supplier = await db.suppliers.find_one({"id": p.supplier_id})
-        if not supplier:
-            raise HTTPException(status_code=404, detail="Supplier not found")
+        # The invoice, stock, prices, supplier, cash, accounting rows and outbox
+        # event are one atomic operation. Drafts only persist the inert invoice.
+        import asyncio
+        from config.database import client
+        from pymongo.errors import PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        invoice_number = await _generate_invoice_number("PUR", session=tx_session)
+                        supplier = await db.suppliers.find_one({"id": p.supplier_id}, session=tx_session)
+                        if not supplier:
+                            raise HTTPException(status_code=404, detail="Supplier not found")
 
-        remaining = p.total - p.paid_amount
-        status = "paid" if remaining <= 0 else ("partial" if p.paid_amount > 0 else "unpaid")
+                        remaining = p.total - p.paid_amount
+                        status = "paid" if remaining <= 0 else ("partial" if p.paid_amount > 0 else "unpaid")
+                        purchase_doc = {
+                            "id": purchase_id, "invoice_number": invoice_number,
+                            "code": p.code or "",
+                            "supplier_id": p.supplier_id, "supplier_name": supplier["name"],
+                            "items": [item.model_dump() for item in p.items],
+                            "total": p.total, "paid_amount": p.paid_amount,
+                            "remaining": max(0, remaining), "payment_method": p.payment_method,
+                            "payments": ([{"amount": p.paid_amount, "method": p.payment_method, "at": now}] if p.paid_amount > 0 else []),
+                            "status": status, "notes": p.notes or "",
+                            "created_at": now, "created_by": admin["name"]
+                        }
+                        wid = purchase.get("warehouse_id") or ""
+                        purchase_doc["warehouse_id"] = wid
+                        purchase_doc["warehouse_name"] = purchase.get("warehouse_name") or ""
+                        if wid:
+                            wh = await db.warehouses.find_one({"id": wid}, session=tx_session)
+                            if not wh:
+                                raise HTTPException(status_code=404, detail="Warehouse not found")
+                            purchase_doc["warehouse_name"] = wh.get("name", purchase_doc["warehouse_name"])
+                        confirm_stock = purchase.get("confirm_stock", True)
+                        purchase_doc["stock_status"] = "confirmed" if confirm_stock else "draft"
+                        purchase_doc["financial_status"] = "active" if confirm_stock else "inactive"
+                        await db.purchases.insert_one(purchase_doc, session=tx_session)
 
-        purchase_doc = {
-            "id": purchase_id, "invoice_number": invoice_number,
-            "code": p.code or "",
-            "supplier_id": p.supplier_id, "supplier_name": supplier["name"],
-            "items": [item.model_dump() for item in p.items],
-            "total": p.total, "paid_amount": p.paid_amount,
-            "remaining": max(0, remaining), "payment_method": p.payment_method,
-            "payments": ([{"amount": p.paid_amount, "method": p.payment_method, "at": now}] if p.paid_amount > 0 else []),  # p67
-            "status": status, "notes": p.notes or "",
-            "created_at": now, "created_by": admin["name"]
-        }
-        # المخزن المستهدف (اختياري) — يُسجّل على الفاتورة، والمخزون العام يبقى كما هو
-        wid = purchase.get("warehouse_id") or ""
-        purchase_doc["warehouse_id"] = wid
-        purchase_doc["warehouse_name"] = purchase.get("warehouse_name") or ""
-        if wid:
-            wh = await db.warehouses.find_one({"id": wid})
-            if wh:
-                purchase_doc["warehouse_name"] = wh.get("name", purchase_doc["warehouse_name"])
-        confirm_stock = purchase.get("confirm_stock", True)
-        purchase_doc["stock_status"] = "confirmed" if confirm_stock else "draft"
-        purchase_doc["financial_status"] = "active" if confirm_stock else "inactive"
-        await db.purchases.insert_one(purchase_doc)
+                        if confirm_stock:
+                            await _apply_purchase_stock(
+                                [item.model_dump() for item in p.items], +1, now,
+                                ref=invoice_number, admin_name=admin.get("name", ""), session=tx_session,
+                            )
+                            await _activate_purchase_financials(purchase_doc, admin, session=tx_session)
 
-        if not confirm_stock:
-            purchase_doc.pop("_id", None)
-            return purchase_doc
-
-        await _apply_purchase_stock(
-            [item.model_dump() for item in p.items], +1, now,
-            ref=invoice_number, admin_name=admin.get("name", ""),
-        )
-        await _activate_purchase_financials(purchase_doc, admin)
-
-        purchase_doc.pop("_id", None)
-        return purchase_doc
+                        purchase_doc.pop("_id", None)
+                        return purchase_doc
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Get Purchases ──
     @router.get("")

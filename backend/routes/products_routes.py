@@ -15,8 +15,55 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     require_permission = create_permission_checker(db, get_current_user)
     router = APIRouter(prefix="/products", tags=["products"])
 
-    async def _audit_product(action: str, product_id: str, product_name: str, admin: dict, details: dict = None):
-        """Write to product_audit_log — collection existed with indexes but had no writer."""
+    def _identity_claim_ids(doc: dict) -> list:
+        """Stable per-tenant claims close check-then-insert races, including legacy rows."""
+        claims = []
+        for field in ("name_en", "name_ar"):
+            value = (doc.get(field) or "").strip().casefold()
+            if value:
+                claims.append(field + ":" + value)
+        barcodes = ([doc.get("barcode")] if doc.get("barcode") else []) + list(doc.get("additional_barcodes") or [])
+        for value in barcodes:
+            value = str(value or "").strip()
+            if value:
+                claims.append("barcode:" + value)
+        return list(dict.fromkeys(claims))
+
+    async def _assert_product_identities_available(doc: dict, exclude_id: str = "", session=None):
+        """Keep compatibility with legacy products that predate identity claims."""
+        import re
+        for field in ("name_en", "name_ar"):
+            value = (doc.get(field) or "").strip()
+            if not value:
+                continue
+            query = {field: {"$regex": f"^{re.escape(value)}$", "$options": "i"}}
+            if exclude_id:
+                query["id"] = {"$ne": exclude_id}
+            existing = await db.products.find_one(query, {"_id": 0, "name_ar": 1, "name_en": 1}, session=session)
+            if existing:
+                raise HTTPException(status_code=409, detail=f"منتج بنفس الاسم موجود مسبقاً: {existing.get('name_ar') or existing.get('name_en')}")
+        barcodes = ([doc.get("barcode")] if doc.get("barcode") else []) + list(doc.get("additional_barcodes") or [])
+        for barcode in dict.fromkeys(str(v or "").strip() for v in barcodes if str(v or "").strip()):
+            query = {"$or": [{"barcode": barcode}, {"additional_barcodes": barcode}]}
+            if exclude_id:
+                query["id"] = {"$ne": exclude_id}
+            clash = await db.products.find_one(query, {"_id": 0, "name_ar": 1, "name_en": 1}, session=session)
+            if clash:
+                raise HTTPException(status_code=409, detail=f"الباركود مستعمل مسبقاً في المنتج: {clash.get('name_ar') or clash.get('name_en')}")
+
+    async def _claim_product_identities(product_id: str, doc: dict, session):
+        for claim_id in _identity_claim_ids(doc):
+            existing = await db.product_identity_claims.find_one({"_id": claim_id}, session=session)
+            if existing and existing.get("product_id") != product_id:
+                raise HTTPException(status_code=409, detail="اسم المنتج أو الباركود مستعمل مسبقاً")
+            if not existing:
+                await db.product_identity_claims.insert_one({
+                    "_id": claim_id, "product_id": product_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }, session=session)
+
+    async def _audit_product(action: str, product_id: str, product_name: str, admin: dict, details: dict = None, session=None):
+        """Write to product_audit_log in the same transaction as the product mutation."""
         await db.product_audit_log.insert_one({
             "id": str(uuid.uuid4()),
             "action": action,
@@ -26,7 +73,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "performed_by": admin.get("name", admin.get("email", "")),
             "details": details or {},
             "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }, session=session)
 
     # ── Inline Models ──
     class PaginatedProductsResponse(BaseModel):
@@ -63,25 +110,10 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         product_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        import re as _re
-        def _ci_exact(v):
-            return {"$regex": f"^{_re.escape(v.strip())}$", "$options": "i"}
-        dup_conditions = [{"name_en": _ci_exact(p.name_en)}]
-        if p.name_ar and p.name_ar.strip():
-            dup_conditions.append({"name_ar": _ci_exact(p.name_ar)})
-        existing = await db.products.find_one({"$or": dup_conditions})
-        if existing:
-            raise HTTPException(status_code=409, detail=f"منتج بنفس الاسم موجود مسبقاً: {existing.get('name_ar') or existing.get('name_en')}")
-
-        _new_barcodes = ([p.barcode] if p.barcode else []) + list(p.additional_barcodes or [])
-        for _bc in _new_barcodes:
-            if not _bc:
-                continue
-            bc_clash = await db.products.find_one({
-                "$or": [{"barcode": _bc}, {"additional_barcodes": _bc}]
-            })
-            if bc_clash:
-                raise HTTPException(status_code=409, detail=f"الباركود مستعمل مسبقاً في المنتج: {bc_clash.get('name_ar') or bc_clash.get('name_en')}")
+        await _assert_product_identities_available({
+            "name_en": p.name_en, "name_ar": p.name_ar,
+            "barcode": p.barcode, "additional_barcodes": p.additional_barcodes or [],
+        })
 
         family_name = ""
         if p.family_id:
@@ -149,16 +181,26 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         }
         if product_doc["has_variants"]:
             product_doc["quantity"] = sum(v["quantity"] for v in product_doc["variants"])
-        try:
-            await db.products.insert_one(product_doc)
-        except Exception as e:
-            if "E11000" in str(e) or "DuplicateKey" in type(e).__name__:
-                raise HTTPException(status_code=409, detail="الباركود مستعمل مسبقاً (تعارض تزامن)")
-            raise
-        await _audit_product("create", product_id, product_doc["name"], admin,
-                             {"barcode": product_doc.get("barcode", ""), "retail_price": product_doc.get("retail_price", 0)})
-        product_doc.pop("_id", None)
-        return product_doc
+        import asyncio
+        from config.database import client
+        from pymongo.errors import DuplicateKeyError, PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        await _claim_product_identities(product_id, product_doc, tx_session)
+                        await db.products.insert_one(product_doc, session=tx_session)
+                        await _audit_product("create", product_id, product_doc["name"], admin,
+                                             {"barcode": product_doc.get("barcode", ""), "retail_price": product_doc.get("retail_price", 0)},
+                                             session=tx_session)
+                        product_doc.pop("_id", None)
+                        return product_doc
+            except DuplicateKeyError:
+                raise HTTPException(status_code=409, detail="اسم المنتج أو الباركود مستعمل مسبقاً (تعارض تزامن)")
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Get Products ──
     @router.get("")
@@ -491,157 +533,211 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     # ── Update Product ──
     @router.put("/{product_id}")
     async def update_product(product_id: str, updates: dict, admin: dict = Depends(require_permission("products.edit"))):
-        product = await db.products.find_one({"id": product_id})
-        if not product:
-            raise HTTPException(status_code=404, detail="المنتج غير موجود")
-
-        # Validate/sanitize covered fields through ProductUpdate (422 on invalid);
-        # extra keys not in the model keep the prior pass-through semantics
         from models.schemas import ProductUpdate
         validated = ProductUpdate(**updates)
-        update_data = {k: v for k, v in updates.items() if v is not None and k not in ["id"]}
+        update_data = {k: v for k, v in updates.items() if v is not None and k != "id"}
         for k, v in validated.model_dump(exclude_unset=True).items():
             if v is not None:
                 update_data[k] = v
-        if "family_id" in update_data:
-            if update_data["family_id"]:
-                family = await db.product_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1})
-                if not family:
-                    raise HTTPException(status_code=400, detail="عائلة المنتجات المحددة غير موجودة")
-                update_data["family_name"] = family["name_ar"]
-            else:
-                update_data["family_name"] = ""
 
-        # p217: resolve brand name when brand changes
-        if "brand_id" in update_data:
-            if update_data["brand_id"]:
-                brand = await db.product_brands.find_one({"id": update_data["brand_id"]}, {"_id": 0, "name_ar": 1})
-                if not brand:
-                    raise HTTPException(status_code=400, detail="الماركة المحددة غير موجودة")
-                update_data["brand_name"] = brand["name_ar"]
-            else:
-                update_data["brand_name"] = ""
+        import asyncio
+        from config.database import client
+        from pymongo.errors import DuplicateKeyError, PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        product = await db.products.find_one({"id": product_id}, session=tx_session)
+                        if not product:
+                            raise HTTPException(status_code=404, detail="المنتج غير موجود")
 
-        new_barcode = update_data.get("barcode")
-        if new_barcode:
-            bc_clash = await db.products.find_one({
-                "id": {"$ne": product_id},
-                "$or": [{"barcode": new_barcode}, {"additional_barcodes": new_barcode}]
-            })
-            if bc_clash:
-                raise HTTPException(status_code=409, detail=f"الباركود مستعمل مسبقاً في المنتج: {bc_clash.get('name_ar') or bc_clash.get('name_en')}")
+                        if "family_id" in update_data:
+                            if update_data["family_id"]:
+                                family = await db.product_families.find_one(
+                                    {"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1}, session=tx_session
+                                )
+                                if not family:
+                                    raise HTTPException(status_code=400, detail="عائلة المنتجات المحددة غير موجودة")
+                                update_data["family_name"] = family["name_ar"]
+                            else:
+                                update_data["family_name"] = ""
 
-        # p70: variant stock — normalize + recompute total quantity
-        if "variants" in update_data or "has_variants" in update_data:
-            eff_has = update_data.get("has_variants", product.get("has_variants", False))
-            if eff_has:
-                raw_variants = update_data.get("variants", product.get("variants", [])) or []
-                norm = [
-                    {"color": (v or {}).get("color", ""), "size": (v or {}).get("size", ""),
-                     "quantity": float((v or {}).get("quantity", 0) or 0)}
-                    for v in raw_variants
-                ]
-                update_data["variants"] = norm
-                update_data["has_variants"] = True
-                update_data["quantity"] = sum(v["quantity"] for v in norm)
-            else:
-                update_data["has_variants"] = False
-                update_data["variants"] = []
+                        if "brand_id" in update_data:
+                            if update_data["brand_id"]:
+                                brand = await db.product_brands.find_one(
+                                    {"id": update_data["brand_id"]}, {"_id": 0, "name_ar": 1}, session=tx_session
+                                )
+                                if not brand:
+                                    raise HTTPException(status_code=400, detail="الماركة المحددة غير موجودة")
+                                update_data["brand_name"] = brand["name_ar"]
+                            else:
+                                update_data["brand_name"] = ""
 
-        old_price = product.get("retail_price", 0)
-        new_price = update_data.get("retail_price", old_price)
-        if new_price != old_price:
-            await db.price_history.insert_one({
-                "id": str(uuid.uuid4()),
-                "product_id": product_id,
-                "product_name": product.get("name_ar") or product.get("name_en") or product.get("name") or "",
-                "old_price": old_price,
-                "new_price": new_price,
-                "price_type": "retail_price",
-                "change_percent": round(((new_price - old_price) / old_price) * 100, 2) if old_price else 0.0,
-                "changed_by": admin.get("name", admin.get("email", "")),
-                "changed_by_name": admin.get("name", admin.get("email", "")),
-                "source": "manual",
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
+                        if "variants" in update_data or "has_variants" in update_data:
+                            eff_has = update_data.get("has_variants", product.get("has_variants", False))
+                            if eff_has:
+                                raw_variants = update_data.get("variants", product.get("variants", [])) or []
+                                norm = [
+                                    {"color": (v or {}).get("color", ""), "size": (v or {}).get("size", ""),
+                                     "quantity": float((v or {}).get("quantity", 0) or 0)}
+                                    for v in raw_variants
+                                ]
+                                if any(v["quantity"] < 0 for v in norm):
+                                    raise HTTPException(status_code=422, detail="كمية المتغير يجب أن تكون صفر أو أكثر")
+                                update_data["variants"] = norm
+                                update_data["has_variants"] = True
+                                update_data["quantity"] = sum(v["quantity"] for v in norm)
+                            else:
+                                update_data["has_variants"] = False
+                                update_data["variants"] = []
 
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        await db.products.update_one({"id": product_id}, {"$set": update_data})
-        await _audit_product("update", product_id, product.get("name_ar") or product.get("name_en") or "",
-                             admin, {"changed_fields": sorted(k for k in update_data if k != "updated_at")})
-        updated = await db.products.find_one({"id": product_id}, {"_id": 0})
-        return updated
+                        identity_doc = {**product, **update_data}
+                        await _assert_product_identities_available(identity_doc, product_id, tx_session)
+                        await _claim_product_identities(product_id, identity_doc, tx_session)
+                        desired_claims = _identity_claim_ids(identity_doc)
+                        await db.product_identity_claims.delete_many(
+                            {"product_id": product_id, "_id": {"$nin": desired_claims}}, session=tx_session
+                        )
+
+                        now = datetime.now(timezone.utc).isoformat()
+                        changed_by = admin.get("name", admin.get("email", ""))
+                        for price_field in ("purchase_price", "wholesale_price", "retail_price", "super_wholesale_price"):
+                            old_price = float(product.get(price_field, 0) or 0)
+                            new_price = float(update_data.get(price_field, old_price) or 0)
+                            if new_price == old_price:
+                                continue
+                            await db.price_history.insert_one({
+                                "id": str(uuid.uuid4()), "product_id": product_id,
+                                "product_name": product.get("name_ar") or product.get("name_en") or product.get("name") or "",
+                                "old_price": old_price, "new_price": new_price, "price_type": price_field,
+                                "change_percent": round(((new_price - old_price) / old_price) * 100, 2) if old_price else 0.0,
+                                "changed_by": changed_by, "changed_by_name": changed_by,
+                                "source": "manual", "created_at": now,
+                            }, session=tx_session)
+
+                        update_data["updated_at"] = now
+                        await db.products.update_one({"id": product_id}, {"$set": update_data}, session=tx_session)
+                        await _audit_product("update", product_id, product.get("name_ar") or product.get("name_en") or "",
+                                             admin, {"changed_fields": sorted(k for k in update_data if k != "updated_at")},
+                                             session=tx_session)
+                        return await db.products.find_one({"id": product_id}, {"_id": 0}, session=tx_session)
+            except DuplicateKeyError:
+                raise HTTPException(status_code=409, detail="اسم المنتج أو الباركود مستعمل مسبقاً (تعارض تزامن)")
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Delete Product ──
     @router.delete("/{product_id}")
     async def delete_product(product_id: str, admin: dict = Depends(require_permission("products.delete"))):
-        # حماية: المنتج الذي عليه مخزون أو له حركات شراء/بيع أصبح "حقيقياً" — حذفه ممنوع
-        product = await db.products.find_one({"id": product_id}, {"_id": 0, "quantity": 1, "name_ar": 1, "name_en": 1})
-        if not product:
-            raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        pname = product.get("name_ar") or product.get("name_en") or ""
-        if (product.get("quantity") or 0) > 0:
-            raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': عليه مخزون ({product.get('quantity')}). صفّر المخزون أولاً")
-        in_purchase = await db.purchases.find_one({"items.product_id": product_id}, {"_id": 1})
-        in_sale = await db.sales.find_one({"items.product_id": product_id}, {"_id": 1})
-        if in_purchase or in_sale:
-            raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': منتج حقيقي له حركات شراء/بيع مسجلة")
-        await db.store_products.delete_many({"product_id": product_id})
-        # حذف ناعم: أرشفة الوثيقة كاملة في deleted_products قبل الإزالة (قابلة للاستعادة)
-        full_doc = await db.products.find_one({"id": product_id}, {"_id": 0})
-        if full_doc:
-            full_doc["deleted_at"] = datetime.now(timezone.utc).isoformat()
-            full_doc["deleted_by"] = admin.get("full_name") or admin.get("email", "")
-            await db.deleted_products.update_one({"id": product_id}, {"$set": full_doc}, upsert=True)
-        result = await db.products.delete_one({"id": product_id})
-        if result.deleted_count == 0:
-            raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        await _audit_product("delete", product_id, pname, admin, {})
-        return {"message": "تم حذف المنتج بنجاح"}
+        # Archive, store cleanup, identity release and audit share one fate.
+        import asyncio
+        from config.database import client
+        from pymongo.errors import PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        full_doc = await db.products.find_one({"id": product_id}, {"_id": 0}, session=tx_session)
+                        if not full_doc:
+                            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                        pname = full_doc.get("name_ar") or full_doc.get("name_en") or ""
+                        if (full_doc.get("quantity") or 0) > 0:
+                            raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': عليه مخزون ({full_doc.get('quantity')}). صفّر المخزون أولاً")
+                        in_purchase = await db.purchases.find_one({"items.product_id": product_id}, {"_id": 1}, session=tx_session)
+                        in_sale = await db.sales.find_one({"items.product_id": product_id}, {"_id": 1}, session=tx_session)
+                        if in_purchase or in_sale:
+                            raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': منتج حقيقي له حركات شراء/بيع مسجلة")
+                        await db.store_products.delete_many({"product_id": product_id}, session=tx_session)
+                        archived = dict(full_doc)
+                        archived["deleted_at"] = datetime.now(timezone.utc).isoformat()
+                        archived["deleted_by"] = admin.get("full_name") or admin.get("email", "")
+                        await db.deleted_products.update_one({"id": product_id}, {"$set": archived}, upsert=True, session=tx_session)
+                        result = await db.products.delete_one({"id": product_id}, session=tx_session)
+                        if result.deleted_count == 0:
+                            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                        await db.product_identity_claims.delete_many({"product_id": product_id}, session=tx_session)
+                        await _audit_product("delete", product_id, pname, admin, {}, session=tx_session)
+                        return {"message": "تم حذف المنتج بنجاح"}
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Restore Deleted Product (recycle bin) ──
     @router.post("/{product_id}/restore")
     async def restore_product(product_id: str, admin: dict = Depends(require_permission("products.delete"))):
-        archived = await db.deleted_products.find_one({"id": product_id}, {"_id": 0})
-        if not archived:
-            raise HTTPException(status_code=404, detail="لا يوجد منتج محذوف بهذا المعرّف")
-        existing = await db.products.find_one({"id": product_id}, {"_id": 1})
-        if existing:
-            raise HTTPException(status_code=400, detail="منتج بنفس المعرّف موجود حالياً")
-        archived.pop("deleted_at", None)
-        archived.pop("deleted_by", None)
-        archived["restored_at"] = datetime.now(timezone.utc).isoformat()
-        archived["restored_by"] = admin.get("full_name") or admin.get("email", "")
-        await db.products.insert_one(archived)
-        await db.deleted_products.delete_one({"id": product_id})
-        await _audit_product("restore", product_id, archived.get("name_ar") or archived.get("name_en") or "", admin, {})
-        return {"message": "تمت استعادة المنتج من سلة المحذوفات", "product_id": product_id}
+        import asyncio
+        from config.database import client
+        from pymongo.errors import DuplicateKeyError, PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        archived = await db.deleted_products.find_one({"id": product_id}, {"_id": 0}, session=tx_session)
+                        if not archived:
+                            raise HTTPException(status_code=404, detail="لا يوجد منتج محذوف بهذا المعرّف")
+                        existing = await db.products.find_one({"id": product_id}, {"_id": 1}, session=tx_session)
+                        if existing:
+                            raise HTTPException(status_code=400, detail="منتج بنفس المعرّف موجود حالياً")
+                        archived.pop("deleted_at", None)
+                        archived.pop("deleted_by", None)
+                        archived["restored_at"] = datetime.now(timezone.utc).isoformat()
+                        archived["restored_by"] = admin.get("full_name") or admin.get("email", "")
+                        await _assert_product_identities_available(archived, product_id, tx_session)
+                        await _claim_product_identities(product_id, archived, tx_session)
+                        await db.products.insert_one(archived, session=tx_session)
+                        await db.deleted_products.delete_one({"id": product_id}, session=tx_session)
+                        await _audit_product("restore", product_id, archived.get("name_ar") or archived.get("name_en") or "", admin, {}, session=tx_session)
+                        return {"message": "تمت استعادة المنتج من سلة المحذوفات", "product_id": product_id}
+            except DuplicateKeyError:
+                raise HTTPException(status_code=409, detail="تعذر الاستعادة: اسم المنتج أو الباركود مستعمل مسبقاً")
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Clone Product ──
     @router.post("/{product_id}/clone", status_code=201)
     async def clone_product(product_id: str, admin: dict = Depends(require_permission("products.add"))):
-        src = await db.products.find_one({"id": product_id}, {"_id": 0})
-        if not src:
-            raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        now = datetime.now(timezone.utc).isoformat()
-        clone = dict(src)
-        clone["id"] = str(uuid.uuid4())
-        base_name = src.get("name_ar") or src.get("name_en") or ""
-        clone["name_ar"] = (src.get("name_ar") or "") + " (نسخة)" if src.get("name_ar") else ""
-        clone["name_en"] = (src.get("name_en") or "") + " (copy)" if src.get("name_en") else ""
-        clone["quantity"] = 0  # النسخة تبدأ بلا مخزون — لا تضخيم وهمي للمخزون
-        clone["barcode"] = ""  # تفادي صدام الفهرس الفريد
-        clone["additional_barcodes"] = []
-        clone["article_code"] = ""
-        clone["created_at"] = now
-        clone["updated_at"] = now
-        clone["cloned_from"] = product_id
-        clone.pop("restored_at", None)
-        clone.pop("restored_by", None)
-        await db.products.insert_one(clone)
-        clone.pop("_id", None)
-        await _audit_product("clone", clone["id"], base_name, admin, {"cloned_from": product_id})
-        return clone
+        import asyncio
+        from config.database import client
+        from pymongo.errors import DuplicateKeyError, PyMongoError
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        src = await db.products.find_one({"id": product_id}, {"_id": 0}, session=tx_session)
+                        if not src:
+                            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                        now = datetime.now(timezone.utc).isoformat()
+                        clone = dict(src)
+                        clone["id"] = str(uuid.uuid4())
+                        base_name = src.get("name_ar") or src.get("name_en") or ""
+                        clone["name_ar"] = (src.get("name_ar") or "") + " (نسخة)" if src.get("name_ar") else ""
+                        clone["name_en"] = (src.get("name_en") or "") + " (copy)" if src.get("name_en") else ""
+                        clone["quantity"] = 0  # النسخة تبدأ بلا مخزون — لا تضخيم وهمي للمخزون
+                        clone["barcode"] = ""
+                        clone["additional_barcodes"] = []
+                        clone["article_code"] = ""
+                        clone["created_at"] = now
+                        clone["updated_at"] = now
+                        clone["cloned_from"] = product_id
+                        clone.pop("restored_at", None)
+                        clone.pop("restored_by", None)
+                        await _assert_product_identities_available(clone, session=tx_session)
+                        await _claim_product_identities(clone["id"], clone, tx_session)
+                        await db.products.insert_one(clone, session=tx_session)
+                        await _audit_product("clone", clone["id"], base_name, admin, {"cloned_from": product_id}, session=tx_session)
+                        clone.pop("_id", None)
+                        return clone
+            except DuplicateKeyError:
+                raise HTTPException(status_code=409, detail="اسم النسخة مستعمل مسبقاً")
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Product History ──
     @router.get("/{product_id}/history")

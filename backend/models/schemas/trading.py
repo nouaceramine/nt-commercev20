@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import List, Optional, Literal
 # ============ SALE MODELS ============
 
@@ -80,29 +80,44 @@ class PurchaseItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     product_id: Optional[str] = None
     product_name: str
-    quantity: int
-    unit_price: float
-    total: float
+    quantity: int = Field(gt=0)
+    unit_price: float = Field(ge=0, allow_inf_nan=False)
+    total: float = Field(ge=0, allow_inf_nan=False)
     # p173: selling_price removed — retail_price (below) is the ONLY sale-price field.
     # purchase_price always syncs from unit_price; sale price syncs to retail_price
     # with a price_history row (see purchases_routes._sync_item_extras).
     update_product_prices: Optional[bool] = True   # default ON so user gets the obvious behavior
     # p168: direct sale-price column in the purchase form → retail_price + price_history
-    retail_price: Optional[float] = None
+    retail_price: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     # p168: expiry date of the purchased lot → auto-creates a product_lots row (expiry alerts)
     expiry_date: Optional[str] = ""
-    alert_days: Optional[int] = 30
+    alert_days: Optional[int] = Field(default=30, ge=0, le=3650)
+
+    @model_validator(mode="after")
+    def validate_line_total(self):
+        if abs(self.total - self.quantity * self.unit_price) > 0.01:
+            raise ValueError("إجمالي الصنف يجب أن يساوي الكمية × سعر الوحدة")
+        return self
 
 class PurchaseCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     supplier_id: str
-    items: List[PurchaseItem]
-    total: float
-    paid_amount: float = 0
+    items: List[PurchaseItem] = Field(min_length=1)
+    total: float = Field(gt=0, allow_inf_nan=False)
+    paid_amount: float = Field(default=0, ge=0, allow_inf_nan=False)
     payment_method: Literal["cash", "bank", "wallet", "safe", "personal"] = "cash"  # p62: +خزنة/مال خاص
     payment_type: Optional[str] = "cash"
     notes: Optional[str] = ""
     code: Optional[str] = ""
+
+    @model_validator(mode="after")
+    def validate_purchase_totals(self):
+        items_total = sum(item.total for item in self.items)
+        if abs(self.total - items_total) > 0.01:
+            raise ValueError("إجمالي الفاتورة يجب أن يساوي مجموع الأصناف")
+        if self.paid_amount > self.total + 0.001:
+            raise ValueError("المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة")
+        return self
 
 class PurchaseResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
