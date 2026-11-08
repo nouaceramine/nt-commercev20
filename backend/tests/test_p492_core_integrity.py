@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from models.schemas.catalog import ProductCreate, ProductLotCreate, ProductUpdate
+from models.schemas.inventory import InventorySessionUpdate, StockTransferCreate, WarehouseCreate
 from models.schemas.trading import PurchaseCreate
 from services.cost_drift import check_cost_drift
 
@@ -92,6 +93,35 @@ def test_lot_rejects_invalid_quantity_alert_and_expiry(overrides):
         ProductLotCreate(**payload)
 
 
+@pytest.mark.parametrize("name", ["", "   "])
+def test_warehouse_rejects_blank_name(name):
+    with pytest.raises(ValidationError):
+        WarehouseCreate(name=name)
+
+
+def test_warehouse_name_is_trimmed():
+    assert WarehouseCreate(name="  Main  ").name == "Main"
+
+
+@pytest.mark.parametrize("quantity", [0, -1, float("nan"), float("inf")])
+def test_stock_transfer_rejects_nonpositive_or_nonfinite_quantity(quantity):
+    with pytest.raises(ValidationError):
+        StockTransferCreate(from_warehouse="a", to_warehouse="b", product_id="p", quantity=quantity)
+
+
+@pytest.mark.parametrize("counted_items", [
+    {"p": -1}, {"p": float("nan")}, {"p": float("inf")}, {"": 1},
+])
+def test_inventory_rejects_invalid_counted_items(counted_items):
+    with pytest.raises(ValidationError):
+        InventorySessionUpdate(counted_items=counted_items)
+
+
+def test_inventory_accepts_zero_count():
+    update = InventorySessionUpdate(counted_items={"p": 0})
+    assert update.counted_items == {"p": 0.0}
+
+
 class EmptyCursor:
     def __aiter__(self):
         return self
@@ -128,3 +158,69 @@ def test_cost_drift_uses_the_purchase_transaction_session():
     ))
     assert alerts == []
     assert db.recipes.called
+
+
+class WarehouseStockCollection:
+    def __init__(self, stock=None):
+        self.stock = stock
+        self.inserted = None
+        self.atomic_update = None
+
+    async def find_one(self, query, session=None):
+        return self.stock
+
+    async def insert_one(self, doc, session=None):
+        self.inserted = doc
+
+    async def find_one_and_update(self, query, update, session=None, return_document=None):
+        self.atomic_update = (query, update)
+        if self.stock["quantity"] < query.get("quantity", {}).get("$gte", float("-inf")):
+            return None
+        self.stock["quantity"] += update["$inc"]["quantity"]
+        return self.stock
+
+
+class WarehouseStockDB:
+    def __init__(self, stock=None):
+        self.warehouse_stock = WarehouseStockCollection(stock)
+
+
+def test_warehouse_stock_initialization_uses_unique_mongo_id():
+    from services.warehouse_stock import adjust_warehouse_stock, warehouse_stock_id
+    db = WarehouseStockDB()
+    quantity = asyncio.run(adjust_warehouse_stock(
+        db, "TEST-P492-product", "TEST-P492-main", -2,
+        product_quantity_before=20, session=None,
+    ))
+    expected_id = warehouse_stock_id("TEST-P492-product", "TEST-P492-main")
+    assert quantity == 18
+    assert db.warehouse_stock.inserted["_id"] == expected_id
+    assert db.warehouse_stock.inserted["id"] == expected_id
+    assert db.warehouse_stock.inserted["quantity"] == 18
+
+
+def test_warehouse_stock_existing_balance_uses_atomic_increment():
+    from services.warehouse_stock import adjust_warehouse_stock
+    db = WarehouseStockDB({"_id": "mongo-id", "id": "logical-id", "quantity": 20.0})
+    quantity = asyncio.run(adjust_warehouse_stock(
+        db, "TEST-P492-product", "TEST-P492-main", -2,
+        product_quantity_before=20, session=None,
+    ))
+    query, update = db.warehouse_stock.atomic_update
+    assert quantity == 18
+    assert query == {"_id": "mongo-id", "quantity": {"$gte": 2.0}}
+    assert update["$inc"] == {"quantity": -2.0}
+    assert "$set" in update and "quantity" not in update["$set"]
+
+
+def test_warehouse_stock_rejects_atomic_overdraw():
+    from fastapi import HTTPException
+    from services.warehouse_stock import adjust_warehouse_stock
+    db = WarehouseStockDB({"_id": "mongo-id", "id": "logical-id", "quantity": 1.0})
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(adjust_warehouse_stock(
+            db, "TEST-P492-product", "TEST-P492-main", -2,
+            product_quantity_before=20, session=None,
+        ))
+    assert error.value.status_code == 400
+    assert db.warehouse_stock.stock["quantity"] == 1.0

@@ -208,7 +208,7 @@ export default function InventoryCountPage() {
       saveCountToSession({ ...prev, [productId]: newCount });
       return { ...prev, [productId]: newCount };
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const decrementCount = useCallback((productId) => {
     setCountedItems(prev => {
@@ -216,7 +216,7 @@ export default function InventoryCountPage() {
       saveCountToSession({ ...prev, [productId]: newCount });
       return { ...prev, [productId]: newCount };
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setManualCount = useCallback((productId, count) => {
     const value = Math.max(0, parseInt(count) || 0);
@@ -224,7 +224,7 @@ export default function InventoryCountPage() {
       saveCountToSession({ ...prev, [productId]: value });
       return { ...prev, [productId]: value };
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Set count to match current system quantity
   const confirmCurrentQuantity = useCallback((productId, currentQty) => {
@@ -232,7 +232,7 @@ export default function InventoryCountPage() {
       saveCountToSession({ ...prev, [productId]: currentQty });
       return { ...prev, [productId]: currentQty };
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveCountToSession = async (items) => {
     if (!activeSession) return;
@@ -254,19 +254,8 @@ export default function InventoryCountPage() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      // Calculate differences and apply if needed
-      if (applyChanges) {
-        for (const product of filteredProducts) {
-          const countedQty = countedItems[product.id];
-          if (countedQty !== undefined && countedQty !== product.quantity) {
-            await apiClient.put(`/products/${product.id}`, {
-              ...product,
-              quantity: countedQty
-            }, { headers });
-          }
-        }
-      }
-
+      // The backend applies all differences and completes the session in one
+      // transaction; never leave a partially applied browser-side loop.
       // Update session status
       await apiClient.put(`/inventory-sessions/${activeSession.id}`, {
         ...activeSession,

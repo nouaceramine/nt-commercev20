@@ -98,7 +98,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             ],
         }, session=session)
 
-    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "", admin_name: str = "", session=None):
+    async def _apply_purchase_stock(items, sign: int, now: str, sync_prices: bool = True, ref: str = "",
+                                    admin_name: str = "", warehouse_id: str = "", session=None):
         # Shared by direct creation and draft confirmation so every stock
         # activation applies the same price, history, lot and alert semantics.
         price_changes = []
@@ -121,6 +122,13 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     price_changes.append({"product_id": pid, "name": product.get("name_ar") or product.get("name_en") or pid,
                                           "old_price": old_pp, "new_price": new_pp})
             await db.products.update_one({"id": pid}, updates, session=session)
+            if warehouse_id:
+                from services.warehouse_stock import adjust_warehouse_stock
+                await adjust_warehouse_stock(
+                    db, pid, warehouse_id, sign * qty,
+                    product_quantity_before=old_quantity, session=session,
+                    initialize_from_product=True,
+                )
             if sign > 0:
                 if sync_item_price and abs(new_pp - old_pp) > 1e-9:
                     await db.price_history.insert_one({
@@ -210,7 +218,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         # event are one atomic operation. Drafts only persist the inert invoice.
         import asyncio
         from config.database import client
-        from pymongo.errors import PyMongoError
+        from pymongo.errors import DuplicateKeyError, PyMongoError
         for attempt in range(5):
             try:
                 async with await client.start_session() as tx_session:
@@ -249,14 +257,18 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                         if confirm_stock:
                             await _apply_purchase_stock(
                                 [item.model_dump() for item in p.items], +1, now,
-                                ref=invoice_number, admin_name=admin.get("name", ""), session=tx_session,
+                                ref=invoice_number, admin_name=admin.get("name", ""),
+                                warehouse_id=purchase_doc.get("warehouse_id", ""), session=tx_session,
                             )
                             await _activate_purchase_financials(purchase_doc, admin, session=tx_session)
 
                         purchase_doc.pop("_id", None)
                         return purchase_doc
-            except PyMongoError as exc:
-                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+            except (DuplicateKeyError, PyMongoError) as exc:
+                if attempt == 4 or (
+                    not isinstance(exc, DuplicateKeyError)
+                    and not exc.has_error_label("TransientTransactionError")
+                ):
                     raise
                 await asyncio.sleep(0.02 * (2 ** attempt))
 
@@ -412,7 +424,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         # stock, supplier, cash, price-history or accounting effects twice.
         import asyncio
         from config.database import client
-        from pymongo.errors import PyMongoError
+        from pymongo.errors import DuplicateKeyError, PyMongoError
         for attempt in range(5):
             try:
                 async with await client.start_session() as tx_session:
@@ -437,7 +449,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                         await _apply_purchase_stock(
                             purchase_doc.get("items", []), +1, now,
                             ref=purchase_doc.get("invoice_number", ""), admin_name=admin.get("name", ""),
-                            session=tx_session,
+                            warehouse_id=purchase_doc.get("warehouse_id", ""), session=tx_session,
                         )
                         financial_status = purchase_doc.get("financial_status", "inactive")
                         if financial_status == "inactive":
@@ -456,8 +468,11 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                             "message": "تم تأكيد المخزون", "stock_status": "confirmed",
                             "financial_status": financial_status,
                         }
-            except PyMongoError as exc:
-                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+            except (DuplicateKeyError, PyMongoError) as exc:
+                if attempt == 4 or (
+                    not isinstance(exc, DuplicateKeyError)
+                    and not exc.has_error_label("TransientTransactionError")
+                ):
                     raise
                 existing = await db.purchases.find_one(
                     {"id": purchase_id}, {"_id": 0, "stock_status": 1, "financial_status": 1}
@@ -492,7 +507,8 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
             }
         await _apply_purchase_stock(
             purchase_doc.get("items", []), -1, now, sync_prices=False,
-            ref=purchase_doc.get("invoice_number", ""), admin_name=admin["name"], session=session,
+            ref=purchase_doc.get("invoice_number", ""), admin_name=admin["name"],
+            warehouse_id=purchase_doc.get("warehouse_id", ""), session=session,
         )
         financial_active = purchase_doc.get("financial_status") == "active" or (
             "financial_status" not in purchase_doc
@@ -548,14 +564,17 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
     async def reopen_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.edit"))):
         import asyncio
         from config.database import client
-        from pymongo.errors import PyMongoError
+        from pymongo.errors import DuplicateKeyError, PyMongoError
         for attempt in range(5):
             try:
                 async with await client.start_session() as tx_session:
                     async with tx_session.start_transaction():
                         return await _reopen_purchase_impl(purchase_id, admin, tx_session)
-            except PyMongoError as exc:
-                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+            except (DuplicateKeyError, PyMongoError) as exc:
+                if attempt == 4 or (
+                    not isinstance(exc, DuplicateKeyError)
+                    and not exc.has_error_label("TransientTransactionError")
+                ):
                     raise
                 existing = await db.purchases.find_one(
                     {"id": purchase_id}, {"_id": 0, "stock_status": 1, "financial_status": 1}
@@ -648,14 +667,17 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
     async def update_purchase(purchase_id: str, update_data: PurchaseUpdate, admin: dict = Depends(require_permission("purchases.edit"))):
         import asyncio
         from config.database import client
-        from pymongo.errors import PyMongoError
+        from pymongo.errors import DuplicateKeyError, PyMongoError
         for attempt in range(5):
             try:
                 async with await client.start_session() as tx_session:
                     async with tx_session.start_transaction():
                         return await _update_purchase_impl(purchase_id, update_data, admin, tx_session)
-            except PyMongoError as exc:
-                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+            except (DuplicateKeyError, PyMongoError) as exc:
+                if attempt == 4 or (
+                    not isinstance(exc, DuplicateKeyError)
+                    and not exc.has_error_label("TransientTransactionError")
+                ):
                     raise
                 await asyncio.sleep(0.02 * (2 ** attempt))
 
@@ -672,6 +694,14 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         )
         if purchase.get("stock_status", "confirmed") == "confirmed":
             for item_index, item in enumerate(purchase.get("items", [])):
+                product = await db.products.find_one({"id": item["product_id"]}, session=session)
+                if purchase.get("warehouse_id") and product:
+                    from services.warehouse_stock import adjust_warehouse_stock
+                    await adjust_warehouse_stock(
+                        db, item["product_id"], purchase["warehouse_id"], -item["quantity"],
+                        product_quantity_before=float(product.get("quantity", 0) or 0), session=session,
+                        initialize_from_product=True,
+                    )
                 await db.products.update_one(
                     {"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}}, session=session
                 )
@@ -730,14 +760,17 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
     async def delete_purchase(purchase_id: str, admin: dict = Depends(require_permission("purchases.delete"))):
         import asyncio
         from config.database import client
-        from pymongo.errors import PyMongoError
+        from pymongo.errors import DuplicateKeyError, PyMongoError
         for attempt in range(5):
             try:
                 async with await client.start_session() as tx_session:
                     async with tx_session.start_transaction():
                         return await _delete_purchase_impl(purchase_id, admin, tx_session)
-            except PyMongoError as exc:
-                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+            except (DuplicateKeyError, PyMongoError) as exc:
+                if attempt == 4 or (
+                    not isinstance(exc, DuplicateKeyError)
+                    and not exc.has_error_label("TransientTransactionError")
+                ):
                     raise
                 if not await db.purchases.find_one({"id": purchase_id}, {"_id": 1}):
                     raise HTTPException(status_code=404, detail="Purchase not found")
