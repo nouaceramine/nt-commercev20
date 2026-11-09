@@ -22,6 +22,38 @@ class ProductLotCreate(BaseModel):
         return value
 
 
+class ProductSupplierLinkCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    supplier_id: str = Field(min_length=1)
+    purchase_price: float = Field(default=0, ge=0, allow_inf_nan=False)
+    is_default: bool = False
+
+    @field_validator("supplier_id")
+    @classmethod
+    def validate_supplier_id(cls, value):
+        value = (value or "").strip()
+        if not value:
+            raise ValueError("المورد مطلوب")
+        return value
+
+
+class ProductSupplierLinkUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    supplier_id: Optional[str] = None
+    purchase_price: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+    is_default: Optional[bool] = None
+
+    @field_validator("supplier_id")
+    @classmethod
+    def validate_supplier_id(cls, value):
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("المورد مطلوب")
+        return value
+
+
 class ProductCreate(BaseModel):
     name_en: str  # اسم المنتج (إلزامي)
     name_ar: Optional[str] = ""  # اسم عربي (اختياري)

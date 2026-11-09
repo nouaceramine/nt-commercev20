@@ -10,6 +10,14 @@ from utils.inventory_queries import low_stock_filter
 import uuid
 
 
+def product_supplier_link_mongo_id(product_id: str, supplier_id: str) -> str:
+    """Unique per-tenant Mongo identity for a logical product/supplier link."""
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"product-supplier-link:{product_id}:{supplier_id}",
+    ))
+
+
 def create_products_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
     from utils.permissions import create_permission_checker
     require_permission = create_permission_checker(db, get_current_user)
@@ -818,46 +826,145 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         return {"message": "تم الحذف"}
 
     # ── Product Supplier Links ──
+    async def _lock_product_supplier_links(product_id: str, session):
+        """Serialize default-link changes for one product inside the tenant DB."""
+        now = datetime.now(timezone.utc).isoformat()
+        await db.product_supplier_link_locks.find_one_and_update(
+            {"_id": product_id},
+            {
+                "$set": {"updated_at": now},
+                "$setOnInsert": {"product_id": product_id, "created_at": now},
+            },
+            upsert=True,
+            session=session,
+        )
+
+    async def _supplier_display_name(supplier_id: str, session):
+        supplier = await db.suppliers.find_one(
+            {"id": supplier_id},
+            {"_id": 0, "name": 1, "name_ar": 1, "company": 1},
+            session=session,
+        )
+        if not supplier:
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
+        return supplier.get("name_ar") or supplier.get("name") or supplier.get("company", "")
+
     @router.get("/{product_id}/suppliers")
     async def get_product_suppliers(product_id: str, user: dict = Depends(require_tenant)):
+        product = await db.products.find_one({"id": product_id}, {"_id": 1})
+        if not product:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
         links = await db.product_supplier_links.find({"product_id": product_id}, {"_id": 0}).to_list(100)
         return links
 
     @router.post("/{product_id}/suppliers", status_code=201)
     async def add_product_supplier(product_id: str, link: dict, admin: dict = Depends(require_permission("products.edit"))):
-        product = await db.products.find_one({"id": product_id})
-        if not product:
-            raise HTTPException(status_code=404, detail="المنتج غير موجود")
-        supplier_id = link.get("supplier_id")
-        if not supplier_id:
-            raise HTTPException(status_code=400, detail="المورد مطلوب")
-        supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0, "name": 1, "name_ar": 1, "company": 1})
-        supplier_name = ""
-        if supplier:
-            supplier_name = supplier.get("name_ar") or supplier.get("name") or supplier.get("company", "")
-        link_doc = {
-            "id": str(uuid.uuid4()),
-            "product_id": product_id,
-            "supplier_id": supplier_id,
-            "supplier_name": supplier_name,
-            "purchase_price": float(link.get("purchase_price", 0)),
-            "is_default": bool(link.get("is_default", False)),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.product_supplier_links.insert_one(link_doc)
-        link_doc.pop("_id", None)
-        return link_doc
+        import asyncio
+        from config.database import client
+        from models.schemas import ProductSupplierLinkCreate
+        from pymongo.errors import DuplicateKeyError, PyMongoError
+
+        validated = ProductSupplierLinkCreate(**link)
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        product = await db.products.find_one({"id": product_id}, {"_id": 1}, session=tx_session)
+                        if not product:
+                            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                        supplier_name = await _supplier_display_name(validated.supplier_id, tx_session)
+                        await _lock_product_supplier_links(product_id, tx_session)
+                        duplicate = await db.product_supplier_links.find_one(
+                            {"product_id": product_id, "supplier_id": validated.supplier_id},
+                            {"_id": 1}, session=tx_session,
+                        )
+                        if duplicate:
+                            raise HTTPException(status_code=409, detail="هذا المورد مرتبط بالمنتج مسبقاً")
+                        if validated.is_default:
+                            await db.product_supplier_links.update_many(
+                                {"product_id": product_id, "is_default": True},
+                                {"$set": {"is_default": False}}, session=tx_session,
+                            )
+                        link_doc = {
+                            "_id": product_supplier_link_mongo_id(product_id, validated.supplier_id),
+                            "id": str(uuid.uuid4()),
+                            "product_id": product_id,
+                            "supplier_id": validated.supplier_id,
+                            "supplier_name": supplier_name,
+                            "purchase_price": validated.purchase_price,
+                            "is_default": validated.is_default,
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await db.product_supplier_links.insert_one(link_doc, session=tx_session)
+                        link_doc.pop("_id", None)
+                        return link_doc
+            except DuplicateKeyError:
+                if attempt == 4:
+                    raise HTTPException(status_code=409, detail="هذا المورد مرتبط بالمنتج مسبقاً")
+                await asyncio.sleep(0.02 * (2 ** attempt))
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     @router.put("/{product_id}/suppliers/{link_id}")
     async def update_product_supplier(product_id: str, link_id: str, updates: dict, admin: dict = Depends(require_permission("products.edit"))):
-        result = await db.product_supplier_links.update_one(
-            {"id": link_id, "product_id": product_id},
-            {"$set": {k: v for k, v in updates.items() if k not in ["id", "product_id"]}}
-        )
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="الربط غير موجود")
-        updated = await db.product_supplier_links.find_one({"id": link_id}, {"_id": 0})
-        return updated
+        import asyncio
+        from config.database import client
+        from models.schemas import ProductSupplierLinkUpdate
+        from pymongo.errors import DuplicateKeyError, PyMongoError
+
+        validated = ProductSupplierLinkUpdate(**updates)
+        update_data = validated.model_dump(exclude_unset=True, exclude_none=True)
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        product = await db.products.find_one({"id": product_id}, {"_id": 1}, session=tx_session)
+                        if not product:
+                            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                        existing = await db.product_supplier_links.find_one(
+                            {"id": link_id, "product_id": product_id}, session=tx_session,
+                        )
+                        if not existing:
+                            raise HTTPException(status_code=404, detail="الربط غير موجود")
+                        await _lock_product_supplier_links(product_id, tx_session)
+                        supplier_id = update_data.get("supplier_id", existing.get("supplier_id"))
+                        if "supplier_id" in update_data:
+                            update_data["supplier_name"] = await _supplier_display_name(supplier_id, tx_session)
+                            duplicate = await db.product_supplier_links.find_one(
+                                {"product_id": product_id, "supplier_id": supplier_id, "id": {"$ne": link_id}},
+                                {"_id": 1}, session=tx_session,
+                            )
+                            if duplicate:
+                                raise HTTPException(status_code=409, detail="هذا المورد مرتبط بالمنتج مسبقاً")
+                        if update_data.get("is_default") is True:
+                            await db.product_supplier_links.update_many(
+                                {"product_id": product_id, "id": {"$ne": link_id}, "is_default": True},
+                                {"$set": {"is_default": False}}, session=tx_session,
+                            )
+                        target_mongo_id = product_supplier_link_mongo_id(product_id, supplier_id)
+                        if target_mongo_id != existing["_id"]:
+                            replacement = {**existing, **update_data, "_id": target_mongo_id}
+                            await db.product_supplier_links.insert_one(replacement, session=tx_session)
+                            await db.product_supplier_links.delete_one(
+                                {"_id": existing["_id"]}, session=tx_session,
+                            )
+                        elif update_data:
+                            await db.product_supplier_links.update_one(
+                                {"_id": existing["_id"]}, {"$set": update_data}, session=tx_session,
+                            )
+                        return await db.product_supplier_links.find_one(
+                            {"_id": target_mongo_id}, {"_id": 0}, session=tx_session,
+                        )
+            except DuplicateKeyError:
+                if attempt == 4:
+                    raise HTTPException(status_code=409, detail="هذا المورد مرتبط بالمنتج مسبقاً")
+                await asyncio.sleep(0.02 * (2 ** attempt))
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     @router.delete("/{product_id}/suppliers/{link_id}")
     async def delete_product_supplier(product_id: str, link_id: str, admin: dict = Depends(require_permission("products.edit"))):

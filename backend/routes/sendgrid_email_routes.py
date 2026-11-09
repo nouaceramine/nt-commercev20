@@ -188,10 +188,10 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         settings = await db.system_settings.find_one({"type": "sendgrid_settings"})
         if not settings or not settings.get("enabled") or not settings.get("low_stock_notification"):
             return {"success": False, "message": "إشعارات انخفاض المخزون غير مفعلة"}
-        low_stock_products = await db.products.find({"$expr": {"$lte": ["$stock", "$min_quantity"]}}).to_list(100)
+        low_stock_products = await db.products.find(low_stock_filter()).to_list(100)
         if not low_stock_products:
             return {"success": True, "message": "لا توجد منتجات منخفضة المخزون"}
-        products_list = [{"name": p.get("name", ""), "stock": p.get("stock", 0), "min_quantity": p.get("min_quantity", 10)} for p in low_stock_products]
+        products_list = [{"name": p.get("name") or p.get("name_ar") or p.get("name_en") or "", "stock": p.get("quantity", 0), "min_quantity": p.get("low_stock_threshold", 10)} for p in low_stock_products]
         recipient = settings.get("notification_email")
         if not recipient:
             return {"success": False, "message": "يرجى إعداد بريد الإشعارات"}

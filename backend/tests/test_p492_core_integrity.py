@@ -4,7 +4,13 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from models.schemas.catalog import ProductCreate, ProductLotCreate, ProductUpdate
+from models.schemas.catalog import (
+    ProductCreate,
+    ProductLotCreate,
+    ProductSupplierLinkCreate,
+    ProductSupplierLinkUpdate,
+    ProductUpdate,
+)
 from models.schemas.inventory import InventorySessionUpdate, StockTransferCreate, WarehouseCreate
 from models.schemas.trading import PurchaseCreate
 from services.cost_drift import check_cost_drift
@@ -91,6 +97,47 @@ def test_lot_rejects_invalid_quantity_alert_and_expiry(overrides):
     payload.update(overrides)
     with pytest.raises(ValidationError):
         ProductLotCreate(**payload)
+
+
+def test_supplier_link_create_trims_supplier_and_accepts_zero_price():
+    link = ProductSupplierLinkCreate(supplier_id="  TEST-P492-supplier  ", purchase_price=0)
+    assert link.supplier_id == "TEST-P492-supplier"
+    assert link.purchase_price == 0
+    assert link.is_default is False
+
+
+@pytest.mark.parametrize("price", [-0.01, float("nan"), float("inf"), float("-inf")])
+def test_supplier_link_create_rejects_invalid_prices(price):
+    with pytest.raises(ValidationError):
+        ProductSupplierLinkCreate(supplier_id="TEST-P492-supplier", purchase_price=price)
+
+
+@pytest.mark.parametrize("supplier_id", ["", "   "])
+def test_supplier_link_create_rejects_blank_supplier(supplier_id):
+    with pytest.raises(ValidationError):
+        ProductSupplierLinkCreate(supplier_id=supplier_id)
+
+
+@pytest.mark.parametrize("price", [-0.01, float("nan"), float("inf")])
+def test_supplier_link_update_rejects_invalid_prices(price):
+    with pytest.raises(ValidationError):
+        ProductSupplierLinkUpdate(purchase_price=price)
+
+
+def test_supplier_link_update_ignores_unset_fields():
+    update = ProductSupplierLinkUpdate(purchase_price=85, is_default=False)
+    assert update.model_dump(exclude_unset=True, exclude_none=True) == {
+        "purchase_price": 85.0,
+        "is_default": False,
+    }
+
+
+def test_supplier_link_mongo_id_is_deterministic_and_pair_specific():
+    from routes.products_routes import product_supplier_link_mongo_id
+
+    first = product_supplier_link_mongo_id("TEST-P492-product", "TEST-P492-supplier")
+    assert first == product_supplier_link_mongo_id("TEST-P492-product", "TEST-P492-supplier")
+    assert first != product_supplier_link_mongo_id("TEST-P492-product", "TEST-P492-other")
 
 
 @pytest.mark.parametrize("name", ["", "   "])
@@ -237,3 +284,104 @@ def test_inventory_code_generation_requires_tenant_context():
                  if item.path == "/inventory-sessions/generate-code")
     assert any(dependency.call is require_tenant
                for dependency in route.dependant.dependencies)
+
+
+class FakeLowStockCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, limit):
+        return self.rows[:limit]
+
+
+def evaluate_inventory_expression(expression, product):
+    if isinstance(expression, str) and expression.startswith("$"):
+        return product.get(expression[1:])
+    if isinstance(expression, dict):
+        if "$ifNull" in expression:
+            value, fallback = expression["$ifNull"]
+            resolved = evaluate_inventory_expression(value, product)
+            return resolved if resolved is not None else evaluate_inventory_expression(fallback, product)
+        for operator in ("$lt", "$lte"):
+            if operator in expression:
+                left, right = expression[operator]
+                left = evaluate_inventory_expression(left, product)
+                right = evaluate_inventory_expression(right, product)
+                if left is None or right is None:
+                    return operator == "$lte" and left is right
+                return left < right if operator == "$lt" else left <= right
+    return expression
+
+
+class FakeLowStockProducts:
+    def __init__(self):
+        self.rows = [
+            {"id": "low", "name": "TEST-P492 low", "quantity": 2, "low_stock_threshold": 3},
+            {"id": "edge", "name": "TEST-P492 edge", "quantity": 3, "low_stock_threshold": 3},
+            {"id": "default", "name": "TEST-P492 default", "quantity": 9},
+            {"id": "high", "name": "TEST-P492 high", "quantity": 11, "low_stock_threshold": 10},
+        ]
+        self.last_matches = []
+
+    def find(self, query, *args, **kwargs):
+        expression = query.get("$expr", {})
+        self.last_matches = [row["id"] for row in self.rows
+                             if evaluate_inventory_expression(expression, row)]
+        return FakeLowStockCursor([
+            row for row in self.rows if row["id"] in self.last_matches
+        ])
+
+
+class FakeSendGridSettings:
+    async def find_one(self, query, *args, **kwargs):
+        return {
+            "type": "sendgrid_settings",
+            "enabled": True,
+            "low_stock_notification": True,
+            "api_key": "TEST-P492-not-a-real-key",
+            "sender_email": "test-p492@example.com",
+            "notification_email": "test-p492-recipient@example.com",
+        }
+
+
+class FakeLowStockDB:
+    def __init__(self):
+        self.products = FakeLowStockProducts()
+        self.system_settings = FakeSendGridSettings()
+
+
+def test_enabled_low_stock_email_uses_canonical_fields_without_external_send(monkeypatch):
+    import routes.sendgrid_email_routes as email_routes
+
+    sent = []
+
+    class FakeSendGridClient:
+        def __init__(self, api_key):
+            self.api_key = api_key
+
+        def send(self, mail):
+            sent.append(mail)
+
+            class Response:
+                status_code = 202
+
+            return Response()
+
+    async def require_tenant():
+        return {"tenant_id": "TEST-P492-tenant"}
+
+    monkeypatch.setattr(email_routes, "SENDGRID_AVAILABLE", True)
+    monkeypatch.setattr(email_routes, "SendGridAPIClient", FakeSendGridClient)
+    monkeypatch.setattr("services.crypto_fields.decrypt_field", lambda value: value)
+    db = FakeLowStockDB()
+    router = email_routes.create_sendgrid_email_routes(
+        db, None, require_tenant, require_tenant, require_tenant, require_tenant,
+    )
+    route = next(item for item in router.routes
+                 if item.path == "/notifications/check-low-stock")
+    response = asyncio.run(route.endpoint(user={"tenant_id": "TEST-P492-tenant"}))
+
+    assert response["success"] is True
+    assert db.products.last_matches == ["low", "default"]
+    assert "2" in response["message"]
+    assert len(sent) == 1
