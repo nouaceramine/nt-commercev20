@@ -36,8 +36,8 @@ def create_utility_routes(db, require_tenant, get_tenant_admin, PriceHistoryResp
         return {"code": await next_code(db, "expenses", "CH", 4, True)}
 
     @router.get("/inventory-sessions/generate-code")
-    async def generate_inventory_code():
-        """Generate next inventory code (IN0001/26, etc.)"""
+    async def generate_inventory_code(user: dict = Depends(require_tenant)):
+        """Generate next inventory code (IN0001/26, etc.) in the tenant database."""
         # p257: atomic counter — race-proof, continues from existing max
         from services.code_generator import next_code
         return {"code": await next_code(db, "inventory_sessions", "IN", 4, True)}

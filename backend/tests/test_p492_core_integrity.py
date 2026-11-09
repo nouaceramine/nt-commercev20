@@ -224,3 +224,16 @@ def test_warehouse_stock_rejects_atomic_overdraw():
         ))
     assert error.value.status_code == 400
     assert db.warehouse_stock.stock["quantity"] == 1.0
+
+
+def test_inventory_code_generation_requires_tenant_context():
+    from routes.utility_routes import create_utility_routes
+
+    async def require_tenant():
+        return {"tenant_id": "TEST-P492-tenant"}
+
+    router = create_utility_routes(None, require_tenant, require_tenant, ProductLotCreate)
+    route = next(item for item in router.routes
+                 if item.path == "/inventory-sessions/generate-code")
+    assert any(dependency.call is require_tenant
+               for dependency in route.dependant.dependencies)
