@@ -1,5 +1,6 @@
 """P492 validation and transactional-helper regression tests."""
 import asyncio
+import io
 
 import pytest
 from pydantic import ValidationError
@@ -385,3 +386,41 @@ def test_enabled_low_stock_email_uses_canonical_fields_without_external_send(mon
     assert db.products.last_matches == ["low", "default"]
     assert "2" in response["message"]
     assert len(sent) == 1
+
+
+def test_product_excel_headers_require_names_and_reject_duplicates():
+    from fastapi import HTTPException
+    from routes.notifications_routes import validate_product_excel_headers
+
+    assert validate_product_excel_headers(["الاسم (إنجليزي)", "الكمية"]) == [
+        "الاسم (إنجليزي)", "الكمية"
+    ]
+    for header in (["الكمية"], ["الاسم (عربي)", "الاسم (عربي)"], []):
+        with pytest.raises(HTTPException) as error:
+            validate_product_excel_headers(header)
+        assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize("value", ["=1+1", "+SUM(A1:A2)", "-1+2", "@command"])
+def test_product_excel_formula_prefixes_roundtrip_as_text(value):
+    from openpyxl import Workbook, load_workbook
+    from routes.notifications_routes import set_product_excel_cell
+
+    workbook = Workbook()
+    set_product_excel_cell(workbook.active["A1"], value)
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    cell = load_workbook(output, data_only=False).active["A1"]
+    assert cell.value == value
+    assert cell.data_type == "s"
+
+
+def test_product_excel_negative_number_remains_numeric():
+    from openpyxl import Workbook
+    from routes.notifications_routes import set_product_excel_cell
+
+    workbook = Workbook()
+    cell = set_product_excel_cell(workbook.active["A1"], -1)
+    assert cell.value == -1
+    assert cell.data_type == "n"
