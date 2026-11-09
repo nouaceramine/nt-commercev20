@@ -424,3 +424,40 @@ def test_product_excel_negative_number_remains_numeric():
     cell = set_product_excel_cell(workbook.active["A1"], -1)
     assert cell.value == -1
     assert cell.data_type == "n"
+
+
+def test_shared_product_import_preserves_generic_product_fields():
+    from services.product_excel import _validated_row
+
+    validated, update_data, barcode, name_ar, name_en = _validated_row({
+        "الباركود": "TEST-P492-GENERIC",
+        "الاسم (عربي)": "TEST-P492 Generic",
+        "الاسم (إنجليزي)": "TEST-P492 Generic",
+        "سعر الشراء": 10,
+        "سعر الجملة": 15,
+        "سعر التجزئة": 20,
+        "الكمية": 4,
+        "حد المخزون المنخفض": 0,
+        "article_code": "TEST-P492-ARTICLE",
+        "family_id": "TEST-P492-FAMILY",
+        "tax_rate": 19,
+        "unit_of_measure": "piece",
+        "category": "TEST-P492-CATEGORY",
+    })
+    assert barcode == "TEST-P492-GENERIC"
+    assert name_ar == name_en == "TEST-P492 Generic"
+    assert validated.low_stock_threshold == 0
+    assert update_data["article_code"] == "TEST-P492-ARTICLE"
+    assert update_data["family_id"] == "TEST-P492-FAMILY"
+    assert update_data["tax_rate"] == 19
+    assert update_data["unit_of_measure"] == "piece"
+    assert update_data["category"] == "TEST-P492-CATEGORY"
+
+
+def test_shared_product_import_skips_empty_rows_before_validation_or_db():
+    from services.product_excel import apply_product_excel_row
+
+    outcome = asyncio.run(apply_product_excel_row(
+        None, {"الكمية": 0}, 2, "2026-11-10T00:00:00+00:00", {},
+    ))
+    assert outcome == "skipped"

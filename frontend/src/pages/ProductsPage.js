@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
+import { rowsToXlsxBlob } from '../lib/spreadsheet';
 import { startRealtime, onEvent } from '../lib/realtime';
 import PrintButton from '../components/print/PrintButton';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -414,7 +415,7 @@ export default function ProductsPage() {
   );
 
   // Quick export to Excel function
-  const quickExportToExcel = () => {
+  const quickExportToExcel = async () => {
     const headers = [
       language === 'ar' ? 'الكود' : 'Code',
       language === 'ar' ? 'المنتج' : 'Produit',
@@ -423,27 +424,35 @@ export default function ProductsPage() {
       language === 'ar' ? 'سعر البيع' : 'Prix vente',
       language === 'ar' ? 'سعر الشراء' : 'Prix achat'
     ];
-    
-    let tableHtml = `<table><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
-    products.forEach(p => {
-      tableHtml += `<tr>
-        <td>${p.article_code || '-'}</td>
-        <td>${language === 'ar' ? p.name_ar : p.name_en}</td>
-        <td>${p.family_name || '-'}</td>
-        <td>${p.quantity}</td>
-        <td>${p.retail_price?.toFixed(2) || '0.00'}</td>
-        <td>${p.purchase_price?.toFixed(2) || '0.00'}</td>
-      </tr>`;
-    });
-    tableHtml += '</table>';
-    
-    const blob = new Blob([`<html><head><meta charset="UTF-8"></head><body>${tableHtml}</body></html>`], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `products_${new Date().toISOString().split('T')[0]}.xls`;
-    a.click();
-    URL.revokeObjectURL(url);
+
+    try {
+      const rows = [
+        headers,
+        ...products.map(p => [
+          p.article_code || '-',
+          language === 'ar' ? p.name_ar : p.name_en,
+          p.family_name || '-',
+          p.quantity,
+          p.retail_price?.toFixed(2) || '0.00',
+          p.purchase_price?.toFixed(2) || '0.00'
+        ])
+      ];
+      const blob = await rowsToXlsxBlob(rows, {
+        sheetName: language === 'ar' ? 'المنتجات' : 'Produits',
+        widths: [20, 36, 24, 14, 16, 16]
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `products_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Quick Excel export failed', error);
+      toast.error(language === 'ar' ? 'تعذر تصدير المنتجات إلى Excel' : "Échec de l'export Excel des produits");
+    }
   };
 
   return (

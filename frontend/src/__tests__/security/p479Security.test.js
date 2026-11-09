@@ -28,6 +28,28 @@ describe('p479 spreadsheet and print hardening', () => {
     await expect(readFirstWorksheetRows(huge)).rejects.toThrow('10 MB');
   });
 
+  it('writes formula-like product text as XLSX strings, not formulas', async () => {
+    const formulaLikeValues = ['=1+1', '+SUM(A1:A2)', '-10', '@cmd'];
+    const blob = await rowsToXlsxBlob([['name', 'quantity'], ...formulaLikeValues.map(value => [value, -10])]);
+    const buffer = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(blob);
+    });
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.worksheets[0];
+
+    formulaLikeValues.forEach((value, index) => {
+      const cell = worksheet.getCell(index + 2, 1);
+      expect(cell.value).toBe(value);
+      expect(cell.type).not.toBe(ExcelJS.ValueType.Formula);
+      expect(worksheet.getCell(index + 2, 2).value).toBe(-10);
+    });
+  });
+
   it('allows only HTTPS or same-origin HTTP label links', () => {
     expect(safeLabelUrl('javascript:alert(1)', 'https://nt-commerce.net')).toBe('');
     expect(safeLabelUrl('http://169.254.169.254/x', 'https://nt-commerce.net')).toBe('');

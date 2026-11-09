@@ -443,6 +443,68 @@ def create_import_export_routes(db, get_current_user) -> dict:
             "created_at": datetime.now(timezone.utc).isoformat()
         }
 
+        if collection == "products":
+            if mode == "replace":
+                raise HTTPException(
+                    status_code=400,
+                    detail="استبدال المنتجات غير مدعوم لأنه قد يفسد المخزون والمراجع المرتبطة؛ استخدم وضع الإضافة",
+                )
+            from services.product_excel import apply_product_excel_row
+
+            created = 0
+            updated = 0
+            skipped = 0
+            errors = []
+            now = datetime.now(timezone.utc).isoformat()
+            source = "smart_import" if file.filename.lower() == "smart_import.csv" else "data_import"
+            for index, record in enumerate(records):
+                excel_row = {
+                    "الباركود": record.get("barcode", ""),
+                    "الاسم (عربي)": record.get("name_ar", ""),
+                    "الاسم (إنجليزي)": record.get("name_en", ""),
+                    "سعر الشراء": record.get("purchase_price", 0),
+                    "سعر الجملة": record.get("wholesale_price", 0),
+                    "سعر التجزئة": record.get("retail_price", 0),
+                    "الكمية": record.get("quantity", 0),
+                    "حد المخزون المنخفض": record.get("min_stock", 10),
+                }
+                for field in ("article_code", "family_id", "tax_rate"):
+                    if field in record:
+                        excel_row[field] = record[field]
+                if "unit" in record:
+                    excel_row["unit_of_measure"] = record["unit"]
+                if "category" in record:
+                    excel_row["category"] = record["category"]
+                try:
+                    outcome = await apply_product_excel_row(
+                        tdb, excel_row, index + 2, now, user, source=source,
+                    )
+                    if outcome == "created":
+                        created += 1
+                    elif outcome == "updated":
+                        updated += 1
+                    else:
+                        skipped += 1
+                except Exception as exc:
+                    errors.append(f"Row {index + 2}: {str(exc)}")
+
+            import_log.update({
+                "inserted_count": created, "updated_count": updated,
+                "skipped_rows": skipped, "errors": errors[:10],
+            })
+            await tdb["import_logs"].insert_one(import_log)
+            return {
+                "success": not errors,
+                "message": f"Imported {created + updated} product records",
+                "records_imported": created + updated,
+                "records_created": created,
+                "records_updated": updated,
+                "skipped_duplicates": 0,
+                "skipped_rows": skipped,
+                "errors": errors[:10],
+                "mode": mode,
+            }
+
         if mode == "replace":
             await tdb[collection].delete_many({})
 

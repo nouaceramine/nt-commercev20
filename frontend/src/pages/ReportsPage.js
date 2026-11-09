@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
+import { toast } from 'sonner';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -105,8 +106,25 @@ export default function ReportsPage() {
     } catch (e) { console.error(e); }
   };
 
-  const handleExportProducts = () => {
-    window.open(`/products/export/excel`, '_blank');
+  const handleExportProducts = async () => {
+    try {
+      const response = await apiClient.get('/products/export/excel', { responseType: 'blob' });
+      const contentType = response.headers['content-type'] || '';
+      if (!contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+        throw new Error(`Unexpected Excel export content type: ${contentType || 'missing'}`);
+      }
+      const url = URL.createObjectURL(response.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `products_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Product Excel export failed', error);
+      toast.error(language === 'ar' ? 'تعذر تصدير المنتجات إلى Excel' : "Échec de l'export Excel des produits");
+    }
   };
 
   // Calculate totals

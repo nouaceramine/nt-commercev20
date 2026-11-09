@@ -161,9 +161,17 @@ export default function ImportDataPage() {
       const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
       const fd = new FormData();
       fd.append('file', blob, 'smart_import.csv');
-      const res = await apiClient.post(`/data/import/${collection.key}?mode=${importMode}`, fd);
+      const res = await apiClient.post(
+        `/data/import/${collection.key}?mode=${importMode}`,
+        fd,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
       setResult(res.data);
-      toast.success(ar ? `تم استيراد ${res.data.records_imported} سجل` : `${res.data.records_imported} enregistrements importés`);
+      if (res.data.errors?.length) {
+        toast.warning(ar ? `اكتمل الاستيراد مع ${res.data.errors.length} خطأ` : `${res.data.errors.length} erreurs pendant l'import`);
+      } else {
+        toast.success(ar ? `تم استيراد ${res.data.records_imported} سجل` : `${res.data.records_imported} enregistrements importés`);
+      }
     } catch (e) {
       const detail = e?.response?.data?.detail;
       toast.error(typeof detail === 'string' ? detail : (ar ? 'فشل الاستيراد' : "Échec de l'import"));

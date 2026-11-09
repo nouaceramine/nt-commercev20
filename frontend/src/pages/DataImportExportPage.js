@@ -116,7 +116,11 @@ export default function DataImportExportPage() {
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       );
-      toast.success(`${language === 'ar' ? 'تم استيراد' : 'Imported'} ${response.data.records_imported} ${language === 'ar' ? 'سجل' : 'records'}`);
+      if (response.data.errors?.length) {
+        toast.warning(language === 'ar' ? `اكتمل الاستيراد مع ${response.data.errors.length} خطأ` : `${response.data.errors.length} errors during import`);
+      } else {
+        toast.success(`${language === 'ar' ? 'تم استيراد' : 'Imported'} ${response.data.records_imported} ${language === 'ar' ? 'سجل' : 'records'}`);
+      }
       setShowImportDialog(false);
       setImportFile(null);
       fetchData();
