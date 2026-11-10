@@ -1664,32 +1664,16 @@ async def recharges_list_alias(limit: int = 100, user: dict = Depends(get_curren
 
 @app.put("/api/repairs/{repair_id}")
 async def repair_update_alias(repair_id: str, data: dict, user: dict = Depends(get_current_user)):
+    # p492: the tracking page uses this alias — enforce the same RBAC and
+    # validation as PUT /repairs/tickets/{id} (previously any authenticated
+    # user could rewrite any ticket field, including invoice links)
+    from utils.permissions import create_permission_checker
+    from routes.repair_routes import apply_ticket_update
+    await create_permission_checker(db, get_current_user)("repairs.edit")(user)
     ticket = await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
     if not ticket:
         raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
-    old_status = ticket.get("status")
-    new_status = data.get("status", old_status)
-    now = datetime.now(timezone.utc).isoformat()
-    updates = {k: v for k, v in data.items() if k not in ["id", "ticket_number"]}
-    updates["updated_at"] = now
-    if new_status != old_status:
-        if new_status == "diagnosed":
-            updates["diagnosed_at"] = now
-        elif new_status == "repaired":
-            updates["repaired_at"] = now
-        elif new_status == "delivered":
-            updates["delivered_at"] = now
-        await db.repair_history.insert_one({
-            "id": str(uuid.uuid4()),
-            "repair_ticket_id": repair_id,
-            "old_status": old_status,
-            "new_status": new_status,
-            "changed_by": user.get("name", ""),
-            "notes": data.get("notes", ""),
-            "created_at": now,
-        })
-    await db.repair_tickets.update_one({"id": repair_id}, {"$set": updates})
-    return await db.repair_tickets.find_one({"id": repair_id}, {"_id": 0})
+    return await apply_ticket_update(db, ticket, data, user.get("name", ""))
 
 # ============ END ROUND 4 ============
 
