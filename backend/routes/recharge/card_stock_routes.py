@@ -17,10 +17,11 @@ Accounting:
   - Stock value (Σ quantity × unit_cost) is added to total capital in stats.
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 from pymongo import ReturnDocument
+from pymongo.errors import PyMongoError
 import uuid
 import logging
 
@@ -37,10 +38,10 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
         kind: str = "scratch_card"        # scratch_card | idoom_card | other_card
         operator: str = "other"           # mobilis | djezzy | ooredoo | idoom | other
         name: str
-        denomination: float = 0           # face value
-        sell_price: float = 0
-        quantity: float = 0               # opening stock (no cash movement)
-        unit_cost: float = 0              # opening stock unit cost
+        denomination: float = Field(default=0, ge=0)   # face value
+        sell_price: float = Field(default=0, ge=0)
+        quantity: float = Field(default=0, ge=0)       # opening stock (no cash movement)
+        unit_cost: float = Field(default=0, ge=0)      # opening stock unit cost
 
     class CardTypeUpdate(BaseModel):
         kind: Optional[str] = None
@@ -111,6 +112,14 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
             raise HTTPException(status_code=400, detail="نوع البطاقة غير صالح")
         if "operator" in update and update["operator"] not in CARD_OPERATORS:
             raise HTTPException(status_code=400, detail="المتعامل غير صالح")
+        # p492: empty names and negative prices were silently accepted on update
+        if "name" in update:
+            update["name"] = (update["name"] or "").strip()
+            if not update["name"]:
+                raise HTTPException(status_code=400, detail="اسم البطاقة مطلوب")
+        for _num_field in ("denomination", "sell_price"):
+            if _num_field in update and float(update[_num_field]) < 0:
+                raise HTTPException(status_code=400, detail="القيم السالبة غير مقبولة")
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
         res = await db.card_stock.update_one({"id": card_id}, {"$set": update})
         if res.matched_count == 0:
@@ -131,94 +140,95 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
 
     @router.post("/cards/purchase", status_code=201)
     async def purchase_cards(payload: CardPurchaseIn, admin: dict = Depends(get_tenant_admin)):
-        """Restock cards: stock += qty at weighted-average cost; cash box −= total."""
+        """Restock cards: stock += qty at weighted-average cost; cash box −= total.
+
+        p492: the money leg never validated the cash box (a ghost payment_method
+        recorded stock WITHOUT cash movement), and the read-then-$set weighted
+        average lost quantity under concurrent purchases. Now everything runs in
+        one MongoDB transaction (purchases/defective parity): card re-read inside
+        the tx, box validated (404 «الصندوق غير موجود»), all-or-nothing.
+        """
         qty = float(payload.quantity or 0)
         cost = float(payload.unit_cost or 0)
         if qty <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
         if cost < 0:
             raise HTTPException(status_code=400, detail="سعر الشراء غير صالح")
-        card = await db.card_stock.find_one({"id": payload.card_id}, {"_id": 0})
-        if not card:
-            raise HTTPException(status_code=404, detail="البطاقة غير موجودة")
 
         now = datetime.now(timezone.utc).isoformat()
         total = round(qty * cost, 2)
-        old_qty = float(card.get("quantity", 0) or 0)
-        old_cost = float(card.get("unit_cost", 0) or 0)
-        new_qty = old_qty + qty
-        new_avg_cost = round(((old_qty * old_cost) + total) / new_qty, 2) if new_qty > 0 else cost
-
         purchase_id = str(uuid.uuid4())
-        card_updated = cash_done = False
-        try:
-            await db.card_stock.update_one(
-                {"id": payload.card_id},
-                {"$set": {"quantity": new_qty, "unit_cost": new_avg_cost, "updated_at": now}},
-            )
-            card_updated = True
+        result = None
 
-            if total > 0:
-                await db.cash_boxes.update_one(
-                    {"id": payload.payment_method},
-                    {"$inc": {"balance": -total}, "$set": {"updated_at": now}},
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "cash_box_id": payload.payment_method,
-                    "type": "expense",
-                    "amount": total,
-                    "description": f"تموين كروت: {card.get('name')} × {qty:g}",
-                    "reference_type": "card_purchase",
-                    "reference_id": purchase_id,
-                    "created_at": now,
-                    "created_by": admin.get("name", ""),
-                })
-            cash_done = True
+        from config.database import client as _client
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        card = await db.card_stock.find_one({"id": payload.card_id}, {"_id": 0}, session=_tx)
+                        if not card:
+                            raise HTTPException(status_code=404, detail="البطاقة غير موجودة")
+                        if total > 0 and not await db.cash_boxes.find_one({"id": payload.payment_method}, {"_id": 1}, session=_tx):
+                            raise HTTPException(status_code=404, detail="الصندوق غير موجود")
 
-            await db.card_purchases.insert_one({
-                "id": purchase_id,
-                "card_id": payload.card_id,
-                "card_name": card.get("name", ""),
-                "quantity": qty,
-                "unit_cost": cost,
-                "total_cost": total,
-                "payment_method": payload.payment_method,
-                "avg_cost_after": new_avg_cost,
-                "notes": payload.notes or "",
-                "created_at": now,
-                "created_by": admin.get("name", ""),
-            })
-        except Exception as e:
-            if card_updated:
-                try:
-                    await db.card_stock.update_one(
-                        {"id": payload.card_id},
-                        {"$set": {"quantity": old_qty, "unit_cost": old_cost, "updated_at": now}},
-                    )
-                except Exception:
-                    logger.exception("card purchase rollback failed for %s", payload.card_id)
-            if cash_done and total > 0:
-                try:
-                    await db.cash_boxes.update_one(
-                        {"id": payload.payment_method},
-                        {"$inc": {"balance": total}, "$set": {"updated_at": now}},
-                    )
-                    await db.transactions.delete_one({"reference_type": "card_purchase", "reference_id": purchase_id})
-                except Exception:
-                    logger.exception("card purchase cash rollback failed for %s", purchase_id)
-            logger.exception("card purchase failed: %s", e)
-            raise HTTPException(status_code=500, detail="فشل تسجيل التموين") from e
+                        old_qty = float(card.get("quantity", 0) or 0)
+                        old_cost = float(card.get("unit_cost", 0) or 0)
+                        new_qty = old_qty + qty
+                        new_avg_cost = round(((old_qty * old_cost) + total) / new_qty, 2) if new_qty > 0 else cost
 
-        return {
-            "id": purchase_id,
-            "card_id": payload.card_id,
-            "quantity": qty,
-            "unit_cost": cost,
-            "total_cost": total,
-            "new_quantity": new_qty,
-            "avg_cost": new_avg_cost,
-        }
+                        await db.card_stock.update_one(
+                            {"id": payload.card_id},
+                            {"$set": {"quantity": new_qty, "unit_cost": new_avg_cost, "updated_at": now}},
+                            session=_tx,
+                        )
+                        if total > 0:
+                            await db.cash_boxes.update_one(
+                                {"id": payload.payment_method},
+                                {"$inc": {"balance": -total}, "$set": {"updated_at": now}},
+                                session=_tx,
+                            )
+                            await db.transactions.insert_one({
+                                "id": str(uuid.uuid4()),
+                                "cash_box_id": payload.payment_method,
+                                "type": "expense",
+                                "amount": total,
+                                "description": f"تموين كروت: {card.get('name')} × {qty:g}",
+                                "reference_type": "card_purchase",
+                                "reference_id": purchase_id,
+                                "created_at": now,
+                                "created_by": admin.get("name", ""),
+                            }, session=_tx)
+                        await db.card_purchases.insert_one({
+                            "id": purchase_id,
+                            "card_id": payload.card_id,
+                            "card_name": card.get("name", ""),
+                            "quantity": qty,
+                            "unit_cost": cost,
+                            "total_cost": total,
+                            "payment_method": payload.payment_method,
+                            "avg_cost_after": new_avg_cost,
+                            "notes": payload.notes or "",
+                            "created_at": now,
+                            "created_by": admin.get("name", ""),
+                        }, session=_tx)
+                        result = {
+                            "id": purchase_id,
+                            "card_id": payload.card_id,
+                            "quantity": qty,
+                            "unit_cost": cost,
+                            "total_cost": total,
+                            "new_quantity": new_qty,
+                            "avg_cost": new_avg_cost,
+                        }
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    logger.exception("card purchase failed after retries: %s", payload.card_id)
+                    raise HTTPException(status_code=500, detail="فشل تسجيل التموين")
+                continue
+        return result
 
     @router.get("/cards/purchases")
     async def list_card_purchases(admin: dict = Depends(get_tenant_admin)):
@@ -232,6 +242,19 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
         qty = float(payload.quantity or 0)
         if qty <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
+
+        # p492: validate the money/debt counterpart BEFORE claiming stock — a ghost
+        # cash box recorded a "paid" sale with no cash, and a ghost customer
+        # recorded a credit sale whose debt $inc matched nothing (debt lost).
+        is_credit_check = payload.payment_method == "credit"
+        if is_credit_check:
+            if not payload.customer_id:
+                raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+            if not await db.customers.find_one({"id": payload.customer_id}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        else:
+            if not await db.cash_boxes.find_one({"id": payload.payment_method}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الصندوق غير موجود")
 
         # Atomic stock claim — prevents overselling under concurrent requests
         card = await db.card_stock.find_one_and_update(

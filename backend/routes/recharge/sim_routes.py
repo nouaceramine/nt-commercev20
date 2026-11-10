@@ -25,12 +25,10 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         balance: float
         notes: Optional[str] = ""
 
-    @router.get("/sim/slots")
-    async def get_sim_slots(admin: dict = Depends(get_tenant_admin)):
-        """Get all SIM slots with their balances"""
+    async def _seed_default_slots():
+        """Idempotent lazy seeding of the 3 operator slots (shared by both readers)."""
         slots = await db.sim_slots.find({}, {"_id": 0}).to_list(10)
         if not slots:
-            # Create default slots
             default_slots = [
                 {"slot_id": 1, "operator": "موبيليس", "phone": "", "balance": 0, "bonus_balance": 0, "empty_sims": 0, "sim_unit_cost": 100, "last_updated": "", "prefix": "06"},
                 {"slot_id": 2, "operator": "جازي", "phone": "", "balance": 0, "bonus_balance": 0, "empty_sims": 0, "sim_unit_cost": 100, "last_updated": "", "prefix": "07"},
@@ -39,6 +37,11 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
             await db.sim_slots.insert_many(default_slots)
             slots = await db.sim_slots.find({}, {"_id": 0}).to_list(10)
         return slots
+
+    @router.get("/sim/slots")
+    async def get_sim_slots(admin: dict = Depends(get_tenant_admin)):
+        """Get all SIM slots with their balances"""
+        return await _seed_default_slots()
 
     @router.put("/sim/slots/{slot_id}")
     async def update_sim_slot(slot_id: int, slot_data: dict, admin: dict = Depends(get_tenant_admin)):
@@ -92,8 +95,12 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
 
     @router.get("/sim/balances")
     async def get_sim_balances(user: dict = Depends(require_tenant)):
-        """POS display: platform recharge/IPTV wallet + all operator SIM balances."""
-        slots = await db.sim_slots.find({}, {"_id": 0}).to_list(20)
+        """POS display: platform recharge/IPTV wallet + all operator SIM balances.
+
+        p492: /telecom-stock renders its SIM tabs from THIS endpoint, but lazy
+        seeding lived only in GET /sim/slots — a fresh tenant saw an empty SIM
+        tab. Seed here too (idempotent)."""
+        slots = await _seed_default_slots()
         sim_total = round(sum(float(s.get("balance", 0) or 0) for s in slots), 2)
         bonus_total = round(sum(float(s.get("bonus_balance", 0) or 0) for s in slots), 2)
         wallet_balance = 0.0
@@ -136,62 +143,74 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
 
     @router.post("/sim/purchase")
     async def purchase_empty_sims(payload: SimPurchaseIn, admin: dict = Depends(get_tenant_admin)):
-        """Buy empty SIMs from the operator: slot stock += qty (weighted-avg cost), cash box −= total."""
+        """Buy empty SIMs from the operator: slot stock += qty (weighted-avg cost), cash box −= total.
+
+        p492: same defects as card purchases — ghost payment_method recorded stock
+        with NO cash movement, and read-then-$set weighted average lost quantity
+        under concurrency. Now one MongoDB transaction: slot re-read inside the
+        tx, cash box validated (404 «الصندوق غير موجود»), all-or-nothing.
+        """
         qty = int(payload.quantity or 0)
         cost = float(payload.unit_cost or 0)
         if qty <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
         if cost < 0:
             raise HTTPException(status_code=400, detail="سعر الشراء غير صالح")
-        slot = await db.sim_slots.find_one({"slot_id": payload.slot_id}, {"_id": 0})
-        if not slot:
-            raise HTTPException(status_code=404, detail="الشريحة غير موجودة")
 
         now = datetime.now(timezone.utc).isoformat()
         total = round(qty * cost, 2)
-        old_qty = float(slot.get("empty_sims", 0) or 0)
-        old_cost = float(slot.get("sim_unit_cost", 0) or 0)
-        new_qty = old_qty + qty
-        new_avg = round(((old_qty * old_cost) + total) / new_qty, 2) if new_qty > 0 else cost
+        result = None
 
-        slot_updated = _cash_done = False
-        try:
-            await db.sim_slots.update_one(
-                {"slot_id": payload.slot_id},
-                {"$set": {"empty_sims": new_qty, "sim_unit_cost": new_avg, "last_updated": now}},
-            )
-            slot_updated = True
-            if total > 0:
-                await db.cash_boxes.update_one(
-                    {"id": payload.payment_method},
-                    {"$inc": {"balance": -total}, "$set": {"updated_at": now}},
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "cash_box_id": payload.payment_method,
-                    "type": "expense",
-                    "amount": total,
-                    "description": f"شراء شرائح فارغة {slot.get('operator', '')} × {qty}",
-                    "reference_type": "sim_purchase",
-                    "reference_id": str(uuid.uuid4()),
-                    "created_at": now,
-                    "created_by": admin.get("name", ""),
-                })
-            _cash_done = True
-        except Exception as e:
-            if slot_updated:
-                try:
-                    await db.sim_slots.update_one(
-                        {"slot_id": payload.slot_id},
-                        {"$set": {"empty_sims": old_qty, "sim_unit_cost": old_cost, "last_updated": now}},
-                    )
-                except Exception:
-                    pass
-            logger.exception("sim purchase failed: %s", e)
-            raise HTTPException(status_code=500, detail="فشل تسجيل شراء الشرائح") from e
+        from config.database import client as _client
+        from pymongo.errors import PyMongoError
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        slot = await db.sim_slots.find_one({"slot_id": payload.slot_id}, {"_id": 0}, session=_tx)
+                        if not slot:
+                            raise HTTPException(status_code=404, detail="الشريحة غير موجودة")
+                        if total > 0 and not await db.cash_boxes.find_one({"id": payload.payment_method}, {"_id": 1}, session=_tx):
+                            raise HTTPException(status_code=404, detail="الصندوق غير موجود")
 
-        return {"slot_id": payload.slot_id, "quantity": qty, "unit_cost": cost,
-                "total_cost": total, "new_quantity": new_qty, "avg_cost": new_avg}
+                        old_qty = float(slot.get("empty_sims", 0) or 0)
+                        old_cost = float(slot.get("sim_unit_cost", 0) or 0)
+                        new_qty = old_qty + qty
+                        new_avg = round(((old_qty * old_cost) + total) / new_qty, 2) if new_qty > 0 else cost
+
+                        await db.sim_slots.update_one(
+                            {"slot_id": payload.slot_id},
+                            {"$set": {"empty_sims": new_qty, "sim_unit_cost": new_avg, "last_updated": now}},
+                            session=_tx,
+                        )
+                        if total > 0:
+                            await db.cash_boxes.update_one(
+                                {"id": payload.payment_method},
+                                {"$inc": {"balance": -total}, "$set": {"updated_at": now}},
+                                session=_tx,
+                            )
+                            await db.transactions.insert_one({
+                                "id": str(uuid.uuid4()),
+                                "cash_box_id": payload.payment_method,
+                                "type": "expense",
+                                "amount": total,
+                                "description": f"شراء شرائح فارغة {slot.get('operator', '')} × {qty}",
+                                "reference_type": "sim_purchase",
+                                "reference_id": str(uuid.uuid4()),
+                                "created_at": now,
+                                "created_by": admin.get("name", ""),
+                            }, session=_tx)
+                        result = {"slot_id": payload.slot_id, "quantity": qty, "unit_cost": cost,
+                                  "total_cost": total, "new_quantity": new_qty, "avg_cost": new_avg}
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    logger.exception("sim purchase failed after retries: %s", payload.slot_id)
+                    raise HTTPException(status_code=500, detail="فشل تسجيل شراء الشرائح")
+                continue
+        return result
 
     @router.post("/sim/slots/{slot_id}/topup")
     async def topup_sim_slot(slot_id: int, payload: SimTopupIn, admin: dict = Depends(get_tenant_admin)):
@@ -204,6 +223,10 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
             raise HTTPException(status_code=404, detail="الشريحة غير موجودة")
 
         now = datetime.now(timezone.utc).isoformat()
+        # p492: the money leg never validated the cash box — a ghost
+        # payment_method topped up SIM balance with NO cash movement.
+        if not await db.cash_boxes.find_one({"id": payload.payment_method}, {"_id": 1}):
+            raise HTTPException(status_code=404, detail="الصندوق غير موجود")
         old_balance = float(slot.get("balance", 0) or 0)
         slot_updated = _cash_done = False
         try:
