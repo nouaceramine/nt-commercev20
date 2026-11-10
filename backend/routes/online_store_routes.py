@@ -491,7 +491,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0}) or {}
         return {
             "success": True,
-            "product": _pub_product(store_slug, product),
+            # p492: same public whitelist as the product detail endpoint —
+            # _pub_product alone would leak purchase_price/barcode/notes.
+            "product": _pub_detail(store_slug, product),
             "settings": _public_settings(settings),
             "landing": {k: cfg.get(k, v) for k, v in _LANDING_DEFAULTS.items()},
         }
