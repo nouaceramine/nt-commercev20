@@ -6,8 +6,9 @@ Distribution is report + record only (no automatic cash movements).
 """
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from pydantic import BaseModel
+from pymongo.errors import PyMongoError, DuplicateKeyError
 import uuid
 
 
@@ -35,23 +36,42 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
             out.append({**p, "share_pct": pct})
         return out, total_cap
 
-    async def _due_map():
+    async def _due_map(session=None):
         """partner_id -> profits due = sum(distributions) - sum(profit withdrawals)."""
         dues = {}
-        dists = await db.partner_distributions.find({}, {"_id": 0, "shares": 1}).to_list(1000)
+        dists = await db.partner_distributions.find(
+            {}, {"_id": 0, "shares": 1}, session=session).to_list(1000)
         for d in dists:
             for s in d.get("shares", []):
                 dues[s["partner_id"]] = dues.get(s["partner_id"], 0.0) + float(s.get("amount", 0))
         withdrawals = await db.partner_movements.find(
-            {"type": "profit_withdrawal"}, {"_id": 0, "partner_id": 1, "amount": 1}
+            {"type": "profit_withdrawal"}, {"_id": 0, "partner_id": 1, "amount": 1},
+            session=session
         ).to_list(10000)
         for w in withdrawals:
             dues[w["partner_id"]] = dues.get(w["partner_id"], 0.0) - float(w.get("amount", 0))
         return dues
 
+    def _day_range(start_date: str, end_date: str):
+        """Normalize any date/date-time bounds to [start_day, end_day+1).
+
+        sales.created_at is a full ISO datetime while expenses.date is stored
+        date-only ("YYYY-MM-DD") by the frontend — plain string range filters
+        silently dropped same-day rows on whichever side mismatched. Day-
+        granular half-open bounds cover both storage formats.
+        """
+        start_day = (start_date or "")[:10]
+        end_day = (end_date or "")[:10]
+        try:
+            end_excl = (date.fromisoformat(end_day) + timedelta(days=1)).isoformat()
+        except ValueError:
+            end_excl = end_day + "\uffff"
+        return start_day, end_day, end_excl
+
     async def _compute_profit(start_date: str, end_date: str):
         """Revenue, COGS, gross profit, expenses, net profit for a period."""
-        rng = {"$gte": start_date, "$lte": end_date}
+        start_day, _end_day, end_excl = _day_range(start_date, end_date)
+        rng = {"$gte": start_day, "$lt": end_excl}
         sales_agg = await db.sales.aggregate([
             {"$match": {"created_at": rng, "status": {"$ne": "cancelled"}}},
             {"$group": {"_id": None, "revenue": {"$sum": "$total"}, "count": {"$sum": 1}}},
@@ -193,15 +213,7 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
             raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         if body.direction not in ("in", "out"):
             raise HTTPException(status_code=400, detail="الاتجاه يجب أن يكون in أو out")
-        current = float(partner.get("capital", 0))
-        if body.direction == "out" and amount > current:
-            raise HTTPException(status_code=400, detail="لا يمكن سحب أكثر من رأس مال الشريك الحالي")
-        delta = amount if body.direction == "in" else -amount
         now = _now()
-        await db.partners.update_one(
-            {"id": partner_id},
-            {"$inc": {"capital": delta}, "$set": {"updated_at": now}},
-        )
         move = {
             "id": f"pmv_{uuid.uuid4().hex[:10]}",
             "partner_id": partner_id,
@@ -211,9 +223,43 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
             "created_at": now,
             "created_by": admin.get("name", ""),
         }
-        await db.partner_movements.insert_one(dict(move))
-        move.pop("_id", None)
-        return {**move, "new_capital": round(current + delta, 2)}
+        # p492: the overdraw check must be part of the atomic claim — a
+        # read-then-$inc race let concurrent "out" moves drive capital negative.
+        from config.database import client as _client
+        new_capital = None
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        if body.direction == "out":
+                            claimed = await db.partners.find_one_and_update(
+                                {"id": partner_id, "capital": {"$gte": amount}},
+                                {"$inc": {"capital": -amount},
+                                 "$set": {"updated_at": now}},
+                                session=_tx)
+                            if not claimed:
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail="لا يمكن سحب أكثر من رأس مال الشريك الحالي")
+                            new_capital = round(float(claimed.get("capital", 0)) - amount, 2)
+                        else:
+                            current = await db.partners.find_one(
+                                {"id": partner_id}, {"capital": 1}, session=_tx)
+                            await db.partners.update_one(
+                                {"id": partner_id},
+                                {"$inc": {"capital": amount},
+                                 "$set": {"updated_at": now}},
+                                session=_tx)
+                            new_capital = round(float(current.get("capital", 0)) + amount, 2)
+                        await db.partner_movements.insert_one(dict(move), session=_tx)
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    raise HTTPException(status_code=500, detail="خطأ في قاعدة البيانات")
+                continue
+        return {**move, "new_capital": new_capital}
 
     @router.get("/partners/{partner_id}/movements")
     async def partner_movements(partner_id: str, admin: dict = Depends(get_tenant_admin)):
@@ -241,8 +287,9 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
                 "share_pct": p["share_pct"],
                 "amount": amount,
             })
+        start_day, end_day, _excl = _day_range(start_date, end_date)
         already = await db.partner_distributions.find_one(
-            {"period_start": start_date, "period_end": end_date}, {"_id": 0, "id": 1}
+            {"period_start": start_day, "period_end": end_day}, {"_id": 0, "id": 1}
         )
         return {
             "period_start": start_date,
@@ -265,9 +312,12 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
     async def create_distribution(body: DistributionCreate, admin: dict = Depends(get_tenant_admin)):
         if not body.period_start or not body.period_end:
             raise HTTPException(status_code=400, detail="فترة التوزيع مطلوبة")
+        # p492: normalize to day strings so "2026-03-13" and
+        # "2026-03-13T00:00:00".."T23:59:59" are the SAME period.
+        start_day, end_day, _excl = _day_range(body.period_start, body.period_end)
         if not body.force:
             existing = await db.partner_distributions.find_one(
-                {"period_start": body.period_start, "period_end": body.period_end}, {"_id": 0, "id": 1}
+                {"period_start": start_day, "period_end": end_day}, {"_id": 0, "id": 1}
             )
             if existing:
                 raise HTTPException(
@@ -288,15 +338,25 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
         } for p in active]
         dist = {
             "id": f"dst_{uuid.uuid4().hex[:10]}",
-            "period_start": body.period_start,
-            "period_end": body.period_end,
+            "period_start": start_day,
+            "period_end": end_day,
             **profit,
             "shares": shares,
             "notes": body.notes or "",
             "created_at": _now(),
             "created_by": admin.get("name", ""),
         }
-        await db.partner_distributions.insert_one(dict(dist))
+        # p492: deterministic _id makes the duplicate check race-safe — two
+        # concurrent creations of the same period can no longer both succeed.
+        if not body.force:
+            dist["_id"] = f"dist_{start_day}_{end_day}"
+        try:
+            await db.partner_distributions.insert_one(dict(dist))
+        except DuplicateKeyError:
+            raise HTTPException(
+                status_code=409,
+                detail="يوجد توزيع مسجل مسبقاً لنفس الفترة — أعد الإرسال مع force=true للتأكيد",
+            )
         dist.pop("_id", None)
         return dist
 
@@ -325,13 +385,6 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
         amount = round(float(body.amount or 0), 2)
         if amount <= 0:
             raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
-        dues = await _due_map()
-        due = dues.get(partner_id, 0.0)
-        if amount > due:
-            raise HTTPException(
-                status_code=400,
-                detail=f"المستحقات الحالية للشريك {due:.2f} فقط — لا يمكن سحب أكثر",
-            )
         move = {
             "id": f"pmv_{uuid.uuid4().hex[:10]}",
             "partner_id": partner_id,
@@ -341,8 +394,34 @@ def create_partners_routes(db, get_current_user, get_tenant_admin) -> APIRouter:
             "created_at": _now(),
             "created_by": admin.get("name", ""),
         }
-        await db.partner_movements.insert_one(dict(move))
-        move.pop("_id", None)
+        # p492: the due check + insert ran check-then-act and concurrent
+        # withdrawals could exceed the partner's due. The partner-doc write
+        # inside the transaction serializes concurrent withdrawals on the same
+        # partner (write conflict -> retry re-reads the committed dues).
+        from config.database import client as _client
+        due = None
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        await db.partners.update_one(
+                            {"id": partner_id}, {"$set": {"updated_at": _now()}},
+                            session=_tx)
+                        dues = await _due_map(session=_tx)
+                        due = round(dues.get(partner_id, 0.0), 2)
+                        if amount > due:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"المستحقات الحالية للشريك {due:.2f} فقط — لا يمكن سحب أكثر",
+                            )
+                        await db.partner_movements.insert_one(dict(move), session=_tx)
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    raise HTTPException(status_code=500, detail="خطأ في قاعدة البيانات")
+                continue
         return {**move, "remaining_due": round(due - amount, 2)}
 
     return router
