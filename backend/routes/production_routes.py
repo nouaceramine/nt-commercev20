@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
+from pymongo.errors import PyMongoError, DuplicateKeyError
 import math
 import uuid
 
@@ -127,6 +128,9 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=409, detail="لهذا المنتج وصفة موجودة — عدّلها")
         components, unit_cost = await _validate_recipe(data.product_id, data.components, data.output_qty)
         doc = {
+            # p492: deterministic _id — one recipe per product is enforced by
+            # Mongo itself, so concurrent creates can no longer both succeed.
+            "_id": f"rcp_{data.product_id}",
             "id": f"rcp_{uuid.uuid4().hex[:12]}",
             "product_id": data.product_id,
             "name": name,
@@ -136,7 +140,10 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             "created_at": _now(),
             "updated_at": _now(),
         }
-        await _recipes().insert_one(doc)
+        try:
+            await _recipes().insert_one(doc)
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409, detail="لهذا المنتج وصفة موجودة — عدّلها")
         return _out(doc)
 
     @router.put("/recipes/{recipe_id}")
@@ -200,58 +207,81 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not out_p:
             raise HTTPException(status_code=404, detail="المنتج النهائي غير موجود")
 
-        # Atomic component claims with rollback (same pattern as sales_service)
-        claimed = []
-        for c in r["components"]:
-            need = c["quantity"] * data.batches
-            cp = await _product(c["product_id"])
-            if cp and cp.get("is_non_stockable"):
-                continue
-            res = await db.products.find_one_and_update(
-                {"id": c["product_id"], "quantity": {"$gte": need}},
-                {"$inc": {"quantity": -need}},
-            )
-            if res is None:
-                for pid, q in claimed:
-                    await db.products.update_one({"id": pid}, {"$inc": {"quantity": q}})
-                stock = (cp.get("quantity") or 0) if cp else 0
-                raise HTTPException(status_code=400, detail=f"مخزون غير كافٍ للمكوّن '{c['product_name']}': المتاح {stock} والمطلوب {need}")
-            claimed.append((c["product_id"], need))
-
-        output_qty = r["output_qty"] * data.batches
-        # refresh component costs at run time
+        # snapshot component costs/stock before the transaction
         comp_snap = []
         for c in r["components"]:
             cp = await _product(c["product_id"])
             cost = (cp.get("purchase_price", 0) or 0) if cp else c["unit_cost"]
-            comp_snap.append({**c, "unit_cost": cost, "consumed": c["quantity"] * data.batches})
+            comp_snap.append({**c, "unit_cost": cost,
+                              "consumed": c["quantity"] * data.batches,
+                              "is_non_stockable": bool(cp and cp.get("is_non_stockable")),
+                              "stock": (cp.get("quantity") or 0) if cp else 0})
+        output_qty = r["output_qty"] * data.batches
         total_cost = sum(c["unit_cost"] * c["consumed"] for c in comp_snap)
         unit_cost = round(total_cost / output_qty, 2) if output_qty else 0
 
-        await db.products.update_one(
-            {"id": r["product_id"]},
-            {"$inc": {"quantity": output_qty}, "$set": {"purchase_price": unit_cost}},
-        )
-
+        # p492: unique order codes via the atomic counters collection
+        # (count-then-insert raced into duplicate PRD codes under concurrency)
+        from config.database import client as _client
+        from pymongo import ReturnDocument
         day = _now().strftime("%Y%m%d")
-        count = await _orders().count_documents({"code": {"$regex": f"^PRD-{day}-"}})
+        cnt = await db.counters.find_one_and_update(
+            {"_id": f"PRD_{day}"}, {"$inc": {"seq": 1}},
+            upsert=True, return_document=ReturnDocument.AFTER)
         doc = {
             "id": f"prd_{uuid.uuid4().hex[:12]}",
-            "code": f"PRD-{day}-{count + 1:04d}",
+            "code": f"PRD-{day}-{cnt['seq']:04d}",
             "recipe_id": r["id"],
             "recipe_name": r["name"],
             "product_id": r["product_id"],
             "product_name": out_p.get("name_ar") or out_p.get("name_en"),
             "batches": data.batches,
             "output_qty": output_qty,
-            "components": comp_snap,
+            "components": [{k: v for k, v in c.items()
+                            if k not in ("is_non_stockable", "stock")}
+                           for c in comp_snap],
             "total_cost": round(total_cost, 2),
             "unit_cost": unit_cost,
             "created_by": user.get("name") or user.get("username"),
             "created_at": _now(),
         }
-        await _orders().insert_one(doc)
-        await _recipes().update_one({"id": r["id"]}, {"$set": {"unit_cost": unit_cost, "updated_at": _now()}})
+        # p492: the whole run (component claims + output + order + recipe cost)
+        # in ONE transaction — a mid-run failure no longer leaves stock moved
+        # without a record, and the atomic $gte claims still prevent oversell.
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        for c in comp_snap:
+                            if c["is_non_stockable"]:
+                                continue
+                            res = await db.products.find_one_and_update(
+                                {"id": c["product_id"],
+                                 "quantity": {"$gte": c["consumed"]}},
+                                {"$inc": {"quantity": -c["consumed"]}},
+                                session=_tx)
+                            if res is None:
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"مخزون غير كافٍ للمكوّن '{c['product_name']}': "
+                                           f"المتاح {c['stock']} والمطلوب {c['consumed']}")
+                        await db.products.update_one(
+                            {"id": r["product_id"]},
+                            {"$inc": {"quantity": output_qty},
+                             "$set": {"purchase_price": unit_cost}},
+                            session=_tx)
+                        await _orders().insert_one(dict(doc), session=_tx)
+                        await _recipes().update_one(
+                            {"id": r["id"]},
+                            {"$set": {"unit_cost": unit_cost, "updated_at": _now()}},
+                            session=_tx)
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    raise HTTPException(status_code=500, detail="خطأ في قاعدة البيانات")
+                continue
         return _out(doc)
 
     # ---------- p305: waste log + food cost report ----------
@@ -268,10 +298,6 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
         unit_cost = p.get("purchase_price", 0) or 0
         total_cost = round(unit_cost * data.quantity, 2)
         wid = "wst_" + uuid.uuid4().hex[:12]
-        await db.products.update_one(
-            {"id": data.product_id},
-            {"$inc": {"quantity": -data.quantity}, "$set": {"updated_at": now}},
-        )
         doc = {
             "id": wid,
             "product_id": data.product_id,
@@ -283,7 +309,32 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             "created_by": admin.get("name") or admin.get("email"),
             "created_at": now,
         }
-        await db.waste_log.insert_one(doc)
+        # p492: waste used an unconditional $inc — recording more waste than
+        # the stock on hand drove the quantity negative. Atomic claim inside
+        # a transaction: stock and waste_log move together or not at all.
+        from config.database import client as _client
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        claimed = await db.products.find_one_and_update(
+                            {"id": data.product_id,
+                             "quantity": {"$gte": data.quantity}},
+                            {"$inc": {"quantity": -data.quantity},
+                             "$set": {"updated_at": now}},
+                            session=_tx)
+                        if not claimed:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="الكمية أكبر من المخزون المتاح")
+                        await db.waste_log.insert_one(dict(doc), session=_tx)
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    raise HTTPException(status_code=500, detail="خطأ في قاعدة البيانات")
+                continue
         try:
             from services.accounting_auto import ensure_accounts, _insert_entry, _line, already_posted
             if total_cost > 0 and not await already_posted(db, wid, "production_waste"):
