@@ -177,9 +177,10 @@ export default function BarcodePrintPage() {
   const totalLabels = Object.values(selectedProducts).reduce((sum, qty) => sum + qty, 0);
 
   const generateBarcodeSVG = (code) => {
+    if (!code) return '';
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     try {
-      JsBarcode(svg, code || '0000000000000', {
+      JsBarcode(svg, code, {
         format: "CODE128",
         width: 1.5,
         height: TEMPLATES[template].barcodeHeight,
@@ -206,14 +207,19 @@ export default function BarcodePrintPage() {
           <div class="label" style="width:${templateConfig.width}px; height:${templateConfig.height}px; border:1px solid #ddd; padding:4px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; margin:2px; page-break-inside:avoid;">
             ${customSettings.showName ? `<div style="font-size:${templateConfig.fontSize}px; font-weight:bold; text-align:center; overflow:hidden; max-height:20px;">${escapeHtml(language === 'ar' ? product.name_ar : product.name_en)}</div>` : ''}
             ${customSettings.showBarcode ? `<div style="margin:4px 0;">${generateBarcodeSVG(product.barcode)}</div>` : ''}
-            ${customSettings.showPrice ? `<div style="font-size:${templateConfig.fontSize + 2}px; font-weight:bold;">${(Number(product.price) || 0).toFixed(2)} ${escapeHtml(t.currency)}</div>` : ''}
+            ${customSettings.showPrice ? `<div style="font-size:${templateConfig.fontSize + 2}px; font-weight:bold;">${(Number(product.retail_price ?? product.price ?? 0) || 0).toFixed(2)} ${escapeHtml(t.currency)}</div>` : ''}
           </div>
         `;
       }
     });
 
     const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+    if (!printWindow) {
+      _toast.error(language === 'ar'
+        ? 'يرجى السماح بالنوافذ المنبثقة لطباعة الملصقات'
+        : 'Veuillez autoriser les fenêtres pop-up pour imprimer les étiquettes');
+      return;
+    }
     printWindow.document.write(`
       <!DOCTYPE html>
       <html dir="${language === 'ar' ? 'rtl' : 'ltr'}">
@@ -374,7 +380,7 @@ export default function BarcodePrintPage() {
                         </p>
                         <p className="text-xs text-muted-foreground">{product.barcode}</p>
                         <p className="text-sm font-semibold text-primary mt-1">
-                          {(product.price || 0).toFixed(2)} {t.currency}
+                          {(Number(product.retail_price ?? product.price ?? 0) || 0).toFixed(2)} {t.currency}
                         </p>
                       </div>
                     </div>
@@ -478,7 +484,7 @@ export default function BarcodePrintPage() {
                   min="1"
                   max="10"
                   value={customSettings.copies}
-                  onChange={(e) => setCustomSettings(prev => ({ ...prev, copies: parseInt(e.target.value) || 1 }))}
+                  onChange={(e) => setCustomSettings(prev => ({ ...prev, copies: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) }))}
                   className="mt-1"
                 />
               </div>

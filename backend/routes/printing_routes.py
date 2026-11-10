@@ -2,8 +2,8 @@
 Printing & Barcode System Routes
 Collections: print_templates, print_logs, printer_settings, product_barcodes, label_designs
 """
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
@@ -127,14 +127,22 @@ def create_barcode_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     # ── Label Designs ──
     class LabelCreate(BaseModel):
-        name_ar: str
+        name_ar: str = Field(..., min_length=1, max_length=200)
         name_fr: str = ""
-        width: int = 40
-        height: int = 25
+        width: int = Field(default=40, gt=0, le=1000)
+        height: int = Field(default=25, gt=0, le=1000)
         include_price: bool = True
         include_barcode: bool = True
         include_name: bool = True
-        font_size: int = 12
+        font_size: int = Field(default=12, gt=0, le=200)
+
+        @field_validator("name_ar")
+        @classmethod
+        def validate_name_ar(cls, value: str) -> str:
+            value = value.strip()
+            if not value:
+                raise ValueError("name_ar must not be blank")
+            return value
 
     @router.post("/labels")
     async def create_label(data: LabelCreate, admin: dict = Depends(get_tenant_admin)):
@@ -148,9 +156,21 @@ def create_barcode_routes(db, get_current_user, get_tenant_admin) -> dict:
         return await db.label_designs.find({}, {"_id": 0}).to_list(50)
 
     # ── Barcode Scans ──
+    class ScanCreate(BaseModel):
+        barcode: str = Field(..., min_length=1, max_length=128)
+        scan_type: str = Field(default="lookup", min_length=1, max_length=50)
+
+        @field_validator("barcode")
+        @classmethod
+        def validate_barcode(cls, value: str) -> str:
+            value = value.strip()
+            if not value:
+                raise ValueError("barcode must not be blank")
+            return value
+
     @router.post("/scan")
-    async def record_scan(data: dict, user: dict = Depends(get_current_user)):
-        barcode = data.get("barcode", "")
+    async def record_scan(data: ScanCreate, user: dict = Depends(get_current_user)):
+        barcode = data.barcode
         product = await db.products.find_one(
             {"$or": [{"barcode": barcode}, {"article_code": barcode}]}, {"_id": 0}
         )
@@ -159,7 +179,7 @@ def create_barcode_routes(db, get_current_user, get_tenant_admin) -> dict:
             "barcode": barcode,
             "product_id": product["id"] if product else None,
             "product_found": product is not None,
-            "scan_type": data.get("scan_type", "lookup"),
+            "scan_type": data.scan_type,
             "scanned_by": user.get("name", ""),
             "scanned_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -168,7 +188,7 @@ def create_barcode_routes(db, get_current_user, get_tenant_admin) -> dict:
         return {"scan": scan, "product": product}
 
     @router.get("/scan-history")
-    async def get_scan_history(limit: int = 50, user: dict = Depends(get_current_user)):
+    async def get_scan_history(limit: int = Query(default=50, ge=1, le=200), user: dict = Depends(get_current_user)):
         return await db.barcode_scans.find({}, {"_id": 0}).sort("scanned_at", -1).limit(limit).to_list(limit)
 
     return router
