@@ -29,8 +29,10 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         family_name = ""
         if c.family_id:
             family = await db.customer_families.find_one({"id": c.family_id}, {"_id": 0, "name": 1})
-            if family:
-                family_name = family["name"]
+            if not family:
+                # p492: ghost family_id was silently accepted (family_name="") — reject it
+                raise HTTPException(status_code=404, detail="عائلة الزبائن غير موجودة")
+            family_name = family["name"]
 
         customer_doc = {
             "id": customer_id, "name": c.name,
@@ -247,7 +249,10 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         if "family_id" in update_data:
             if update_data["family_id"]:
                 family = await db.customer_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name": 1})
-                update_data["family_name"] = family["name"] if family else ""
+                if not family:
+                    # p492: ghost family_id was silently accepted (family_name="") — reject it
+                    raise HTTPException(status_code=404, detail="عائلة الزبائن غير موجودة")
+                update_data["family_name"] = family["name"]
             else:
                 update_data["family_name"] = ""
         if update_data:

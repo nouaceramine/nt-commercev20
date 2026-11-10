@@ -2,10 +2,11 @@
 Families Permissions Routes
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional, List, Literal
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import uuid
 import logging
 import asyncio
@@ -626,13 +627,40 @@ async def get_family_products(family_id: str, user: dict = Depends(require_tenan
 
 # ============ CUSTOMER & SUPPLIER FAMILIES ============
 
+def _validate_family_name(v: str) -> str:
+    """Name validation parity with models/schemas/parties.py: strip HTML, require
+    non-empty, max 255 chars. p492: family names were stored raw (empty string or
+    markup) because the schemas had no validators at all."""
+    if not v or not v.strip():
+        raise ValueError('اسم العائلة مطلوب')
+    v = re.sub(r'<[^>]+>', '', v).strip()
+    if not v:
+        raise ValueError('اسم العائلة مطلوب')
+    if len(v) > 255:
+        raise ValueError('الاسم يجب ألا يتجاوز 255 حرف')
+    return v
+
+
 class CustomerFamilyCreate(BaseModel):
     name: str
     description: Optional[str] = ""
 
+    @field_validator('name')
+    @classmethod
+    def _name_valid(cls, v):
+        return _validate_family_name(v)
+
+
 class CustomerFamilyUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def _name_valid(cls, v):
+        if v is None:
+            return v
+        return _validate_family_name(v)
 
 class CustomerFamilyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -646,9 +674,22 @@ class SupplierFamilyCreate(BaseModel):
     name: str
     description: Optional[str] = ""
 
+    @field_validator('name')
+    @classmethod
+    def _name_valid(cls, v):
+        return _validate_family_name(v)
+
+
 class SupplierFamilyUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def _name_valid(cls, v):
+        if v is None:
+            return v
+        return _validate_family_name(v)
 
 class SupplierFamilyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
