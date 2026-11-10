@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
 from utils.inventory_queries import low_stock_filter
+from services.warehouse_stock import adjust_warehouse_stock
 import uuid
 
 
@@ -198,6 +199,14 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                     async with tx_session.start_transaction():
                         await _claim_product_identities(product_id, product_doc, tx_session)
                         await db.products.insert_one(product_doc, session=tx_session)
+                        main_warehouse = await db.warehouses.find_one(
+                            {"is_main": True}, {"_id": 0, "id": 1}, session=tx_session
+                        )
+                        if main_warehouse and not product_doc.get("is_non_stockable"):
+                            await adjust_warehouse_stock(
+                                db, product_id, main_warehouse["id"], product_doc["quantity"],
+                                product_quantity_before=0, session=tx_session,
+                            )
                         await _audit_product("create", product_id, product_doc["name"], admin,
                                              {"barcode": product_doc.get("barcode", ""), "retail_price": product_doc.get("retail_price", 0)},
                                              session=tx_session)
@@ -623,6 +632,19 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                                 "source": "manual", "created_at": now,
                             }, session=tx_session)
 
+                        old_quantity = float(product.get("quantity", 0) or 0)
+                        new_quantity = float(update_data.get("quantity", old_quantity) or 0)
+                        if new_quantity != old_quantity:
+                            main_warehouse = await db.warehouses.find_one(
+                                {"is_main": True}, {"_id": 0, "id": 1}, session=tx_session
+                            )
+                            if main_warehouse and not update_data.get(
+                                "is_non_stockable", product.get("is_non_stockable", False)
+                            ):
+                                await adjust_warehouse_stock(
+                                    db, product_id, main_warehouse["id"], new_quantity - old_quantity,
+                                    product_quantity_before=old_quantity, session=tx_session,
+                                )
                         update_data["updated_at"] = now
                         await db.products.update_one({"id": product_id}, {"$set": update_data}, session=tx_session)
                         await _audit_product("update", product_id, product.get("name_ar") or product.get("name_en") or "",
@@ -658,9 +680,13 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         if in_purchase or in_sale:
                             raise HTTPException(status_code=400, detail=f"لا يمكن حذف '{pname}': منتج حقيقي له حركات شراء/بيع مسجلة")
                         product_lots = await db.product_lots.find({"product_id": product_id}, {"_id": 0}, session=tx_session).to_list(None)
+                        warehouse_stock = await db.warehouse_stock.find(
+                            {"product_id": product_id}
+                        ).to_list(None)
                         await db.store_products.delete_many({"product_id": product_id}, session=tx_session)
                         archived = dict(full_doc)
                         archived["product_lots"] = product_lots
+                        archived["warehouse_stock"] = warehouse_stock
                         archived["deleted_at"] = datetime.now(timezone.utc).isoformat()
                         archived["deleted_by"] = admin.get("full_name") or admin.get("email", "")
                         await db.deleted_products.update_one({"id": product_id}, {"$set": archived}, upsert=True, session=tx_session)
@@ -668,6 +694,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         if result.deleted_count == 0:
                             raise HTTPException(status_code=404, detail="المنتج غير موجود")
                         await db.product_lots.delete_many({"product_id": product_id}, session=tx_session)
+                        await db.warehouse_stock.delete_many({"product_id": product_id}, session=tx_session)
                         await db.product_identity_claims.delete_many({"product_id": product_id}, session=tx_session)
                         await _audit_product("delete", product_id, pname, admin, {}, session=tx_session)
                         return {"message": "تم حذف المنتج بنجاح"}
@@ -695,6 +722,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         archived.pop("deleted_at", None)
                         archived.pop("deleted_by", None)
                         product_lots = archived.pop("product_lots", [])
+                        warehouse_stock = archived.pop("warehouse_stock", [])
                         archived["restored_at"] = datetime.now(timezone.utc).isoformat()
                         archived["restored_by"] = admin.get("full_name") or admin.get("email", "")
                         await _assert_product_identities_available(archived, product_id, tx_session)
@@ -702,6 +730,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         await db.products.insert_one(archived, session=tx_session)
                         if product_lots:
                             await db.product_lots.insert_many(product_lots, session=tx_session)
+                        if warehouse_stock:
+                            await db.warehouse_stock.insert_many(warehouse_stock, session=tx_session)
                         await db.deleted_products.delete_one({"id": product_id}, session=tx_session)
                         await _audit_product("restore", product_id, archived.get("name_ar") or archived.get("name_en") or "", admin, {}, session=tx_session)
                         return {"message": "تمت استعادة المنتج من سلة المحذوفات", "product_id": product_id}
