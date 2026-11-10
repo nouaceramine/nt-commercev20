@@ -382,12 +382,15 @@ async def create_product_family(family: ProductFamilyCreate, admin: dict = Depen
     family_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
-    # Get parent name if exists
+    # A child must always point to a real parent in the same tenant database.
     parent_name = ""
     if family.parent_id:
-        parent = await db.product_families.find_one({"id": family.parent_id}, {"_id": 0, "name_ar": 1})
-        if parent:
-            parent_name = parent["name_ar"]
+        parent = await db.product_families.find_one(
+            {"id": family.parent_id}, {"_id": 0, "name_ar": 1}
+        )
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent product family not found")
+        parent_name = parent["name_ar"]
 
     from services.code_generator import generate_code
     code = await generate_code(db, "product_families", "FA", 5, with_year=False)
@@ -505,17 +508,58 @@ async def update_product_family(family_id: str, updates: ProductFamilyUpdate, ad
     if not family:
         raise HTTPException(status_code=404, detail="Product family not found")
 
-    update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
+    # Only explicitly supplied fields are updated; null parent_id means no parent.
+    update_data = {
+        k: v for k, v in updates.model_dump(exclude_unset=True).items()
+        if v is not None or k == "parent_id"
+    }
 
-    # Update parent name if parent_id changed
     if "parent_id" in update_data and update_data["parent_id"]:
-        parent = await db.product_families.find_one({"id": update_data["parent_id"]}, {"_id": 0, "name_ar": 1})
-        update_data["parent_name"] = parent["name_ar"] if parent else ""
-    elif "parent_id" in update_data and not update_data["parent_id"]:
+        parent_id = update_data["parent_id"]
+        if parent_id == family_id:
+            raise HTTPException(status_code=400, detail="Product family cannot be its own parent")
+        parent = await db.product_families.find_one(
+            {"id": parent_id}, {"_id": 0, "id": 1, "name_ar": 1, "parent_id": 1}
+        )
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent product family not found")
+
+        # Reject assigning a family below itself, including longer cycles.
+        ancestor_id = parent.get("parent_id") or ""
+        visited = {family_id, parent_id}
+        while ancestor_id:
+            if ancestor_id == family_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Product family cannot be assigned to one of its descendants",
+                )
+            if ancestor_id in visited:
+                raise HTTPException(status_code=400, detail="Invalid product family hierarchy")
+            visited.add(ancestor_id)
+            ancestor = await db.product_families.find_one(
+                {"id": ancestor_id}, {"_id": 0, "parent_id": 1}
+            )
+            if not ancestor:
+                raise HTTPException(status_code=404, detail="Parent product family not found")
+            ancestor_id = ancestor.get("parent_id") or ""
+        update_data["parent_name"] = parent["name_ar"]
+    elif "parent_id" in update_data:
+        update_data["parent_id"] = ""
         update_data["parent_name"] = ""
 
     if update_data:
-        await db.product_families.update_one({"id": family_id}, {"$set": update_data})
+        from config.database import client
+        async with await client.start_session() as tx_session:
+            async with tx_session.start_transaction():
+                await db.product_families.update_one(
+                    {"id": family_id}, {"$set": update_data}, session=tx_session
+                )
+                if "name_ar" in update_data:
+                    await db.product_families.update_many(
+                        {"parent_id": family_id},
+                        {"$set": {"parent_name": update_data["name_ar"]}},
+                        session=tx_session,
+                    )
 
     updated = await db.product_families.find_one({"id": family_id}, {"_id": 0})
     count = await db.products.count_documents({"family_id": family_id})

@@ -245,20 +245,38 @@ class ProductResponse(BaseModel):
 # ============ PRODUCT FAMILY MODELS ============
 
 class ProductFamilyCreate(BaseModel):
-    name_en: str
-    name_ar: str
+    name_en: str = Field(..., min_length=1, max_length=200)
+    name_ar: str = Field(..., min_length=1, max_length=200)
     description_en: Optional[str] = ""
     description_ar: Optional[str] = ""
     parent_id: Optional[str] = None  # للعائلات الفرعية
     is_spare_parts: bool = False  # p286: عائلة قطع غيار صيانة — تظهر منتجاتها في مخزون الصيانة
 
+    @field_validator("name_en", "name_ar")
+    @classmethod
+    def validate_family_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("اسم العائلة مطلوب")
+        return value
+
 class ProductFamilyUpdate(BaseModel):
-    name_en: Optional[str] = None
-    name_ar: Optional[str] = None
+    name_en: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    name_ar: Optional[str] = Field(default=None, min_length=1, max_length=200)
     description_en: Optional[str] = None
     description_ar: Optional[str] = None
     parent_id: Optional[str] = None
     is_spare_parts: Optional[bool] = None  # p286
+
+    @field_validator("name_en", "name_ar")
+    @classmethod
+    def validate_family_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("اسم العائلة مطلوب")
+        return value
 
 class ProductFamilyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
