@@ -395,7 +395,7 @@ export default function EditProductPage() {
         lot_number: newLot.lot_number,
         expiry_date: newLot.expiry_date,
         quantity: parseFloat(newLot.quantity) || 0,
-        alert_days: parseInt(newLot.alert_days) || 30,
+        alert_days: newLot.alert_days === '' ? 30 : parseInt(newLot.alert_days, 10),
       });
       setLots(prev => [...prev, response.data]);
       setNewLot({ lot_number: '', expiry_date: '', quantity: '', alert_days: '30' });
@@ -423,12 +423,12 @@ export default function EditProductPage() {
     }
     setSavingSupplier(true);
     try {
-      const response = await apiClient.post(`/products/${id}/suppliers`, {
+      await apiClient.post(`/products/${id}/suppliers`, {
         supplier_id: newSupplierLink.supplier_id,
         purchase_price: parseFloat(newSupplierLink.purchase_price) || 0,
         is_default: newSupplierLink.is_default,
       });
-      setSupplierLinks(prev => [...prev, response.data]);
+      await fetchSupplierLinks();
       setNewSupplierLink({ supplier_id: '', purchase_price: '0', is_default: false });
       setShowAddSupplierDialog(false);
       toast.success(language === 'ar' ? 'تم ربط المورد' : 'Fournisseur ajouté');
@@ -579,7 +579,7 @@ export default function EditProductPage() {
                   <TabsTrigger value="multicodes" className="text-xs gap-1"><Barcode className="h-3 w-3" />Multi-codes</TabsTrigger>
                   <TabsTrigger value="lots" className="text-xs gap-1 relative">
                     <CalendarDays className="h-3 w-3" />Lots
-                    {lots.some(l => l.remaining_days !== null && l.remaining_days <= (l.alert_days || 30)) && (
+                    {lots.some(l => l.remaining_days !== null && l.remaining_days <= (l.alert_days ?? 30)) && (
                       <span className="absolute -top-1 -right-1 h-2 w-2 bg-red-500 rounded-full" />
                     )}
                   </TabsTrigger>
@@ -953,7 +953,7 @@ export default function EditProductPage() {
                     <div className="space-y-2">
                       {lots.map(lot => {
                         const isExpired = lot.remaining_days !== null && lot.remaining_days <= 0;
-                        const isAlert = lot.remaining_days !== null && lot.remaining_days > 0 && lot.remaining_days <= (lot.alert_days || 30);
+                        const isAlert = lot.remaining_days !== null && lot.remaining_days > 0 && lot.remaining_days <= (lot.alert_days ?? 30);
                         return (
                           <div key={lot.id} className={`flex items-center justify-between p-3 border rounded-lg ${isExpired ? 'border-red-300 bg-red-50 dark:bg-red-950/20' : isAlert ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20' : 'border-border'}`}>
                             <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -1116,7 +1116,7 @@ export default function EditProductPage() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">{isAr ? 'تنبيه قبل (أيام)' : 'Alerter avant (jours)'}</Label>
-                <Input className="h-9" type="number" min="1" value={newLot.alert_days} onChange={e => setNewLot(p => ({ ...p, alert_days: e.target.value }))} />
+                <Input className="h-9" type="number" min="0" value={newLot.alert_days} onChange={e => setNewLot(p => ({ ...p, alert_days: e.target.value }))} />
               </div>
             </div>
             <div className="flex gap-2 pt-1">
