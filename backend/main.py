@@ -1453,42 +1453,168 @@ async def dashboard_alerts(user: dict = Depends(get_current_user)):
         alerts.append({"id": "debts", "type": "debt", "message": f"{overdue} ديون غير مسددة", "priority": "medium"})
     return alerts
 
-# ── Defective products aliases (frontend uses /defective-products) ──
+# ── Defective products (ProductsPage "المعطلة" tab) — p492: full lifecycle parity
+# with the /api/defective router: filters, UI stats keys, stock+expense integration,
+# atomic numbering, supplier-return linking, restore-on-delete, admin-only writes. ──
+async def _defective_next_number(prefix: str, collection: str, session=None) -> str:
+    key = f"defective_{prefix}"
+    if await db.counters.find_one({"_id": key}, session=session) is None:
+        legacy = await db[collection].count_documents({}, session=session)
+        await db.counters.update_one({"_id": key}, {"$setOnInsert": {"seq": legacy}},
+                                     upsert=True, session=session)
+    doc = await db.counters.find_one_and_update(
+        {"_id": key}, {"$inc": {"seq": 1}},
+        upsert=True, return_document=True, session=session,
+    )
+    return f"{prefix}-{doc['seq']:05d}"
+
 @app.get("/api/defective-products")
-async def defective_products_list(user: dict = Depends(get_current_user)):
-    return await db.defective_goods.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def defective_products_list(status: str = None, reason: str = None, user: dict = Depends(get_current_user)):
+    query = {}
+    if status:
+        query["status"] = status
+    if reason:
+        query["reason"] = reason
+    return await db.defective_goods.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 @app.get("/api/defective-products/stats")
 async def defective_products_stats(user: dict = Depends(get_current_user)):
     total = await db.defective_goods.count_documents({})
-    pending = await db.defective_goods.count_documents({"status": "pending_inspection"})
+    pending = await db.defective_goods.count_documents({"status": {"$in": ["pending", "pending_inspection"]}})
+    in_progress = await db.defective_goods.count_documents({"status": "in_progress"})
+    completed = await db.defective_goods.count_documents({"status": "completed"})
     confirmed = await db.defective_goods.count_documents({"status": "confirmed_defective"})
     returned = await db.supplier_returns.count_documents({})
     disposed = await db.disposal_records.count_documents({})
     cost_agg = await db.defective_goods.aggregate([{"$group": {"_id": None, "total": {"$sum": "$total_cost"}}}]).to_list(1)
+    qty_agg = await db.defective_goods.aggregate([{"$group": {"_id": None, "total": {"$sum": "$quantity"}}}]).to_list(1)
     return {
+        "total": total,
+        "pending": pending,
+        "in_progress": in_progress,
+        "completed": completed,
+        "total_quantity": qty_agg[0]["total"] if qty_agg else 0,
+        "total_cost": cost_agg[0]["total"] if cost_agg else 0,
         "total_defective": total,
         "pending_inspection": pending,
         "confirmed_defective": confirmed,
         "total_returns": returned,
         "total_disposals": disposed,
-        "total_cost": cost_agg[0]["total"] if cost_agg else 0,
     }
 
 @app.post("/api/defective-products")
-async def defective_products_create(data: dict, user: dict = Depends(get_current_user)):
-    doc = dict(data)
-    doc.setdefault("id", str(uuid.uuid4()))
-    doc.setdefault("status", "pending_inspection")
-    doc["created_at"] = datetime.now(timezone.utc).isoformat()
-    doc["created_by"] = user.get("name", "")
-    await db.defective_goods.insert_one(dict(doc))
+async def defective_products_create(data: dict, admin: dict = Depends(get_tenant_admin)):
+    from pymongo.errors import PyMongoError
+    product_id = (data.get("product_id") or "").strip()
+    if not product_id:
+        raise HTTPException(status_code=400, detail="المنتج مطلوب")
+    try:
+        quantity = int(data.get("quantity") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="الكمية غير صالحة")
+    if quantity < 1:
+        raise HTTPException(status_code=400, detail="الكمية غير صالحة")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = None
+    for attempt in range(5):
+        try:
+            async with await client.start_session() as tx_session:
+                async with tx_session.start_transaction():
+                    product = await db.products.find_one({"id": product_id}, {"_id": 0}, session=tx_session)
+                    if not product:
+                        raise HTTPException(status_code=404, detail="المنتج غير موجود")
+                    stock_field = "quantity" if "quantity" in product else "stock"
+                    available = product.get(stock_field, 0) or 0
+                    if available < quantity:
+                        raise HTTPException(status_code=400, detail="الكمية المتاحة غير كافية")
+                    supplier_name = ""
+                    supplier_id = (data.get("supplier_id") or "").strip()
+                    if supplier_id:
+                        supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0}, session=tx_session)
+                        if not supplier:
+                            raise HTTPException(status_code=404, detail="المورد غير موجود")
+                        supplier_name = supplier.get("name", "")
+                    unit_cost = product.get("purchase_price", 0) or 0
+                    doc = {
+                        "id": str(uuid.uuid4()),
+                        "defective_number": await _defective_next_number("DEF", "defective_goods", session=tx_session),
+                        "product_id": product_id,
+                        "product_name": product.get("name_ar") or product.get("name_en") or product.get("name", ""),
+                        "product_code": product.get("barcode") or product.get("article_code") or "",
+                        "quantity": quantity,
+                        "reason": data.get("reason", "manufacturing"),
+                        "notes": data.get("notes", ""),
+                        "supplier_id": supplier_id or None,
+                        "supplier_name": supplier_name,
+                        "action": data.get("action", "pending"),
+                        "status": data.get("status") or "pending",
+                        "unit_cost": unit_cost,
+                        "total_cost": quantity * unit_cost,
+                        "created_by": admin.get("name", ""),
+                        "created_at": now,
+                    }
+                    await db.products.update_one({"id": product_id}, {"$inc": {stock_field: -quantity}},
+                                                 session=tx_session)
+                    await db.defective_goods.insert_one(doc, session=tx_session)
+                    if doc["total_cost"] > 0:
+                        await db.expenses.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "type": "defective_goods",
+                            "category": "منتجات معيبة",
+                            "amount": doc["total_cost"],
+                            "description": f"خسارة منتج معيب: {doc['product_name']} × {quantity}",
+                            "reference_type": "defective_goods",
+                            "reference_id": doc["id"],
+                            "created_by": admin.get("name", ""),
+                            "created_at": now,
+                        }, session=tx_session)
+                    if doc["action"] == "return_to_supplier" and supplier_id:
+                        ret = {
+                            "id": str(uuid.uuid4()),
+                            "return_number": await _defective_next_number("RET", "supplier_returns", session=tx_session),
+                            "supplier_id": supplier_id,
+                            "supplier_name": supplier_name,
+                            "items": [{"defective_goods_id": doc["id"], "product_id": product_id,
+                                       "quantity": quantity, "unit_cost": unit_cost}],
+                            "notes": "",
+                            "total_quantity": quantity,
+                            "total_value": doc["total_cost"],
+                            "status": "pending",
+                            "request_date": now,
+                            "refund_amount": 0,
+                            "created_by": admin.get("name", ""),
+                            "created_at": now,
+                        }
+                        await db.supplier_returns.insert_one(ret, session=tx_session)
+                        await db.return_tracking.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "return_request_id": ret["id"],
+                            "event_type": "created",
+                            "event_description": "تم إنشاء طلب الإرجاع",
+                            "event_date": now,
+                        }, session=tx_session)
+                        doc["return_request_id"] = ret["id"]
+                        await db.defective_goods.update_one(
+                            {"id": doc["id"]}, {"$set": {"return_request_id": ret["id"]}},
+                            session=tx_session)
+            break
+        except HTTPException:
+            raise
+        except PyMongoError:
+            if attempt == 4:
+                raise
+            continue
     doc.pop("_id", None)
     return doc
 
 @app.put("/api/defective-products/{item_id}")
-async def defective_products_update(item_id: str, data: dict, user: dict = Depends(get_current_user)):
-    updates = {k: v for k, v in data.items() if k not in ("id", "_id")}
+async def defective_products_update(item_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+    allowed = {"status", "action", "notes", "reason", "supplier_id", "supplier_name"}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if "status" in updates and updates["status"] not in (
+            "pending", "in_progress", "completed", "cancelled",
+            "pending_inspection", "confirmed_defective", "not_defective"):
+        raise HTTPException(status_code=400, detail="حالة غير صالحة")
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.defective_goods.update_one({"id": item_id}, {"$set": updates})
     if res.matched_count == 0:
@@ -1496,10 +1622,35 @@ async def defective_products_update(item_id: str, data: dict, user: dict = Depen
     return await db.defective_goods.find_one({"id": item_id}, {"_id": 0})
 
 @app.delete("/api/defective-products/{item_id}")
-async def defective_products_delete(item_id: str, user: dict = Depends(get_current_user)):
-    res = await db.defective_goods.delete_one({"id": item_id})
-    if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="العنصر غير موجود")
+async def defective_products_delete(item_id: str, restore_stock: bool = False, admin: dict = Depends(get_tenant_admin)):
+    from pymongo.errors import PyMongoError
+    for attempt in range(5):
+        try:
+            async with await client.start_session() as tx_session:
+                async with tx_session.start_transaction():
+                    goods = await db.defective_goods.find_one({"id": item_id}, session=tx_session)
+                    if not goods:
+                        raise HTTPException(status_code=404, detail="العنصر غير موجود")
+                    if restore_stock and goods.get("product_id"):
+                        product = await db.products.find_one({"id": goods["product_id"]}, {"_id": 0}, session=tx_session)
+                        if product:
+                            stock_field = "quantity" if "quantity" in product else "stock"
+                            await db.products.update_one(
+                                {"id": goods["product_id"]},
+                                {"$inc": {stock_field: goods.get("quantity", 0)}},
+                                session=tx_session)
+                    await db.defective_goods.delete_one({"id": item_id}, session=tx_session)
+                    await db.defective_inspections.delete_many({"defective_goods_id": item_id}, session=tx_session)
+                    await db.expenses.delete_many(
+                        {"reference_type": "defective_goods", "reference_id": item_id},
+                        session=tx_session)
+            break
+        except HTTPException:
+            raise
+        except PyMongoError:
+            if attempt == 4:
+                raise
+            continue
     return {"message": "تم الحذف"}
 
 # ── Misc aliases ──
