@@ -213,27 +213,76 @@ async def get_system_stats(admin: dict = Depends(get_tenant_admin)):
 class BulkPriceUpdateRequest(BaseModel):
     product_ids: Optional[List[str]] = None  # None = all products
     family_id: Optional[str] = None  # Filter by family
-    update_type: Literal["percentage", "fixed", "set"]  # نسبة مئوية، مبلغ ثابت، تحديد قيمة
+    update_type: Literal["percentage", "fixed", "set", "margin"]  # نسبة مئوية، مبلغ ثابت، تحديد قيمة، هامش ربح
     price_field: Literal["purchase_price", "wholesale_price", "retail_price", "all"]
     value: float
     round_to: int = 0  # Round to nearest (0 = no rounding, 10 = nearest 10, etc.)
+    min_price: float = 0  # p492: price-range scope (advanced options in the UI)
+    max_price: float = 0
+
+
+def _bulk_validate(update_type: str, price_field: str, value: float) -> None:
+    # p492: reject destructive payloads instead of silently clamping every price to 0.
+    if update_type == "set" and value < 0:
+        raise HTTPException(status_code=400, detail="لا يمكن تحديد سعر سالب")
+    if update_type == "percentage" and value <= -100:
+        raise HTTPException(status_code=400, detail="نسبة التخفيض لا يمكن أن تتجاوز 100%")
+    if update_type == "margin":
+        if not 0 <= value <= 1000:
+            raise HTTPException(status_code=400, detail="هامش الربح غير صالح")
+        if price_field == "purchase_price":
+            raise HTTPException(status_code=400, detail="هامش الربح يُطبَّق على أسعار البيع فقط")
+
+
+def _bulk_scope_query(product_ids, family_id, price_field, min_price, max_price) -> dict:
+    # p492: an explicit empty product_ids list means "no products" — never "all".
+    query = {}
+    if product_ids is not None:
+        query["id"] = {"$in": product_ids}
+    if family_id:
+        query["family_id"] = family_id
+    if min_price > 0 or max_price > 0:
+        range_field = price_field if price_field != "all" else "retail_price"
+        cond = {}
+        if min_price > 0:
+            cond["$gte"] = min_price
+        if max_price > 0:
+            cond["$lte"] = max_price
+        query[range_field] = cond
+    return query
+
+
+def _bulk_compute(update_type: str, field: str, old_price: float, value: float,
+                  round_to: int, purchase_price: float):
+    # Returns None when the field is not affected (margin never touches purchase_price).
+    if update_type == "margin":
+        if field == "purchase_price":
+            return None
+        new_price = (purchase_price or 0) * (1 + value / 100)
+    elif update_type == "percentage":
+        new_price = old_price * (1 + value / 100)
+    elif update_type == "fixed":
+        new_price = old_price + value
+    else:  # set
+        new_price = value
+    if round_to > 0:
+        new_price = round(new_price / round_to) * round_to
+    new_price = round(new_price, 2)  # clean float artifacts even without round_to
+    return max(0, new_price)
+
 
 @router.post("/products/bulk-price-update")
 async def bulk_price_update(request: BulkPriceUpdateRequest, admin: dict = Depends(get_tenant_admin)):
     """Update prices for multiple products at once"""
-
-    # Build query
-    query = {}
-    if request.product_ids:
-        query["id"] = {"$in": request.product_ids}
-    if request.family_id:
-        query["family_id"] = request.family_id
+    _bulk_validate(request.update_type, request.price_field, request.value)
+    query = _bulk_scope_query(request.product_ids, request.family_id,
+                              request.price_field, request.min_price, request.max_price)
 
     # Get products
     products = await db.products.find(query, {"_id": 0}).to_list(10000)
 
     if not products:
-        return {"success": False, "message": "No products found", "updated_count": 0}
+        raise HTTPException(status_code=404, detail="لا توجد منتجات مطابقة للمعايير")
 
     price_fields = ["purchase_price", "wholesale_price", "retail_price"] if request.price_field == "all" else [request.price_field]
 
@@ -245,29 +294,10 @@ async def bulk_price_update(request: BulkPriceUpdateRequest, admin: dict = Depen
 
         for field in price_fields:
             old_price = product.get(field, 0)
-            new_price = old_price
-
-            if request.update_type == "percentage":
-                # Increase/decrease by percentage
-                new_price = old_price * (1 + request.value / 100)
-            elif request.update_type == "fixed":
-                # Add/subtract fixed amount
-                new_price = old_price + request.value
-            elif request.update_type == "set":
-                # Set to specific value
-                new_price = request.value
-
-            # Round if needed
-            if request.round_to > 0:
-                new_price = round(new_price / request.round_to) * request.round_to
-
-            # Clean float artifacts (e.g. 33.333333333333) even without round_to
-            new_price = round(new_price, 2)
-
-            # Ensure price is not negative
-            new_price = max(0, new_price)
-
-            update_data[field] = new_price
+            new_price = _bulk_compute(request.update_type, field, old_price, request.value,
+                                      request.round_to, product.get("purchase_price", 0))
+            if new_price is not None:
+                update_data[field] = new_price
 
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -278,12 +308,14 @@ async def bulk_price_update(request: BulkPriceUpdateRequest, admin: dict = Depen
             "product_id": product["id"],
             "product_name": product.get("name_ar", product.get("name_en", "")),
             "old_prices": {f: product.get(f, 0) for f in price_fields},
-            "new_prices": {f: update_data[f] for f in price_fields}
+            "new_prices": {f: update_data.get(f, product.get(f, 0)) for f in price_fields}
         })
 
         # Same audit trail as single-product PUT: one price_history row per changed field
         now_iso = update_data["updated_at"]
         for field in price_fields:
+            if field not in update_data:
+                continue  # margin never rewrites purchase_price
             old_p = product.get(field, 0)
             new_p = update_data[field]
             if new_p != old_p:
@@ -320,17 +352,21 @@ async def bulk_price_update(request: BulkPriceUpdateRequest, admin: dict = Depen
 
 @router.get("/products/price-preview")
 async def preview_price_update(
-    update_type: str,
-    price_field: str,
+    update_type: Literal["percentage", "fixed", "set", "margin"],
+    price_field: Literal["purchase_price", "wholesale_price", "retail_price", "all"],
     value: float,
     family_id: Optional[str] = None,
     round_to: int = 0,
+    min_price: float = 0,
+    max_price: float = 0,
     admin: dict = Depends(get_tenant_admin)
 ):
     """Preview price changes before applying"""
-    query = {}
-    if family_id:
-        query["family_id"] = family_id
+    # p492: identical validation/scope/math as the apply endpoint so the preview
+    # is a faithful preview (previously bogus types were silent no-ops and the
+    # UI's min/max price range was ignored).
+    _bulk_validate(update_type, price_field, value)
+    query = _bulk_scope_query(None, family_id, price_field, min_price, max_price)
 
     products = await db.products.find(query, {"_id": 0}).limit(20).to_list(20)
 
@@ -346,25 +382,14 @@ async def preview_price_update(
 
         for field in price_fields:
             old_price = product.get(field, 0)
-            new_price = old_price
-
-            if update_type == "percentage":
-                new_price = old_price * (1 + value / 100)
-            elif update_type == "fixed":
-                new_price = old_price + value
-            elif update_type == "set":
-                new_price = value
-
-            if round_to > 0:
-                new_price = round(new_price / round_to) * round_to
-
-            new_price = round(new_price, 2)
-            new_price = max(0, new_price)
-
+            new_price = _bulk_compute(update_type, field, old_price, value,
+                                      round_to, product.get("purchase_price", 0))
+            if new_price is None:
+                continue  # margin never touches purchase_price
             preview["changes"][field] = {
                 "old": old_price,
                 "new": new_price,
-                "diff": new_price - old_price
+                "diff": round(new_price - old_price, 2)
             }
 
         previews.append(preview)

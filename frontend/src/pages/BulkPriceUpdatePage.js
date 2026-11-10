@@ -188,7 +188,15 @@ export default function BulkPriceUpdatePage() {
       if (selectedFamily !== 'all') {
         data.family_id = selectedFamily;
       }
-      
+
+      // p492: the preview already honors the price range — the apply call must too
+      if (minPrice > 0) {
+        data.min_price = minPrice;
+      }
+      if (maxPrice > 0) {
+        data.max_price = maxPrice;
+      }
+
       if (selectMode && selectedProducts.size > 0) {
         data.product_ids = Array.from(selectedProducts);
       }
