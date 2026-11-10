@@ -111,7 +111,7 @@ export default function ProductDetailPage() {
     : [];
   const selectedVariant = (variantIdx != null && product?.variants) ? product.variants[variantIdx] : null;
   const maxQty = selectedVariant ? Number(selectedVariant.quantity) : (product?.quantity || 99);
-  const oldPrice = product && product.purchase_price > 0 ? Math.round(price * 1.2) : 0;
+  const oldPrice = product && product.has_cost_price ? Math.round(price * 1.2) : 0;
   const savePercent = oldPrice > price ? Math.round((1 - price / oldPrice) * 100) : 0;
   const selectedRate = deliveryRates.find(r => String(r.id || r.wilaya_id || '') === String(customerInfo.wilaya).padStart(2, '0'));
   const rateFee = selectedRate ? (customerInfo.delivery_type === 'office' ? selectedRate.office_price : selectedRate.home_price) : null;

@@ -623,7 +623,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tenant_id = slug_mapping.get("tenant_id")
         tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
         meta = await tenant_db_inst.products.find_one({"id": product_id}, {"_id": 0, "updated_at": 1})
-        if not meta:
+        # p492: a projection of a missing field returns {}, which is falsy —
+        # legacy products without updated_at must not 404.
+        if meta is None:
             raise HTTPException(status_code=404, detail="Product not found")
         key = (tenant_id, product_id, idx, meta.get("updated_at"))
         headers = {"Cache-Control": "public, max-age=86400"}
@@ -1197,6 +1199,21 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     # NEW: Public Product Detail
 
+    # p492: the public detail payload is a whitelist — internal cost, stock-by-warehouse,
+    # barcode and note fields must never leave the server.
+    _PUBLIC_DETAIL_FIELDS = (
+        "id", "name", "name_ar", "name_en", "description", "description_ar",
+        "short_description", "retail_price", "selling_price", "quantity",
+        "has_variants", "variants", "image_url", "images", "family_id",
+    )
+
+    def _pub_detail(store_slug, p):
+        public = {k: p[k] for k in _PUBLIC_DETAIL_FIELDS if k in p}
+        # The page only needs to know whether a cost price exists (fake old price),
+        # never the exact purchase price.
+        public["has_cost_price"] = bool(p.get("purchase_price") or 0)
+        return _pub_product(store_slug, public)
+
     @router.get("/shop/{store_slug}/product/{product_id}")
     async def get_product_detail(store_slug: str, product_id: str):
         slug_mapping = await main_db.store_slugs.find_one({"store_slug": store_slug, "enabled": True}, {"_id": 0})
@@ -1209,8 +1226,15 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
         tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
 
+        # p250/p492: visibility is defined per store — the default store holds
+        # legacy entries without store_id, sub-stores only their own.
+        _store_id = slug_mapping.get("store_id")
+        if _store_id:
+            _sp_query = {"is_active": True, "store_id": _store_id}
+        else:
+            _sp_query = {"is_active": True, "store_id": {"$in": [None, ""]}}
         store_product = await tenant_db_inst.store_products.find_one(
-            {"product_id": product_id, "is_active": True}, {"_id": 0}
+            {**_sp_query, "product_id": product_id}, {"_id": 0}
         )
         if not store_product:
             raise HTTPException(status_code=404, detail="Product not found in store")
@@ -1221,20 +1245,33 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not product:
             raise HTTPException(status_code=404, detail="Product not available")
 
+        settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0}) or {}
+
+        # Related products must respect the same store visibility as the catalog:
+        # active store entries (or products of families auto-visible per p149),
+        # same family, in stock, excluding the current product.
+        _visible_ids = {
+            sp["product_id"] async for sp in tenant_db_inst.store_products.find(
+                _sp_query, {"_id": 0, "product_id": 1})
+        }
+        if not _store_id:
+            _vis_fams = [f for f in (settings.get("visible_family_ids") or []) if f]
+            if _vis_fams:
+                async for _p in tenant_db_inst.products.find(
+                        {"family_id": {"$in": _vis_fams}}, {"_id": 0, "id": 1}):
+                    _visible_ids.add(_p["id"])
         related_products = await tenant_db_inst.products.find(
             {
-                "id": {"$ne": product_id},
+                "id": {"$ne": product_id, "$in": list(_visible_ids)},
                 "family_id": product.get("family_id"),
                 "quantity": {"$gt": 0}
             },
             {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "retail_price": 1, "selling_price": 1, "image_url": 1}
         ).limit(4).to_list(4)
 
-        settings = await tenant_db_inst.store_settings.find_one({}, {"_id": 0}) or {}
-
         return {
             "success": True,
-            "product": _pub_product(store_slug, product),
+            "product": _pub_detail(store_slug, product),
             "related_products": [_pub_product(store_slug, p) for p in related_products],
             "settings": _public_settings(settings)
         }
