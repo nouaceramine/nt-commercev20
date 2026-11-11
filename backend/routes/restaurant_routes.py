@@ -4,7 +4,11 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import uuid
+import asyncio  # p494: تراجع قصير في حلقات الادعاء الذري
 import secrets  # p323: rotating QR table tokens
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TableCreate(BaseModel):
@@ -649,36 +653,78 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             await _orders().insert_one(doc)
             return _order_out(doc)
         table = None
+        _claimed_order_id = None
         if data.table_id:
-            table = await _tables().find_one({"id": data.table_id})
-            if not table:
-                raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
-            # If the table already has an active order, append items to it
-            active_id = table.get("active_order_id")
-            if active_id:
-                # p336: pending_payment أيضًا — الطلب غير المدفوع (نمط مسبق) يُلحق ولا يتضاعف
-                existing = await _orders().find_one(
-                    {
-                        "id": active_id,
-                        "status": {"$in": ["pending", "preparing", "pending_payment"]},
-                    }
-                )
-                if existing:
-                    _set = {"updated_at": _now()}
-                    if existing.get("status") != "pending_payment":
-                        _set["status"] = "pending"
-                    if await _payment_mode() == "prepaid":
-                        _set["payment_status"] = "unpaid"  # الإضافات الجديدة غير مدفوعة
-                    await _orders().update_one(
-                        {"id": active_id},
-                        {"$push": {"items": {"$each": items}}, "$set": _set},
+            # p494: ادعاء الطاولة ذرّيًا — قراءة ثم كتابة كانت تسمح لطلبين
+            # متزامنين على نفس الطاولة (طلب يتيم + active_order_id مُستبدَل)
+            for _claim_try in range(4):
+                table = await _tables().find_one({"id": data.table_id})
+                if not table:
+                    raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+                # If the table already has an active order, append items to it
+                active_id = table.get("active_order_id")
+                if active_id:
+                    # p336: pending_payment أيضًا — الطلب غير المدفوع (نمط مسبق) يُلحق ولا يتضاعف
+                    existing = await _orders().find_one(
+                        {
+                            "id": active_id,
+                            "status": {"$in": ["pending", "preparing", "pending_payment"]},
+                        }
                     )
-                    updated = await _orders().find_one({"id": active_id})
-                    await _publish("kitchen_order.updated", updated, user)
-                    return _order_out(updated)
+                    if not existing:
+                        # p494: active_order_id قد يشير لطلب يُدرَج الآن من فائز
+                        # بالسباق (الادعاء يسبق الإدراج) — انتظر لحظات قبل إعلانه ميتًا
+                        for _wait in range(10):
+                            await asyncio.sleep(0.05)
+                            existing = await _orders().find_one(
+                                {
+                                    "id": active_id,
+                                    "status": {
+                                        "$in": ["pending", "preparing", "pending_payment"]
+                                    },
+                                }
+                            )
+                            if existing:
+                                break
+                    if existing:
+                        _set = {"updated_at": _now()}
+                        if existing.get("status") != "pending_payment":
+                            _set["status"] = "pending"
+                        if await _payment_mode() == "prepaid":
+                            _set["payment_status"] = "unpaid"  # الإضافات الجديدة غير مدفوعة
+                        await _orders().update_one(
+                            {"id": active_id},
+                            {"$push": {"items": {"$each": items}}, "$set": _set},
+                        )
+                        updated = await _orders().find_one({"id": active_id})
+                        await _publish("kitchen_order.updated", updated, user)
+                        return _order_out(updated)
+                    # p494: active_order_id يشير لطلب منتهٍ/مفقود — حرّر ذرّيًا وأعد
+                    freed = await _tables().update_one(
+                        {"id": data.table_id, "active_order_id": active_id},
+                        {"$set": {"status": "free", "active_order_id": None,
+                                  "qr_token": secrets.token_hex(5)}})
+                    if freed.matched_count:
+                        continue
+                    await asyncio.sleep(0.05)
+                    continue
+                # الطاولة حرة — ادعُها باسم الطلب الجديد قبل الإدراج
+                _claimed_order_id = f"kch_{uuid.uuid4().hex[:12]}"
+                claimed = await _tables().update_one(
+                    {"id": data.table_id,
+                     "$or": [{"active_order_id": None},
+                             {"active_order_id": {"$exists": False}}]},
+                    {"$set": {"status": "occupied",
+                              "active_order_id": _claimed_order_id}})
+                if claimed.matched_count:
+                    break
+                await asyncio.sleep(0.05)  # خسرنا السباق — أعد القراءة وألحق بالفائز
+            else:
+                raise HTTPException(status_code=409,
+                                    detail="تعارض على الطاولة — أعد المحاولة")
         _mode = await _payment_mode()  # p336
         doc = {
-            "id": f"kch_{uuid.uuid4().hex[:12]}",
+            "id": _claimed_order_id or f"kch_{uuid.uuid4().hex[:12]}",
             "code": await _order_code(),
             "table_id": table["id"] if table else None,
             "table_name": table.get("name") if table else None,
@@ -713,6 +759,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         o = await _orders().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
+        # p494: لا إلغاء لطلب عليه دفعات — يُعالَج ماليًا بإرجاع من المبيعات
+        if data.status == "cancelled" and (
+            o.get("payments") or o.get("payment_status") in ("paid", "partial")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="لا يمكن إلغاء طلب مدفوع — أنشئ إرجاعًا من المبيعات",
+            )
         await _orders().update_one(
             {"id": order_id},
             {
@@ -6537,134 +6591,165 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(
                 status_code=400, detail="الدفع المسبق يتطلب دفع كامل الفاتورة"
             )
-        # p366: الخصم يُوزَّع تناسبياً على الدفعات، والدفعة الأخيرة تسدد الباقي بالضبط ليطابق final_total
-        total_all = round(
-            sum(
-                float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
-                for i in items_doc
-            ),
-            2,
-        )
-        disc = float((o.get("discount") or {}).get("amount") or 0)
-        final_total = round(max(0.0, total_all - disc), 2)
-        payments = list(o.get("payments") or [])
-        paid_so_far = round(sum(float(p.get("amount") or 0) for p in payments), 2)
-        sub = round(
-            sum(
-                float(items_doc[i].get("quantity") or 0)
-                * float(items_doc[i].get("unit_price") or 0)
-                for i in sel
-            ),
-            2,
-        )
-        last_part = len(sel) == len(unpaid_idx)
-        ratio = (final_total / total_all) if total_all > 0 else 1.0
-        part = max(
-            0.0,
-            round(final_total - paid_so_far, 2) if last_part else round(sub * ratio, 2),
-        )
-        part_disc = round(max(0.0, sub - part), 2)
-        who = user.get("username") or user.get("email")
-        set_fields = {"updated_at": _now(), "paid_at": _now(), "paid_by": who}
-        for i in sel:
-            set_fields[f"items.{i}.paid"] = True
-        if last_part:
-            set_fields["payment_status"] = "paid"
-            set_fields["payment_method"] = data.method
-        else:
-            set_fields["payment_status"] = "partial"  # p366
-        if o.get("status") == "pending_payment":
-            set_fields["status"] = (
-                "pending"  # p336: المسبق يدخل المطبخ بعد اكتمال الدفع
-            )
-        payment_rec = {
-            "method": data.method,
-            "amount": part,
-            "item_indexes": sel,
-            "paid_by": who,
-            "paid_at": _now(),
-        }
-        sale_id = None
-        # p362: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع حقيقية لكل دفعة (مخزون + صندوق + محاسبة)
-        # — الآجل debt يبقى بلا قيد (يحتاج حساب زبون)
-        if data.method != "debt" and part > 0:
-            try:
-                from models.schemas import SaleCreate
-                from services.application.sales_service import create_sale_op
-                from services import pos_loyalty as _pl
-
-                phone = _clean_phone(
-                    data.customer_phone or o.get("customer_phone") or ""
-                )
-                cust = await _pl._resolve_customer(db, phone=phone) if phone else None
-                sitems = [
-                    {
-                        "product_id": items_doc[i].get("product_id"),
-                        "product_name": items_doc[i].get("product_name") or "",
-                        "quantity": float(items_doc[i].get("quantity") or 0),
-                        "unit_price": float(items_doc[i].get("unit_price") or 0),
-                        "total": round(
-                            float(items_doc[i].get("quantity") or 0)
-                            * float(items_doc[i].get("unit_price") or 0),
-                            2,
-                        ),
-                        "note": items_doc[i].get("note") or "",
-                        "modifiers": items_doc[i].get("modifiers"),
-                    }
-                    for i in sel
-                ]
-                if sitems:
-                    s = SaleCreate(
-                        customer_id=(cust or {}).get("id"),
-                        items=sitems,
-                        subtotal=sub,
-                        discount=part_disc,
-                        total=part,
-                        paid_amount=part,
-                        payment_method="cash" if data.method == "cash" else "bank",
-                        payment_type="cash",
-                        notes=f"طلب مطعم {o.get('code', '')} ({o.get('table_name') or 'سفري'}) — دفعة {len(payments) + 1}",
+        # p494: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع — تحقق أولاً من وجود المنتجات
+        # حتى لا يُعلَّم الطلب مدفوعًا بلا بيع حقيقي (منتج محذوف = ثقب مالي صامت)
+        if data.method != "debt":
+            for i in sel:
+                pid = items_doc[i].get("product_id")
+                if pid and not await db.products.find_one({"id": pid}):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="منتج غير موجود في المخزون — راجع الطلب قبل الدفع",
                     )
-                    sale = await create_sale_op(db, s, user)
-                    sale_id = sale["id"]
-                    payment_rec["sale_id"] = sale_id
-                    payment_rec["invoice_number"] = sale.get("invoice_number")
-                    if sale.get("loyalty_earned"):
-                        payment_rec["loyalty_earned"] = sale["loyalty_earned"]
-            except Exception:
-                pass  # القيد المحاسبي لا يُسقط الدفع — الدفعة تبقى مسجلة
-        if sale_id and not o.get("sale_id"):
-            set_fields["sale_id"] = (
-                sale_id  # توافق p362: أول فاتورة تبقى في الحقل المفرد
+        # p494: ادعاء الدفع ذرّيًا — دفع واحد فقط يمر حتى تحت التزامن
+        _claimed = await _orders().find_one_and_update(
+            {"id": order_id, "_paying": {"$ne": True}},
+            {"$set": {"_paying": True}},
+        )
+        if not _claimed:
+            raise HTTPException(
+                status_code=409, detail="دفع آخر قيد التنفيذ — أعد المحاولة"
             )
-        upd = {"$set": set_fields, "$push": {"payments": payment_rec}}
-        if sale_id:
-            upd["$push"]["sale_ids"] = sale_id
-        await _orders().update_one({"id": order_id}, upd)
-        updated = await _orders().find_one({"id": order_id})
-        await _publish("kitchen_order.updated", updated, user)
-        out = _order_out(updated)
-        out["payment"] = payment_rec
-        if sale_id:
-            out["sale_id"] = sale_id
-            out["invoice_number"] = payment_rec.get("invoice_number")
-            if payment_rec.get("loyalty_earned"):
-                out["loyalty_earned"] = payment_rec["loyalty_earned"]
-        # p356: كسب نقاط الولاء عند الدفع الفعلي — فقط إن لم تُنشأ فاتورة (الفاتورة تكسب بنفسها)
-        if data.method != "debt" and not sale_id and part > 0:
-            from services import pos_loyalty
+        try:
+            # p366: الخصم يُوزَّع تناسبياً على الدفعات، والدفعة الأخيرة تسدد الباقي بالضبط ليطابق final_total
+            total_all = round(
+                sum(
+                    float(i.get("quantity") or 0) * float(i.get("unit_price") or 0)
+                    for i in items_doc
+                ),
+                2,
+            )
+            disc = float((o.get("discount") or {}).get("amount") or 0)
+            final_total = round(max(0.0, total_all - disc), 2)
+            payments = list(o.get("payments") or [])
+            paid_so_far = round(sum(float(p.get("amount") or 0) for p in payments), 2)
+            sub = round(
+                sum(
+                    float(items_doc[i].get("quantity") or 0)
+                    * float(items_doc[i].get("unit_price") or 0)
+                    for i in sel
+                ),
+                2,
+            )
+            last_part = len(sel) == len(unpaid_idx)
+            ratio = (final_total / total_all) if total_all > 0 else 1.0
+            part = max(
+                0.0,
+                round(final_total - paid_so_far, 2) if last_part else round(sub * ratio, 2),
+            )
+            part_disc = round(max(0.0, sub - part), 2)
+            who = user.get("username") or user.get("email")
+            set_fields = {"updated_at": _now(), "paid_at": _now(), "paid_by": who}
+            for i in sel:
+                set_fields[f"items.{i}.paid"] = True
+            if last_part:
+                set_fields["payment_status"] = "paid"
+                set_fields["payment_method"] = data.method
+            else:
+                set_fields["payment_status"] = "partial"  # p366
+            if o.get("status") == "pending_payment":
+                set_fields["status"] = (
+                    "pending"  # p336: المسبق يدخل المطبخ بعد اكتمال الدفع
+                )
+            payment_rec = {
+                "method": data.method,
+                "amount": part,
+                "item_indexes": sel,
+                "paid_by": who,
+                "paid_at": _now(),
+            }
+            sale_id = None
+            # p362: الدفع النقدي/بالبطاقة يُنشئ فاتورة بيع حقيقية لكل دفعة (مخزون + صندوق + محاسبة)
+            # — الآجل debt يبقى بلا قيد (يحتاج حساب زبون)
+            if data.method != "debt" and part > 0:
+                try:
+                    from models.schemas import SaleCreate
+                    from services.application.sales_service import create_sale_op
+                    from services import pos_loyalty as _pl
 
-            earned = await pos_loyalty.earn_points(
-                db,
-                amount=part,
-                ref_id=f"{order_id}#{len(payments) + 1}",
-                ref_label=f"طلب مطعم {o.get('code', '')}",
-                user_name=user.get("username") or user.get("email", ""),
-                phone=data.customer_phone or o.get("customer_phone") or "",
+                    phone = _clean_phone(
+                        data.customer_phone or o.get("customer_phone") or ""
+                    )
+                    cust = await _pl._resolve_customer(db, phone=phone) if phone else None
+                    sitems = [
+                        {
+                            "product_id": items_doc[i].get("product_id"),
+                            "product_name": items_doc[i].get("product_name") or "",
+                            "quantity": float(items_doc[i].get("quantity") or 0),
+                            "unit_price": float(items_doc[i].get("unit_price") or 0),
+                            "total": round(
+                                float(items_doc[i].get("quantity") or 0)
+                                * float(items_doc[i].get("unit_price") or 0),
+                                2,
+                            ),
+                            "note": items_doc[i].get("note") or "",
+                            "modifiers": items_doc[i].get("modifiers"),
+                        }
+                        for i in sel
+                    ]
+                    if sitems:
+                        s = SaleCreate(
+                            customer_id=(cust or {}).get("id"),
+                            items=sitems,
+                            subtotal=sub,
+                            discount=part_disc,
+                            total=part,
+                            paid_amount=part,
+                            payment_method="cash" if data.method == "cash" else "bank",
+                            payment_type="cash",
+                            notes=f"طلب مطعم {o.get('code', '')} ({o.get('table_name') or 'سفري'}) — دفعة {len(payments) + 1}",
+                        )
+                        sale = await create_sale_op(db, s, user)
+                        sale_id = sale["id"]
+                        payment_rec["sale_id"] = sale_id
+                        payment_rec["invoice_number"] = sale.get("invoice_number")
+                        if sale.get("loyalty_earned"):
+                            payment_rec["loyalty_earned"] = sale["loyalty_earned"]
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    # p494: فشل إنشاء البيع يُفشِل الدفع — لا «مدفوع» بلا قيد مالي
+                    logger.error(f"Restaurant pay: sale creation failed: {e}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="فشل إنشاء فاتورة البيع للدفعة — لم يُسجَّل الدفع",
+                    )
+            if sale_id and not o.get("sale_id"):
+                set_fields["sale_id"] = (
+                    sale_id  # توافق p362: أول فاتورة تبقى في الحقل المفرد
+                )
+            upd = {"$set": set_fields, "$push": {"payments": payment_rec}}
+            if sale_id:
+                upd["$push"]["sale_ids"] = sale_id
+            await _orders().update_one({"id": order_id}, upd)
+            updated = await _orders().find_one({"id": order_id})
+            await _publish("kitchen_order.updated", updated, user)
+            out = _order_out(updated)
+            out["payment"] = payment_rec
+            if sale_id:
+                out["sale_id"] = sale_id
+                out["invoice_number"] = payment_rec.get("invoice_number")
+                if payment_rec.get("loyalty_earned"):
+                    out["loyalty_earned"] = payment_rec["loyalty_earned"]
+            # p356: كسب نقاط الولاء عند الدفع الفعلي — فقط إن لم تُنشأ فاتورة (الفاتورة تكسب بنفسها)
+            if data.method != "debt" and not sale_id and part > 0:
+                from services import pos_loyalty
+
+                earned = await pos_loyalty.earn_points(
+                    db,
+                    amount=part,
+                    ref_id=f"{order_id}#{len(payments) + 1}",
+                    ref_label=f"طلب مطعم {o.get('code', '')}",
+                    user_name=user.get("username") or user.get("email", ""),
+                    phone=data.customer_phone or o.get("customer_phone") or "",
+                )
+                if earned:
+                    out["loyalty_earned"] = earned["points"]
+            return out
+        finally:
+            await _orders().update_one(
+                {"id": order_id}, {"$unset": {"_paying": ""}}
             )
-            if earned:
-                out["loyalty_earned"] = earned["points"]
-        return out
 
     @router.post("/tables/{table_id}/checkout")
     async def checkout_table(
@@ -6674,20 +6759,26 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         t = await _tables().find_one({"id": table_id})
         if not t:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+        # p494: إن أُرسل sale_id فيجب أن يكون فاتورة حقيقية — لا علامة مدفوع بلا بيع
+        sale_ok = False
+        if data.sale_id:
+            sale_ok = bool(await db.sales.find_one({"id": data.sale_id}))
+            if not sale_ok:
+                raise HTTPException(status_code=404, detail="فاتورة البيع غير موجودة")
         active_id = t.get("active_order_id")
         if active_id:
-            await _orders().update_one(
-                {"id": active_id},
-                {
-                    "$set": {
-                        "status": "served",
-                        "sale_id": data.sale_id,
-                        "payment_status": "paid",
-                        "paid_at": _now(),
-                        "updated_at": _now(),
-                    }
-                },  # p336
-            )
+            active_o = await _orders().find_one({"id": active_id}) or {}
+            _set = {
+                "status": "served",
+                "updated_at": _now(),
+            }
+            if data.sale_id:
+                _set["sale_id"] = data.sale_id
+            # لا نعلّم مدفوعًا إلا بفاتورة مُتحقَّق منها أو طلب مدفوع أصلًا
+            if sale_ok or active_o.get("payment_status") == "paid":
+                _set["payment_status"] = "paid"
+                _set["paid_at"] = _now()
+            await _orders().update_one({"id": active_id}, {"$set": _set})  # p336
         await _tables().update_one(
             {"id": table_id},
             {
