@@ -229,9 +229,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return o
 
     async def _delivery_code() -> str:
+        # p494: عدّاد ذرّي — count+1 كان يسمح برمزين متماثلين في سباق الإنشاء
+        from services.code_generator import next_code
+
         day = _now().strftime("%Y%m%d")
-        count = await _delivery().count_documents({"code": {"$regex": f"^DLV-{day}-"}})
-        return f"DLV-{day}-{count + 1:04d}"
+        return await next_code(db, "delivery_orders", f"DLV-{day}-", 4, False)
 
     def _table_out(t):
         t = dict(t)
@@ -406,9 +408,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         return doc.get("payment_mode") or "postpaid"
 
     async def _order_code() -> str:
+        # p494: عدّاد ذرّي — count+1 كان يسمح برمزين متماثلين في سباق الإنشاء
+        from services.code_generator import next_code
+
         day = _now().strftime("%Y%m%d")
-        count = await _orders().count_documents({"code": {"$regex": f"^KCH-{day}-"}})
-        return f"KCH-{day}-{count + 1:04d}"
+        return await next_code(db, "kitchen_orders", f"KCH-{day}-", 4, False)
 
     # ---------- p308: Modifier groups (إضافات/بدائل الأطباق) ----------
     @router.get("/products/{product_id}/modifier-groups")
@@ -1961,37 +1965,62 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(
                 status_code=400, detail="موعد الحجز يجب أن يكون في المستقبل"
             )
-        if not (1 <= int(data.party_size or 1) <= 50):
+        # p494: party_size=0 كان يمرّ صامتًا (0 or 1 → 1) — تحقق صريح
+        ps = int(data.party_size) if data.party_size is not None else 1
+        if not (1 <= ps <= 50):
             raise HTTPException(status_code=400, detail="عدد الأشخاص غير صالح")
         win = timedelta(minutes=90)  # تعارض: نفس الطاولة وحجز قائم ضمن ±90 دقيقة
-        clash = await _resv().find_one(
+        # p494: قفل حجز على مستوى الطاولة — قراءة clash ثم إدراج كانت تسمح
+        # بحجزين متزامنين لنفس الموعد. القفل العتيق (>30s) يُسترد تلقائيًا.
+        lock = await _tables().find_one_and_update(
             {
-                "table_id": data.table_id,
-                "status": "booked",
-                "reserved_for": {"$gt": when - win, "$lt": when + win},
-            }
-        )  # حدّان حصريان: فرق 90د بالضبط مسموح
-        if clash:
+                "id": data.table_id,
+                "$or": [
+                    {"_booking_lock": {"$ne": True}},
+                    {"_booking_lock_at": {"$lt": _now() - timedelta(seconds=30)}},
+                ],
+            },
+            {"$set": {"_booking_lock": True, "_booking_lock_at": _now()}},
+        )
+        if not lock:
             raise HTTPException(
                 status_code=409,
-                detail=f"الطاولة محجوزة في موعد قريب ({clash.get('customer_name', '')})",
+                detail="حجز آخر قيد التنفيذ على هذه الطاولة — أعد المحاولة",
             )
-        doc = {
-            "id": f"resv_{uuid.uuid4().hex[:12]}",
-            "table_id": t["id"],
-            "table_name": t.get("name"),
-            "customer_name": name,
-            "customer_phone": _clean_phone(data.customer_phone),
-            "reserved_for": when,
-            "party_size": int(data.party_size or 1),
-            "notes": (data.notes or "").strip() or None,
-            "status": "booked",
-            "reminder_sent": False,
-            "created_by": user.get("username") or user.get("email"),
-            "created_at": _now(),
-            "updated_at": _now(),
-        }
-        await _resv().insert_one(doc)
+        try:
+            clash = await _resv().find_one(
+                {
+                    "table_id": data.table_id,
+                    "status": "booked",
+                    "reserved_for": {"$gt": when - win, "$lt": when + win},
+                }
+            )  # حدّان حصريان: فرق 90د بالضبط مسموح
+            if clash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"الطاولة محجوزة في موعد قريب ({clash.get('customer_name', '')})",
+                )
+            doc = {
+                "id": f"resv_{uuid.uuid4().hex[:12]}",
+                "table_id": t["id"],
+                "table_name": t.get("name"),
+                "customer_name": name,
+                "customer_phone": _clean_phone(data.customer_phone),
+                "reserved_for": when,
+                "party_size": ps,
+                "notes": (data.notes or "").strip() or None,
+                "status": "booked",
+                "reminder_sent": False,
+                "created_by": user.get("username") or user.get("email"),
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            await _resv().insert_one(doc)
+        finally:
+            await _tables().update_one(
+                {"id": data.table_id},
+                {"$unset": {"_booking_lock": "", "_booking_lock_at": ""}},
+            )
         await _publish_resv("reservation.created", doc, user)  # p393
         return _resv_out(doc)
 
@@ -7740,13 +7769,25 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         order_id: str, data: DeliveryCollect, user: dict = Depends(get_current_user)
     ):
         """بعد تسجيل البيع في POS: ربط الفاتورة وإنهاء الطلب (مثل checkout الطاولة)."""
+        from pymongo import ReturnDocument
+
         o = await _delivery().find_one({"id": order_id})
         if not o:
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
-        if o.get("status") == "cancelled":
-            raise HTTPException(status_code=400, detail="الطلب ملغى")
-        await _delivery().update_one(
-            {"id": order_id},
+        if o.get("status") in ("delivered", "cancelled"):
+            # p494: منتهٍ — لا تحصيل ثانٍ ولا تحصيل لملغى
+            raise HTTPException(status_code=400, detail="الطلب مُنهى — لا يمكن تحصيله")
+        # p494: الفاتورة يجب أن توجد فعلاً — التحصيل بفاتورة شبح كان يعلّم الطلب مدفوعًا
+        sale = await db.sales.find_one({"id": data.sale_id}, {"_id": 0, "id": 1})
+        if not sale:
+            raise HTTPException(status_code=404, detail="فاتورة البيع غير موجودة")
+        # p494: ادعاء ذرّي — تحصيلان متزامنان يفوز بواحد منهما فقط
+        claimed = await _delivery().find_one_and_update(
+            {
+                "id": order_id,
+                "status": {"$nin": ["delivered", "cancelled"]},
+                "payment_collected": {"$ne": True},
+            },
             {
                 "$set": {
                     "sale_id": data.sale_id,
@@ -7756,7 +7797,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     "updated_at": _now(),
                 }
             },
+            return_document=ReturnDocument.AFTER,
         )
+        if not claimed:
+            raise HTTPException(
+                status_code=409, detail="تحصيل آخر قيد التنفيذ أو تم — أعد المحاولة"
+            )
         if o.get("kitchen_order_id"):
             await _orders().update_one(
                 {"id": o["kitchen_order_id"]},
@@ -7770,9 +7816,8 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                     }
                 },  # p336
             )
-        updated = await _delivery().find_one({"id": order_id})
-        await _publish("delivery_order.updated", updated, user)
-        return _delivery_out(updated)
+        await _publish("delivery_order.updated", claimed, user)
+        return _delivery_out(claimed)
 
     # ---------- p335: حسابات الجيران (B2B) — طلبات المؤسسات المجاورة ----------
     def _neighbors():
