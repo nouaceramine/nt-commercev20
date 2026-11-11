@@ -23,10 +23,13 @@ async def generate_invoice_number(db, prefix: str) -> str:
 async def create_sale_op(db, s, user: dict) -> dict:
     """p189: ACID wrapper — stock claims, serials, sale doc, installments,
     notifications, customer stats, cash box and the outbox event all commit
-    atomically in one MongoDB transaction; any failure aborts everything."""
+    atomically in one MongoDB transaction; any failure aborts everything.
+    p494: also retry on TransientTransactionError (a racing sale used to
+    surface as a bare 500 instead of a clean 400 after re-read)."""
+    import asyncio
     from config.database import client
-    from pymongo.errors import DuplicateKeyError
-    for _attempt in range(2):
+    from pymongo.errors import DuplicateKeyError, PyMongoError
+    for _attempt in range(5):
         try:
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
@@ -45,12 +48,19 @@ async def create_sale_op(db, s, user: dict) -> dict:
                     result["loyalty_earned"] = earned["points"]
             return result
         except DuplicateKeyError:
-            if _attempt == 1:
+            if _attempt == 4:
                 raise
             # p348: كود مُدخل من العميل تسابق مع عامل آخر (فاتورة مجزأة) —
             # المعاملة أُجهضت بالكامل؛ اسحب كوداً ذرياً جديداً وأعد العملية كلها
             from services.code_generator import next_code as _next_sale_code
             s.code = await _next_sale_code(db, "sales", "BV", 4, True)
+        except PyMongoError as exc:
+            # p494: transient conflict with a concurrent sale — back off and
+            # re-run the whole validation+claim on the fresh state (the
+            # retried attempt returns the clean 400 when stock ran out)
+            if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                raise
+            await asyncio.sleep(0.02 * (2 ** _attempt))
 
 
 
@@ -63,8 +73,11 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     customer_name = "عميل نقدي"
     if s.customer_id:
         customer = await db.customers.find_one({"id": s.customer_id})
-        if customer:
-            customer_name = customer["name"]
+        # p494: a credit/debt sale must land on a REAL customer — a ghost id
+        # used to be accepted silently ("عميل نقدي" name, debt on nobody)
+        if not customer:
+            raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        customer_name = customer["name"]
         # p170: tag customer category (زبون المحل)
         from services.customer_sources import tag_customer_source, SOURCE_POS
         await tag_customer_source(db, SOURCE_POS, customer_id=s.customer_id)
@@ -101,7 +114,12 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
 
     for pid, qty in _claim_qty.items():
         product = await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1})
-        if not product or product.get("is_non_stockable"):
+        # p494: a referenced product must EXIST — ghosts were silently exempt
+        # from the stock claim, selling nonexistent merchandise with COGS 0
+        if not product:
+            await _rollback_claims()
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        if product.get("is_non_stockable"):
             continue
         res = await db.products.find_one_and_update(
             {"id": pid, "quantity": {"$gte": qty}},
@@ -184,6 +202,12 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     final_total = s.total + delivery_fee
     if s.payment_type == "installment" and s.installment_plan:
         s.paid_amount = s.installment_plan.down_payment
+    # p494: no overpayment — the paid amount may never exceed the invoice
+    # total (a 500-over-200 sale used to be accepted, inflating the cash box
+    # and the ledger by money that never existed)
+    if final_total >= 0 and s.paid_amount > final_total + 0.01:
+        raise HTTPException(status_code=400,
+                            detail="المبلغ المدفوع يتجاوز إجمالي الفاتورة")
     remaining = final_total - s.paid_amount
     # p58: mirror debt whenever the sale is under-paid AND has a customer,
     # regardless of the payment_type label (a "cash" sale paid 100/3600
@@ -351,7 +375,10 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         "payments": ([{"amount": s.paid_amount, "method": s.payment_method, "at": now}] if s.paid_amount > 0 else []),  # p67
         "installment_plan": installment_info,
         "status": status,
-        "notes": s.notes or "", "created_at": now, "created_by": user["name"]
+        "notes": s.notes or "", "created_at": now, "created_by": user["name"],
+        # p494b: attribute the sale to its maker so the employee filter,
+        # employee report and by_employee grouping are not dead weight
+        "employee_id": user.get("id", ""), "employee_name": user.get("name", ""),
     }
     await db.sales.insert_one(sale_doc, session=_tx)
 
@@ -449,11 +476,27 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
 
 
 async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
-    """p189: ACID wrapper — full reversal commits atomically in one transaction."""
+    """p189: ACID wrapper — full reversal commits atomically in one transaction.
+    p494: retry on TransientTransactionError so a racing delete settles as a
+    clean 404 instead of a bare 500."""
+    import asyncio
     from config.database import client
-    async with await client.start_session() as _tx_session:
-        async with _tx_session.start_transaction():
-            await _delete_sale_impl(db, sale_id, reason, user, _tx_session)
+    from pymongo.errors import PyMongoError
+    for _attempt in range(5):
+        try:
+            async with await client.start_session() as _tx_session:
+                async with _tx_session.start_transaction():
+                    await _delete_sale_impl(db, sale_id, reason, user, _tx_session)
+            return
+        except PyMongoError as exc:
+            if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                raise
+            # A competing delete may already have committed — re-read and
+            # report the same clean 404 instead of retrying the reversal
+            existing = await db.sales.find_one({"id": sale_id}, {"_id": 0, "id": 1})
+            if not existing:
+                raise HTTPException(status_code=404, detail="Sale not found")
+            await asyncio.sleep(0.02 * (2 ** _attempt))
 
 
 async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> None:
@@ -548,7 +591,7 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
     )
 
 
-async def return_sale_op(db, sale_id: str, user: dict) -> None:
+async def return_sale_op(db, sale_id: str, user: dict, reason: str = "") -> None:
     """ACID, idempotent return; a concurrent retry re-reads the claimed state."""
     import asyncio
     from config.database import client
@@ -557,7 +600,7 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
         try:
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
-                    await _return_sale_impl(db, sale_id, user, _tx_session)
+                    await _return_sale_impl(db, sale_id, user, _tx_session, reason)
             return
         except PyMongoError as exc:
             if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
@@ -571,7 +614,7 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
             await asyncio.sleep(0.02 * (2 ** _attempt))
 
 
-async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
+async def _return_sale_impl(db, sale_id: str, user: dict, _tx, reason: str = "") -> None:
     """Return a sale: restore stock, revert customer stats, reverse cash."""
     now = datetime.now(timezone.utc).isoformat()
     # Claim the return atomically before reversing anything. The transaction
@@ -579,7 +622,10 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
     # sale can never restore stock, customer mirrors or cash a second time.
     sale = await db.sales.find_one_and_update(
         {"id": sale_id, "status": {"$ne": "returned"}},
-        {"$set": {"status": "returned", "updated_at": now}},
+        # p494b: stamp returned_at (+ optional reason) so returns-report date
+        # filters and by_reason grouping stop being dead
+        {"$set": {"status": "returned", "updated_at": now, "returned_at": now,
+                  "return_reason": (reason or "").strip()}},
         session=_tx,
     )
     if sale is None:
