@@ -2,8 +2,8 @@
 Daily Sessions Routes - Extracted from server.py
 Cash session management for employees (open, close, summary)
 """
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -16,13 +16,13 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
     router = APIRouter(prefix="/daily-sessions", tags=["daily-sessions"])
 
     class DailySessionCreate(BaseModel):
-        opening_cash: float
+        opening_cash: float = Field(ge=0)  # p494: رصيد افتتاح سالب كان يمرر
         opened_at: str
         status: str = "open"
         code: Optional[str] = ""
 
     class DailySessionClose(BaseModel):
-        closing_cash: float
+        closing_cash: float = Field(ge=0)  # p494: عدّ سالب مستحيل
         closed_at: str
         notes: Optional[str] = ""
         status: str = "closed"
@@ -53,8 +53,34 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         if "user_name" not in s:
             s["user_name"] = s.get("created_by", fallback_name)
 
+    def _parse_iso(value, field_label):
+        # p494c: طابع زمني غير قابل للقراءة كان يمرر ويكسر نوافذ الغلق
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(status_code=422,
+                                detail=f"طابع زمني غير صالح في {field_label}")
+
+    # p494: حصة مفتوحة واحدة لكل موظف — فهرس فريد جزئي يجعل الفحص ذرياً
+    # تحت التزامن (كان: فحص ثم إدراج → سباق ينشئ حصتين مفتوحتين).
+    _open_index_state = {"ensured": False}
+
+    async def _ensure_open_session_index():
+        if _open_index_state["ensured"]:
+            return
+        _open_index_state["ensured"] = True
+        try:
+            await db.daily_sessions.create_index(
+                [("user_id", 1)], unique=True, name="uniq_open_session_per_user",
+                partialFilterExpression={"status": "open"})
+        except Exception:
+            # بيانات قديمة فيها حصتان مفتوحتان تمنع بناء الفهرس — يبقى الفحص المنطقي
+            pass
+
     @router.post("")
     async def create_daily_session(session: DailySessionCreate, user: dict = Depends(require_permission("daily_sessions.view"))):
+        await _ensure_open_session_index()
+        _parse_iso(session.opened_at, "opened_at")
         existing = await db.daily_sessions.find_one({"user_id": user["id"], "status": "open"})
         if existing:
             raise HTTPException(status_code=400, detail="لديك حصة مفتوحة بالفعل")
@@ -76,7 +102,10 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         }
         try:
             await db.daily_sessions.insert_one(doc)
-        except DuplicateKeyError:
+        except DuplicateKeyError as dke:
+            # p494: الاصطدام بفهرس الحصة المفتوحة يعني سباق إنشاء — 400 نظيف
+            if "uniq_open_session_per_user" in str(dke):
+                raise HTTPException(status_code=400, detail="لديك حصة مفتوحة بالفعل")
             # p348: سباق عاملَي uvicorn على نفس الكود — اسحب كوداً ذرياً جديداً وأعد المحاولة
             from services.code_generator import next_code as _next_session_code
             doc["code"] = await _next_session_code(db, "daily_sessions", "S", 3, True)
@@ -104,7 +133,9 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
         return DailySessionResponse(**session)
 
     @router.get("/summary")
-    async def get_sessions_summary(days: int = 7, admin: dict = Depends(require_permission("daily_sessions.edit"))):
+    # p494c: days bounded — a negative window used to return a silently empty
+    # 200, indistinguishable from "no sessions"
+    async def get_sessions_summary(days: int = Query(7, ge=1, le=366), admin: dict = Depends(require_permission("daily_sessions.edit"))):
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         sessions = await db.daily_sessions.find({"status": "closed", "closed_at": {"$gte": start_date}}, {"_id": 0}).to_list(500)
         user_stats = {}
@@ -136,94 +167,134 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
             raise HTTPException(status_code=404, detail="الحصة غير موجودة")
         if session.get("user_id") != user["id"] and user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="لا يمكنك إغلاق حصة موظف آخر")
-        if session["status"] == "closed":
+        if session.get("status") == "closed":
             raise HTTPException(status_code=400, detail="الحصة مغلقة بالفعل")
+
+        # p494c: نافذة زمنية سليمة قبل أي كتابة — غلق يسبق الفتح كان يُقبل
+        opened_dt = _parse_iso(session["opened_at"], "opened_at")
+        closed_dt = _parse_iso(closing_data.closed_at, "closed_at")
+        if closed_dt < opened_dt:
+            raise HTTPException(status_code=400, detail="وقت الغلق يسبق وقت الفتح")
+
+        # p494c: ادعاء ذري — فحص ثم تحديث كان يسمح لفائزَين متزامنين
+        # بتحويل مزدوج من الصندوق إلى الخزنة
+        claimed = await db.daily_sessions.find_one_and_update(
+            {"id": session_id, "status": "open"},
+            {"$set": {"status": "closing"}})
+        if not claimed:
+            raise HTTPException(status_code=400, detail="الحصة مغلقة بالفعل")
+        session = claimed
 
         opened_at = session["opened_at"]
         closed_at = closing_data.closed_at
         session_user_id = session.get("user_id", user["id"])
-        sales = await db.sales.find({"created_at": {"$gte": opened_at, "$lte": closed_at}, "status": {"$ne": "returned"}}, {"_id": 0}).to_list(1000)
-        total_sales = sum(s.get("total", 0) for s in sales)
-        cash_sales = sum(s.get("paid_amount", 0) for s in sales if s.get("payment_method") == "cash")
-        credit_sales = sum(s.get("remaining", 0) for s in sales)
-        total_profit = 0
-        for sale in sales:
-            for item in sale.get("items", []):
-                pid = item.get("product_id")
-                if pid:
-                    product = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
-                    if product:
-                        total_profit += (item.get("price", 0) - product.get("purchase_price", 0)) * item.get("quantity", 1)
+        session_user_name = session.get("user_name") or session.get("created_by", "")
+        try:
+            # p494c: الغلق يجمّع مبيعات صاحب الحصة فقط — employee_id منذ p494b،
+            # والسجلات القديمة تسقط إلى created_by بالاسم
+            sales = await db.sales.find(
+                {"created_at": {"$gte": opened_at, "$lte": closed_at},
+                 "status": {"$ne": "returned"},
+                 "$or": [{"employee_id": session_user_id},
+                         {"employee_id": {"$in": [None, ""]},
+                          "created_by": session_user_name}]},
+                {"_id": 0}).to_list(1000)
+            total_sales = sum(s.get("total", 0) for s in sales)
+            cash_sales = sum(s.get("paid_amount", 0) for s in sales if s.get("payment_method") == "cash")
+            credit_sales = sum(s.get("remaining", 0) for s in sales)
+            total_profit = 0
+            for sale in sales:
+                for item in sale.get("items", []):
+                    pid = item.get("product_id")
+                    if pid:
+                        product = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
+                        if product:
+                            total_profit += (item.get("price", 0) - product.get("purchase_price", 0)) * item.get("quantity", 1)
 
-        # p216: debt settlements on the cash drawer within the window count
-        # toward expected cash — customer collections add, supplier payments subtract
-        debt_txs = await db.transactions.find(
-            {"reference_type": "debt_payment", "cash_box_id": "cash",
-             "created_at": {"$gte": opened_at, "$lte": closed_at}}, {"_id": 0}).to_list(1000)
-        debt_collections = sum(t.get("amount", 0) for t in debt_txs if t.get("type") == "income")
-        debt_payouts = sum(t.get("amount", 0) for t in debt_txs if t.get("type") == "expense")
+            # p216: debt settlements on the cash drawer within the window count
+            # toward expected cash — customer collections add, supplier payments subtract
+            # p494c: تسويات الديون تُحسب لصاحب الحصة فقط (created_by بالاسم)
+            debt_txs = await db.transactions.find(
+                {"reference_type": "debt_payment", "cash_box_id": "cash",
+                 "created_by": session_user_name,
+                 "created_at": {"$gte": opened_at, "$lte": closed_at}}, {"_id": 0}).to_list(1000)
+            debt_collections = sum(t.get("amount", 0) for t in debt_txs if t.get("type") == "income")
+            debt_payouts = sum(t.get("amount", 0) for t in debt_txs if t.get("type") == "expense")
 
-        update_data = {
-            "closing_cash": closing_data.closing_cash, "closed_at": closing_data.closed_at,
-            "notes": closing_data.notes or "", "status": "closed",
-            "total_sales": total_sales, "cash_sales": cash_sales,
-            "credit_sales": credit_sales, "sales_count": len(sales), "total_profit": total_profit,
-            "debt_collections": debt_collections, "debt_payouts": debt_payouts,
-        }
-        await db.daily_sessions.update_one({"id": session_id}, {"$set": update_data})
+            update_data = {
+                "closing_cash": closing_data.closing_cash, "closed_at": closing_data.closed_at,
+                "notes": closing_data.notes or "", "status": "closed",
+                "total_sales": total_sales, "cash_sales": cash_sales,
+                "credit_sales": credit_sales, "sales_count": len(sales), "total_profit": total_profit,
+                "debt_collections": debt_collections, "debt_payouts": debt_payouts,
+            }
+            # p494c: the claim above already flipped open→closing atomically —
+            # this write just lands the computed totals and the final status
+            await db.daily_sessions.update_one({"id": session_id}, {"$set": update_data})
 
-        # p291: عند الغلق يُحوَّل المبلغ الفعلي المعدود من الصندوق النقدي إلى الخزنة
-        # تلقائياً (حركة + قيدان في دفتر الحركات). idempotent: حقل
-        # cash_transferred_to_safe يمنع التحويل المزدوج عند إعادة الإغلاق/التعديل.
-        _transferred = None
-        if closing_data.transfer_to_safe and closing_data.closing_cash > 0 \
-                and not session.get("cash_transferred_to_safe"):
-            now_iso = datetime.now(timezone.utc).isoformat()
-            amt = round(float(closing_data.closing_cash), 2)
-            # upsert آمِن للصندوقين ثم حركة متوازنة + قيدان في الدفتر
-            for box_id, box_name, box_fr, box_type in (
-                    ("cash", "الصندوق النقدي", "Caisse", "cash"),
-                    ("safe", "الخزنة", "Coffre-fort", "safe")):
-                await db.cash_boxes.update_one(
-                    {"id": box_id},
-                    {"$setOnInsert": {"name": box_name, "name_fr": box_fr,
-                                      "type": box_type, "balance": 0}},
-                    upsert=True)
-            await db.cash_boxes.update_one({"id": "cash"}, {"$inc": {"balance": -amt}, "$set": {"updated_at": now_iso}})
-            await db.cash_boxes.update_one({"id": "safe"}, {"$inc": {"balance": amt}, "$set": {"updated_at": now_iso}})
-            await db.transactions.insert_many([
-                {"id": str(uuid.uuid4()), "cash_box_id": "cash", "type": "expense",
-                 "amount": amt, "description": "غلق الحصة — تحويل الحصيلة الفعلية إلى الخزنة",
-                 "reference_type": "session_close", "reference_id": session_id,
-                 "created_at": now_iso, "created_by": user.get("name", "")},
-                {"id": str(uuid.uuid4()), "cash_box_id": "safe", "type": "income",
-                 "amount": amt, "description": f"حصيلة حصة {session.get('user_name', session.get('created_by', 'موظف'))} (غلق الحصة)",
-                 "reference_type": "session_close", "reference_id": session_id,
-                 "created_at": now_iso, "created_by": user.get("name", "")},
-            ])
-            _transferred = amt
-            update_data["cash_transferred_to_safe"] = amt
+            # p291: عند الغلق يُحوَّل المبلغ الفعلي المعدود من الصندوق النقدي إلى الخزنة
+            # تلقائياً (حركة + قيدان في دفتر الحركات). idempotent: حقل
+            # cash_transferred_to_safe يمنع التحويل المزدوج عند إعادة الإغلاق/التعديل.
+            _transferred = None
+            if closing_data.transfer_to_safe and closing_data.closing_cash > 0 \
+                    and not session.get("cash_transferred_to_safe"):
+                now_iso = datetime.now(timezone.utc).isoformat()
+                amt = round(float(closing_data.closing_cash), 2)
+                # upsert آمِن للصندوقين ثم حركة متوازنة + قيدان في الدفتر
+                for box_id, box_name, box_fr, box_type in (
+                        ("cash", "الصندوق النقدي", "Caisse", "cash"),
+                        ("safe", "الخزنة", "Coffre-fort", "safe")):
+                    await db.cash_boxes.update_one(
+                        {"id": box_id},
+                        {"$setOnInsert": {"name": box_name, "name_fr": box_fr,
+                                          "type": box_type, "balance": 0}},
+                        upsert=True)
+                await db.cash_boxes.update_one({"id": "cash"}, {"$inc": {"balance": -amt}, "$set": {"updated_at": now_iso}})
+                await db.cash_boxes.update_one({"id": "safe"}, {"$inc": {"balance": amt}, "$set": {"updated_at": now_iso}})
+                await db.transactions.insert_many([
+                    {"id": str(uuid.uuid4()), "cash_box_id": "cash", "type": "expense",
+                     "amount": amt, "description": "غلق الحصة — تحويل الحصيلة الفعلية إلى الخزنة",
+                     "reference_type": "session_close", "reference_id": session_id,
+                     "created_at": now_iso, "created_by": user.get("name", "")},
+                    {"id": str(uuid.uuid4()), "cash_box_id": "safe", "type": "income",
+                     "amount": amt, "description": f"حصيلة حصة {session.get('user_name', session.get('created_by', 'موظف'))} (غلق الحصة)",
+                     "reference_type": "session_close", "reference_id": session_id,
+                     "created_at": now_iso, "created_by": user.get("name", "")},
+                ])
+                _transferred = amt
+                update_data["cash_transferred_to_safe"] = amt
+                await db.daily_sessions.update_one(
+                    {"id": session_id}, {"$set": {"cash_transferred_to_safe": amt}})
+
+            updated = await db.daily_sessions.find_one({"id": session_id}, {"_id": 0})
+            _fix_session_fields(updated, session_user_id, session.get("user_name", session.get("created_by", "")))
+
+            # Cash difference notification
+            sys_settings = await db.system_settings.find_one({"id": "global"}, {"_id": 0})
+            threshold = sys_settings.get("cash_difference_threshold", 1000) if sys_settings else 1000
+            expected_cash = session.get("opening_cash", 0) + cash_sales + debt_collections - debt_payouts  # p216
+            difference = closing_data.closing_cash - expected_cash
+            if abs(difference) >= threshold:
+                emp_name = session.get("user_name", session.get("created_by", "موظف"))
+                now = datetime.now(timezone.utc).isoformat()
+                ntype = "cash_deficit" if difference < 0 else "cash_surplus"
+                msg_ar = f"تم تسجيل {'عجز' if difference < 0 else 'فائض'} بقيمة {abs(difference):.2f} دج في حصة {emp_name}"
+                admin_users = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+                recipients = list(set([u["id"] for u in admin_users] + [session_user_id]))
+                for rid in recipients:
+                    await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": rid, "type": ntype, "title": msg_ar, "message": msg_ar, "data": {"session_id": session_id, "difference": difference}, "read": False, "created_at": now})
+
+        except HTTPException:
             await db.daily_sessions.update_one(
-                {"id": session_id}, {"$set": {"cash_transferred_to_safe": amt}})
-
-        updated = await db.daily_sessions.find_one({"id": session_id}, {"_id": 0})
-        _fix_session_fields(updated, session_user_id, session.get("user_name", session.get("created_by", "")))
-
-        # Cash difference notification
-        sys_settings = await db.system_settings.find_one({"id": "global"}, {"_id": 0})
-        threshold = sys_settings.get("cash_difference_threshold", 1000) if sys_settings else 1000
-        expected_cash = session.get("opening_cash", 0) + cash_sales + debt_collections - debt_payouts  # p216
-        difference = closing_data.closing_cash - expected_cash
-        if abs(difference) >= threshold:
-            emp_name = session.get("user_name", session.get("created_by", "موظف"))
-            now = datetime.now(timezone.utc).isoformat()
-            ntype = "cash_deficit" if difference < 0 else "cash_surplus"
-            msg_ar = f"تم تسجيل {'عجز' if difference < 0 else 'فائض'} بقيمة {abs(difference):.2f} دج في حصة {emp_name}"
-            admin_users = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
-            recipients = list(set([u["id"] for u in admin_users] + [session_user_id]))
-            for rid in recipients:
-                await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": rid, "type": ntype, "title": msg_ar, "message": msg_ar, "data": {"session_id": session_id, "difference": difference}, "read": False, "created_at": now})
-
+                {"id": session_id, "status": "closing"},
+                {"$set": {"status": "open"}})
+            raise
+        except Exception:
+            # p494c: فشل منتصف الغلق يعيد الحصة إلى open بدل تقييدها closing
+            await db.daily_sessions.update_one(
+                {"id": session_id, "status": "closing"},
+                {"$set": {"status": "open"}})
+            raise
         return DailySessionResponse(**updated)
 
     @router.delete("/{session_id}")
