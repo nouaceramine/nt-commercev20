@@ -38,11 +38,24 @@ class DeliveryInfo(BaseModel):
 
 class InstallmentPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    down_payment: float = 0
-    installments_count: int = 3
-    interest_rate: float = 0
+    # p494c: bounded, non-negative plan inputs — an unbounded count (0 crashed
+    # the sale with a bare 500, 500 rows were accepted), negative interest or
+    # down payment silently corrupted the debt, and a garbage date blew up in
+    # strptime far from the client error.
+    down_payment: float = Field(0, ge=0)
+    installments_count: int = Field(3, ge=1, le=120)
+    interest_rate: float = Field(0, ge=0, le=100)
     frequency: Literal["monthly", "weekly"] = "monthly"
     first_due_date: str
+
+    @model_validator(mode="after")
+    def validate_first_due_date(self):
+        from datetime import datetime as _dt
+        try:
+            _dt.strptime(self.first_due_date, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            raise ValueError("تاريخ أول قسط يجب أن يكون بصيغة YYYY-MM-DD")
+        return self
 
 class SaleCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")

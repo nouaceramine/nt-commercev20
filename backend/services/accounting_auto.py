@@ -29,6 +29,7 @@ DEFAULT_ACCOUNTS = [
     ("600", "تكلفة البضاعة المباعة", "expense", None),
     ("658", "مصاريف العمولات", "expense", None),  # p221
     ("421", "عمولات مستحقة الدفع", "liability", None),  # p221
+    ("761", "إيرادات فوائد التقسيط", "revenue", None),  # p494c
 ]
 
 BOX_ACCOUNT = {box: code for code, _, _, box in DEFAULT_ACCOUNTS if box}
@@ -421,10 +422,19 @@ async def post_installment_payment_entry(tdb, payload: dict):
     if amount <= 0:
         return None
     box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
-    lines = [
-        _line(accounts[box_code], debit=amount),
-        _line(accounts["411"], credit=amount),
-    ]
+    # p494c: split principal vs interest — the sale booked only the PRINCIPAL
+    # as receivable (411), so crediting 411 with the full amount used to leave
+    # the AR account net-credited by the interest forever. Interest is revenue.
+    principal = payload.get("principal_share")
+    if principal is None:
+        principal = round(amount - float(payload.get("interest_share", 0) or 0), 2)
+    principal = round(float(principal), 2)
+    interest = round(amount - principal, 2)
+    lines = [_line(accounts[box_code], debit=amount)]
+    if principal > 0:
+        lines.append(_line(accounts["411"], credit=principal))
+    if interest > 0:
+        lines.append(_line(accounts["761"], credit=interest))
     return await _insert_entry(
         tdb,
         reference=payload.get("invoice_number", ""),

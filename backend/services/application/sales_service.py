@@ -326,19 +326,33 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     installment_info = None
     if s.payment_type == "installment" and s.installment_plan:
         plan = s.installment_plan
-        remaining_after_down = final_total - plan.down_payment
-        interest_amount = remaining_after_down * plan.interest_rate / 100
-        total_with_interest = remaining_after_down + interest_amount
-        installment_amount = round(total_with_interest / plan.installments_count, 2)
+        remaining_after_down = round(final_total - plan.down_payment, 2)
+        interest_amount = round(remaining_after_down * plan.interest_rate / 100, 2)
+        total_with_interest = round(remaining_after_down + interest_amount, 2)
+        count = plan.installments_count
+        # p494c: per-row principal/interest split — the LAST row absorbs the
+        # rounding remainder so the rows sum EXACTLY to the declared totals
+        # (uniform rounding drifted: 91.67 x 3 = 275.01 on a 275.00 plan, and
+        # the customer mirror plus the AR account stayed permanently off by
+        # the interest + drift because mirrors moved by the full amount).
+        base_p = round(remaining_after_down / count, 2)
+        base_i = round(interest_amount / count, 2)
+        schedule = []
+        for i in range(count):
+            p_share = base_p if i < count - 1 else round(remaining_after_down - base_p * (count - 1), 2)
+            i_share = base_i if i < count - 1 else round(interest_amount - base_i * (count - 1), 2)
+            schedule.append({"amount": round(p_share + i_share, 2),
+                             "principal_share": p_share, "interest_share": i_share})
         installment_info = {
             "down_payment": plan.down_payment,
-            "installments_count": plan.installments_count,
+            "installments_count": count,
             "interest_rate": plan.interest_rate,
-            "interest_amount": round(interest_amount, 2),
-            "installment_amount": installment_amount,
-            "total_with_interest": round(final_total - plan.down_payment + interest_amount, 2),
+            "interest_amount": interest_amount,
+            "installment_amount": schedule[0]["amount"] if schedule else 0,
+            "total_with_interest": total_with_interest,
             "frequency": plan.frequency,
             "first_due_date": plan.first_due_date,
+            "schedule": schedule,
         }
 
     # p167: worker-linked cash box — a worker's cash sales land in HIS box
@@ -385,8 +399,7 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     if s.payment_type == "installment" and installment_info:
         first_due = datetime.strptime(installment_info["first_due_date"], "%Y-%m-%d")
         freq_days = 30 if installment_info["frequency"] == "monthly" else 7
-        interest_share = round(installment_info["interest_amount"] / installment_info["installments_count"], 2)
-        for i in range(installment_info["installments_count"]):
+        for i, row in enumerate(installment_info["schedule"]):
             due = (first_due + timedelta(days=freq_days * i)).strftime("%Y-%m-%d")
             await db.installment_payments.insert_one({
                 "id": str(uuid.uuid4()),
@@ -396,8 +409,11 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
                 "customer_name": customer_name,
                 "installment_number": i + 1,
                 "total_installments": installment_info["installments_count"],
-                "amount": installment_info["installment_amount"],
-                "interest_share": interest_share,
+                "amount": row["amount"],
+                # p494c: mirrors move by principal_share; interest_share is
+                # revenue, booked on its own account at pay time
+                "principal_share": row["principal_share"],
+                "interest_share": row["interest_share"],
                 "due_date": due,
                 "status": "pending",
                 "paid_date": None,

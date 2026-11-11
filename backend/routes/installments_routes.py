@@ -19,7 +19,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
 
     # ── Summary ──
     @router.get("/summary")
-    async def get_summary(user: dict = Depends(get_current_user)):
+    async def get_summary(user: dict = Depends(require_tenant)):
         today = datetime.now(timezone.utc).date().isoformat()
         all_inst = await db.installment_payments.find({}, {"_id": 0}).to_list(length=10000)
         total_owed       = sum(i["amount"] for i in all_inst if i["status"] != "paid")
@@ -42,7 +42,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
     async def list_installments(
         status: Optional[str] = Query(None),
         customer_id: Optional[str] = Query(None),
-        user: dict = Depends(get_current_user),
+        user: dict = Depends(require_tenant),
     ):
         query = {}
         if status:
@@ -66,7 +66,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
 
     # ── Get installments for a sale ──
     @router.get("/sale/{sale_id}")
-    async def get_sale_installments(sale_id: str, user: dict = Depends(get_current_user)):
+    async def get_sale_installments(sale_id: str, user: dict = Depends(require_tenant)):
         items = await db.installment_payments.find(
             {"sale_id": sale_id}, {"_id": 0}
         ).sort("installment_number", 1).to_list(length=100)
@@ -84,6 +84,14 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
         now = _now()
         payment_method = data.get("payment_method", "cash")
         paid_amount = inst["amount"]
+        # p494c: the box receives the FULL amount, but the customer mirror and
+        # the sale's remaining/debt move by the PRINCIPAL share only — the
+        # interest share is revenue (Cr 761), not receivable. Legacy rows
+        # without principal_share fall back to amount minus interest_share.
+        principal = inst.get("principal_share")
+        if principal is None:
+            principal = round(inst["amount"] - (inst.get("interest_share") or 0), 2)
+        interest = round(paid_amount - principal, 2)
 
         # p204: atomic — installment + cash box + customer + sale + outbox
         # event commit or abort together (replica set, pattern p195)
@@ -123,15 +131,19 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
                         "reference_type": "installment", "reference_id": installment_id,
                         "created_at": now, "created_by": user.get("name", ""),
                     }, session=_tx)
-                    # p204: outbox → auto journal entry (Dr box / Cr 411)
+                    # p204: outbox → auto journal entry
+                    # (Dr box full / Cr 411 principal / Cr 761 interest)
                     await outbox_write(
                         _main_db, "installment.paid",
                         {
                             "payment_id": installment_id,
                             "installment_number": inst.get("installment_number"),
                             "sale_id": inst.get("sale_id"),
+                            "invoice_number": inst.get("invoice_number", ""),
                             "customer_name": inst.get("customer_name", ""),
                             "amount": paid_amount,
+                            "principal_share": principal,
+                            "interest_share": interest,
                             "payment_method": payment_method,
                         },
                         tenant_id=user.get("tenant_id") or "platform",
@@ -142,18 +154,20 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
                 if inst.get("customer_id"):
                     await db.customers.update_one(
                         {"id": inst["customer_id"]},
-                        {"$inc": {"balance": -paid_amount}},
+                        {"$inc": {"balance": -principal}},
                         session=_tx,
                     )
 
                 await db.sales.update_one(
                     {"id": inst["sale_id"]},
-                    {"$inc": {"paid_amount": paid_amount, "remaining": -paid_amount}},
+                    {"$inc": {"paid_amount": paid_amount, "remaining": -principal}},
                     session=_tx,
                 )
                 sale = await db.sales.find_one({"id": inst["sale_id"]}, {"_id": 0, "remaining": 1, "paid_amount": 1, "total": 1}, session=_tx)
                 if sale:
-                    new_remaining = max(0, sale.get("remaining", 0))
+                    # p494c: round float dust — 1.4e-14 of accumulated
+                    # principal arithmetic kept a fully paid plan "partial"
+                    new_remaining = round(max(0, sale.get("remaining", 0)), 2)
                     new_status = "paid" if new_remaining <= 0 else "partial"
                     # p494c: keep debt_amount coherent too — a fully paid
                     # installment sale used to stay "in debt" for the FIFO
@@ -166,7 +180,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
     async def pay_installment(
         installment_id: str,
         data: dict,
-        user: dict = Depends(get_current_user),
+        user: dict = Depends(require_tenant),
     ):
         # p494c: retry transient transaction conflicts — a concurrent pay used
         # to surface as a bare 500 instead of a clean 400 "already paid"
@@ -184,7 +198,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
 
     # ── Get cash boxes (for pay dialog) ──
     @router.get("/cash-boxes")
-    async def get_cash_boxes(user: dict = Depends(get_current_user)):
+    async def get_cash_boxes(user: dict = Depends(require_tenant)):
         boxes = await db.cash_boxes.find({}, {"_id": 0, "id": 1, "name": 1, "balance": 1}).to_list(length=100)
         return boxes
 
