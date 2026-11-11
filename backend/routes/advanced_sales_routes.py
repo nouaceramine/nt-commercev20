@@ -39,13 +39,13 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
             query["customer_id"] = customer_id
         if payment_method:
             query["payment_method"] = payment_method
-        sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+        sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
         if product_id:
             sales = [s for s in sales if any(i.get("product_id") == product_id for i in s.get("items", []))]
         total_amount = sum(s.get("total", 0) for s in sales)
         total_paid = sum(s.get("paid_amount", 0) for s in sales)
         total_discount = sum(s.get("discount", 0) for s in sales)
-        total_profit = 0
+        total_profit = sum((i.get("unit_price", 0) - i.get("purchase_price", i.get("unit_price", 0) * 0.7)) * i.get("quantity", 1) for s in sales for i in s.get("items", []))
         by_employee, by_payment, product_sales = {}, {}, {}
         for sale in sales:
             eid = sale.get("employee_id", "unknown")
@@ -56,17 +56,12 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
             by_payment.setdefault(m, {"count": 0, "total": 0})
             by_payment[m]["count"] += 1
             by_payment[m]["total"] += sale.get("total", 0)
-            for item in sale.get("items", []):
-                pid = item.get("product_id")
-                pname = item.get("product_name", "غير محدد")
-                product_sales.setdefault(pid, {"name": pname, "quantity": 0, "total": 0})
-                product_sales[pid]["quantity"] += item.get("quantity", 0)
-                product_sales[pid]["total"] += item.get("total", 0)
-                prod = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
-                if prod:
-                    total_profit += (item.get("price", 0) - prod.get("purchase_price", 0)) * item.get("quantity", 0)
-        top_products = sorted(product_sales.values(), key=lambda x: x["total"], reverse=True)[:10]
-        return {"period": {"start": start_date, "end": end_date}, "statistics": {"total_sales": len(sales), "total_amount": total_amount, "total_paid": total_paid, "total_remaining": total_amount - total_paid, "total_discount": total_discount, "total_profit": total_profit, "average_sale": total_amount / len(sales) if sales else 0}, "by_employee": sorted(by_employee.values(), key=lambda x: x["total"], reverse=True), "by_payment_method": by_payment, "top_products": top_products, "sales": sales[:100]}
+            for i in sale.get("items", []):
+                pid = i.get("product_id", "unknown")
+                product_sales.setdefault(pid, {"name": i.get("product_name", "غير محدد"), "quantity": 0, "total": 0})
+                product_sales[pid]["quantity"] += i.get("quantity", 1)
+                product_sales[pid]["total"] += i.get("total", 0)
+        return {"sales": sales, "statistics": {"total_sales": len(sales), "total_amount": total_amount, "total_paid": total_paid, "total_remaining": total_amount - total_paid, "total_discount": total_discount, "total_profit": total_profit, "average_sale": total_amount / len(sales) if sales else 0}, "by_employee": list(by_employee.values()), "by_payment_method": by_payment, "top_products": sorted(product_sales.values(), key=lambda x: x["total"], reverse=True)[:10]}
 
     @router.get("/employee-report/{employee_id}")
     async def get_employee_sales_report(employee_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, admin: dict = Depends(get_tenant_admin)):
@@ -129,13 +124,12 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         return {"returns": returns, "statistics": {"total_returns": len(returns), "total_amount": sum(r.get("total", 0) for r in returns)}, "by_reason": by_reason}
 
     @router.get("/{sale_id}/audit-log")
-    async def get_sale_audit_log(sale_id: str, user: dict = Depends(require_tenant)):
-        # p494b: a real sale is required — ghost ids return 404 instead of an
-        # empty list that looks legitimate
+    async def get_sale_audit_log(sale_id: str, admin: dict = Depends(get_tenant_admin)):
+        # p494b: a ghost sale id must not answer 200 — same contract as the
+        # sale resource itself; also closes cross-tenant probing
         sale = await db.sales.find_one({"id": sale_id}, {"_id": 0, "id": 1})
         if not sale:
-            raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
-        logs = await db.sale_audit_log.find({"sale_id": sale_id}, {"_id": 0}).sort("timestamp", -1).to_list(200)
-        return {"sale_id": sale_id, "logs": logs}
+            raise HTTPException(status_code=404, detail="Sale not found")
+        return await db.sale_audit_logs.find({"sale_id": sale_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
 
-    return {"router": router}
+    return router
