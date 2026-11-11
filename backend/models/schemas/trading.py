@@ -17,6 +17,16 @@ class SaleItem(BaseModel):
     serial_number: Optional[str] = None  # p187: IMEI/serial tracking
     modifiers: Optional[List[dict]] = None  # p308: إضافات/بدائل الطبق [{group, option, price_delta, product_id?, qty?}]
 
+    @model_validator(mode="after")
+    def validate_line_total(self):
+        # p494: line coherence — total must equal qty x unit_price minus the
+        # line discount (negative lines are legitimate return lines). 0.05
+        # tolerance absorbs split-bill rounding (2-decimal rounded parts).
+        expected = self.quantity * self.unit_price - (self.discount or 0)
+        if abs(self.total - expected) > 0.05:
+            raise ValueError("إجمالي السطر يجب أن يساوي الكمية × السعر − خصم السطر")
+        return self
+
 class DeliveryInfo(BaseModel):
     enabled: bool = False
     wilaya_code: Optional[str] = None
@@ -50,6 +60,20 @@ class SaleCreate(BaseModel):
     code: Optional[str] = ""
     installment_plan: Optional[InstallmentPlan] = None
     payment_details: Optional[dict] = None
+
+    @model_validator(mode="after")
+    def validate_totals(self):
+        # p494: the server never trusts a client total — it must reconcile
+        # with the item lines (authoritative) minus the invoice discount.
+        # This blocks understated-total fraud (items 200, total 1).
+        computed = round(sum(it.total for it in self.items), 2)
+        if abs(round(self.subtotal, 2) - computed) > 0.05:
+            raise ValueError("المجموع الفرعي لا يطابق مجموع الأسطر")
+        if abs(round(self.total, 2) - round(computed - (self.discount or 0), 2)) > 0.05:
+            raise ValueError("إجمالي الفاتورة يجب أن يساوي مجموع الأسطر − الخصم")
+        if self.paid_amount < 0 and self.total >= 0:
+            raise ValueError("المبلغ المدفوع لا يمكن أن يكون سالبًا")
+        return self
 
 class SaleResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -182,7 +206,7 @@ class DebtCreate(BaseModel):
     type: Literal["receivable", "payable"]  # receivable = دين على زبون, payable = دين لمورد
     party_type: Literal["customer", "supplier"]
     party_id: str
-    amount: float
+    amount: float = Field(gt=0)  # p494c: a zero/negative debt is meaningless corruption
     due_date: Optional[str] = None
     notes: Optional[str] = ""
     reference_type: Optional[str] = None  # sale, purchase
@@ -190,7 +214,7 @@ class DebtCreate(BaseModel):
 
 class DebtPaymentCreate(BaseModel):
     debt_id: str
-    amount: float
+    amount: float = Field(gt=0)  # p494c: a negative "payment" used to INCREASE the remaining debt
     payment_method: Literal["cash", "bank", "wallet", "safe", "personal"] = "cash"  # p64: +خزنة/مال خاص
     notes: Optional[str] = ""
 
