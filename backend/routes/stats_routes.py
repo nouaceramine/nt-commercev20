@@ -389,9 +389,12 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     # ── Analytics: Restock Suggestions ──
     @router.get("/analytics/restock-suggestions")
     async def get_restock_suggestions(admin: dict = Depends(get_tenant_admin)):
+        # p492: product documents carry `quantity` / `low_stock_threshold`
+        # (see utils.inventory_queries.low_stock_filter) — the old filter on
+        # `stock` / `min_stock` matched zero documents, so the suggestions
+        # panel rendered permanently empty. Use the canonical filter.
         low_stock_products = await db.products.find(
-            {"stock": {"$type": "number"},
-             "$expr": {"$lte": ["$stock", {"$ifNull": ["$min_stock", 5]}]}},
+            low_stock_filter(),
             {"_id": 0}
         ).to_list(100)
         now = datetime.now(timezone.utc)
@@ -408,13 +411,13 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             sales_result = await db.sales.aggregate(pipeline).to_list(1)
             monthly_sales = sales_result[0]["total_sold"] if sales_result else 0
             daily_velocity = monthly_sales / 30
-            current_stock = product.get("stock", 0)
+            current_stock = product.get("quantity", 0)
             days_until_stockout = current_stock / daily_velocity if daily_velocity > 0 else 999
-            suggested_quantity = max(int(daily_velocity * 60), product.get("low_stock_threshold", 10) * 2)
+            suggested_quantity = max(int(daily_velocity * 60), (product.get("low_stock_threshold") or 10) * 2)
             urgency = "critical" if days_until_stockout <= 3 else ("high" if days_until_stockout <= 7 else ("medium" if days_until_stockout <= 14 else "low"))
             suggestions.append({
                 "product_id": product["id"],
-                "product_name": product.get("name_en", ""),
+                "product_name": product.get("name_ar") or product.get("name_en", ""),
                 "current_stock": current_stock,
                 "monthly_sales": monthly_sales,
                 "daily_velocity": round(daily_velocity, 2),
