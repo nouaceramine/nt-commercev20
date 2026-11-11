@@ -244,6 +244,11 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         product_id = data.get("product_id")
         if not product_id:
             raise HTTPException(status_code=400, detail="product_id required")
+        # p492: attaching a product that does not exist must 404 — ghost
+        # entries leaked into the public storefront otherwise
+        product = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1})
+        if not product:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
         existing = await db.store_products.find_one({"product_id": product_id})
         if existing:
             return {"message": "Product already in store"}
@@ -258,7 +263,10 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.delete("/store/products/{product_id}")
     async def remove_store_product(product_id: str, admin: dict = Depends(get_tenant_admin)):
-        await db.store_products.delete_one({"product_id": product_id})
+        # p492: removing a product that is not attached must 404
+        result = await db.store_products.delete_one({"product_id": product_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="المنتج غير مرتبط بالمتجر")
         return {"message": "تمت إزالة المنتج من المتجر"}
 
 
