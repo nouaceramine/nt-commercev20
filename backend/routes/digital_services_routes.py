@@ -74,6 +74,20 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
     async def _product_stock(product_id: str) -> int:
         return await db.digital_codes.count_documents({"product_id": product_id, "is_used": False})
 
+    def _code_hash(code: str) -> str:
+        # p492: sha256 fingerprint for duplicate detection — codes are
+        # AES-GCM encrypted with random IVs, so equality needs a hash column
+        import hashlib
+        return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+    async def _code_exists(product_id: str, code: str, serial: str = ""):
+        # duplicate = same code value OR same live serial within the product
+        clauses = [{"code_hash": _code_hash(code)}]
+        if serial:
+            clauses.append({"serial": serial})
+        return await db.digital_codes.find_one(
+            {"product_id": product_id, "is_used": False, "$or": clauses})
+
     async def _with_stock(p: dict) -> dict:
         p["stock"] = await _product_stock(p["id"])
         return p
@@ -98,29 +112,57 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         items = await db.digital_products.find({}, {"_id": 0}).to_list(500)
         return [await _with_stock(p) for p in items]
 
+    # p492: whitelist for the raw-dict update payload — everything else
+    # (id/_id/created_at/created_by/stock...) is server-owned.
+    _PRODUCT_UPDATE_FIELDS = {"name", "type", "provider", "price", "cost_price",
+                              "delivery_method", "image_url", "description",
+                              "is_active"}
+
+    def _validate_product_fields(payload: dict, partial: bool = False):
+        if not partial or "type" in payload:
+            if payload.get("type") not in DIGITAL_TYPES:
+                raise HTTPException(status_code=400, detail="نوع المنتج غير صالح")
+        if not partial or "delivery_method" in payload:
+            if payload.get("delivery_method") not in DELIVERY_METHODS:
+                raise HTTPException(status_code=400, detail="طريقة التسليم غير صالحة")
+        for field in ("price", "cost_price"):
+            if field in payload and (payload[field] is None or payload[field] < 0):
+                raise HTTPException(status_code=400, detail="السعر غير صالح")
+        if "name" in payload and not (payload["name"] or "").strip():
+            raise HTTPException(status_code=400, detail="اسم المنتج مطلوب")
+
     @router.post("/products", status_code=201)
     async def create_product(data: DigitalProductCreate, admin: dict = Depends(get_tenant_admin)):
-        if data.type not in DIGITAL_TYPES:
-            raise HTTPException(status_code=400, detail="نوع المنتج غير صالح")
-        if data.delivery_method not in DELIVERY_METHODS:
-            raise HTTPException(status_code=400, detail="طريقة التسليم غير صالحة")
-        doc = {"id": str(uuid.uuid4()), **data.model_dump(), "created_at": _now(), "created_by": admin.get("name", "")}
+        payload = data.model_dump()
+        _validate_product_fields(payload)
+        payload["name"] = payload["name"].strip()
+        doc = {"id": str(uuid.uuid4()), **payload, "created_at": _now(), "created_by": admin.get("name", "")}
         await db.digital_products.insert_one(dict(doc))
         doc["stock"] = 0
         return doc
 
     @router.put("/products/{product_id}")
     async def update_product(product_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
-        data.pop("id", None)
-        data["updated_at"] = _now()
-        await db.digital_products.update_one({"id": product_id}, {"$set": data})
         p = await db.digital_products.find_one({"id": product_id}, {"_id": 0})
         if not p:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
+        payload = {k: v for k, v in (data or {}).items() if k in _PRODUCT_UPDATE_FIELDS}
+        if not payload:
+            raise HTTPException(status_code=400, detail="لا توجد حقول قابلة للتحديث")
+        _validate_product_fields(payload, partial=True)
+        if "name" in payload:
+            payload["name"] = payload["name"].strip()
+        payload["updated_at"] = _now()
+        await db.digital_products.update_one({"id": product_id}, {"$set": payload})
+        p = await db.digital_products.find_one({"id": product_id}, {"_id": 0})
         return await _with_stock(p)
 
     @router.delete("/products/{product_id}")
     async def delete_product(product_id: str, admin: dict = Depends(get_tenant_admin)):
+        # p492: ghost products must 404 — the blind update returned 200 before
+        p = await db.digital_products.find_one({"id": product_id}, {"_id": 0, "id": 1})
+        if not p:
+            raise HTTPException(status_code=404, detail="المنتج غير موجود")
         await db.digital_products.update_one({"id": product_id}, {"$set": {"is_active": False}})
         return {"message": "تم تعطيل المنتج"}
 
@@ -138,15 +180,16 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             if not code:
                 skipped += 1
                 continue
-            exists = await db.digital_codes.find_one({"product_id": product_id, "serial": row.serial, "is_used": False}) if row.serial else None
-            if exists:
+            serial = (row.serial or "").strip()
+            if await _code_exists(product_id, code, serial):
                 skipped += 1
                 continue
             enc = encrypt_code(code)
             await db.digital_codes.insert_one({
                 "id": str(uuid.uuid4()), "product_id": product_id,
                 "code_encrypted": enc["encrypted"], "iv": enc["iv"], "tag": enc["tag"],
-                "serial": row.serial or "", "expiry_date": row.expiry_date or "",
+                "code_hash": _code_hash(code),
+                "serial": serial, "expiry_date": row.expiry_date or "",
                 "is_used": False, "used_at": None, "order_id": None, "created_at": _now(),
             })
             inserted += 1
@@ -168,10 +211,14 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             code = row[0].strip()
             serial = row[1].strip() if len(row) > 1 else ""
             expiry = row[2].strip() if len(row) > 2 else ""
+            if await _code_exists(product_id, code, serial):
+                skipped += 1
+                continue
             enc = encrypt_code(code)
             await db.digital_codes.insert_one({
                 "id": str(uuid.uuid4()), "product_id": product_id,
                 "code_encrypted": enc["encrypted"], "iv": enc["iv"], "tag": enc["tag"],
+                "code_hash": _code_hash(code),
                 "serial": serial, "expiry_date": expiry,
                 "is_used": False, "used_at": None, "order_id": None, "created_at": _now(),
             })
