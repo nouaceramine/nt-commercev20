@@ -100,11 +100,15 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
             "created_at": _now(),
             "created_by": admin.get("email") or admin.get("username"),
         }
-        await _screens().insert_one(doc)
-        await main_db.display_pairings.update_one(
-            {"code": code},
+        # p494f: ادعاء ذرّي للكود قبل إدراج الشاشة — ادعاءان متزامنان كانا
+        # ينجحان معًا (201/201) وتُنشأ شاشتان لكود واحد
+        claimed = await main_db.display_pairings.update_one(
+            {"code": code, "claimed": {"$ne": True}},
             {"$set": {"claimed": True, "screen_token": doc["token"], "tenant_id": tenant_id}},
         )
+        if not claimed.matched_count:
+            raise HTTPException(status_code=404, detail="كود غير صالح أو مستعمل")
+        await _screens().insert_one(doc)
         return _screen_out(dict(doc))
 
     @router.put("/screens/{screen_id}")

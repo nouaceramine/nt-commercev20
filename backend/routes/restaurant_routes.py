@@ -5727,12 +5727,15 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 "family_name": 1,
                 "quantity": 1,
                 "min_quantity": 1,
+                "low_stock_threshold": 1,
                 "purchase_price": 1,
             },
         ):
             pid = p.get("id")
             stock = float(p.get("quantity") or 0)
-            minimum = float(p.get("min_quantity") or 0)
+            # p494f: الحقل الحالي هو low_stock_threshold؛ min_quantity قديم —
+            # التقرير كان أعمى عن كل منتج يُنشأ عبر API (حدّه يُقرأ 0)
+            minimum = float(p.get("min_quantity") or p.get("low_stock_threshold") or 0)
             sold, revenue = sales.get(pid, (0.0, 0.0))
             rows.append(
                 {
@@ -8040,6 +8043,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(
                 status_code=400, detail="نمط الحساب غير صالح — debt أو cash"
             )
+        # p494f: رفض الأسعار الخاصة السالبة/غير المنتهية — كانت تمرّ وتفسد
+        # رصيد الجار عند الطلب (سعر وحدة سالب ⇒ دين بالسالب)
+        import math as _math
+
+        clean_prices = {}
+        for k, v in (data.prices or {}).items():
+            if v is None:
+                continue
+            fv = float(v)
+            if not _math.isfinite(fv) or fv < 0:
+                raise HTTPException(
+                    status_code=400, detail="السعر الخاص يجب أن يكون صفراً أو موجباً"
+                )
+            clean_prices[str(k)] = fv
         doc = {
             "id": f"nbr_{uuid.uuid4().hex[:12]}",
             "token": "NBR-" + secrets.token_hex(10),
@@ -8048,11 +8065,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "phone": (data.phone or "").strip(),
             "payment": data.payment,
             "discount_pct": max(0.0, min(90.0, float(data.discount_pct or 0))),
-            "prices": {
-                str(k): float(v)
-                for k, v in (data.prices or {}).items()
-                if v is not None
-            },
+            "prices": clean_prices,
             "balance": 0.0,
             "is_active": True,
             "notes": (data.notes or "").strip(),
@@ -8072,6 +8085,9 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         for k in ("name", "manager_name", "phone", "notes"):
             v = getattr(data, k)
             if v is not None:
+                # p494f: الاسم الفارغ كان يُكتب ويمسح اسم الجار (نمط P494-028)
+                if k == "name" and not v.strip():
+                    raise HTTPException(status_code=400, detail="اسم الجار مطلوب")
                 upd[k] = v.strip()
         if data.payment is not None:
             if data.payment not in ("debt", "cash"):
@@ -8080,9 +8096,20 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         if data.discount_pct is not None:
             upd["discount_pct"] = max(0.0, min(90.0, float(data.discount_pct)))
         if data.prices is not None:
-            upd["prices"] = {
-                str(k): float(v) for k, v in data.prices.items() if v is not None
-            }
+            import math as _math
+
+            clean_prices = {}
+            for k2, v2 in data.prices.items():
+                if v2 is None:
+                    continue
+                fv2 = float(v2)
+                if not _math.isfinite(fv2) or fv2 < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="السعر الخاص يجب أن يكون صفراً أو موجباً",
+                    )
+                clean_prices[str(k2)] = fv2
+            upd["prices"] = clean_prices
         if data.is_active is not None:
             upd["is_active"] = bool(data.is_active)
         if upd:
@@ -8091,6 +8118,14 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.delete("/neighbors/{nid}")
     async def delete_neighbor(nid: str, admin: dict = Depends(get_tenant_admin)):
+        # p494f: لا حذف لجار عليه رصيد — كان الحذف يبخّر الدين من الدفاتر
+        n = await _neighbors().find_one({"id": nid})
+        if not n:
+            raise HTTPException(status_code=404, detail="الجار غير موجود")
+        if abs(float(n.get("balance") or 0)) > 0.005:
+            raise HTTPException(
+                status_code=400, detail="لا يمكن حذف جار برصيد غير مصفّر — سوِّ الحساب أولاً"
+            )
         res = await _neighbors().delete_one({"id": nid})
         if not res.deleted_count:
             raise HTTPException(status_code=404, detail="الجار غير موجود")
@@ -8106,19 +8141,31 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         n = await _neighbors().find_one({"id": nid})
         if not n:
             raise HTTPException(status_code=404, detail="الجار غير موجود")
-        await db.neighbor_settlements.insert_one(
-            {
-                "id": f"stl_{uuid.uuid4().hex[:12]}",
-                "neighbor_id": nid,
-                "amount": float(data.amount),
-                "notes": (data.notes or "").strip(),
-                "created_by": admin.get("username") or admin.get("email"),
-                "created_at": _now(),
-            }
+        amount = float(data.amount)
+        # p494f: خصم ذرّي مشروط بالرصيد — التجاوز والسباق كانا يقودان الرصيد
+        # للسالب ([200,200] على رصيد 50 ⇒ −50 ودفعتان مسجلتان)
+        dec = await _neighbors().update_one(
+            {"id": nid, "balance": {"$gte": amount}},
+            {"$inc": {"balance": -amount}},
         )
-        await _neighbors().update_one(
-            {"id": nid}, {"$inc": {"balance": -float(data.amount)}}
-        )
+        if not dec.matched_count:
+            raise HTTPException(
+                status_code=400, detail="مبلغ التسديد يتجاوز رصيد الجار"
+            )
+        try:
+            await db.neighbor_settlements.insert_one(
+                {
+                    "id": f"stl_{uuid.uuid4().hex[:12]}",
+                    "neighbor_id": nid,
+                    "amount": amount,
+                    "notes": (data.notes or "").strip(),
+                    "created_by": admin.get("username") or admin.get("email"),
+                    "created_at": _now(),
+                }
+            )
+        except Exception:
+            await _neighbors().update_one({"id": nid}, {"$inc": {"balance": amount}})
+            raise
         return _neighbor_out(await _neighbors().find_one({"id": nid}))
 
     @router.get("/neighbors/{nid}/statement")
@@ -8713,36 +8760,80 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             )
         pseudo = {"tenant_id": tenant_id, "email": "qr@table", "username": "QR"}
         _mode = await _payment_mode(tdb)  # p336
-        active_id = table.get("active_order_id")
-        if active_id:
-            existing = await tdb.kitchen_orders.find_one(
-                {
-                    "id": active_id,
-                    "status": {"$in": ["pending", "preparing", "pending_payment"]},
-                }
-            )  # p336
-            if existing:
-                _set = {"updated_at": _now()}
-                if existing.get("status") != "pending_payment":
-                    _set["status"] = "pending"
-                if _mode == "prepaid":
-                    _set["payment_status"] = "unpaid"
-                await tdb.kitchen_orders.update_one(
-                    {"id": active_id},
-                    {"$push": {"items": {"$each": items}}, "$set": _set},
-                )
-                updated = await tdb.kitchen_orders.find_one({"id": active_id})
-                await _publish("kitchen_order.updated", updated, pseudo)
-                _out = _order_out(updated)
-                _out["payment_mode"] = _mode  # p336
-                return _out
+        # p494f: ادعاء الطاولة ذرّيًا كما في المسار المصادق — القراءة ثم الكتابة
+        # كانت تسمح لطلبي QR متزامنين على طاولة واحدة بإنشاء طلبين نشطين
+        _claimed_order_id = None
+        for _claim_try in range(4):
+            table = await tdb.restaurant_tables.find_one({"id": table_id})
+            if not table:
+                raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
+            active_id = table.get("active_order_id")
+            if active_id:
+                existing = await tdb.kitchen_orders.find_one(
+                    {
+                        "id": active_id,
+                        "status": {"$in": ["pending", "preparing", "pending_payment"]},
+                    }
+                )  # p336
+                if not existing:
+                    # الادعاء يسبق الإدراج عند الفائز — انتظر لحظات قبل إعلانه ميتًا
+                    for _wait in range(10):
+                        await asyncio.sleep(0.05)
+                        existing = await tdb.kitchen_orders.find_one(
+                            {
+                                "id": active_id,
+                                "status": {
+                                    "$in": ["pending", "preparing", "pending_payment"]
+                                },
+                            }
+                        )
+                        if existing:
+                            break
+                if existing:
+                    _set = {"updated_at": _now()}
+                    if existing.get("status") != "pending_payment":
+                        _set["status"] = "pending"
+                    if _mode == "prepaid":
+                        _set["payment_status"] = "unpaid"
+                    await tdb.kitchen_orders.update_one(
+                        {"id": active_id},
+                        {"$push": {"items": {"$each": items}}, "$set": _set},
+                    )
+                    updated = await tdb.kitchen_orders.find_one({"id": active_id})
+                    await _publish("kitchen_order.updated", updated, pseudo)
+                    _out = _order_out(updated)
+                    _out["payment_mode"] = _mode  # p336
+                    return _out
+                # active_order_id يشير لطلب منتهٍ/مفقود — حرّر ذرّيًا وأعد
+                freed = await tdb.restaurant_tables.update_one(
+                    {"id": table_id, "active_order_id": active_id},
+                    {"$set": {"status": "free", "active_order_id": None,
+                              "qr_token": secrets.token_hex(5)}})
+                if freed.matched_count:
+                    continue
+                await asyncio.sleep(0.05)
+                continue
+            # الطاولة حرة — ادعُها باسم الطلب الجديد قبل الإدراج
+            _claimed_order_id = f"kch_{uuid.uuid4().hex[:12]}"
+            claimed = await tdb.restaurant_tables.update_one(
+                {"id": table_id,
+                 "$or": [{"active_order_id": None},
+                         {"active_order_id": {"$exists": False}}]},
+                {"$set": {"status": "occupied",
+                          "active_order_id": _claimed_order_id}})
+            if claimed.matched_count:
+                break
+            await asyncio.sleep(0.05)  # خسرنا السباق — أعد القراءة وألحق بالفائز
+        else:
+            raise HTTPException(status_code=409,
+                                detail="تعارض على الطاولة — أعد المحاولة")
         day = _now().strftime("%Y%m%d")
-        count = await tdb.kitchen_orders.count_documents(
-            {"code": {"$regex": f"^KCH-{day}-"}}
-        )
+        # p494f: عدّاد ذرّي (نمط P494-043) — count+1 كان يخاطر برموز مكررة
+        from services.code_generator import next_code as _next_code
+
         doc = {
-            "id": f"kch_{uuid.uuid4().hex[:12]}",
-            "code": f"KCH-{day}-{count + 1:04d}",
+            "id": _claimed_order_id or f"kch_{uuid.uuid4().hex[:12]}",
+            "code": await _next_code(tdb, "kitchen_orders", f"KCH-{day}-", 4, False),
             "table_id": table["id"],
             "table_name": table.get("name"),
             "items": items,
@@ -8757,10 +8848,6 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "updated_at": _now(),
         }
         await tdb.kitchen_orders.insert_one(doc)
-        await tdb.restaurant_tables.update_one(
-            {"id": table["id"]},
-            {"$set": {"status": "occupied", "active_order_id": doc["id"]}},
-        )
         await _publish("kitchen_order.created", doc, pseudo)
         _out = _order_out(doc)
         _out["payment_mode"] = _mode  # p336
@@ -8913,12 +9000,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         pseudo = {"tenant_id": tenant_id, "email": "kiosk@counter", "username": "KIOSK"}
         _mode = await _payment_mode(tdb)  # p336
         day = _now().strftime("%Y%m%d")
-        count = await tdb.kitchen_orders.count_documents(
-            {"code": {"$regex": f"^KCH-{day}-"}}
-        )
+        # p494f: عدّاد ذرّي (نمط P494-043) — count+1 كان يخاطر برموز مكررة
+        from services.code_generator import next_code as _next_code
+
         doc = {
             "id": f"kch_{uuid.uuid4().hex[:12]}",
-            "code": f"KCH-{day}-{count + 1:04d}",
+            "code": await _next_code(tdb, "kitchen_orders", f"KCH-{day}-", 4, False),
             "table_id": None,  # كشك — بلا طاولة
             "table_name": ks.get("counter_name") or "كشك",
             "items": items,
@@ -9044,12 +9131,12 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 }
             )
         day = _now().strftime("%Y%m%d")
-        count = await tdb.kitchen_orders.count_documents(
-            {"code": {"$regex": f"^KCH-{day}-"}}
-        )
+        # p494f: عدّاد ذرّي (نمط P494-043) — count+1 كان يخاطر برموز مكررة
+        from services.code_generator import next_code as _next_code
+
         doc = {
             "id": f"kch_{uuid.uuid4().hex[:12]}",
-            "code": f"KCH-{day}-{count + 1:04d}",
+            "code": await _next_code(tdb, "kitchen_orders", f"KCH-{day}-", 4, False),
             "table_id": None,
             "table_name": n.get("name"),  # يظهر اسم الجار في شاشة المطبخ
             "items": items,
