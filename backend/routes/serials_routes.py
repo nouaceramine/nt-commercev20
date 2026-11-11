@@ -49,15 +49,24 @@ def create_serials_routes(db, get_current_user, get_tenant_admin) -> dict:
             if exists:
                 skipped += 1
                 continue
-            await _serials().insert_one({
-                "id": f"sn_{uuid.uuid4().hex[:12]}",
-                "product_id": data.product_id,
-                "serial": sn,
-                "status": "in_stock",
-                "sale_id": None,
-                "sold_at": None,
-                "created_at": _now(),
-            })
+            # p492: deterministic _id per serial closes the check-then-insert
+            # race — a concurrent duplicate hits DuplicateKeyError and is
+            # counted as skipped, never double-registered.
+            from pymongo.errors import DuplicateKeyError as _DupKey
+            try:
+                await _serials().insert_one({
+                    "_id": f"sn_{sn}",
+                    "id": f"sn_{uuid.uuid4().hex[:12]}",
+                    "product_id": data.product_id,
+                    "serial": sn,
+                    "status": "in_stock",
+                    "sale_id": None,
+                    "sold_at": None,
+                    "created_at": _now(),
+                })
+            except _DupKey:
+                skipped += 1
+                continue
             added += 1
         return {"added": added, "skipped_duplicates": skipped}
 
