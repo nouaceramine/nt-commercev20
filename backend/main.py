@@ -470,6 +470,31 @@ async def startup_event():
     except Exception as e:
         logger.warning("Barcode index ensure: %s", e)
 
+    # p494: one customer per phone per tenant (partial: empty phones ignored) —
+    # the create-time duplicate check was check-then-insert, so two concurrent
+    # creates with the same phone both succeeded. Idempotent; a tenant with
+    # pre-existing duplicate phones only skips its own index (logged).
+    try:
+        from config.database import get_tenant_db as _get_tenant_db3, main_db as _main_db3
+        _dbs3 = [_main_db3]
+        async for t in _main_db3.saas_tenants.find({}, {"_id": 0, "id": 1}):
+            if t.get("id"):
+                try:
+                    _dbs3.append(_get_tenant_db3(t["id"]))
+                except Exception:
+                    pass
+        for _d in _dbs3:
+            try:
+                await _d.customers.create_index(
+                    [("phone", 1)], name="uniq_phone_nonempty", unique=True,
+                    partialFilterExpression={"phone": {"$type": "string", "$gt": ""}})
+            except Exception as _pe:
+                logger.warning("customers uniq_phone_nonempty on %s: %s", getattr(_d, "name", "?"), _pe)
+            await drop_db_if_tenant_deleted(_main_db3, client, _d.name)
+        logger.info("Customer phone unique partial indexes ensured on %d databases", len(_dbs3))
+    except Exception as e:
+        logger.warning("Customer phone index ensure: %s", e)
+
     # p257: unique entity codes per tenant DB (safety net behind the atomic
     # counters). Sparse: legacy docs without the field are ignored. Each index
     # is attempted independently — a pre-existing duplicate in one collection
@@ -702,6 +727,14 @@ async def startup_event():
         await db.products.create_index("article_code")
         await db.customers.create_index("id", unique=True)
         await db.customers.create_index("phone")
+        try:
+            # p494: one customer per phone — partial (non-empty phones only);
+            # turns the create-time duplicate check into an atomic claim
+            await db.customers.create_index(
+                [("phone", 1)], name="uniq_phone_nonempty", unique=True,
+                partialFilterExpression={"phone": {"$type": "string", "$gt": ""}})
+        except Exception as exc:
+            logger.warning("customers uniq_phone_nonempty index skipped: %s", exc)
         await db.suppliers.create_index("id", unique=True)
         await db.sales.create_index("id", unique=True)
         await db.sales.create_index("created_at")
