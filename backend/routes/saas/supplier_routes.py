@@ -757,8 +757,23 @@ def build_supplier_router() -> APIRouter:
             raise
 
         # --- Wallet transfer (tenant -> platform) ---
+        # p493: atomic guarded debit — the earlier balance CHECK raced
+        # concurrent orders (both passed, both debited -> negative wallet).
+        # Debit with a $gte guard; on failure roll back the reserved codes.
         order_id = str(uuid.uuid4())
-        await main_db.wallets.update_one({"entity_id": tenant_id}, {"$inc": {"balance": -total}})
+        debit = await main_db.wallets.update_one(
+            {"entity_id": tenant_id, "balance": {"$gte": total}},
+            {"$inc": {"balance": -total}},
+        )
+        if debit.modified_count == 0:
+            for stock_coll, ids, _, _ in reservations:
+                await stock_coll.update_many({"id": {"$in": ids}}, {"$set": {"status": "available", "tenant_id": None, "sold_at": None}})
+            current = await main_db.wallets.find_one({"entity_id": tenant_id}, {"_id": 0, "balance": 1})
+            raise HTTPException(status_code=402, detail={
+                "error": "insufficient_balance",
+                "required": total,
+                "available": (current or {}).get("balance", 0),
+            })
         await _ensure_wallet(PLATFORM_WALLET_ID)
         await main_db.wallets.update_one({"entity_id": PLATFORM_WALLET_ID}, {"$inc": {"balance": total}})
         await main_db.wallet_transfers.insert_one({
