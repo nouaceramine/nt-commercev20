@@ -14,6 +14,7 @@ import requests as http_requests
 
 from config.database import db
 from utils.auth import get_current_user as require_tenant, get_tenant_admin
+from utils.permissions import create_permission_checker
 from models.schemas import (
     DEFAULT_PERMISSIONS, ROLE_DESCRIPTIONS, PERMISSION_CATEGORIES,
     ProductFamilyCreate, ProductFamilyUpdate, ProductFamilyResponse, ProductResponse
@@ -25,6 +26,11 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter()
+
+# p492: real permission checker for the legacy /spare-parts* surface
+# (main.py imports a no-op require_permission — factories/modules must build
+# their own). Spare parts belong to the maintenance domain -> repairs.* perms.
+_require_perm = create_permission_checker(db, require_tenant)
 
 # ============ ADVANCED ROLES AND PERMISSIONS ============
 
@@ -1017,8 +1023,13 @@ async def get_spare_parts_stats(user: dict = Depends(require_tenant)):
     total = await db.spare_parts.count_documents({})
     low_stock = await db.spare_parts.count_documents({"quantity": {"$lte": 5}})
     out_of_stock = await db.spare_parts.count_documents({"quantity": 0})
+    # p492: tolerate legacy rows with non-numeric quantity/cost (a single
+    # garbage row used to 500 the whole stats endpoint)
+    def _num(expr):
+        return {"$convert": {"input": expr, "to": "double", "onError": 0, "onNull": 0}}
     agg = await db.spare_parts.aggregate([
-        {"$group": {"_id": None, "total_value": {"$sum": {"$multiply": ["$quantity", "$cost_price"]}}}}
+        {"$group": {"_id": None, "total_value": {"$sum": {"$multiply": [
+            _num("$quantity"), _num("$cost_price")]}}}}
     ]).to_list(1)
     return {
         "total_parts": total,
@@ -1035,22 +1046,50 @@ async def get_spare_part(part_id: str, user: dict = Depends(require_tenant)):
         raise HTTPException(status_code=404, detail="قطعة الغيار غير موجودة")
     return part
 
+def _spare_number(value, field):
+    """p492: numeric guard for the legacy spare-parts dict payloads."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"قيمة غير صالحة: {field}")
+    if f < 0:
+        raise HTTPException(status_code=400, detail="القيم السالبة غير مقبولة")
+    return f
+
+
+SPARE_UPDATE_FIELDS = {
+    "name", "reference", "category", "quantity", "min_quantity",
+    "cost_price", "sell_price", "supplier_id", "notes",
+}
+
+
 @router.post("/spare-parts")
-async def create_spare_part(part: dict, user: dict = Depends(require_tenant)):
+async def create_spare_part(part: dict, user: dict = Depends(_require_perm("repairs.add"))):
     """Create a new spare part"""
+    name = str(part.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم القطعة مطلوب")
+    quantity = _spare_number(part.get("quantity", 0), "الكمية")
+    min_quantity = _spare_number(part.get("min_quantity", 5), "الحد الأدنى")
+    cost_price = _spare_number(part.get("cost_price", 0), "سعر الكلفة")
+    sell_price = _spare_number(part.get("sell_price", 0), "سعر البيع")
+    linked = str(part.get("linked_product_id") or "")
+    if linked:
+        if not await db.products.find_one({"id": linked}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=404, detail="المنتج المرتبط غير موجود")
     now = datetime.now(timezone.utc).isoformat()
     part_doc = {
         "id": str(uuid.uuid4()),
-        "name": part.get("name", ""),
-        "reference": part.get("reference", ""),
-        "category": part.get("category", ""),
-        "quantity": part.get("quantity", 0),
-        "min_quantity": part.get("min_quantity", 5),
-        "cost_price": part.get("cost_price", 0),
-        "sell_price": part.get("sell_price", 0),
-        "supplier_id": part.get("supplier_id", ""),
-        "linked_product_id": part.get("linked_product_id", ""),
-        "notes": part.get("notes", ""),
+        "name": name,
+        "reference": str(part.get("reference") or ""),
+        "category": str(part.get("category") or ""),
+        "quantity": quantity,
+        "min_quantity": min_quantity,
+        "cost_price": cost_price,
+        "sell_price": sell_price,
+        "supplier_id": str(part.get("supplier_id") or ""),
+        "linked_product_id": linked,
+        "notes": str(part.get("notes") or ""),
         "created_at": now,
         "updated_at": now
     }
@@ -1058,19 +1097,29 @@ async def create_spare_part(part: dict, user: dict = Depends(require_tenant)):
     return {k: v for k, v in part_doc.items() if k != "_id"}
 
 @router.put("/spare-parts/{part_id}")
-async def update_spare_part(part_id: str, part: dict, user: dict = Depends(require_tenant)):
+async def update_spare_part(part_id: str, part: dict, user: dict = Depends(_require_perm("repairs.edit"))):
     """Update a spare part"""
     existing = await db.spare_parts.find_one({"id": part_id})
     if not existing:
         raise HTTPException(status_code=404, detail="قطعة الغيار غير موجودة")
-    update_data = {k: v for k, v in part.items() if k not in ["id", "_id"]}
+    # p492: whitelist + numeric guards — arbitrary $set used to allow mass
+    # assignment of created_at/linked_product_id and negative quantities
+    update_data = {k: v for k, v in part.items() if k in SPARE_UPDATE_FIELDS}
+    if "name" in update_data:
+        update_data["name"] = str(update_data["name"] or "").strip()
+        if not update_data["name"]:
+            raise HTTPException(status_code=400, detail="اسم القطعة مطلوب")
+    for field, label in (("quantity", "الكمية"), ("min_quantity", "الحد الأدنى"),
+                         ("cost_price", "سعر الكلفة"), ("sell_price", "سعر البيع")):
+        if field in update_data:
+            update_data[field] = _spare_number(update_data[field], label)
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.spare_parts.update_one({"id": part_id}, {"$set": update_data})
     updated = await db.spare_parts.find_one({"id": part_id}, {"_id": 0})
     return updated
 
 @router.delete("/spare-parts/{part_id}")
-async def delete_spare_part(part_id: str, user: dict = Depends(require_tenant)):
+async def delete_spare_part(part_id: str, user: dict = Depends(_require_perm("repairs.delete"))):
     """Delete a spare part"""
     result = await db.spare_parts.delete_one({"id": part_id})
     if result.deleted_count == 0:
@@ -1082,54 +1131,73 @@ async def use_spare_part_in_repair(
     repair_id: str,
     part_id: str,
     quantity: int = 1,
-    user: dict = Depends(require_tenant)
+    user: dict = Depends(_require_perm("repairs.edit"))
 ):
     """Use a spare part in a repair - deducts from inventory"""
+    from pymongo.errors import PyMongoError
+    if not isinstance(quantity, int) or quantity < 1:
+        raise HTTPException(status_code=400, detail="الكمية غير صالحة")
     # Verify repair exists
     repair = await db.repairs.find_one({"id": repair_id}, {"_id": 0})
     if not repair:
         raise HTTPException(status_code=404, detail="طلب الصيانة غير موجود")
 
-    # Verify spare part exists and has enough stock
+    # Verify spare part exists
     part = await db.spare_parts.find_one({"id": part_id}, {"_id": 0})
     if not part:
         raise HTTPException(status_code=404, detail="قطعة الغيار غير موجودة")
 
-    if part.get("quantity", 0) < quantity:
-        raise HTTPException(status_code=400, detail="الكمية غير كافية في المخزون")
-
-    # Deduct from spare parts inventory
-    new_qty = part["quantity"] - quantity
-    await db.spare_parts.update_one(
-        {"id": part_id},
-        {"$set": {"quantity": new_qty, "updated_at": datetime.now(timezone.utc).isoformat()}}
-    )
-
-    # Record the usage in repair
+    now = datetime.now(timezone.utc).isoformat()
     usage_record = {
         "part_id": part_id,
         "part_name": part.get("name"),
         "quantity": quantity,
         "unit_price": part.get("sell_price", 0),
         "total_price": part.get("sell_price", 0) * quantity,
-        "used_at": datetime.now(timezone.utc).isoformat(),
+        "used_at": now,
         "used_by": user["name"]
     }
 
-    await db.repairs.update_one(
-        {"id": repair_id},
-        {
-            "$push": {"parts_used": usage_record},
-            "$inc": {"parts_cost": usage_record["total_price"]}
-        }
-    )
-
-    # Also check if there's a linked product in main inventory
-    if part.get("linked_product_id"):
-        await db.products.update_one(
-            {"id": part["linked_product_id"]},
-            {"$inc": {"quantity": -quantity}}
-        )
+    # p492: read-then-set raced (oversell) and a negative quantity INCREASED
+    # stock. Atomic $gte claims for the spare part AND its linked product in
+    # one transaction — any insufficiency aborts the whole operation.
+    from config.database import client as _client
+    new_qty = None
+    for _attempt in range(5):
+        try:
+            async with await _client.start_session() as _tx:
+                async with _tx.start_transaction():
+                    claimed = await db.spare_parts.find_one_and_update(
+                        {"id": part_id, "quantity": {"$gte": quantity}},
+                        {"$inc": {"quantity": -quantity},
+                         "$set": {"updated_at": now}},
+                        session=_tx)
+                    if not claimed:
+                        raise HTTPException(
+                            status_code=400, detail="الكمية غير كافية في المخزون")
+                    new_qty = float(claimed.get("quantity", 0)) - quantity
+                    if part.get("linked_product_id"):
+                        linked = await db.products.find_one_and_update(
+                            {"id": part["linked_product_id"],
+                             "quantity": {"$gte": quantity}},
+                            {"$inc": {"quantity": -quantity}},
+                            session=_tx)
+                        if not linked:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="الكمية غير كافية في المخزون المرتبط")
+                    await db.repairs.update_one(
+                        {"id": repair_id},
+                        {"$push": {"parts_used": usage_record},
+                         "$inc": {"parts_cost": usage_record["total_price"]}},
+                        session=_tx)
+            break
+        except HTTPException:
+            raise
+        except PyMongoError:
+            if _attempt == 4:
+                raise HTTPException(status_code=500, detail="خطأ في قاعدة البيانات")
+            continue
 
     return {
         "success": True,
@@ -1142,7 +1210,7 @@ async def use_spare_part_in_repair(
 async def link_spare_part_to_product(
     part_id: str,
     product_id: str,
-    user: dict = Depends(require_tenant)
+    user: dict = Depends(_require_perm("repairs.edit"))
 ):
     """Link a spare part to a main product for synchronized inventory"""
     # Verify both exist
@@ -1172,7 +1240,7 @@ async def link_spare_part_to_product(
 @router.delete("/spare-parts/unlink-product/{part_id}")
 async def unlink_spare_part_from_product(
     part_id: str,
-    user: dict = Depends(require_tenant)
+    user: dict = Depends(_require_perm("repairs.edit"))
 ):
     """Remove link between spare part and product"""
     part = await db.spare_parts.find_one({"id": part_id}, {"_id": 0})
@@ -1187,11 +1255,11 @@ async def unlink_spare_part_from_product(
     return {"success": True, "message": "تم إلغاء الربط"}
 
 @router.post("/spare-parts/sync-inventory")
-async def sync_spare_parts_with_products(user: dict = Depends(require_tenant)):
+async def sync_spare_parts_with_products(user: dict = Depends(_require_perm("repairs.edit"))):
     """Sync spare parts inventory with linked products"""
-    # Get all linked spare parts
+    # Get all linked spare parts (p492: skip empty/unset links)
     linked_parts = await db.spare_parts.find(
-        {"linked_product_id": {"$exists": True}},
+        {"linked_product_id": {"$exists": True, "$nin": ["", None]}},
         {"_id": 0}
     ).to_list(1000)
 
