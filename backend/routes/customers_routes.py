@@ -46,10 +46,15 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             "max_debt_limit": c.max_debt_limit or 0, "special_discount": c.special_discount or 0,
             "total_purchases": 0, "balance": 0, "sources": [], "created_at": now
         }
-        await db.customers.insert_one(customer_doc)
+        try:
+            # p494: unique partial index on phone makes the claim atomic —
+            # a racing duplicate insert loses with DuplicateKeyError -> 409
+            from pymongo.errors import DuplicateKeyError
+            await db.customers.insert_one(customer_doc)
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409, detail="زبون برقم الهاتف هذا موجود مسبقاً")
         customer_doc.pop("_id", None)
         return customer_doc
-
     # ── Get Customers ──
     @router.get("")
     async def get_customers(search: Optional[str] = None, family_id: Optional[str] = None, source: Optional[str] = None, user: dict = Depends(require_permission("customers.view"))):
@@ -240,12 +245,31 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         return customer
 
     # ── Update Customer ──
+    # p494: whitelist — financial mirrors (balance/total_debt/total_purchases)
+    # and server-managed fields are NEVER client-writable through this route
+    _EDITABLE = {"name", "phone", "email", "address", "notes", "family_id",
+                 "code", "price_tier", "national_id", "commercial_register",
+                 "birthdate", "customer_type", "max_debt_limit",
+                 "special_discount"}
+
     @router.put("/{customer_id}")
     async def update_customer(customer_id: str, updates: dict, user: dict = Depends(require_permission("customers.view"))):
+        from pymongo.errors import DuplicateKeyError
         customer = await db.customers.find_one({"id": customer_id})
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
+        forbidden = sorted(k for k in updates if k not in _EDITABLE)
+        if forbidden:
+            raise HTTPException(
+                status_code=400,
+                detail=f"حقول غير قابلة للتعديل من هنا: {', '.join(forbidden)}")
         update_data = {k: v for k, v in updates.items() if v is not None and k != "id"}
+        # p494: phone uniqueness on update too (create already enforces it)
+        new_phone = (update_data.get("phone") or "").strip()
+        if "phone" in update_data and new_phone and new_phone != (customer.get("phone") or ""):
+            existing = await db.customers.find_one({"phone": new_phone, "id": {"$ne": customer_id}}, {"_id": 0, "name": 1})
+            if existing:
+                raise HTTPException(status_code=409, detail=f"زبون برقم الهاتف هذا موجود مسبقاً: {existing.get('name')}")
         if "family_id" in update_data:
             if update_data["family_id"]:
                 family = await db.customer_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name": 1})
@@ -256,7 +280,11 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             else:
                 update_data["family_name"] = ""
         if update_data:
-            await db.customers.update_one({"id": customer_id}, {"$set": update_data})
+            try:
+                await db.customers.update_one({"id": customer_id}, {"$set": update_data})
+            except DuplicateKeyError:
+                # race: another worker claimed the same phone meanwhile
+                raise HTTPException(status_code=409, detail="زبون برقم الهاتف هذا موجود مسبقاً")
         updated = await db.customers.find_one({"id": customer_id}, {"_id": 0})
         if not updated.get("family_id"):
             updated["family_id"] = ""

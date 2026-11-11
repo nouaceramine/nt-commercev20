@@ -78,6 +78,9 @@ async def allocate_customer_payment(db, customer_id: str, amount: float, method:
         _upd = {"$set": {
             "remaining": new_debt, "debt_amount": new_debt, "paid_amount": new_paid,
             "payment_status": "paid" if new_debt <= 0.01 else "partial",
+            # p494: keep the canonical `status` in sync — the UI and the
+            # return guard read `status`, not `payment_status`
+            "status": "paid" if new_debt <= 0.01 else "partial",
         }}
         if method:  # p67: track which box this payment used
             from datetime import datetime as _dt, timezone as _tz

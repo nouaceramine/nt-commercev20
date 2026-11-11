@@ -112,67 +112,93 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
     # ── Update Sale (notes, customer, record payment) ──
     @router.put("/{sale_id}")
     async def update_sale(sale_id: str, data: dict, user: dict = Depends(require_permission("sales.edit"))):
+        # p494: the whole edit is ONE transaction — the old code adjusted the
+        # customer mirror, pushed payment rows and bumped boxes in separate
+        # unguarded writes (ghost reassignment drained the old customer's
+        # mirror; unbounded payments inflated boxes; phantom boxes logged
+        # transactions against nothing)
         from datetime import datetime, timezone
         import uuid
-        sale = await db.sales.find_one({"id": sale_id})
-        if not sale:
-            raise HTTPException(status_code=404, detail="Sale not found")
-        now = datetime.now(timezone.utc).isoformat()
-        updates = {"updated_at": now}
+        from config.database import client as _client
+        async with await _client.start_session() as _tx:
+            async with _tx.start_transaction():
+                sale = await db.sales.find_one({"id": sale_id}, session=_tx)
+                if not sale:
+                    raise HTTPException(status_code=404, detail="Sale not found")
+                now = datetime.now(timezone.utc).isoformat()
+                updates = {"updated_at": now}
 
-        if "notes" in data:
-            updates["notes"] = data.get("notes", "")
+                if "notes" in data:
+                    updates["notes"] = data.get("notes", "")
 
-        # Customer reassignment
-        if "customer_id" in data:
-            new_cid = data["customer_id"]
-            old_cid = sale.get("customer_id")
-            if new_cid != old_cid:
-                if old_cid:
-                    await adjust_customer_mirror(db, old_cid,
-                        total_purchases=-sale.get("total", 0), balance=-sale.get("remaining", 0))
-                if new_cid:
-                    cust = await db.customers.find_one({"id": new_cid}, {"_id": 0})
-                    if cust:
-                        await adjust_customer_mirror(db, new_cid,
-                            total_purchases=sale.get("total", 0), balance=sale.get("remaining", 0))
-                        updates["customer_id"] = new_cid
-                        updates["customer_name"] = cust.get("name", "")
-                else:
-                    updates["customer_id"] = None
-                    updates["customer_name"] = ""
+                # Customer reassignment
+                if "customer_id" in data:
+                    new_cid = data["customer_id"]
+                    old_cid = sale.get("customer_id")
+                    if new_cid != old_cid:
+                        cust = None
+                        if new_cid:
+                            # p494: reject the ghost BEFORE touching any mirror
+                            cust = await db.customers.find_one({"id": new_cid}, {"_id": 0}, session=_tx)
+                            if not cust:
+                                raise HTTPException(status_code=404, detail="الزبون غير موجود")
+                        if old_cid:
+                            await adjust_customer_mirror(db, old_cid,
+                                total_purchases=-sale.get("total", 0), balance=-sale.get("remaining", 0), session=_tx)
+                        if new_cid:
+                            await adjust_customer_mirror(db, new_cid,
+                                total_purchases=sale.get("total", 0), balance=sale.get("remaining", 0), session=_tx)
+                            updates["customer_id"] = new_cid
+                            updates["customer_name"] = cust.get("name", "")
+                        else:
+                            updates["customer_id"] = None
+                            updates["customer_name"] = ""
 
-        # Record additional payment
-        payment_amount = float(data.get("payment_amount") or 0)
-        if payment_amount > 0:
-            new_paid = float(sale.get("paid_amount", 0)) + payment_amount
-            new_remaining = max(0.0, float(sale.get("total", 0)) - new_paid)
-            updates["paid_amount"] = new_paid
-            updates["remaining"] = new_remaining
-            updates["payment_status"] = "paid" if new_remaining <= 0.01 else "partial"
+                # Record additional payment
+                payment_amount = float(data.get("payment_amount") or 0)
+                if payment_amount > 0:
+                    # p494: never accept more than the sale still owes
+                    current_remaining = float(sale.get("remaining", 0) or 0)
+                    if payment_amount > current_remaining + 0.01:
+                        raise HTTPException(status_code=400,
+                                            detail=f"المبلغ يتجاوز المتبقي على الفاتورة ({current_remaining})")
+                    new_paid = float(sale.get("paid_amount", 0)) + payment_amount
+                    new_remaining = max(0.0, float(sale.get("total", 0)) - new_paid)
+                    updates["paid_amount"] = new_paid
+                    updates["remaining"] = new_remaining
+                    # p494: keep ALL status/debt fields coherent — the debt
+                    # allocator reads debt_amount and the UI reads status
+                    updates["debt_amount"] = new_remaining
+                    updates["payment_status"] = "paid" if new_remaining <= 0.01 else "partial"
+                    updates["status"] = updates["payment_status"]
 
-            cust_id = updates.get("customer_id", sale.get("customer_id"))
-            if cust_id:
-                await adjust_customer_mirror(db, cust_id, balance=-payment_amount, total_debt=-payment_amount)  # p58
+                    cust_id = updates.get("customer_id", sale.get("customer_id"))
+                    if cust_id:
+                        await adjust_customer_mirror(db, cust_id, balance=-payment_amount, total_debt=-payment_amount, session=_tx)  # p58
 
-            cash_box_id = data.get("cash_box_id")
-            if cash_box_id:
-                # p67: log which box this additional payment used
-                await db.sales.update_one({"id": sale_id}, {"$push": {"payments": {"amount": payment_amount, "method": cash_box_id, "at": now}}})
-                await db.cash_boxes.update_one(
-                    {"id": cash_box_id},
-                    {"$inc": {"balance": payment_amount}, "$set": {"updated_at": now}}
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,
-                    "type": "income", "amount": payment_amount,
-                    "description": f"دفعة إضافية - فاتورة {sale.get('invoice_number', '')}",
-                    "reference_type": "sale_payment", "reference_id": sale_id,
-                    "created_at": now, "created_by": user.get("name", "")
-                })
+                    cash_box_id = data.get("cash_box_id")
+                    if cash_box_id:
+                        # p216 parity: the destination must be a REAL cash box
+                        box = await db.cash_boxes.find_one({"id": cash_box_id}, {"_id": 0, "id": 1}, session=_tx)
+                        if not box:
+                            raise HTTPException(status_code=400, detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                        # p67: log which box this additional payment used
+                        await db.sales.update_one({"id": sale_id}, {"$push": {"payments": {"amount": payment_amount, "method": cash_box_id, "at": now}}}, session=_tx)
+                        await db.cash_boxes.update_one(
+                            {"id": cash_box_id},
+                            {"$inc": {"balance": payment_amount}, "$set": {"updated_at": now}},
+                            session=_tx
+                        )
+                        await db.transactions.insert_one({
+                            "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,
+                            "type": "income", "amount": payment_amount,
+                            "description": f"دفعة إضافية - فاتورة {sale.get('invoice_number', '')}",
+                            "reference_type": "sale_payment", "reference_id": sale_id,
+                            "created_at": now, "created_by": user.get("name", "")
+                        }, session=_tx)
 
-        if updates:
-            await db.sales.update_one({"id": sale_id}, {"$set": updates})
+                if updates:
+                    await db.sales.update_one({"id": sale_id}, {"$set": updates}, session=_tx)
         updated = await db.sales.find_one({"id": sale_id}, {"_id": 0})
         return updated
 
