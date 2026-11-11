@@ -1,0 +1,40 @@
+{
+  "short_name": "NT Commerce",
+  "name": "NT Commerce - منصة محاسبة ذكية",
+  "description": "منصة محاسبة سحابية مدعومة بالذكاء الاصطناعي",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1e40af",
+  "background_color": "#ffffff",
+  "dir": "rtl",
+  "lang": "ar",
+  "categories": ["business", "finance", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "لوحة التحكم",
+      "url": "/dashboard",
+      "icons": [{"src": "favicon.ico", "sizes": "96x96"}]
+    },
+    {
+      "name": "نقطة البيع",
+      "url": "/pos",
+      "icons": [{"src": "favicon.ico", "sizes": "96x96"}]
+    }
+  ]
+}
