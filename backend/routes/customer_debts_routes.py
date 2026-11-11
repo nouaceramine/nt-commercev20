@@ -12,6 +12,10 @@ from services.balances import customer_debt_aggregates, adjust_customer_mirror, 
 
 
 def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require_tenant, CURRENCY="دج") -> dict:
+    from utils.permissions import create_permission_checker
+    # p494c: the debt book (summary/export) is the same data as GET /debts —
+    # it must sit behind the same debts.view permission, not bare require_tenant
+    _require_debts_view = create_permission_checker(db, get_current_user)("debts.view")
     router = APIRouter(tags=["customer-debts"])
 
     class CustomerDebtPayment(BaseModel):
@@ -138,7 +142,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         return {"message": "Payment recorded successfully", "amount_paid": payment.amount, "updated_purchases": updated_purchases}
 
     @router.get("/debts/summary")
-    async def get_debts_summary(user: dict = Depends(require_tenant)):
+    async def get_debts_summary(user: dict = Depends(_require_debts_view)):
         debts_by_customer = await customer_debt_aggregates(db)
         result = []
         for debt in debts_by_customer:
@@ -149,7 +153,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         return {"total_outstanding": total_outstanding, "customers_with_debt": len(result), "debts": sorted(result, key=lambda x: x["total_debt"], reverse=True)}
 
     @router.get("/debts/export")
-    async def export_debts_to_excel(user: dict = Depends(require_tenant)):
+    async def export_debts_to_excel(user: dict = Depends(_require_debts_view)):
         from io import BytesIO
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side

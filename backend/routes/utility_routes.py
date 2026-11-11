@@ -243,7 +243,7 @@ def create_utility_routes(db, require_tenant, get_tenant_admin, PriceHistoryResp
         return settings
 
     @router.put("/debt-reminders/settings")
-    async def update_debt_reminder_settings(settings: DebtReminderSettings, user: dict = Depends(require_tenant)):
+    async def update_debt_reminder_settings(settings: DebtReminderSettings, user: dict = Depends(get_tenant_admin)):  # p494c: settings are admin-only
         """Update debt reminder settings"""
         await db.system_settings.update_one(
             {"type": "debt_reminders"},
@@ -271,7 +271,18 @@ def create_utility_routes(db, require_tenant, get_tenant_admin, PriceHistoryResp
         reminders = []
         now = datetime.now(timezone.utc)
 
+        # p494c: honor dismissals — dismissing used to write a document that
+        # nobody ever read, so the "dismissed" customer kept showing up
+        dismissals = {
+            d["customer_id"]: d.get("dismissed_until", "")
+            async for d in db.debt_reminder_dismissals.find(
+                {"dismissed_until": {"$gt": now.isoformat()}},
+                {"_id": 0, "customer_id": 1, "dismissed_until": 1})
+        }
+
         for customer in customers_with_debt:
+            if customer["id"] in dismissals:
+                continue
             # Get last sale date for this customer
             last_sale = await db.sales.find_one(
                 {"customer_id": customer["id"], "payment_type": {"$in": ["credit", "partial"]}},

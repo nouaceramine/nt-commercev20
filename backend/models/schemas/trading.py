@@ -206,7 +206,7 @@ class DebtCreate(BaseModel):
     type: Literal["receivable", "payable"]  # receivable = دين على زبون, payable = دين لمورد
     party_type: Literal["customer", "supplier"]
     party_id: str
-    amount: float
+    amount: float = Field(gt=0)  # p494c: a zero/negative debt is meaningless corruption
     due_date: Optional[str] = None
     notes: Optional[str] = ""
     reference_type: Optional[str] = None  # sale, purchase
@@ -214,7 +214,7 @@ class DebtCreate(BaseModel):
 
 class DebtPaymentCreate(BaseModel):
     debt_id: str
-    amount: float
+    amount: float = Field(gt=0)  # p494c: a negative "payment" used to INCREASE the remaining debt
     payment_method: Literal["cash", "bank", "wallet", "safe", "personal"] = "cash"  # p64: +خزنة/مال خاص
     notes: Optional[str] = ""
 
