@@ -209,7 +209,10 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
                     if pid:
                         product = await db.products.find_one({"id": pid}, {"_id": 0, "purchase_price": 1})
                         if product:
-                            total_profit += (item.get("price", 0) - product.get("purchase_price", 0)) * item.get("quantity", 1)
+                            # p494: أسطر البيع تخزن unit_price (لا price) — كان الربح
+                            # يُحسب (0 - cost) فيظهر سالباً دائماً
+                            _sell = item.get("price") if item.get("price") is not None else item.get("unit_price", 0)
+                            total_profit += (_sell - product.get("purchase_price", 0)) * item.get("quantity", 1)
 
             # p216: debt settlements on the cash drawer within the window count
             # toward expected cash — customer collections add, supplier payments subtract
