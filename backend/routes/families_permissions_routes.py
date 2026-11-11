@@ -482,14 +482,22 @@ async def create_product_brand(brand: ProductBrandCreate, admin: dict = Depends(
         {"name_ar": {"$regex": f"^{_re.escape(name)}$", "$options": "i"}})
     if existing:
         raise HTTPException(status_code=409, detail="الماركة موجودة مسبقاً")
+    # p492: deterministic _id from the normalized name closes the
+    # check-then-insert race — a concurrent duplicate hits DuplicateKeyError.
+    import hashlib as _hl
+    from pymongo.errors import DuplicateKeyError as _DupKey
     doc = {
+        "_id": "brand_" + _hl.sha1(name.casefold().encode("utf-8")).hexdigest()[:24],
         "id": str(uuid.uuid4()),
         "name_ar": name,
         "name_en": (brand.name_en or "").strip() or name,
         "product_count": 0,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.product_brands.insert_one(doc)
+    try:
+        await db.product_brands.insert_one(doc)
+    except _DupKey:
+        raise HTTPException(status_code=409, detail="الماركة موجودة مسبقاً")
     doc.pop("_id", None)
     return doc
 
@@ -502,6 +510,14 @@ async def update_product_brand(brand_id: str, updates: ProductBrandCreate, admin
     name = (updates.name_ar or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="اسم الماركة مطلوب")
+    # p492: renaming onto an existing brand name must be rejected (409),
+    # mirroring the create endpoint's duplicate guard.
+    import re as _re
+    clash = await db.product_brands.find_one({
+        "id": {"$ne": brand_id},
+        "name_ar": {"$regex": f"^{_re.escape(name)}$", "$options": "i"}})
+    if clash:
+        raise HTTPException(status_code=409, detail="الماركة موجودة مسبقاً")
     name_en = (updates.name_en or "").strip() or name
     await db.product_brands.update_one({"id": brand_id}, {"$set": {"name_ar": name, "name_en": name_en}})
     # keep product mirrors consistent
