@@ -219,6 +219,15 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
             _tid = admin.get("tenant_id") or "platform"
             async with await _client.start_session() as _tx:
                 async with _tx.start_transaction():
+                    # p494c: destination must be a real cash box (parity with
+                    # customer_debts p216) — a phantom method wrote ledger rows
+                    # into a box that does not exist
+                    _box = await db.cash_boxes.find_one(
+                        {"id": p.payment_method}, session=_tx)
+                    if not _box:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
                     if v_party_type == "customer":
                         await allocate_customer_payment(
                             db,
@@ -326,6 +335,13 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
         _tid = admin.get("tenant_id") or "platform"
         async with await _client.start_session() as _tx:
             async with _tx.start_transaction():
+                # p494c: destination must be a real cash box (see virtual path)
+                _box = await db.cash_boxes.find_one(
+                    {"id": p.payment_method}, session=_tx)
+                if not _box:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
                 await db.debts.update_one(
                     {"id": debt_id},
                     {
@@ -407,6 +423,12 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
     async def get_debt_payments(
         debt_id: str, admin: dict = Depends(require_permission("debts.view"))
     ):
+        # p494c: ghost debt (and cross-tenant probe) must answer 404 like the
+        # debt resource itself, not a bare 200 []
+        if not debt_id.startswith("virt-"):
+            _debt = await db.debts.find_one({"id": debt_id}, {"_id": 0, "id": 1})
+            if not _debt:
+                raise HTTPException(status_code=404, detail="Debt not found")
         return (
             await db.debt_payments.find({"debt_id": debt_id}, {"_id": 0})
             .sort("created_at", -1)

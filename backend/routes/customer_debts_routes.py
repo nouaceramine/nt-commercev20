@@ -12,6 +12,10 @@ from services.balances import customer_debt_aggregates, adjust_customer_mirror, 
 
 
 def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require_tenant, CURRENCY="دج") -> dict:
+    from utils.permissions import create_permission_checker
+    # p494c: the debt book (summary/export) is the same data as GET /debts —
+    # it must sit behind the same debts.view permission, not bare require_tenant
+    _require_debts_view = create_permission_checker(db, get_current_user)("debts.view")
     router = APIRouter(tags=["customer-debts"])
 
     class CustomerDebtPayment(BaseModel):
@@ -90,6 +94,21 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         settlement_id = str(uuid.uuid4())
         async with await _client.start_session() as _tx:
             async with _tx.start_transaction():
+                # p493: explicit guards the customer counterpart already had —
+                # positive amount, a REAL destination cash box (p216 parity),
+                # and no overpayment beyond the outstanding debt (the surplus
+                # used to leave the box without settling anything)
+                if float(payment.amount or 0) <= 0:
+                    raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+                box = await db.cash_boxes.find_one({"id": payment.payment_method}, {"_id": 0, "id": 1}, session=_tx)
+                if not box:
+                    raise HTTPException(status_code=400, detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                open_rows = await db.purchases.find(
+                    {"supplier_id": payment.supplier_id, "remaining": {"$gt": 0}},
+                    {"_id": 0, "remaining": 1}, session=_tx).to_list(500)
+                outstanding = round(sum(float(p.get("remaining") or 0) for p in open_rows), 2)
+                if payment.amount > outstanding + 0.01:
+                    raise HTTPException(status_code=400, detail=f"المبلغ يتجاوز الدين المتبقي ({outstanding})")
                 # p64: shared FIFO allocator (same semantics as before)
                 amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method, session=_tx)
                 if amount_applied <= 0:
@@ -123,7 +142,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         return {"message": "Payment recorded successfully", "amount_paid": payment.amount, "updated_purchases": updated_purchases}
 
     @router.get("/debts/summary")
-    async def get_debts_summary(user: dict = Depends(require_tenant)):
+    async def get_debts_summary(user: dict = Depends(_require_debts_view)):
         debts_by_customer = await customer_debt_aggregates(db)
         result = []
         for debt in debts_by_customer:
@@ -134,7 +153,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         return {"total_outstanding": total_outstanding, "customers_with_debt": len(result), "debts": sorted(result, key=lambda x: x["total_debt"], reverse=True)}
 
     @router.get("/debts/export")
-    async def export_debts_to_excel(user: dict = Depends(require_tenant)):
+    async def export_debts_to_excel(user: dict = Depends(_require_debts_view)):
         from io import BytesIO
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
