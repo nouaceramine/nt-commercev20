@@ -52,106 +52,122 @@ def create_ocr_invoice_routes(db, require_tenant, get_tenant_admin, CURRENCY, Ap
         if not sale:
             raise HTTPException(status_code=404, detail="Sale not found")
 
-        # Get sale code if exists
-        sale_code = sale.get("code", "")
+        # p494b: the route promises a PDF — build a real one (reportlab A4 +
+        # Noto Naskh Arabic, same pattern as the restaurant/production reports)
+        import os as _os
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen import canvas as _canvas
+        import arabic_reshaper
+        from bidi.algorithm import get_display
 
-        # Generate simple HTML invoice
-        items_html = ""
-        for i, item in enumerate(sale["items"], 1):
-            barcode = item.get('barcode', '-')
-            items_html += f"""
-            <tr>
-                <td>{i}</td>
-                <td>{barcode}</td>
-                <td>{item['product_name']}</td>
-                <td>{item['quantity']}</td>
-                <td>{item['unit_price']:.2f} {CURRENCY}</td>
-                <td>{item['discount']:.2f} {CURRENCY}</td>
-                <td>{item['total']:.2f} {CURRENCY}</td>
-            </tr>
-            """
+        font_path = _os.path.join(
+            _os.path.dirname(__file__), "..", "assets", "NotoNaskhArabic-Regular.ttf"
+        )
+        try:
+            pdfmetrics.getFont("Arabic")
+        except Exception:
+            pdfmetrics.registerFont(TTFont("Arabic", font_path))
 
-        html_content = f"""
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-            <meta charset="UTF-8">
-            <title>فاتورة {sale['invoice_number']}</title>
-            <style>
-                body {{ font-family: 'Cairo', Arial, sans-serif; margin: 20px; direction: rtl; }}
-                .header {{ text-align: center; margin-bottom: 30px; }}
-                .header h1 {{ color: #2563EB; margin: 0; }}
-                .sale-code {{ font-family: monospace; font-size: 14px; background: #f0f0f0; padding: 4px 8px; border-radius: 4px; }}
-                .info {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
-                .info div {{ width: 48%; }}
-                table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: right; }}
-                th {{ background: #2563EB; color: white; }}
-                .barcode {{ font-family: monospace; font-size: 11px; }}
-                .totals {{ text-align: left; margin-top: 20px; }}
-                .totals table {{ width: 300px; margin-right: 0; margin-left: auto; }}
-                .footer {{ text-align: center; margin-top: 40px; color: #666; }}
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>NT</h1>
-                <p>فاتورة مبيعات</p>
-                {f'<p class="sale-code">{sale_code}</p>' if sale_code else ''}
-            </div>
+        def _ar(v):
+            try:
+                return get_display(arabic_reshaper.reshape(str(v)))
+            except Exception:
+                return str(v)
 
-            <div class="info">
-                <div>
-                    <p><strong>رقم الفاتورة:</strong> {sale['invoice_number']}</p>
-                    <p><strong>التاريخ:</strong> {sale['created_at'][:10]}</p>
-                    <p><strong>البائع:</strong> {sale['created_by']}</p>
-                </div>
-                <div>
-                    <p><strong>العميل:</strong> {sale['customer_name']}</p>
-                    <p><strong>طريقة الدفع:</strong> {sale['payment_method']}</p>
-                    <p><strong>الحالة:</strong> {sale['status']}</p>
-                </div>
-            </div>
+        store = ""
+        try:
+            from config.database import main_db as _mdb
 
-            <table>
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>الباركود</th>
-                        <th>المنتج</th>
-                        <th>الكمية</th>
-                        <th>السعر</th>
-                        <th>الخصم</th>
-                        <th>الإجمالي</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {items_html}
-                </tbody>
-            </table>
+            tdoc = (
+                await _mdb.saas_tenants.find_one(
+                    {"id": user.get("tenant_id")},
+                    {"_id": 0, "company_name": 1, "name": 1},
+                )
+                or {}
+            )
+            store = tdoc.get("company_name") or tdoc.get("name") or ""
+        except Exception:
+            pass
 
-            <div class="totals">
-                <table>
-                    <tr><td>المجموع الفرعي:</td><td>{sale['subtotal']:.2f} {CURRENCY}</td></tr>
-                    <tr><td>الخصم:</td><td>{sale['discount']:.2f} {CURRENCY}</td></tr>
-                    <tr><td><strong>الإجمالي:</strong></td><td><strong>{sale['total']:.2f} {CURRENCY}</strong></td></tr>
-                    <tr><td>المدفوع:</td><td>{sale['paid_amount']:.2f} {CURRENCY}</td></tr>
-                    <tr><td>المتبقي:</td><td>{sale['remaining']:.2f} {CURRENCY}</td></tr>
-                </table>
-            </div>
+        W, H = A4
+        MARGIN = 40
+        buf = io.BytesIO()
+        c = _canvas.Canvas(buf, pagesize=A4)
+        y = [H - MARGIN]
 
-            <div class="footer">
-                <p>شكراً لتعاملكم معنا</p>
-            </div>
-        </body>
-        </html>
-        """
+        def _need():
+            if y[0] < MARGIN + 30:
+                c.showPage()
+                y[0] = H - MARGIN
+
+        def _center(txt, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawCentredString(W / 2, y[0], _ar(txt))
+            y[0] -= size + 6
+
+        def _row(label, val, size=10):
+            _need()
+            c.setFont("Arabic", size)
+            c.drawRightString(W - MARGIN, y[0], _ar(label))
+            c.drawString(MARGIN, y[0], _ar(val))
+            y[0] -= size + 5
+
+        def _dash():
+            _need()
+            c.setDash(1, 2)
+            c.line(MARGIN, y[0] + 4, W - MARGIN, y[0] + 4)
+            c.setDash(1, 0)
+            y[0] -= 10
+
+        _center(store, 16)
+        _center("فاتورة مبيعات", 13)
+        if sale.get("code"):
+            _center(str(sale["code"]), 10)
+        _dash()
+        _row("رقم الفاتورة:", str(sale.get("invoice_number", "")))
+        _row("التاريخ:", str(sale.get("created_at", ""))[:10])
+        _row("البائع:", str(sale.get("employee_name") or sale.get("created_by", "")))
+        _row("العميل:", str(sale.get("customer_name", "")))
+        _row("طريقة الدفع:", str(sale.get("payment_method", "")))
+        _row("الحالة:", str(sale.get("status", "")))
+        _dash()
+        _center("الأصناف", 11)
+        for idx, item in enumerate(sale.get("items", []), 1):
+            _need()
+            c.setFont("Arabic", 10)
+            line = "{}. {} — {} × {:.2f} = {:.2f} {}".format(
+                idx, item.get("product_name", ""), item.get("quantity", 0),
+                item.get("unit_price", 0), item.get("total", 0), CURRENCY)
+            if item.get("discount"):
+                line += " (خصم {:.2f})".format(item["discount"])
+            c.drawRightString(W - MARGIN, y[0], _ar(line))
+            y[0] -= 14
+            if item.get("barcode"):
+                c.setFont("Arabic", 8)
+                c.drawRightString(W - MARGIN - 14, y[0], _ar("باركود: " + str(item["barcode"])))
+                y[0] -= 10
+        _dash()
+        _row("المجموع الفرعي:", "{:.2f} {}".format(sale.get("subtotal", 0), CURRENCY))
+        _row("الخصم:", "{:.2f} {}".format(sale.get("discount", 0), CURRENCY))
+        if sale.get("delivery_fee"):
+            _row("التوصيل:", "{:.2f} {}".format(sale.get("delivery_fee", 0), CURRENCY))
+        _row("الإجمالي:", "{:.2f} {}".format(sale.get("total", 0), CURRENCY), 12)
+        _row("المدفوع:", "{:.2f} {}".format(sale.get("paid_amount", 0), CURRENCY))
+        _row("المتبقي:", "{:.2f} {}".format(sale.get("remaining", 0), CURRENCY))
+        _dash()
+        _center("شكراً لتعاملكم معنا", 10)
+        c.save()
+        buf.seek(0)
 
         return StreamingResponse(
-            io.BytesIO(html_content.encode('utf-8')),
-            media_type="text/html",
-            headers={"Content-Disposition": f"inline; filename=invoice_{sale['invoice_number']}.html"}
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=invoice_{sale.get('invoice_number', sale_id)}.pdf"}
         )
+
 
     # ============ API KEYS MANAGEMENT ============
 
