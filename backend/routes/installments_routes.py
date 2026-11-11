@@ -73,17 +73,13 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
         return items
 
     # ── Pay an installment ──
-    @router.post("/{installment_id}/pay")
-    async def pay_installment(
-        installment_id: str,
-        data: dict,
-        user: dict = Depends(get_current_user),
-    ):
+    class _AlreadyPaid(Exception):
+        pass
+
+    async def _pay_once(installment_id: str, data: dict, user: dict):
         inst = await db.installment_payments.find_one({"id": installment_id}, {"_id": 0})
         if not inst:
             raise HTTPException(status_code=404, detail="Installment not found")
-        if inst["status"] == "paid":
-            raise HTTPException(status_code=400, detail="Already paid")
 
         now = _now()
         payment_method = data.get("payment_method", "cash")
@@ -95,11 +91,24 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
         from services.outbox import outbox_write
         async with await _client.start_session() as _tx:
             async with _tx.start_transaction():
-                await db.installment_payments.update_one(
-                    {"id": installment_id},
+                # p494c: the destination must be a REAL cash box — a free-text
+                # method used to write a phantom ledger row into thin air
+                if payment_method and payment_method not in ["credit", "none"]:
+                    _box = await db.cash_boxes.find_one(
+                        {"id": payment_method}, session=_tx)
+                    if not _box:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                # p494c: atomic claim — the old check-then-act let two
+                # concurrent pays both pass and double-credit the box
+                claimed = await db.installment_payments.find_one_and_update(
+                    {"id": installment_id, "status": {"$ne": "paid"}},
                     {"$set": {"status": "paid", "paid_date": now, "paid_by": user.get("name", "")}},
                     session=_tx,
                 )
+                if claimed is None:
+                    raise _AlreadyPaid()
 
                 if payment_method and payment_method not in ["credit", "none"]:
                     await db.cash_boxes.update_one(
@@ -146,9 +155,32 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
                 if sale:
                     new_remaining = max(0, sale.get("remaining", 0))
                     new_status = "paid" if new_remaining <= 0 else "partial"
-                    await db.sales.update_one({"id": inst["sale_id"]}, {"$set": {"remaining": new_remaining, "status": new_status}}, session=_tx)
+                    # p494c: keep debt_amount coherent too — a fully paid
+                    # installment sale used to stay "in debt" for the FIFO
+                    # allocator which reads max(remaining, debt_amount)
+                    await db.sales.update_one({"id": inst["sale_id"]}, {"$set": {"remaining": new_remaining, "debt_amount": new_remaining, "status": new_status}}, session=_tx)
 
         return {"ok": True, "message": "تم تسجيل الدفع بنجاح"}
+
+    @router.post("/{installment_id}/pay")
+    async def pay_installment(
+        installment_id: str,
+        data: dict,
+        user: dict = Depends(get_current_user),
+    ):
+        # p494c: retry transient transaction conflicts — a concurrent pay used
+        # to surface as a bare 500 instead of a clean 400 "already paid"
+        import asyncio as _asyncio
+        from pymongo.errors import PyMongoError
+        for _attempt in range(5):
+            try:
+                return await _pay_once(installment_id, data, user)
+            except _AlreadyPaid:
+                raise HTTPException(status_code=400, detail="Already paid")
+            except PyMongoError as exc:
+                if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await _asyncio.sleep(0.2 * (_attempt + 1))
 
     # ── Get cash boxes (for pay dialog) ──
     @router.get("/cash-boxes")
