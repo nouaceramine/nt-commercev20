@@ -3,9 +3,12 @@ NT Commerce 12.0 - Database Configuration
 Centralized database connection and tenant management
 """
 import os
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from contextvars import ContextVar
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 MONGO_URL: str = os.environ.get("MONGO_URL")
@@ -169,7 +172,20 @@ async def init_tenant_database(tenant_id: str) -> AsyncIOMotorDatabase:
     """Initialize a new tenant database with default collections and data"""
     from datetime import datetime, timezone
     tenant_db = get_tenant_db(tenant_id)
-    
+
+    # p494: one customer per phone per tenant (partial: empty phones ignored).
+    # The create-route duplicate check is check-then-insert, so without this
+    # index two concurrent creates with the same phone both succeed. Tenants
+    # provisioned before p494 get the same index from the startup sweep in
+    # main.py; this covers every tenant created after boot. Never block
+    # provisioning on an index conflict (pre-existing duplicates just skip).
+    try:
+        await tenant_db.customers.create_index(
+            [("phone", 1)], name="uniq_phone_nonempty", unique=True,
+            partialFilterExpression={"phone": {"$type": "string", "$gt": ""}})
+    except Exception as exc:
+        logger.warning("customers uniq_phone_nonempty on new tenant %s: %s", tenant_id, exc)
+
     # Initialize cash boxes
     boxes = [
         {"id": "cash", "name": "الصندوق النقدي", "name_fr": "Caisse", "type": "cash", "balance": 0},
