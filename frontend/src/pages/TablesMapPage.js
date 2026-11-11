@@ -509,6 +509,9 @@ export default function TablesMapPage() {
     return () => { un && un(); };
   }, [isAr]);
 
+  // p370: حجوزات الطاولات المسبقة (نُقل التصريح فوق effect الـp398 — كان resvList في TDZ يُسقط الصفحة كلها)
+  const [resvList, setResvList] = useState([]);
+
   // p398: تنبيه صوتي + منبثق عند دخول حجز نافذة الـ30 دقيقة — مرة واحدة لكل حجز
   const resvAlerted = useRef(new Set());
   useEffect(() => {
@@ -545,8 +548,6 @@ export default function TablesMapPage() {
     apiClient.get(`/restaurant/revenue-trend?days=${trendDays}`).then(r => setTrend(r.data)).catch(() => {});
   }, [trendDays]);
 
-  // p370: حجوزات الطاولات المسبقة
-  const [resvList, setResvList] = useState([]);
   const [resvDlg, setResvDlg] = useState(false);
   const [resvTable, setResvTable] = useState('');
   const [resvName, setResvName] = useState('');
