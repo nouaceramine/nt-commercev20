@@ -260,14 +260,14 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
             if v <= 0:
                 continue
             qty = float(p.get("quantity") or 0)
-            days_left = round(qty / v, 1) if v else None
+            days_left = round(qty / v, 1)  # v > 0 here; zero stock must stay 0.0 (critical)
             out.append({
                 "product_id": p["id"], "name": p.get("name_ar") or p.get("name_en") or "",
                 "stock": qty, "daily_velocity": round(v, 2), "days_left": days_left,
                 "suggested_reorder": int(v * 14) + 1,
-                "urgency": "critical" if (days_left or 99) <= 3 else "warning" if (days_left or 99) <= 7 else "ok",
+                "urgency": "critical" if days_left <= 3 else "warning" if days_left <= 7 else "ok",
             })
-        out.sort(key=lambda x: x["days_left"] or 999)
+        out.sort(key=lambda x: x["days_left"])
         return {"days_analyzed": days, "forecast": [o for o in out if o["urgency"] != "ok" or o["days_left"] <= 14][:50]}
 
     # ════════════════════════════════════════════════════════════════════
