@@ -476,7 +476,7 @@ async def startup_event():
     # pre-existing duplicate phones only skips its own index (logged).
     try:
         from config.database import get_tenant_db as _get_tenant_db3, main_db as _main_db3
-        _dbs3 = [_main_db3]
+        _dbs3 = [_main_db3, client["template_tenant"]]
         async for t in _main_db3.saas_tenants.find({}, {"_id": 0, "id": 1}):
             if t.get("id"):
                 try:
