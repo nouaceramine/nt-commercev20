@@ -464,6 +464,12 @@ def create_expenses_routes(
         rate = float(body.get("rate") or 0)
         if usd <= 0 or rate <= 0:
             raise HTTPException(status_code=400, detail="أدخل كمية الدولار وسعر الصرف")
+        pm = body.get("payment_method")
+        if pm:
+            # p493: the chosen box must exist — a ghost id used to record the
+            # doc + a phantom transaction while the $inc matched nothing
+            if not await db.cash_boxes.find_one({"id": pm}, {"_id": 0, "id": 1}):
+                raise HTTPException(status_code=400, detail="الصندوق غير موجود")
         now = datetime.now(timezone.utc).isoformat()
         doc = {
             "id": str(uuid.uuid4()),
@@ -475,26 +481,40 @@ def create_expenses_routes(
             "created_at": now,
             "created_by": user.get("id"),
         }
-        await db.usd_purchases.insert_one(doc)
-        pm = body.get("payment_method")
-        if pm:
-            await db.cash_boxes.update_one(
-                {"id": pm},
-                {"$inc": {"balance": -doc["dzd_total"]}, "$set": {"updated_at": now}},
-            )
-            await db.transactions.insert_one(
-                {
-                    "id": str(uuid.uuid4()),
-                    "cash_box_id": pm,
-                    "type": "expense",
-                    "amount": doc["dzd_total"],
-                    "description": f"شراء {doc['usd_amount']}$ بسعر {doc['rate']} دج/$",
-                    "reference_type": "usd_purchase",
-                    "reference_id": doc["id"],
-                    "created_at": now,
-                    "created_by": user.get("name", ""),
-                }
-            )
+        # p493: doc + box movement + ledger transaction commit/abort together
+        import asyncio as _asyncio
+        from pymongo.errors import PyMongoError as _PyMongoError
+        from config.database import client as _client
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        await db.usd_purchases.insert_one(doc, session=_tx)
+                        if pm:
+                            await db.cash_boxes.update_one(
+                                {"id": pm},
+                                {"$inc": {"balance": -doc["dzd_total"]}, "$set": {"updated_at": now}},
+                                session=_tx,
+                            )
+                            await db.transactions.insert_one(
+                                {
+                                    "id": str(uuid.uuid4()),
+                                    "cash_box_id": pm,
+                                    "type": "expense",
+                                    "amount": doc["dzd_total"],
+                                    "description": f"شراء {doc['usd_amount']}$ بسعر {doc['rate']} دج/$",
+                                    "reference_type": "usd_purchase",
+                                    "reference_id": doc["id"],
+                                    "created_at": now,
+                                    "created_by": user.get("name", ""),
+                                },
+                                session=_tx,
+                            )
+                break
+            except _PyMongoError:
+                if _attempt == 4:
+                    raise
+                await _asyncio.sleep(0.2 * (_attempt + 1))
         doc.pop("_id", None)
         return doc
 

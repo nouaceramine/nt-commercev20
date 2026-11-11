@@ -90,6 +90,21 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         settlement_id = str(uuid.uuid4())
         async with await _client.start_session() as _tx:
             async with _tx.start_transaction():
+                # p493: explicit guards the customer counterpart already had —
+                # positive amount, a REAL destination cash box (p216 parity),
+                # and no overpayment beyond the outstanding debt (the surplus
+                # used to leave the box without settling anything)
+                if float(payment.amount or 0) <= 0:
+                    raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+                box = await db.cash_boxes.find_one({"id": payment.payment_method}, {"_id": 0, "id": 1}, session=_tx)
+                if not box:
+                    raise HTTPException(status_code=400, detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                open_rows = await db.purchases.find(
+                    {"supplier_id": payment.supplier_id, "remaining": {"$gt": 0}},
+                    {"_id": 0, "remaining": 1}, session=_tx).to_list(500)
+                outstanding = round(sum(float(p.get("remaining") or 0) for p in open_rows), 2)
+                if payment.amount > outstanding + 0.01:
+                    raise HTTPException(status_code=400, detail=f"المبلغ يتجاوز الدين المتبقي ({outstanding})")
                 # p64: shared FIFO allocator (same semantics as before)
                 amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method, session=_tx)
                 if amount_applied <= 0:
