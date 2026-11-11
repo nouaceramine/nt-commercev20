@@ -2,9 +2,25 @@
 Advanced Sales Tracking & Reports Routes - Extracted from server.py
 Advanced reports, employee sales, peak hours, returns analysis
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+
+# p494b: business-hour grouping follows Africa/Algiers (fixed UTC+1, no DST)
+# like every other report in the system (restaurant reports use the same
+# timezone in their $dateToString/$hour aggregations).
+DZ_TZ = timezone(timedelta(hours=1))
+
+
+def _local_dt(iso_value):
+    """Parse a stored ISO timestamp into Africa/Algiers local time."""
+    try:
+        dt = datetime.fromisoformat(str(iso_value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(DZ_TZ)
 
 
 def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -16,7 +32,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         if start_date:
             query["created_at"] = {"$gte": start_date}
         if end_date:
-            query.setdefault("created_at", {})["$lte"] = end_date + "T23:59:59" if isinstance(query.get("created_at"), dict) else {"$lte": end_date + "T23:59:59"}
+            query.setdefault("created_at", {})["$lte"] = end_date + "T23:59:59"
         if employee_id:
             query["employee_id"] = employee_id
         if customer_id:
@@ -33,7 +49,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         by_employee, by_payment, product_sales = {}, {}, {}
         for sale in sales:
             eid = sale.get("employee_id", "unknown")
-            by_employee.setdefault(eid, {"name": sale.get("employee_name", "غير محدد"), "count": 0, "total": 0})
+            by_employee.setdefault(eid, {"employee_id": eid, "name": sale.get("employee_name", "غير محدد"), "count": 0, "total": 0})
             by_employee[eid]["count"] += 1
             by_employee[eid]["total"] += sale.get("total", 0)
             m = sale.get("payment_method", "cash")
@@ -56,37 +72,39 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
             query.setdefault("created_at", {})["$lte"] = end_date + "T23:59:59"
         sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if not employee:
+            # p494b: sales made by tenant users (owner/manager) carry their user
+            # id; fall back to the users collection so the report still names them
+            employee = await db.users.find_one({"id": employee_id}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1})
         total_amount = sum(s.get("total", 0) for s in sales)
         total_paid = sum(s.get("paid_amount", 0) for s in sales)
         by_hour = {}
         for sale in sales:
-            try:
-                hour = sale.get("created_at", "")[:13].split("T")[1] if "T" in sale.get("created_at", "") else "00"
-                by_hour.setdefault(hour, {"count": 0, "total": 0})
-                by_hour[hour]["count"] += 1
-                by_hour[hour]["total"] += sale.get("total", 0)
-            except Exception:
-                pass
+            local = _local_dt(sale.get("created_at"))
+            if local is None:
+                continue
+            hour = f"{local.hour:02d}"
+            by_hour.setdefault(hour, {"count": 0, "total": 0})
+            by_hour[hour]["count"] += 1
+            by_hour[hour]["total"] += sale.get("total", 0)
         return {"employee": employee, "sales": sales, "statistics": {"total_sales": len(sales), "total_amount": total_amount, "total_paid": total_paid, "total_remaining": total_amount - total_paid, "average_sale": total_amount / len(sales) if sales else 0}, "by_hour": by_hour}
 
     @router.get("/peak-hours")
-    async def get_peak_hours_report(days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def get_peak_hours_report(days: int = Query(30, ge=1, le=366), admin: dict = Depends(get_tenant_admin)):
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         sales = await db.sales.find({"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}, {"_id": 0, "created_at": 1, "total": 1}).to_list(10000)
         by_hour = {str(i).zfill(2): {"count": 0, "total": 0} for i in range(24)}
         day_names_ar = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
         by_day = {i: {"count": 0, "total": 0, "name_ar": day_names_ar[i]} for i in range(7)}
         for sale in sales:
-            try:
-                if "T" in sale.get("created_at", ""):
-                    hour = sale["created_at"].split("T")[1][:2]
-                    by_hour[hour]["count"] += 1
-                    by_hour[hour]["total"] += sale.get("total", 0)
-                date = datetime.fromisoformat(sale["created_at"].replace("Z", "+00:00"))
-                by_day[date.weekday()]["count"] += 1
-                by_day[date.weekday()]["total"] += sale.get("total", 0)
-            except Exception:
-                pass
+            local = _local_dt(sale.get("created_at"))
+            if local is None:
+                continue
+            hour = f"{local.hour:02d}"
+            by_hour[hour]["count"] += 1
+            by_hour[hour]["total"] += sale.get("total", 0)
+            by_day[local.weekday()]["count"] += 1
+            by_day[local.weekday()]["total"] += sale.get("total", 0)
         return {"by_hour": by_hour, "by_day": list(by_day.values()), "peak_hour": max(by_hour.items(), key=lambda x: x[1]["total"])[0] if by_hour else None, "peak_day": max(by_day.items(), key=lambda x: x[1]["total"])[0] if by_day else None}
 
     @router.get("/returns-report")
@@ -99,7 +117,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         returns = await db.sales.find(query, {"_id": 0}).sort("returned_at", -1).to_list(1000)
         by_reason = {}
         for ret in returns:
-            reason = ret.get("return_reason", "غير محدد")
+            reason = ret.get("return_reason") or "غير محدد"
             by_reason.setdefault(reason, {"count": 0, "total": 0})
             by_reason[reason]["count"] += 1
             by_reason[reason]["total"] += ret.get("total", 0)
@@ -107,6 +125,11 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
 
     @router.get("/{sale_id}/audit-log")
     async def get_sale_audit_log(sale_id: str, admin: dict = Depends(get_tenant_admin)):
+        # p494b: a ghost sale id must not answer 200 — same contract as the
+        # sale resource itself; also closes cross-tenant probing
+        sale = await db.sales.find_one({"id": sale_id}, {"_id": 0, "id": 1})
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
         return await db.sale_audit_logs.find({"sale_id": sale_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
 
     return router

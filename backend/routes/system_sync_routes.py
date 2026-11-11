@@ -285,6 +285,14 @@ async def log_sale_action(
     """Log an action on a sale"""
     if details is None:
         details = {}
+    # p494b: audit rows must reference a real sale with a real action —
+    # otherwise anyone can plant ghost/forged entries in the audit trail
+    action = (action or "").strip()
+    if not action:
+        raise HTTPException(status_code=400, detail="الإجراء مطلوب")
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0, "id": 1})
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
     log = {
         "id": str(uuid.uuid4()),
         "sale_id": sale_id,

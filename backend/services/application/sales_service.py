@@ -375,7 +375,10 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         "payments": ([{"amount": s.paid_amount, "method": s.payment_method, "at": now}] if s.paid_amount > 0 else []),  # p67
         "installment_plan": installment_info,
         "status": status,
-        "notes": s.notes or "", "created_at": now, "created_by": user["name"]
+        "notes": s.notes or "", "created_at": now, "created_by": user["name"],
+        # p494b: attribute the sale to its maker so the employee filter,
+        # employee report and by_employee grouping are not dead weight
+        "employee_id": user.get("id", ""), "employee_name": user.get("name", ""),
     }
     await db.sales.insert_one(sale_doc, session=_tx)
 
@@ -588,7 +591,7 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
     )
 
 
-async def return_sale_op(db, sale_id: str, user: dict) -> None:
+async def return_sale_op(db, sale_id: str, user: dict, reason: str = "") -> None:
     """ACID, idempotent return; a concurrent retry re-reads the claimed state."""
     import asyncio
     from config.database import client
@@ -597,7 +600,7 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
         try:
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
-                    await _return_sale_impl(db, sale_id, user, _tx_session)
+                    await _return_sale_impl(db, sale_id, user, _tx_session, reason)
             return
         except PyMongoError as exc:
             if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
@@ -611,7 +614,7 @@ async def return_sale_op(db, sale_id: str, user: dict) -> None:
             await asyncio.sleep(0.02 * (2 ** _attempt))
 
 
-async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
+async def _return_sale_impl(db, sale_id: str, user: dict, _tx, reason: str = "") -> None:
     """Return a sale: restore stock, revert customer stats, reverse cash."""
     now = datetime.now(timezone.utc).isoformat()
     # Claim the return atomically before reversing anything. The transaction
@@ -619,7 +622,10 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx) -> None:
     # sale can never restore stock, customer mirrors or cash a second time.
     sale = await db.sales.find_one_and_update(
         {"id": sale_id, "status": {"$ne": "returned"}},
-        {"$set": {"status": "returned", "updated_at": now}},
+        # p494b: stamp returned_at (+ optional reason) so returns-report date
+        # filters and by_reason grouping stop being dead
+        {"$set": {"status": "returned", "updated_at": now, "returned_at": now,
+                  "return_reason": (reason or "").strip()}},
         session=_tx,
     )
     if sale is None:

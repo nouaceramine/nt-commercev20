@@ -214,11 +214,13 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
 
     # ── Return Sale ──
     @router.post("/{sale_id}/return")
-    async def return_sale(sale_id: str, user: dict = Depends(require_permission("sales.refund"))):
+    async def return_sale(sale_id: str, data: Optional[dict] = None, user: dict = Depends(require_permission("sales.refund"))):
         sale = await db.sales.find_one({"id": sale_id}, {"_id": 0, "source": 1})
         if sale and sale.get("source") == "webstore":  # p87
             raise HTTPException(status_code=400, detail="طلبات المتجر الإلكتروني تُدار من مركز التجارة الإلكترونية — استخدم حالة الطلب هناك")
-        await return_sale_op(db, sale_id, user)
+        # p494b: optional free-text reason stored on the sale for returns-report
+        reason = (data or {}).get("reason", "") if isinstance(data, dict) else ""
+        await return_sale_op(db, sale_id, user, reason)
         return {"message": "Sale returned successfully"}
 
     return router
