@@ -1311,6 +1311,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.social_inbox_routes',  # p249: social inbox -> order conversion
     'routes.store_multi_routes',  # p250: multi-store per tenant
     'routes.quotations_routes',  # M1: quotations module pack
+    'routes.gift_cards_routes',  # M2: gift cards module pack
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

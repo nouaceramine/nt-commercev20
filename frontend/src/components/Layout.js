@@ -20,6 +20,7 @@ import {
   X,
   Search as _Search,
   Globe,
+  Gift,
   Inbox,
   Link2 as _Link2,
   BookOpen,
@@ -496,6 +497,7 @@ export const Layout = ({ children }) => {
         { path: '/pos', icon: ShoppingCart, label: t.pos, subFeature: 'pos', featureKey: 'pos' },
         { path: '/sales', icon: Receipt, label: t.sales, subFeature: 'invoices' },
         { path: '/quotations', icon: FileText, label: language === 'ar' ? 'عروض الأسعار' : 'Devis' },  // M1
+        { path: '/gift-cards', icon: Gift, label: language === 'ar' ? 'بطاقات الهدايا' : 'Cartes cadeaux' },  // M2
         { path: '/installments', icon: CreditCard, label: language === 'ar' ? 'الأقساط' : 'Versements' },
         { path: '/daily-sessions', icon: Clock, label: language === 'ar' ? 'حصص البيع' : 'Sessions' },
         { path: '/daily-report', icon: Calendar, label: language === 'ar' ? 'التقرير اليومي' : 'Rapport Journalier' },
