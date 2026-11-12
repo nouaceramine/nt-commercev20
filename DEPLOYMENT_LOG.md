@@ -6825,3 +6825,9 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 **الاختبار:** staging ترابطي 176/176 (منها سباقات 6 خيوط لكل مسار مال) + متصفح 23/23 للصفحات الست (ربط API بعد كل إجراء، صفر pageerror)؛ انحدار: نواة 83/83، خضراء 59/59، M-tests ‏50/50، Ruff نظيف.
 **النشر:** restart ntcommerce-backend-1؛ health 200 مباشرة/nginx/Cloudflare ×3؛ OpenAPI ‏1208/1490 ثابت؛ md5 repo≡حاوية للملفات الخمسة؛ staging زُامن إلى HEAD (كان متأخرًا منذ p478 شجرةً) وأُعيد بناء www-staging بحزمة M. الإنتاج بلا بيانات اختبار. النسخ backups/p502/.
 **الحالة:** المصفوفة 1773 صفًا؛ كل الحزم المنشورة مختبرة ترابطيًا.
+
+## P503 — 2026-11-13 (تدقيق وإصلاح حزم M7–M9)
+- الالتزام `3095d97`: 6 إصلاحات (bookings_routes.py, van_sales_routes.py, sales_service.py) — مدفوع لـorigin/main.
+- إعادة إقلاع ntcommerce-backend-1؛ الصحة 200 ×3 (مباشر/nginx/Cloudflare)؛ OpenAPI ‏1223/1509؛ بصمة md5 مطابقة.
+- staging فُتِّح إلى HEAD (M7–M9 + صفحاتها) وبُنيت واجهته (main.ae9da379.js) ونُشرت على www-staging؛ النسخ قبل المزامنة في backups/p503/staging-sync/.
+- صفر بيانات اختبار في الإنتاج؛ staging ‏residue=0.
