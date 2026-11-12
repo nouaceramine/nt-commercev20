@@ -210,7 +210,11 @@ export default function RestaurantPOSPage() {
   }, [products, search, fam, topIds]);
 
   const families = useMemo(() => [...new Set(products.map(p => p.family_name).filter(Boolean))], [products]);
-  const tableOrder = useCallback((t) => orders.find(o => o.id === t?.active_order_id), [orders]);
+  // p494h: حلّ الطاولة من أحدث لقطة — selTable يبقى كائنًا قديمًا active_order_id=null بعد الإرسال فيخفي زر الفاتورة
+  const tableOrder = useCallback((t) => {
+    const fresh = tables.find(x => x.id === t?.id) || t;
+    return orders.find(o => o.id === fresh?.active_order_id);
+  }, [orders, tables]);
 
   const addDish = (p, mods = []) => {
     const delta = mods.reduce((a, m) => a + (Number(m.price_delta) || 0), 0);
