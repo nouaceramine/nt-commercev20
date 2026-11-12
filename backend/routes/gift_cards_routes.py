@@ -74,6 +74,17 @@ def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_ten
             await db.gift_cards.create_index("code", unique=True)
         except Exception:
             pass
+        # p502: one redeem per (sale_id, card_code) at the DATABASE level — the
+        # check-then-act dup probe raced (two concurrent redemptions for the
+        # same sale both passed and both debited the card).
+        try:
+            await db.gift_card_transactions.create_index(
+                [("sale_id", 1), ("card_code", 1)],
+                unique=True, name="redeem_sale_unique",
+                partialFilterExpression={"type": "redeem", "sale_id": {"$type": "string"}},
+            )
+        except Exception:
+            pass
 
     async def _tx(card: dict, tx_type: str, amount: float, balance_after: float,
                   user: dict, notes: str = "", sale_id: str = None, session=None):
@@ -183,6 +194,7 @@ def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_ten
     # ── Redeem (atomic balance guard; idempotent per sale_id) ──
     @router.post("/redeem")
     async def redeem(body: RedeemIn, user: dict = Depends(_perm("sales.add"))):
+        await _ensure_index()
         code = body.code.strip().upper()
         if body.sale_id:
             dup = await db.gift_card_transactions.find_one(
@@ -204,7 +216,18 @@ def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_ten
         if updated["balance"] <= 0:
             await db.gift_cards.update_one({"id": updated["id"]}, {"$set": {"status": "depleted"}})
             updated["status"] = "depleted"
-        await _tx(updated, "redeem", -body.amount, updated["balance"], user, sale_id=body.sale_id)
+        # p502: the redeem tx insert is the atomic idempotency gate (unique
+        # partial index redeem_sale_unique). On a concurrent duplicate the
+        # insert loses the race — refund the debited amount, then 400.
+        from pymongo.errors import DuplicateKeyError
+        try:
+            await _tx(updated, "redeem", -body.amount, updated["balance"], user, sale_id=body.sale_id)
+        except DuplicateKeyError:
+            await db.gift_cards.find_one_and_update(
+                {"id": updated["id"]},
+                {"$inc": {"balance": round(body.amount, 2)},
+                 "$set": {"status": "active", "updated_at": _now()}})
+            raise HTTPException(status_code=400, detail="هذه البطاقة استُخدمت مسبقاً في هذه الفاتورة")
         return {"code": code, "redeemed": round(body.amount, 2),
                 "remaining_balance": round(updated["balance"], 2), "status": updated["status"]}
 

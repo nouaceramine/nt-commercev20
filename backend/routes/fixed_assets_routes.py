@@ -232,39 +232,56 @@ def create_fixed_assets_routes(db, get_current_user, get_tenant_admin, require_t
     # ── Dispose (sale or write-off) ──
     @router.post("/{asset_id}/dispose")
     async def dispose_asset(asset_id: str, body: DisposeIn, user: dict = Depends(get_tenant_admin)):
-        a = await db.fixed_assets.find_one({"id": asset_id})
+        # p502: atomic claim active->disposing BEFORE posting/moving money — the
+        # old check-then-act let concurrent disposals both pass (double proceeds,
+        # and a DuplicateKeyError 500 from auto_entry_unique on the loser).
+        a = await db.fixed_assets.find_one_and_update(
+            {"id": asset_id, "status": "active"},
+            {"$set": {"status": "disposing", "updated_at": _now().isoformat()}})
         if not a:
-            raise HTTPException(status_code=404, detail="الأصل غير موجود")
-        if a.get("status") != "active":
+            exists = await db.fixed_assets.find_one({"id": asset_id}, {"_id": 0, "status": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="الأصل غير موجود")
             raise HTTPException(status_code=400, detail="الأصل مُخرَج مسبقاً")
-        accs = await _ensure_accounts()
-        date = body.disposal_date or _now().strftime("%Y-%m-%d")
-        cost = round(a["cost"], 2)
-        accum = round(a.get("accumulated", 0), 2)
-        book_value = round(cost - accum, 2)
-        proceeds = round(body.sale_amount, 2)
-        lines = []
-        if proceeds > 0:
-            box_acc = await _box_account(body.payment_method)
-            box = await db.cash_boxes.find_one({"id": body.payment_method})
-            if not box:
-                raise HTTPException(status_code=400, detail="صندوق غير موجود")
-            lines.append(_line(box_acc, debit=proceeds))
-        if accum > 0:
-            lines.append(_line(accs["345"], debit=accum))
-        lines.append(_line(accs["340"], credit=cost))
-        diff = round(proceeds - book_value, 2)
-        if diff < 0:
-            lines.append(_line(accs["615"], debit=-diff))   # loss on disposal
-        elif diff > 0:
-            lines.append(_line(accs["765"], credit=diff))   # gain on disposal
-        await _post(f"إخراج أصل {a['name']}", asset_id, "asset_disposal",
-                    f"إخراج أصل ثابت: {a['name']} (قيمة دفترية {book_value}، بيع {proceeds})",
-                    lines, date=date)
-        if proceeds > 0:
-            await db.cash_boxes.update_one({"id": body.payment_method},
-                                           {"$inc": {"balance": proceeds},
-                                            "$set": {"updated_at": _now().isoformat()}})
+        try:
+            accs = await _ensure_accounts()
+            date = body.disposal_date or _now().strftime("%Y-%m-%d")
+            cost = round(a["cost"], 2)
+            accum = round(a.get("accumulated", 0), 2)
+            book_value = round(cost - accum, 2)
+            proceeds = round(body.sale_amount, 2)
+            lines = []
+            if proceeds > 0:
+                box_acc = await _box_account(body.payment_method)
+                box = await db.cash_boxes.find_one({"id": body.payment_method})
+                if not box:
+                    raise HTTPException(status_code=400, detail="صندوق غير موجود")
+                lines.append(_line(box_acc, debit=proceeds))
+            if accum > 0:
+                lines.append(_line(accs["345"], debit=accum))
+            lines.append(_line(accs["340"], credit=cost))
+            diff = round(proceeds - book_value, 2)
+            if diff < 0:
+                lines.append(_line(accs["615"], debit=-diff))   # loss on disposal
+            elif diff > 0:
+                lines.append(_line(accs["765"], credit=diff))   # gain on disposal
+            entry = await _post(f"إخراج أصل {a['name']}", asset_id, "asset_disposal",
+                                f"إخراج أصل ثابت: {a['name']} (قيمة دفترية {book_value}، بيع {proceeds})",
+                                lines, date=date)
+            if entry is None:
+                # A disposal journal already exists for this asset (a crashed
+                # earlier attempt). Refuse to move money against unknown lines.
+                raise HTTPException(status_code=409,
+                                    detail="يوجد قيد إخراج سابق لهذا الأصل — راجع المحاسبة قبل المتابعة")
+            if proceeds > 0:
+                await db.cash_boxes.update_one({"id": body.payment_method},
+                                               {"$inc": {"balance": proceeds},
+                                                "$set": {"updated_at": _now().isoformat()}})
+        except Exception:
+            await db.fixed_assets.update_one(
+                {"id": asset_id, "status": "disposing"},
+                {"$set": {"status": "active", "updated_at": _now().isoformat()}})
+            raise
         await db.fixed_assets.update_one({"id": asset_id}, {"$set": {
             "status": "disposed", "disposal_date": date, "disposal_proceeds": proceeds,
             "disposal_gain_loss": diff, "updated_at": _now().isoformat(),

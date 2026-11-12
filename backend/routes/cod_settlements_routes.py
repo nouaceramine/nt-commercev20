@@ -77,15 +77,29 @@ def create_cod_settlements_routes(db, get_current_user, get_tenant_admin, requir
             q["courier"] = courier
         else:
             q["$or"] = [{"courier": None}, {"courier": ""}]
+        candidates = await db.ecom_orders.find(
+            q, {"_id": 0, "id": 1}).to_list(5000)
+        if not candidates:
+            raise HTTPException(status_code=400, detail="لا توجد طلبات مسلَّمة غير محصَّلة لهذا الناقل")
+        # p502: atomic order claim — lock only orders still unassigned, with the
+        # settlement_id-exists filter inside the update itself. The old code
+        # found-then-locked without the filter, so two concurrent creates could
+        # both read the same free orders and the loser's update_many silently
+        # RE-locked them into its own batch (order in two batches).
+        batch_id = new_id()
+        await db.ecom_orders.update_many(
+            {"id": {"$in": [o["id"] for o in candidates]}, "settlement_id": {"$exists": False}},
+            {"$set": {"settlement_id": batch_id, "updated_at": _now()}})
         orders = await db.ecom_orders.find(
-            q, {"_id": 0, "id": 1, "order_code": 1, "total": 1, "shipping_fee": 1}).to_list(5000)
-        if not orders:
+            {"settlement_id": batch_id},
+            {"_id": 0, "id": 1, "order_code": 1, "total": 1, "shipping_fee": 1}).to_list(5000)
+        if not orders:  # a concurrent batch claimed everything first
             raise HTTPException(status_code=400, detail="لا توجد طلبات مسلَّمة غير محصَّلة لهذا الناقل")
         expected = round(sum(float(o.get("total") or 0) - float(o.get("shipping_fee") or 0)
                              for o in orders), 2)
         from services.code_generator import next_code
         doc = {
-            "id": new_id(),
+            "id": batch_id,
             "code": await next_code(db, "cod_settlements", "STL", 4, True),
             "courier": courier or "manual",
             "order_ids": [o["id"] for o in orders],
@@ -98,11 +112,7 @@ def create_cod_settlements_routes(db, get_current_user, get_tenant_admin, requir
             "created_by": user.get("name", ""),
             "created_at": _now(), "updated_at": _now(), "settled_at": None,
         }
-        # Lock the orders into the batch immediately (no double-batching race)
         await db.cod_settlements.insert_one(doc)
-        await db.ecom_orders.update_many(
-            {"id": {"$in": doc["order_ids"]}},
-            {"$set": {"settlement_id": doc["id"], "updated_at": _now()}})
         doc.pop("_id", None)
         return doc
 
@@ -131,13 +141,22 @@ def create_cod_settlements_routes(db, get_current_user, get_tenant_admin, requir
     # ── Receive the courier payout (money move + journal + order flips) ──
     @router.post("/{batch_id}/receive")
     async def receive_batch(batch_id: str, body: ReceiveIn, user: dict = Depends(get_tenant_admin)):
-        b = await db.cod_settlements.find_one({"id": batch_id})
+        # p502: atomic claim open->receiving BEFORE moving money — the old
+        # check-then-act let concurrent receives all pass and credit the target
+        # box / post the journal once per request. Rollback to open on failure.
+        b = await db.cod_settlements.find_one_and_update(
+            {"id": batch_id, "status": "open"},
+            {"$set": {"status": "receiving", "updated_at": _now()}})
         if not b:
-            raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
-        if b.get("status") != "open":
+            exists = await db.cod_settlements.find_one({"id": batch_id}, {"_id": 0, "status": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
             raise HTTPException(status_code=400, detail="الدفعة مسوّاة أو ملغاة مسبقاً")
         box = await db.cash_boxes.find_one({"id": body.target_box})
         if not box or box.get("type") == "ecom":
+            await db.cod_settlements.update_one(
+                {"id": batch_id, "status": "receiving"},
+                {"$set": {"status": "open", "updated_at": _now()}})
             raise HTTPException(status_code=400, detail="اختر صندوق تحصيل حقيقياً (غير صناديق الناقلين)")
         accs = await _ensure_accounts()
         from services.accounting_auto import BOX_ACCOUNT, ensure_accounts, _insert_entry
@@ -153,26 +172,32 @@ def create_cod_settlements_routes(db, get_current_user, get_tenant_admin, requir
             lines.append(_line(accs["618"], debit=-variance))
         elif variance > 0:
             lines.append(_line(accs["765"], credit=variance))
-        await _insert_entry(
-            db, reference=f"تسوية COD {b['code']} — {b['courier']}",
-            reference_id=batch_id, source_tag="cod_settlement",
-            description=f"تحصيل {received} من {b['courier']} (متوقع {expected}، فرق {variance})",
-            lines=lines, date=now[:10])
+        try:
+            await _insert_entry(
+                db, reference=f"تسوية COD {b['code']} — {b['courier']}",
+                reference_id=batch_id, source_tag="cod_settlement",
+                description=f"تحصيل {received} من {b['courier']} (متوقع {expected}، فرق {variance})",
+                lines=lines, date=now[:10])
 
-        # Money: courier holding box down, target box up
-        ecom_box_id = f"ecom_store_{b['courier']}" if b["courier"] != "manual" else "ecom_store"
-        ecom_box = await db.cash_boxes.find_one({"id": ecom_box_id})
-        if not ecom_box:
-            ecom_box = await db.cash_boxes.find_one({"id": "ecom_store"})
-        if ecom_box:
-            await db.cash_boxes.update_one({"id": ecom_box["id"]},
-                                           {"$inc": {"balance": -expected}, "$set": {"updated_at": now}})
-        await db.cash_boxes.update_one({"id": body.target_box},
-                                       {"$inc": {"balance": received}, "$set": {"updated_at": now}})
-        # Orders flip to paid inside the batch
-        await db.ecom_orders.update_many(
-            {"id": {"$in": b.get("order_ids", [])}},
-            {"$set": {"payment_status": "paid", "updated_at": now}})
+            # Money: courier holding box down, target box up
+            ecom_box_id = f"ecom_store_{b['courier']}" if b["courier"] != "manual" else "ecom_store"
+            ecom_box = await db.cash_boxes.find_one({"id": ecom_box_id})
+            if not ecom_box:
+                ecom_box = await db.cash_boxes.find_one({"id": "ecom_store"})
+            if ecom_box:
+                await db.cash_boxes.update_one({"id": ecom_box["id"]},
+                                               {"$inc": {"balance": -expected}, "$set": {"updated_at": now}})
+            await db.cash_boxes.update_one({"id": body.target_box},
+                                           {"$inc": {"balance": received}, "$set": {"updated_at": now}})
+            # Orders flip to paid inside the batch
+            await db.ecom_orders.update_many(
+                {"id": {"$in": b.get("order_ids", [])}},
+                {"$set": {"payment_status": "paid", "updated_at": now}})
+        except Exception:
+            await db.cod_settlements.update_one(
+                {"id": batch_id, "status": "receiving"},
+                {"$set": {"status": "open", "updated_at": _now()}})
+            raise
         status = "settled" if abs(variance) < 0.01 else "settled_with_variance"
         await db.cod_settlements.update_one({"id": batch_id}, {"$set": {
             "status": status, "received_amount": received, "variance": variance,

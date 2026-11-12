@@ -167,40 +167,53 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
     # ── Pay a draft payslip ──
     @router.post("/payslips/{payslip_id}/pay")
     async def pay_payslip(payslip_id: str, body: PayIn, user: dict = Depends(get_tenant_admin)):
-        p = await db.payslips.find_one({"id": payslip_id})
+        # p502: atomic claim draft->paying BEFORE any side effect — the old
+        # check-then-act let concurrent pays all pass the status check and
+        # debit the box / post the journal multiple times. On any failure the
+        # claim rolls back to draft so the payslip stays payable.
+        p = await db.payslips.find_one_and_update(
+            {"id": payslip_id, "status": "draft"},
+            {"$set": {"status": "paying", "updated_at": _now()}})
         if not p:
-            raise HTTPException(status_code=404, detail="القسيمة غير موجودة")
-        if p.get("status") != "draft":
+            exists = await db.payslips.find_one({"id": payslip_id}, {"_id": 0, "status": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="القسيمة غير موجودة")
             raise HTTPException(status_code=400, detail="القسيمة مدفوعة أو ملغاة مسبقاً")
-        box = await db.cash_boxes.find_one({"id": body.box})
-        if not box or box.get("type") == "ecom":
-            raise HTTPException(status_code=400, detail="اختر صندوق دفع حقيقياً (غير صناديق الناقلين)")
-        net = round(p["net_salary"], 2)
-        if net <= 0:
-            raise HTTPException(status_code=422, detail="صافي الراتب يجب أن يكون أكبر من صفر")
-        accs = await _ensure_accounts()
-        from services.accounting_auto import BOX_ACCOUNT, ensure_accounts, _insert_entry
-        await ensure_accounts(db)
-        box_acc = await db.accounts.find_one({"code": BOX_ACCOUNT.get(body.box, "530")})
-        if not box_acc:
-            raise HTTPException(status_code=400, detail="حساب الصندوق غير موجود")
-        now = _now()
-        await _insert_entry(
-            db, reference=f"راتب {p['month']} — {p['employee_name']}",
-            reference_id=payslip_id, source_tag="payroll",
-            description=(f"{p['code']}: أساسي {p['base_salary']} + عمولة {p['commission']}"
-                         f" − سلف {p['advances']} = صافي {net}"),
-            lines=[_line(accs["641"], debit=net), _line(box_acc, credit=net)],
-            date=now[:10])
-        await db.cash_boxes.update_one({"id": body.box},
-                                       {"$inc": {"balance": -net}, "$set": {"updated_at": now}})
-        if p.get("advance_ids"):
-            await db.advances.update_many(
-                {"id": {"$in": p["advance_ids"]}},
-                {"$set": {"settled_in_payslip": payslip_id, "settled_at": now}})
-            await db.employees.update_one(
-                {"id": p["employee_id"]},
-                {"$inc": {"total_advances": -p["advances"]}})
+        try:
+            box = await db.cash_boxes.find_one({"id": body.box})
+            if not box or box.get("type") == "ecom":
+                raise HTTPException(status_code=400, detail="اختر صندوق دفع حقيقياً (غير صناديق الناقلين)")
+            net = round(p["net_salary"], 2)
+            if net <= 0:
+                raise HTTPException(status_code=422, detail="صافي الراتب يجب أن يكون أكبر من صفر")
+            accs = await _ensure_accounts()
+            from services.accounting_auto import BOX_ACCOUNT, ensure_accounts, _insert_entry
+            await ensure_accounts(db)
+            box_acc = await db.accounts.find_one({"code": BOX_ACCOUNT.get(body.box, "530")})
+            if not box_acc:
+                raise HTTPException(status_code=400, detail="حساب الصندوق غير موجود")
+            now = _now()
+            await _insert_entry(
+                db, reference=f"راتب {p['month']} — {p['employee_name']}",
+                reference_id=payslip_id, source_tag="payroll",
+                description=(f"{p['code']}: أساسي {p['base_salary']} + عمولة {p['commission']}"
+                             f" − سلف {p['advances']} = صافي {net}"),
+                lines=[_line(accs["641"], debit=net), _line(box_acc, credit=net)],
+                date=now[:10])
+            await db.cash_boxes.update_one({"id": body.box},
+                                           {"$inc": {"balance": -net}, "$set": {"updated_at": now}})
+            if p.get("advance_ids"):
+                await db.advances.update_many(
+                    {"id": {"$in": p["advance_ids"]}},
+                    {"$set": {"settled_in_payslip": payslip_id, "settled_at": now}})
+                await db.employees.update_one(
+                    {"id": p["employee_id"]},
+                    {"$inc": {"total_advances": -p["advances"]}})
+        except Exception:
+            await db.payslips.update_one(
+                {"id": payslip_id, "status": "paying"},
+                {"$set": {"status": "draft", "updated_at": _now()}})
+            raise
         await db.payslips.update_one(
             {"id": payslip_id},
             {"$set": {"status": "paid", "box": body.box, "paid_at": now,

@@ -240,12 +240,18 @@ def create_quotations_routes(db, get_current_user, get_tenant_admin, require_ten
     @router.post("/{quotation_id}/convert", status_code=201)
     async def convert_quotation(quotation_id: str, body: QuoteConvertIn,
                                 user: dict = Depends(_perm("sales.add"))):
-        doc = await db.quotations.find_one({"id": quotation_id})
+        # p502: atomic claim -> converted BEFORE invoking the sale engine — the
+        # old check-then-act let concurrent converts all pass, creating one
+        # sale (and one stock claim) per request. Rolls back on sale failure.
+        doc = await db.quotations.find_one_and_update(
+            {"id": quotation_id, "status": {"$in": ["draft", "sent", "accepted"]}},
+            {"$set": {"status": "converted", "updated_at": _now().isoformat()}})
         if not doc:
-            raise HTTPException(status_code=404, detail="عرض السعر غير موجود")
-        if doc.get("status") == "converted":
-            raise HTTPException(status_code=400, detail="عرض السعر محوَّل مسبقاً")
-        if doc.get("status") not in ("draft", "sent", "accepted"):
+            cur = await db.quotations.find_one({"id": quotation_id}, {"_id": 0, "status": 1})
+            if not cur:
+                raise HTTPException(status_code=404, detail="عرض السعر غير موجود")
+            if cur.get("status") == "converted":
+                raise HTTPException(status_code=400, detail="عرض السعر محوَّل مسبقاً")
             raise HTTPException(status_code=400, detail="لا يمكن تحويل عرض مرفوض أو منتهي")
         from models.schemas.trading import SaleCreate
         from services.application.sales_service import create_sale_op
@@ -263,7 +269,14 @@ def create_quotations_routes(db, get_current_user, get_tenant_admin, require_ten
             payment_type=body.payment_type,
             notes=(body.notes or f"تحويل عرض السعر {doc.get('number', '')}"),
         )
-        sale = await create_sale_op(db, sale_payload, user)
+        try:
+            sale = await create_sale_op(db, sale_payload, user)
+        except Exception:
+            await db.quotations.update_one(
+                {"id": quotation_id, "status": "converted", "converted_sale_id": None},
+                {"$set": {"status": doc.get("status", "draft"),
+                          "updated_at": _now().isoformat()}})
+            raise
         now_s = _now().isoformat()
         await db.quotations.update_one({"id": quotation_id}, {"$set": {
             "status": "converted", "converted_sale_id": sale.get("id"), "updated_at": now_s,
