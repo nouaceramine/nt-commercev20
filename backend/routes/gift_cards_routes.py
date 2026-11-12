@@ -53,6 +53,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _fresh_status(card: dict) -> str:
+    if card.get("status") == "disabled":
+        return "disabled"
+    exp = card.get("expires_at")
+    if exp and exp < _now():
+        return "expired"
+    if (card.get("balance") or 0) <= 0:
+        return "depleted"
+    return "active"
+
+
 def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_tenant):
     from utils.permissions import create_permission_checker
     _perm = create_permission_checker(db, get_current_user)
@@ -73,16 +84,6 @@ def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_ten
             "sale_id": sale_id, "notes": notes,
             "created_by": user.get("name", ""), "created_at": _now(),
         }, session=session)
-
-    def _fresh_status(card: dict) -> str:
-        if card.get("status") == "disabled":
-            return "disabled"
-        exp = card.get("expires_at")
-        if exp and exp < _now():
-            return "expired"
-        if (card.get("balance") or 0) <= 0:
-            return "depleted"
-        return "active"
 
     # ── Issue ──
     @router.post("", status_code=201)
