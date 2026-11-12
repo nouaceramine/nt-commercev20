@@ -116,6 +116,13 @@ async def register_tenant(tenant: TenantCreate):
     if stale_agent:
         raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل في حساب وكيل")
     from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
+    # p500-001: free a stale owner identity (tenant deleted outside the cascade
+    # path) so this email can register again. Fail-safe + audit-logged.
+    try:
+        from utils.identity import reap_stale_identity
+        await reap_stale_identity(tenant.email, client)
+    except Exception:
+        pass
     await assert_email_globally_free(tenant.email)
     tenant.email = tenant.email.strip().lower()
 

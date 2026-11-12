@@ -35,7 +35,7 @@ _require_perm = create_permission_checker(db, require_tenant)
 # ============ ADVANCED ROLES AND PERMISSIONS ============
 
 @router.get("/permissions/roles")
-async def get_all_roles():
+async def get_all_roles(user: dict = Depends(require_tenant)):
     """Get all available roles with their default permissions and descriptions"""
     return {
         "roles": list(DEFAULT_PERMISSIONS.keys()),
@@ -45,12 +45,12 @@ async def get_all_roles():
     }
 
 @router.get("/permissions/categories")
-async def get_permission_categories():
+async def get_permission_categories(user: dict = Depends(require_tenant)):
     """Get permission categories for UI grouping"""
     return PERMISSION_CATEGORIES
 
 @router.get("/permissions/role/{role_name}")
-async def get_role_permissions(role_name: str):
+async def get_role_permissions(role_name: str, user: dict = Depends(require_tenant)):
     """Get permissions for a specific role"""
     if role_name not in DEFAULT_PERMISSIONS:
         raise HTTPException(status_code=404, detail="Role not found")

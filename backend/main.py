@@ -620,6 +620,26 @@ async def startup_event():
     except Exception as e:
         logger.warning("Module watchdog: %s", e)
 
+    # p500-001: periodic orphan-identity reaper (every 6h) — frees owner
+    # identities whose tenant was deleted outside the cascade path.
+    try:
+        from utils.identity import reap_orphan_identities
+
+        async def _identity_reaper_loop():
+            while True:
+                try:
+                    _reaped = await reap_orphan_identities(client)
+                    if _reaped:
+                        logger.info("identity reaper freed %d stale identities", _reaped)
+                except Exception as _reap_err:
+                    logger.warning("identity reaper: %s", _reap_err)
+                await asyncio.sleep(6 * 3600)
+
+        asyncio.create_task(_identity_reaper_loop())
+        logger.info("Identity orphan reaper scheduled (every 6h)")
+    except Exception as e:
+        logger.warning("Identity reaper start: %s", e)
+
     try:
         from core.db_naming import load_all_db_names  # p347
         _n = await load_all_db_names(main_db)

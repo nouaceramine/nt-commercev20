@@ -1206,7 +1206,7 @@ async def get_collection_reports(admin: dict = Depends(get_super_admin)):
 
 
 @router.get("/system/info")
-async def get_system_info():
+async def get_system_info(admin: dict = Depends(get_super_admin)):
     """NT Commerce 12.0 - System Information"""
     return {
         "name": "NT Commerce",

@@ -186,7 +186,7 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
         return {"logs": logs, "stats": {"total_sent": total_sent, "total_failed": total_failed}}
 
     @router.get("/sms/templates")
-    async def get_sms_templates():
+    async def get_sms_templates(admin: dict = Depends(get_tenant_admin)):
         return {"templates": [
             {"id": "reminder_friendly", "name_ar": "تذكير ودي", "template": "السلام عليكم {customer_name}، نذكركم بأن لديكم مبلغ {debt_amount} دج مستحق. شكراً لتعاملكم معنا."},
             {"id": "reminder_formal", "name_ar": "تذكير رسمي", "template": "عزيزنا {customer_name}، نود إعلامكم بوجود مستحقات بقيمة {debt_amount} دج. نرجو التسديد في أقرب وقت."},

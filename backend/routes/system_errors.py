@@ -124,7 +124,7 @@ async def get_system_errors(
 
 @router.post("", response_model=SystemErrorResponse)
 @rate_limit("20/minute")
-async def create_system_error(request: Request, error: SystemErrorCreate):
+async def create_system_error(request: Request, error: SystemErrorCreate, admin: dict = Depends(verify_super_admin)):
     """Log a new system error (can be called by system or manually)"""
     if len(json.dumps(error.details or {}, ensure_ascii=False)) > 16384:
         raise HTTPException(status_code=413, detail="details too large")

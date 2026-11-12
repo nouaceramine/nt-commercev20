@@ -153,7 +153,7 @@ async def generate_social_post(data: dict, admin: dict = Depends(get_tenant_admi
     return result
 
 @router.get("/status")
-async def ai_status():
+async def ai_status(admin: dict = Depends(get_tenant_admin)):
     """يتحقق من حالة AI"""
     return {
         "configured": ai_service.is_configured(),
