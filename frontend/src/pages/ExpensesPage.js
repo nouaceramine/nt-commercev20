@@ -183,6 +183,10 @@ export default function ExpensesPage() {
       };
       if (expenseData.currency === 'USD') {  // p111
         expenseData.exchange_rate = parseFloat(formData.exchange_rate) || 0;
+      } else {
+        // p495: DZD expenses do not submit the USD-only field; an empty
+        // string is rejected by the API's Optional[float] contract (422).
+        delete expenseData.exchange_rate;
       }
 
       if (editingExpense) {
@@ -214,6 +218,7 @@ export default function ExpensesPage() {
       fetchExpenses();
       fetchStats();
       fetchReminders();
+      fetchUsdWallet();  // p495: deleting a USD expense restores its wallet layer immediately
     } catch (_error) {
       toast.error(t.somethingWentWrong);
     }
