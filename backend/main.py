@@ -1313,6 +1313,7 @@ _AUTO_REG_MODULES = [
     'routes.quotations_routes',  # M1: quotations module pack
     'routes.gift_cards_routes',  # M2: gift cards module pack
     'routes.fixed_assets_routes',  # M3: fixed assets + depreciation
+    'routes.cod_settlements_routes',  # M4: COD settlement batches
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
