@@ -43,7 +43,10 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
     @router.post("/init-default-data")
     async def api_init_default_data(admin: dict = Depends(get_tenant_admin)):
         """Initialize default data for existing tenant"""
-        tenant_db = get_tenant_db(admin["tenant_id"])
+        tenant_id = admin.get("tenant_id")
+        if not tenant_id:
+            raise HTTPException(status_code=403, detail="هذا المسار مخصص لحسابات المتاجر فقط")
+        tenant_db = get_tenant_db(tenant_id)
         await init_default_data(tenant_db)
         return {"message": "تم تهيئة البيانات الافتراضية بنجاح", "status": "success"}
 
