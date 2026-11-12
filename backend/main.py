@@ -1312,6 +1312,7 @@ _AUTO_REG_MODULES = [
     'routes.store_multi_routes',  # p250: multi-store per tenant
     'routes.quotations_routes',  # M1: quotations module pack
     'routes.gift_cards_routes',  # M2: gift cards module pack
+    'routes.fixed_assets_routes',  # M3: fixed assets + depreciation
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

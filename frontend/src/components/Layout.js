@@ -19,6 +19,7 @@ import {
   Menu, 
   X,
   Search as _Search,
+  Building2,
   Globe,
   Gift,
   Inbox,
@@ -498,6 +499,7 @@ export const Layout = ({ children }) => {
         { path: '/sales', icon: Receipt, label: t.sales, subFeature: 'invoices' },
         { path: '/quotations', icon: FileText, label: language === 'ar' ? 'عروض الأسعار' : 'Devis' },  // M1
         { path: '/gift-cards', icon: Gift, label: language === 'ar' ? 'بطاقات الهدايا' : 'Cartes cadeaux' },  // M2
+        { path: '/fixed-assets', icon: Building2, label: language === 'ar' ? 'الأصول الثابتة' : 'Immobilisations' },  // M3
         { path: '/installments', icon: CreditCard, label: language === 'ar' ? 'الأقساط' : 'Versements' },
         { path: '/daily-sessions', icon: Clock, label: language === 'ar' ? 'حصص البيع' : 'Sessions' },
         { path: '/daily-report', icon: Calendar, label: language === 'ar' ? 'التقرير اليومي' : 'Rapport Journalier' },

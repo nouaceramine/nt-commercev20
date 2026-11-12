@@ -160,6 +160,7 @@ const AutoReportsPage = lazy(() => import("./pages/AutoReportsPage"));  // p273
 const CommissionsPage = lazy(() => import("./pages/CommissionsPage"));  // p273  // p221
 const QuotationsPage = lazy(() => import("./pages/QuotationsPage"));  // M1
 const GiftCardsPage = lazy(() => import("./pages/GiftCardsPage"));  // M2
+const FixedAssetsPage = lazy(() => import("./pages/FixedAssetsPage"));  // M3
 const MarginRulesPage = lazy(() => import("./pages/MarginRulesPage"));  // p273  // p223
 const MarketplacePage = lazy(() => import("./pages/MarketplacePage"));  // p273  // p227
 
@@ -543,6 +544,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <GiftCardsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-assets"
+        element={
+          <ProtectedRoute>
+            <FixedAssetsPage />
           </ProtectedRoute>
         }
       />
