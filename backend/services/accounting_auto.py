@@ -2,6 +2,7 @@
 # Called from event consumers; writes into the TENANT database.
 # Entries mirror the manual create_journal_entry logic (balanced lines +
 # account balance mirrors), but are born approved and tagged source='auto'.
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -382,13 +383,36 @@ async def post_expense_entry(tdb, payload: dict):
     )
 
 
+async def _wait_for_source_entry(tdb, reference_id: str, source_tag: str,
+                                  expected: bool, timeout_s: float = 8.0) -> bool:
+    """Wait out short outbox fan-out reordering for a prerequisite entry."""
+    if not reference_id:
+        return False
+    if await already_posted(tdb, reference_id, source_tag):
+        return True
+    if not expected:
+        return False
+    for _ in range(max(1, int(timeout_s / 0.25))):
+        await asyncio.sleep(0.25)
+        if await already_posted(tdb, reference_id, source_tag):
+            return True
+    return False
+
+
 async def post_expense_reversal(tdb, payload: dict):
     """expense.deleted → mirror of the expense entry (if one was posted)."""
     expense_id = payload.get("expense_id")
     if not expense_id or await already_posted(tdb, expense_id, "expense_reversal"):
         return None
-    if not await already_posted(tdb, expense_id, "expense"):
-        return None  # no entry was ever posted (USD / no payment method)
+    amount = float(payload.get("amount", 0) or 0)
+    expects_original = (
+        (payload.get("currency") or "DZD") == "DZD"
+        and bool(payload.get("payment_method")) and amount > 0
+    )
+    if not await _wait_for_source_entry(tdb, expense_id, "expense", expects_original):
+        return None  # no entry was ever posted (USD / no payment method / legacy)
+    if not payload.get("payment_method"):
+        return None  # p495: deleted legacy/ghost-box expense has no real box refund
     accounts = await ensure_accounts(tdb)
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
@@ -596,7 +620,11 @@ async def post_expense_adjustment(tdb, payload: dict):
     new_amount = float(payload.get("new_amount", 0) or 0)
     old_method = payload.get("old_payment_method")
     new_method = payload.get("new_payment_method")
-    had_entry = bool(expense_id) and await already_posted(tdb, expense_id, "expense")
+    expects_original = (
+        currency == "DZD" and bool(old_method) and old_amount > 0
+    )
+    had_entry = bool(expense_id) and await _wait_for_source_entry(
+        tdb, expense_id, "expense", expects_original)
     # USD expenses never touch the journal (cash moved at the dollar purchase)
     can_post_new = currency == "DZD" and bool(new_method) and new_amount > 0
     if not had_entry and not can_post_new:
