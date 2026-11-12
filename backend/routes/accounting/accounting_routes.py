@@ -2,22 +2,123 @@
 Accounting Routes for NT Commerce
 Handles journal entries, invoices, payments, and financial reports
 """
+import asyncio
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 import uuid
 
-from config.database import db
+from config.database import db, client as _client, main_db as _main_db
 from utils.auth import get_current_user
+from utils.permissions import create_permission_checker
 from services.accounting_auto import (
     ensure_accounts, _insert_entry, _line, BOX_ACCOUNT,
 )
-from pymongo.errors import DuplicateKeyError
+from services.code_generator import next_code
+from services.outbox import outbox_write
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/accounting", tags=["Accounting"])
+
+# p495: accounting WRITES are finance-grade operations. Reads stay on plain
+# authentication; writes require the financial-reports permission (admin
+# roles bypass inside the checker, exactly like other modules).
+_require_permission = create_permission_checker(db, get_current_user)
+require_finance = _require_permission("reports.financial")
+
+_ACCOUNT_TYPES = {"asset", "liability", "equity", "revenue", "expense"}
+
+
+def _req_text(value, label: str) -> str:
+    text = value.strip() if isinstance(value, str) else ""
+    if not text:
+        raise HTTPException(status_code=400, detail=f"{label} مطلوب")
+    if len(text) > 300:
+        raise HTTPException(status_code=400, detail=f"{label} طويل جداً")
+    return text
+
+
+def _money(value, label: str, allow_zero: bool = False) -> float:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صالح")
+    if not math.isfinite(amount) or amount < 0 or (not allow_zero and amount <= 0):
+        raise HTTPException(status_code=400,
+                            detail=f"{label} يجب أن يكون {'لا يقل عن صفر' if allow_zero else 'أكبر من صفر'}")
+    return round(amount, 2)
+
+
+def _iso_date(value, label: str) -> str:
+    if not value or not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{label} مطلوب")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صالح")
+    return parsed.date().isoformat()
+
+
+def _page_limit(page: int, limit: int, max_limit: int = 500):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="رقم الصفحة غير صالح")
+    if limit < 1 or limit > max_limit:
+        raise HTTPException(status_code=400, detail="حجم الصفحة غير صالح")
+    return page, limit
+
+
+async def _validated_lines(lines) -> list:
+    """p495: every journal line must reference a REAL account, carry finite
+    non-negative amounts, never both sides at once, never an all-zero line."""
+    if not isinstance(lines, list) or not lines:
+        raise HTTPException(status_code=400, detail="القيد بلا أسطر — أضف سطراً واحداً على الأقل")
+    cleaned = []
+    for raw in lines:
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail="سطر قيد غير صالح")
+        try:
+            debit = float(raw.get("debit") or 0)
+            credit = float(raw.get("credit") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="مبلغ سطر القيد غير صالح")
+        if not math.isfinite(debit) or not math.isfinite(credit):
+            raise HTTPException(status_code=400, detail="مبلغ سطر القيد غير صالح")
+        if debit < 0 or credit < 0:
+            raise HTTPException(status_code=400, detail="مبالغ القيد لا تقبل السالب")
+        if debit > 0 and credit > 0:
+            raise HTTPException(status_code=400, detail="السطر لا يكون مديناً ودائناً معاً")
+        if debit == 0 and credit == 0:
+            raise HTTPException(status_code=400, detail="سطر بمبلغ صفر")
+        account_id = raw.get("account_id")
+        acc = await db.accounts.find_one({"id": account_id}, {"_id": 0}) if account_id else None
+        if not acc:
+            raise HTTPException(status_code=400, detail="حساب غير موجود في دليل الحسابات")
+        cleaned.append({
+            "account_id": acc["id"],
+            "account_code": acc.get("code"),
+            "account_name": raw.get("account_name") or acc.get("name_ar") or acc.get("name"),
+            "debit": round(debit, 2),
+            "credit": round(credit, 2),
+        })
+    return cleaned
+
+
+async def _tx_retry(fn, *args):
+    """Run the async callable fn() inside a Mongo transaction, retrying on
+    transient conflicts (4 uvicorn workers make races real)."""
+    for attempt in range(5):
+        try:
+            async with await _client.start_session() as _tx:
+                async with _tx.start_transaction():
+                    return await fn(_tx)
+        except PyMongoError as exc:
+            if not exc.has_error_label("TransientTransactionError") or attempt == 4:
+                raise
+            await asyncio.sleep(0.15 * (attempt + 1))
 
 
 # ============ CHART OF ACCOUNTS ============
@@ -39,19 +140,24 @@ async def get_accounts(
     return accounts
 
 @router.post("/accounts", status_code=201)
-async def create_account(account: dict, user=Depends(get_current_user)):
+async def create_account(account: dict, user=Depends(require_finance)):
     """Create a new account"""
+    code = _req_text(account.get("code"), "رمز الحساب")
+    name = _req_text(account.get("name"), "اسم الحساب")
+    account_type = account.get("account_type")
+    if account_type not in _ACCOUNT_TYPES:
+        raise HTTPException(status_code=400, detail="نوع الحساب غير صالح")
     # Check for duplicate code
-    existing = await db.accounts.find_one({"code": account["code"]})
+    existing = await db.accounts.find_one({"code": code})
     if existing:
         raise HTTPException(status_code=409, detail="Account code already exists")
-    
+
     account_doc = {
         "id": str(uuid.uuid4()),
-        "code": account["code"],
-        "name": account["name"],
-        "name_ar": account.get("name_ar", account["name"]),
-        "account_type": account["account_type"],
+        "code": code,
+        "name": name,
+        "name_ar": account.get("name_ar") or name,
+        "account_type": account_type,
         "parent_id": account.get("parent_id"),
         "description": account.get("description", ""),
         "balance": 0,
@@ -84,6 +190,7 @@ async def get_journal_entries(
     if status:
         query["status"] = status
     
+    page, limit = _page_limit(page, limit)
     skip = (page - 1) * limit
     entries = await db.journal_entries.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.journal_entries.count_documents(query)
@@ -91,31 +198,34 @@ async def get_journal_entries(
     return {"items": entries, "total": total, "page": page, "limit": limit}
 
 @router.post("/journal-entries", status_code=201)
-async def create_journal_entry(entry: dict, user=Depends(get_current_user)):
+async def create_journal_entry(entry: dict, user=Depends(require_finance)):
     """Create a new journal entry"""
-    # Validate balanced entry
-    lines = entry.get("lines", [])
-    total_debit = sum(line.get("debit", 0) for line in lines)
-    total_credit = sum(line.get("credit", 0) for line in lines)
+    # p495: validate every line (real accounts, finite one-sided non-negative
+    # amounts) BEFORE any write; NaN can no longer slip past the balance check.
+    lines = await _validated_lines(entry.get("lines"))
+    total_debit = round(sum(line["debit"] for line in lines), 2)
+    total_credit = round(sum(line["credit"] for line in lines), 2)
     
     if abs(total_debit - total_credit) > 0.01:
         raise HTTPException(status_code=400, detail="Journal entry must be balanced")
 
+    date = _iso_date(entry.get("date"), "تاريخ القيد")
+    description = _req_text(entry.get("description"), "وصف القيد")
+
     # p209: entries dated in a closed fiscal year are forbidden
-    _yr = str(entry.get("date", ""))[:4]
+    _yr = date[:4]
     if _yr in await _closed_fiscal_years(db):
         raise HTTPException(status_code=403, detail=f"السنة المالية {_yr} مقفلة — لا يمكن إضافة قيود إليها")
 
-    # Generate entry number
-    count = await db.journal_entries.count_documents({})
-    entry_number = f"JE{str(count + 1).zfill(6)}"
-    
+    # p495: atomic counter — 4 workers can no longer draw the same JE number
+    entry_number = await next_code(db, "journal_entries", "JE", 6, False, "entry_number")
+
     entry_doc = {
         "id": str(uuid.uuid4()),
         "entry_number": entry_number,
-        "date": entry["date"],
-        "reference": entry.get("reference", ""),
-        "description": entry["description"],
+        "date": date,
+        "reference": (entry.get("reference") or "")[:200],
+        "description": description,
         "lines": lines,
         "total_debit": total_debit,
         "total_credit": total_credit,
@@ -127,22 +237,24 @@ async def create_journal_entry(entry: dict, user=Depends(get_current_user)):
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
-    await db.journal_entries.insert_one(entry_doc)
-    
-    # Update account balances
-    for line in lines:
-        if line.get("account_id"):
-            balance_change = line.get("debit", 0) - line.get("credit", 0)
+    # p495: entry insert + account mirror updates commit or abort together
+    async def _work(_tx):
+        entry_doc.pop("_id", None)
+        await db.journal_entries.insert_one(entry_doc, session=_tx)
+        for line in lines:
+            balance_change = line["debit"] - line["credit"]
             await db.accounts.update_one(
                 {"id": line["account_id"]},
-                {"$inc": {"balance": balance_change}}
+                {"$inc": {"balance": balance_change}},
+                session=_tx,
             )
-    
+    await _tx_retry(_work)
+
     entry_doc.pop("_id", None)  # p196: insert_one mutates the doc — ObjectId breaks JSON serialization (500)
     return entry_doc
 
 @router.put("/journal-entries/{entry_id}/approve")
-async def approve_journal_entry(entry_id: str, user=Depends(get_current_user)):
+async def approve_journal_entry(entry_id: str, user=Depends(require_finance)):
     """Approve a journal entry"""
     # p209: approving an entry dated in a closed fiscal year is forbidden
     _doc = await db.journal_entries.find_one({"id": entry_id, "status": "pending"}, {"date": 1})
@@ -194,7 +306,8 @@ async def get_invoices(
         query["issue_date"] = {"$gte": start_date}
     if end_date:
         query.setdefault("issue_date", {})["$lte"] = end_date
-    
+
+    page, limit = _page_limit(page, limit)
     skip = (page - 1) * limit
     invoices = await db.invoices.find(query, {"_id": 0}).sort("issue_date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.invoices.count_documents(query)
@@ -202,31 +315,49 @@ async def get_invoices(
     return {"items": invoices, "total": total, "page": page, "limit": limit}
 
 @router.post("/invoices", status_code=201)
-async def create_invoice(invoice: dict, user=Depends(get_current_user)):
+async def create_invoice(invoice: dict, user=Depends(require_finance)):
     """Create a new invoice"""
-    # Calculate totals
-    items = invoice.get("items", [])
-    subtotal = sum(item.get("quantity", 1) * item.get("unit_price", 0) for item in items)
-    tax_amount = invoice.get("tax_amount", 0)
-    discount_amount = invoice.get("discount_amount", 0)
-    total = subtotal + tax_amount - discount_amount
-    
-    # Generate invoice number
-    invoice_type = invoice.get("invoice_type", "sales")
-    prefix = "INV" if invoice_type == "sales" else "BILL"
-    count = await db.invoices.count_documents({"invoice_type": invoice_type})
-    invoice_number = f"{prefix}{str(count + 1).zfill(6)}"
-    
-    # Get customer/supplier name
+    # p495: validate parties, items, money and dates BEFORE any write
+    invoice_type = invoice.get("invoice_type") or "sales"
+    if invoice_type not in ("sales", "purchase"):
+        raise HTTPException(status_code=400, detail="نوع الفاتورة غير صالح")
+    items = invoice.get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="الفاتورة بلا بنود")
+    clean_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="بند فاتورة غير صالح")
+        qty = _money(item.get("quantity", 1), "كمية البند")
+        price = _money(item.get("unit_price", 0), "سعر البند", allow_zero=True)
+        clean_items.append({**item, "quantity": qty, "unit_price": price})
+    subtotal = round(sum(i2["quantity"] * i2["unit_price"] for i2 in clean_items), 2)
+    tax_amount = _money(invoice.get("tax_amount", 0), "مبلغ الضريبة", allow_zero=True)
+    discount_amount = _money(invoice.get("discount_amount", 0), "مبلغ الخصم", allow_zero=True)
+    total = round(subtotal + tax_amount - discount_amount, 2)
+    if total < 0:
+        raise HTTPException(status_code=400, detail="إجمالي الفاتورة لا يمكن أن يكون سالباً")
+    issue_date = _iso_date(invoice.get("issue_date"), "تاريخ الإصدار")
+    due_date = _iso_date(invoice.get("due_date"), "تاريخ الاستحقاق")
+
+    # Get customer/supplier name — the referenced party must exist
     customer_name = ""
     supplier_name = ""
     if invoice.get("customer_id"):
         customer = await db.customers.find_one({"id": invoice["customer_id"]}, {"_id": 0, "name": 1})
-        customer_name = customer.get("name", "") if customer else ""
+        if not customer:
+            raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        customer_name = customer.get("name", "")
     if invoice.get("supplier_id"):
         supplier = await db.suppliers.find_one({"id": invoice["supplier_id"]}, {"_id": 0, "name": 1})
-        supplier_name = supplier.get("name", "") if supplier else ""
-    
+        if not supplier:
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
+        supplier_name = supplier.get("name", "")
+
+    # p495: atomic per-type numbering (was count+1 — duplicated under 4 workers)
+    prefix = "INV" if invoice_type == "sales" else "BILL"
+    invoice_number = await next_code(db, "invoices", prefix, 6, False, "invoice_number")
+
     invoice_doc = {
         "id": str(uuid.uuid4()),
         "invoice_number": invoice_number,
@@ -235,9 +366,9 @@ async def create_invoice(invoice: dict, user=Depends(get_current_user)):
         "customer_name": customer_name,
         "supplier_id": invoice.get("supplier_id"),
         "supplier_name": supplier_name,
-        "issue_date": invoice["issue_date"],
-        "due_date": invoice["due_date"],
-        "items": items,
+        "issue_date": issue_date,
+        "due_date": due_date,
+        "items": clean_items,
         "subtotal": subtotal,
         "tax_amount": tax_amount,
         "discount_amount": discount_amount,
@@ -252,34 +383,99 @@ async def create_invoice(invoice: dict, user=Depends(get_current_user)):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
-    
+
     await db.invoices.insert_one(invoice_doc)
+    invoice_doc.pop("_id", None)  # p495: insert_one mutates the doc — ObjectId broke JSON (500 after commit)
     return invoice_doc
 
+# p495: only document fields are client-editable; money/state fields
+# (paid_amount, balance_due, status, invoice_number, subtotal, total) are
+# server-owned and rejected explicitly.
+_INVOICE_EDITABLE = {"items", "tax_amount", "discount_amount", "notes", "terms",
+                     "issue_date", "due_date", "currency", "customer_id",
+                     "supplier_id"}
+
+
 @router.put("/invoices/{invoice_id}")
-async def update_invoice(invoice_id: str, updates: dict, user=Depends(get_current_user)):
+async def update_invoice(invoice_id: str, updates: dict, user=Depends(require_finance)):
     """Update an invoice"""
-    # Recalculate if items changed
-    if "items" in updates:
-        items = updates["items"]
-        subtotal = sum(item.get("quantity", 1) * item.get("unit_price", 0) for item in items)
+    rejected = sorted(set(updates) - _INVOICE_EDITABLE)
+    if rejected:
+        raise HTTPException(status_code=400,
+                            detail=f"حقول غير قابلة للتعديل: {', '.join(rejected)}")
+    current = await db.invoices.find_one({"id": invoice_id})
+    if not current:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    merged = {**current, **updates}
+    if "issue_date" in updates:
+        updates["issue_date"] = _iso_date(updates["issue_date"], "تاريخ الإصدار")
+        merged["issue_date"] = updates["issue_date"]
+    if "due_date" in updates:
+        updates["due_date"] = _iso_date(updates["due_date"], "تاريخ الاستحقاق")
+        merged["due_date"] = updates["due_date"]
+    if "customer_id" in updates and updates["customer_id"]:
+        customer = await db.customers.find_one({"id": updates["customer_id"]}, {"_id": 0, "name": 1})
+        if not customer:
+            raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        updates["customer_name"] = customer.get("name", "")
+        merged["customer_name"] = updates["customer_name"]
+    if "supplier_id" in updates and updates["supplier_id"]:
+        supplier = await db.suppliers.find_one({"id": updates["supplier_id"]}, {"_id": 0, "name": 1})
+        if not supplier:
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
+        updates["supplier_name"] = supplier.get("name", "")
+        merged["supplier_name"] = updates["supplier_name"]
+    if "tax_amount" in updates:
+        updates["tax_amount"] = _money(updates["tax_amount"], "مبلغ الضريبة", allow_zero=True)
+        merged["tax_amount"] = updates["tax_amount"]
+    if "discount_amount" in updates:
+        updates["discount_amount"] = _money(updates["discount_amount"], "مبلغ الخصم", allow_zero=True)
+        merged["discount_amount"] = updates["discount_amount"]
+
+    money_touched = {"items", "tax_amount", "discount_amount"} & set(updates)
+    if money_touched:
+        items = merged.get("items") or []
+        if not isinstance(items, list) or not items:
+            raise HTTPException(status_code=400, detail="الفاتورة بلا بنود")
+        clean_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise HTTPException(status_code=400, detail="بند فاتورة غير صالح")
+            qty = _money(item.get("quantity", 1), "كمية البند")
+            price = _money(item.get("unit_price", 0), "سعر البند", allow_zero=True)
+            clean_items.append({**item, "quantity": qty, "unit_price": price})
+        subtotal = round(sum(i2["quantity"] * i2["unit_price"] for i2 in clean_items), 2)
+        # p495: recompute from the MERGED document — stored tax/discount are
+        # no longer silently zeroed when only items change
+        total = round(subtotal + float(merged.get("tax_amount") or 0)
+                      - float(merged.get("discount_amount") or 0), 2)
+        if total < 0:
+            raise HTTPException(status_code=400, detail="إجمالي الفاتورة لا يمكن أن يكون سالباً")
+        paid = round(float(current.get("paid_amount") or 0), 2)
+        if paid > total + 0.005:
+            raise HTTPException(status_code=400, detail="الإجمالي الجديد أقل من المبلغ المدفوع")
+        updates["items"] = clean_items
         updates["subtotal"] = subtotal
-        updates["total"] = subtotal + updates.get("tax_amount", 0) - updates.get("discount_amount", 0)
-    
+        updates["total"] = total
+        updates["balance_due"] = round(max(0.0, total - paid), 2)
+        if paid > 0:
+            updates["status"] = "paid" if total - paid <= 0.005 else "partial"
+
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     result = await db.invoices.update_one(
         {"id": invoice_id},
         {"$set": updates}
     )
-    
-    if result.modified_count == 0:
+
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    
+
     return {"success": True}
 
 @router.put("/invoices/{invoice_id}/send")
-async def send_invoice(invoice_id: str, user=Depends(get_current_user)):
+async def send_invoice(invoice_id: str, user=Depends(require_finance)):
     """Mark invoice as sent"""
     result = await db.invoices.update_one(
         {"id": invoice_id, "status": "draft"},
@@ -308,7 +504,8 @@ async def get_payments(
         query["payment_date"] = {"$gte": start_date}
     if end_date:
         query.setdefault("payment_date", {})["$lte"] = end_date
-    
+
+    page, limit = _page_limit(page, limit)
     skip = (page - 1) * limit
     payments = await db.payments.find(query, {"_id": 0}).sort("payment_date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.payments.count_documents(query)
@@ -316,72 +513,137 @@ async def get_payments(
     return {"items": payments, "total": total, "page": page, "limit": limit}
 
 @router.post("/payments", status_code=201)
-async def create_payment(payment: dict, user=Depends(get_current_user)):
+async def create_payment(payment: dict, user=Depends(require_finance)):
     """Record a payment"""
-    # Generate payment number
-    payment_type = payment.get("payment_type", "received")
-    prefix = "RCP" if payment_type == "received" else "PMT"
-    count = await db.payments.count_documents({"payment_type": payment_type})
-    payment_number = f"{prefix}{str(count + 1).zfill(6)}"
-    
+    # p495: full validation first — no more ghost invoices, ghost boxes,
+    # negative amounts or overpayments moving cash.
+    payment_type = payment.get("payment_type") or "received"
+    if payment_type not in ("received", "made"):
+        raise HTTPException(status_code=400, detail="نوع الدفعة غير صالح")
+    amount = _money(payment.get("amount"), "مبلغ الدفعة")
+    pay_date = _iso_date(payment.get("payment_date"), "تاريخ الدفعة")
+    method = (payment.get("payment_method") or "cash")
+    method = method.strip() if isinstance(method, str) else ""
+    if not await db.cash_boxes.find_one({"id": method}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="الصندوق غير موجود")
+
     # Get customer/supplier name
     customer_name = ""
     supplier_name = ""
     invoice_number = ""
-    
+
     if payment.get("customer_id"):
         customer = await db.customers.find_one({"id": payment["customer_id"]}, {"_id": 0, "name": 1})
-        customer_name = customer.get("name", "") if customer else ""
+        if not customer:
+            raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        customer_name = customer.get("name", "")
     if payment.get("supplier_id"):
         supplier = await db.suppliers.find_one({"id": payment["supplier_id"]}, {"_id": 0, "name": 1})
-        supplier_name = supplier.get("name", "") if supplier else ""
-    if payment.get("invoice_id"):
-        invoice = await db.invoices.find_one({"id": payment["invoice_id"]}, {"_id": 0, "invoice_number": 1})
-        invoice_number = invoice.get("invoice_number", "") if invoice else ""
-    
+        if not supplier:
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
+        supplier_name = supplier.get("name", "")
+    invoice_id = payment.get("invoice_id")
+    if invoice_id:
+        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0, "invoice_number": 1})
+        if not invoice:
+            raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+        invoice_number = invoice.get("invoice_number", "")
+
+    prefix = "RCP" if payment_type == "received" else "PMT"
+    # p495: atomic per-type numbering (was count+1 — duplicated under 4 workers)
+    payment_number = await next_code(db, "payments", prefix, 6, False, "payment_number")
+
     payment_doc = {
         "id": str(uuid.uuid4()),
         "payment_number": payment_number,
         "payment_type": payment_type,
-        "invoice_id": payment.get("invoice_id"),
+        "invoice_id": invoice_id,
         "invoice_number": invoice_number,
         "customer_id": payment.get("customer_id"),
         "customer_name": customer_name,
         "supplier_id": payment.get("supplier_id"),
         "supplier_name": supplier_name,
-        "amount": payment["amount"],
-        "payment_method": payment.get("payment_method", "cash"),
-        "payment_date": payment["payment_date"],
+        "amount": amount,
+        "payment_method": method,
+        "payment_date": pay_date,
         "reference": payment.get("reference", ""),
         "notes": payment.get("notes", ""),
         "status": "completed",
         "created_by": user["id"],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    
-    await db.payments.insert_one(payment_doc)
-    
-    # Update invoice if linked
-    if payment.get("invoice_id"):
-        invoice = await db.invoices.find_one({"id": payment["invoice_id"]})
-        if invoice:
-            new_paid = invoice.get("paid_amount", 0) + payment["amount"]
-            new_balance = invoice.get("total", 0) - new_paid
-            new_status = "paid" if new_balance <= 0 else "partial"
-            
+
+    balance_change = amount if payment_type == "received" else -amount
+    now = datetime.now(timezone.utc).isoformat()
+
+    async def _work(_tx):
+        payment_doc.pop("_id", None)
+        # Re-read inside the transaction: concurrent payments re-evaluate the
+        # remaining balance after each transient-conflict retry.
+        if invoice_id:
+            inv = await db.invoices.find_one({"id": invoice_id}, session=_tx)
+            if not inv:
+                raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+            due = round(float(inv.get("balance_due") or 0), 2)
+            if amount > due + 0.005:
+                raise HTTPException(status_code=400, detail="المبلغ يتجاوز المتبقي على الفاتورة")
+        await db.payments.insert_one(payment_doc, session=_tx)
+        if invoice_id:
+            new_paid = round(float(inv.get("paid_amount") or 0) + amount, 2)
+            new_balance = round(float(inv.get("total") or 0) - new_paid, 2)
+            new_status = "paid" if new_balance <= 0.005 else "partial"
             await db.invoices.update_one(
-                {"id": payment["invoice_id"]},
-                {"$set": {"paid_amount": new_paid, "balance_due": max(0, new_balance), "status": new_status}}
+                {"id": invoice_id},
+                {"$set": {"paid_amount": new_paid,
+                          "balance_due": max(0.0, new_balance),
+                          "status": new_status,
+                          "updated_at": now}},
+                session=_tx,
             )
-    
-    # Update cash box
-    cash_box_id = "cash" if payment.get("payment_method") == "cash" else payment.get("payment_method", "cash")
-    balance_change = payment["amount"] if payment_type == "received" else -payment["amount"]
-    await db.cash_boxes.update_one(
-        {"id": cash_box_id},
-        {"$inc": {"balance": balance_change}}
-    )
-    
+        moved = await db.cash_boxes.update_one(
+            {"id": method},
+            {"$inc": {"balance": balance_change}, "$set": {"updated_at": now}},
+            session=_tx,
+        )
+        if moved.matched_count != 1:
+            raise HTTPException(status_code=400, detail="الصندوق غير موجود")
+        await db.transactions.insert_one(
+            {"id": str(uuid.uuid4()), "cash_box_id": method,
+             "type": "income" if payment_type == "received" else "expense",
+             "amount": amount,
+             "description": f"دفعة {payment_number}" + (f" — فاتورة {invoice_number}" if invoice_number else ""),
+             "reference_type": "accounting_payment",
+             "reference_id": payment_doc["id"],
+             "created_at": now, "created_by": user.get("name", "")},
+            session=_tx,
+        )
+    await _tx_retry(_work)
+
+    # Post the journal entry (cash-basis: collection is revenue, disbursement
+    # is operating expense). The sparse unique (reference_id, source_tag)
+    # index keeps redelivery idempotent.
+    try:
+        accounts = await ensure_accounts(db)
+        box_code = BOX_ACCOUNT.get(method, "530")
+        if payment_type == "received":
+            lines = [_line(accounts[box_code], debit=amount),
+                     _line(accounts["700"], credit=amount)]
+        else:
+            lines = [_line(accounts["610"], debit=amount),
+                     _line(accounts[box_code], credit=amount)]
+        await _insert_entry(
+            db,
+            reference=payment_number,
+            reference_id=payment_doc["id"],
+            source_tag="accounting_payment",
+            description=f"قيد تلقائي — دفعة {payment_number}",
+            lines=lines,
+            date=pay_date,
+        )
+    except Exception:
+        logger.exception("accounting payment journal post failed")
+
+    payment_doc.pop("_id", None)  # p495: ObjectId broke JSON (500 after commit)
     return payment_doc
 
 # ============ EXPENSES ============
@@ -403,7 +665,8 @@ async def get_expenses(
         query["expense_date"] = {"$gte": start_date}
     if end_date:
         query.setdefault("expense_date", {})["$lte"] = end_date
-    
+
+    page, limit = _page_limit(page, limit)
     skip = (page - 1) * limit
     expenses = await db.expenses.find(query, {"_id": 0}).sort("expense_date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.expenses.count_documents(query)
@@ -411,40 +674,76 @@ async def get_expenses(
     return {"items": expenses, "total": total, "page": page, "limit": limit}
 
 @router.post("/expenses", status_code=201)
-async def create_expense(expense: dict, user=Depends(get_current_user)):
-    """Record an expense"""
-    # Generate expense number
-    count = await db.expenses.count_documents({})
-    expense_number = f"EXP{str(count + 1).zfill(6)}"
-    
+async def create_expense(expense: dict, user=Depends(require_finance)):
+    """Record an expense (legacy accounting form — hardened in p495 to the
+    same standard as expenses_routes: validated, atomic, journaled)."""
+    category = _req_text(expense.get("category"), "فئة المصروف")
+    description = _req_text(expense.get("description"), "وصف المصروف")
+    amount = _money(expense.get("amount"), "مبلغ المصروف")
+    exp_date = _iso_date(expense.get("expense_date"), "تاريخ المصروف")
+    method = expense.get("payment_method") or "cash"
+    method = method.strip() if isinstance(method, str) else ""
+    if not await db.cash_boxes.find_one({"id": method}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="الصندوق غير موجود")
+
+    # p495: atomic numbering (was count+1 — duplicated under 4 workers)
+    expense_number = await next_code(db, "expenses", "EXP", 6, False, "expense_number")
+
     expense_doc = {
         "id": str(uuid.uuid4()),
         "expense_number": expense_number,
-        "category": expense["category"],
-        "description": expense["description"],
-        "amount": expense["amount"],
-        "expense_date": expense["expense_date"],
-        "payment_method": expense.get("payment_method", "cash"),
+        "category": category,
+        "description": description,
+        "title": description,
+        "date": exp_date,
+        "amount": amount,
+        "expense_date": exp_date,
+        "payment_method": method,
         "vendor": expense.get("vendor", ""),
         "receipt_url": expense.get("receipt_url", ""),
         "account_id": expense.get("account_id"),
         "notes": expense.get("notes", ""),
         "is_recurring": expense.get("is_recurring", False),
         "recurring_frequency": expense.get("recurring_frequency"),
+        "currency": "DZD",
         "status": "recorded",
         "created_by": user["id"],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    
-    await db.expenses.insert_one(expense_doc)
-    
-    # Update cash box
-    cash_box_id = "cash" if expense.get("payment_method") == "cash" else expense.get("payment_method", "cash")
-    await db.cash_boxes.update_one(
-        {"id": cash_box_id},
-        {"$inc": {"balance": -expense["amount"]}}
-    )
-    
+    now = datetime.now(timezone.utc).isoformat()
+
+    async def _work(_tx):
+        expense_doc.pop("_id", None)
+        await db.expenses.insert_one(expense_doc, session=_tx)
+        moved = await db.cash_boxes.update_one(
+            {"id": method},
+            {"$inc": {"balance": -amount}, "$set": {"updated_at": now}},
+            session=_tx,
+        )
+        if moved.matched_count != 1:
+            raise HTTPException(status_code=400, detail="الصندوق غير موجود")
+        await db.transactions.insert_one(
+            {"id": str(uuid.uuid4()), "cash_box_id": method, "type": "expense",
+             "amount": amount, "description": f"مصروف - {description}",
+             "reference_type": "expense", "reference_id": expense_doc["id"],
+             "created_at": now, "created_by": user.get("name", "")},
+            session=_tx,
+        )
+        # p495: outbox → auto journal entry (expense.created) — cash out is
+        # no longer invisible to the books
+        await outbox_write(
+            _main_db,
+            "expense.created",
+            {"expense_id": expense_doc["id"], "code": expense_number,
+             "title": description, "amount": amount, "currency": "DZD",
+             "payment_method": method, "category": category},
+            tenant_id=user.get("tenant_id") or "platform",
+            source="accounting_routes",
+            session=_tx,
+        )
+    await _tx_retry(_work)
+
+    expense_doc.pop("_id", None)  # p495: ObjectId broke JSON (500 after commit)
     return expense_doc
 
 # ============ FINANCIAL REPORTS ============
@@ -935,7 +1234,7 @@ async def opening_balance_preview(user=Depends(get_current_user)):
 
 
 @router.post("/opening-balance/apply")
-async def opening_balance_apply(body: Optional[dict] = None, user=Depends(get_current_user)):
+async def opening_balance_apply(body: Optional[dict] = None, user=Depends(require_finance)):
     """p199: post the opening-balance entry. Idempotent via the unique
     (reference_id, source_tag) index; force=true posts a delta adjustment
     under a fresh OPENING-n reference."""
@@ -1159,7 +1458,8 @@ async def get_audit_log(
         query["created_at"] = {"$gte": start_date}
     if end_date:
         query.setdefault("created_at", {})["$lte"] = end_date
-    
+
+    page, limit = _page_limit(page, limit)
     skip = (page - 1) * limit
     logs = await db.audit_logs.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.audit_logs.count_documents(query)
@@ -1234,7 +1534,7 @@ async def fiscal_close_preview(year: str, user=Depends(get_current_user)):
 
 
 @router.post("/fiscal-close")
-async def fiscal_close_apply(body: dict, user=Depends(get_current_user)):
+async def fiscal_close_apply(body: dict, user=Depends(require_finance)):
     """p209: close a fiscal year — carry the result to capital 101 and zero
     7xx/6xx via one approved entry dated YYYY-12-31. Idempotent per year."""
     year = str((body or {}).get("year", ""))

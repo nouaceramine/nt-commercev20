@@ -6,7 +6,6 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from pymongo.errors import DuplicateKeyError
 
 log = logging.getLogger("accounting_auto")
 
@@ -96,19 +95,15 @@ async def _insert_entry(tdb, *, reference, reference_id, source_tag, description
     }
     if extra:
         doc.update(extra)
-    # p206: 4-worker race guard — two DIFFERENT entries can compute the same
-    # count+1 entry_number concurrently; the unique index rejects the loser.
-    # Retry with a fresh count (the auto_entry_unique dup still propagates).
-    for _attempt in range(4):
-        count = await tdb.journal_entries.count_documents({})
-        doc["entry_number"] = f"JE{str(count + 1).zfill(6)}"
-        try:
-            await tdb.journal_entries.insert_one(doc)
-            break
-        except DuplicateKeyError as exc:
-            if "entry_number" in str(exc) and _attempt < 3:
-                continue
-            raise
+    # p495: manual entries draw from the atomic _code_counters sequence since
+    # p495b — auto entries MUST use the same sequence or the two numbering
+    # schemes collide (seen live: auto RCP entry and a UI entry both numbered
+    # JE000008 on a tenant DB missing the entry_number unique index).
+    # The auto_entry_unique dup guard still propagates.
+    from services.code_generator import next_code
+    doc["entry_number"] = await next_code(
+        tdb, "journal_entries", "JE", 6, False, "entry_number")
+    await tdb.journal_entries.insert_one(doc)
     for line in lines:
         change = line["debit"] - line["credit"]
         if change:

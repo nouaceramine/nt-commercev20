@@ -186,6 +186,16 @@ async def init_tenant_database(tenant_id: str) -> AsyncIOMotorDatabase:
     except Exception as exc:
         logger.warning("customers uniq_phone_nonempty on new tenant %s: %s", tenant_id, exc)
 
+    # p495: journal entry numbers are unique per tenant. Fresh DBs get the
+    # index at provisioning; existing DBs keep the p495 atomic counter as
+    # their guard (a unique index cannot be imposed on legacy DBs blindly —
+    # pre-p495 count+1 races may already have duplicated numbers there).
+    try:
+        await tenant_db.journal_entries.create_index(
+            "entry_number", name="uniq_entry_number", unique=True)
+    except Exception as exc:
+        logger.warning("journal_entries uniq_entry_number on new tenant %s: %s", tenant_id, exc)
+
     # Initialize cash boxes
     boxes = [
         {"id": "cash", "name": "الصندوق النقدي", "name_fr": "Caisse", "type": "cash", "balance": 0},
