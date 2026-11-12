@@ -1,4 +1,5 @@
 """p221: commission rules CRUD + commission ledger + payout (tenant-scoped)."""
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,8 +32,10 @@ def create_commissions_routes(db, get_current_user) -> dict:
             raise HTTPException(status_code=400, detail="نطاق غير صالح")
         if r.rate_type not in ("percent", "fixed"):
             raise HTTPException(status_code=400, detail="نوع النسبة غير صالح")
-        if r.value <= 0:
+        if not math.isfinite(r.value) or r.value <= 0:
             raise HTTPException(status_code=400, detail="القيمة يجب أن تكون أكبر من صفر")
+        if not math.isfinite(r.min_amount) or r.min_amount < 0:
+            raise HTTPException(status_code=400, detail="الحد الأدنى غير صالح")
         if r.rate_type == "percent" and r.value > 100:
             raise HTTPException(status_code=400, detail="النسبة لا تتجاوز 100%")
         if r.scope == "family" and not r.family_id:
@@ -61,6 +64,10 @@ def create_commissions_routes(db, get_current_user) -> dict:
     @router.put("/rules/{rule_id}")
     async def update_rule(rule_id: str, rule: RuleIn, user: dict = Depends(require_permission("sales.edit"))):
         _validate_rule(rule)
+        if rule.scope == "family":
+            fam = await db.product_families.find_one({"id": rule.family_id}, {"_id": 0, "id": 1})
+            if not fam:
+                raise HTTPException(status_code=400, detail="العائلة المحددة غير موجودة")
         res = await db.commission_rules.update_one(
             {"id": rule_id},
             {"$set": {**rule.dict(), "updated_at": _now()}},
@@ -132,40 +139,66 @@ def create_commissions_routes(db, get_current_user) -> dict:
             raise HTTPException(status_code=404, detail="العمولة غير موجودة")
         if commission.get("status") != "pending":
             raise HTTPException(status_code=400, detail="العمولة ليست معلقة")
+        try:
+            amount = float(commission.get("amount"))
+        except (TypeError, ValueError):
+            amount = float("nan")
+        if not math.isfinite(amount) or amount <= 0:
+            raise HTTPException(status_code=400, detail="مبلغ العمولة غير صالح")
         box = await db.cash_boxes.find_one({"id": body.payment_method}, {"_id": 0, "id": 1, "balance": 1})
         if not box:
             raise HTTPException(status_code=400, detail="صندوق غير موجود")
         from config.database import client as _client
+        from pymongo.errors import OperationFailure
         now = _now()
-        async with await _client.start_session() as _tx:
-            async with _tx.start_transaction():
-                await db.commissions.update_one(
-                    {"id": commission_id},
-                    {"$set": {"status": "paid", "paid_at": now, "paid_by": user.get("name", ""),
-                              "payment_method": body.payment_method}},
-                    session=_tx,
-                )
-                await db.cash_boxes.update_one(
-                    {"id": body.payment_method},
-                    {"$inc": {"balance": -float(commission["amount"])}, "$set": {"updated_at": now}},
-                    session=_tx,
-                )
-                await db.transactions.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "cash_box_id": body.payment_method,
-                    "type": "expense",
-                    "amount": float(commission["amount"]),
-                    "description": f"دفع عمولة — {commission.get('beneficiary', '')} (فاتورة {commission.get('invoice_number', '')})",
-                    "reference_type": "commission_payout",
-                    "reference_id": commission_id,
-                    "created_at": now,
-                    "created_by": user.get("name", ""),
-                }, session=_tx)
+        # Concurrent payouts conflict on the commission document (WriteConflict
+        # 112 / TransientTransactionError); retry so the loser re-reads the
+        # claimed document and exits with the deterministic 400 below.
+        for _attempt in range(3):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        # Atomic claim: exactly one concurrent payout wins.
+                        claim = await db.commissions.update_one(
+                            {"id": commission_id, "status": "pending"},
+                            {"$set": {"status": "paid", "paid_at": now, "paid_by": user.get("name", ""),
+                                      "payment_method": body.payment_method}},
+                            session=_tx,
+                        )
+                        if not claim.modified_count:
+                            raise HTTPException(status_code=400, detail="العمولة ليست معلقة")
+                        # Balance-guarded decrement: payout never overdraws the box.
+                        dec = await db.cash_boxes.update_one(
+                            {"id": body.payment_method, "balance": {"$gte": amount}},
+                            {"$inc": {"balance": -amount}, "$set": {"updated_at": now}},
+                            session=_tx,
+                        )
+                        if not dec.modified_count:
+                            raise HTTPException(status_code=400, detail="رصيد الصندوق غير كافٍ")
+                        await db.transactions.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "cash_box_id": body.payment_method,
+                            "type": "expense",
+                            "amount": amount,
+                            "description": f"دفع عمولة — {commission.get('beneficiary', '')} (فاتورة {commission.get('invoice_number', '')})",
+                            "reference_type": "commission_payout",
+                            "reference_id": commission_id,
+                            "created_at": now,
+                            "created_by": user.get("name", ""),
+                        }, session=_tx)
+                break
+            except HTTPException:
+                raise
+            except OperationFailure as exc:
+                transient = (exc.code == 112
+                             or exc.has_error_label("TransientTransactionError"))
+                if not transient or _attempt == 2:
+                    raise
         from services.accounting_auto import post_commission_payout
         await post_commission_payout(
-            db, commission_id=commission_id, amount=float(commission["amount"]),
+            db, commission_id=commission_id, amount=amount,
             beneficiary=commission.get("beneficiary", ""), payment_method=body.payment_method,
         )
-        return {"status": "paid", "amount": commission["amount"]}
+        return {"status": "paid", "amount": amount}
 
     return {"commissions": router}

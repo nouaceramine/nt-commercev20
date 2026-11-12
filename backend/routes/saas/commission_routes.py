@@ -166,13 +166,34 @@ async def agent_commission_history(
     return records
 
 
+async def _acquire_withdraw_lock(agent_id: str) -> bool:
+    """Atomic per-agent mutex on the agent document (works across workers).
+    Stale locks older than 60s are stealable so a crashed request cannot
+    deadlock the agent forever."""
+    stale_before = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    doc = await db.saas_agents.find_one_and_update(
+        {"id": agent_id,
+         "$or": [{"wd_lock": {"$ne": True}},
+                 {"wd_lock_at": {"$lt": stale_before}}]},
+        {"$set": {"wd_lock": True, "wd_lock_at": now}},
+    )
+    return doc is not None
+
+
+async def _release_withdraw_lock(agent_id: str) -> None:
+    await db.saas_agents.update_one(
+        {"id": agent_id}, {"$unset": {"wd_lock": "", "wd_lock_at": ""}})
+
+
 @router.post("/saas/agent/commissions/withdraw-request")
 async def agent_withdraw_request(data: dict, agent: dict = Depends(get_current_agent)):
     """
     Agent requests a withdrawal of AVAILABLE commission balance.
     The requested amount is reserved (not deducted yet) until admin resolves.
+    The balance check and the insert run under a per-agent atomic lock so
+    concurrent requests can never overbook the available balance.
     """
-    await promote_pending_commissions()
     try:
         amount = float(data.get("amount", 0) or 0)
     except (TypeError, ValueError):
@@ -180,34 +201,41 @@ async def agent_withdraw_request(data: dict, agent: dict = Depends(get_current_a
     if not math.isfinite(amount) or amount <= 0:
         raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون رقماً موجباً صحيحاً")
 
-    summary = await get_commission_summary(agent["id"])
-    # Effective available = available minus already-reserved
-    effective_available = summary["available"] - summary["reserved"]
-    if amount > effective_available:
-        raise HTTPException(
-            status_code=400,
-            detail=f"المبلغ المطلوب ({amount}) يتجاوز الرصيد المتاح ({effective_available:.2f})",
-        )
+    if not await _acquire_withdraw_lock(agent["id"]):
+        raise HTTPException(status_code=409,
+                            detail="هناك طلب سحب قيد المعالجة، أعد المحاولة")
+    try:
+        await promote_pending_commissions()
+        summary = await get_commission_summary(agent["id"])
+        # Effective available = available minus already-reserved
+        effective_available = summary["available"] - summary["reserved"]
+        if amount > effective_available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"المبلغ المطلوب ({amount}) يتجاوز الرصيد المتاح ({effective_available:.2f})",
+            )
 
-    bank_details = data.get("bank_details", "")
-    note = data.get("note", "")
+        bank_details = data.get("bank_details", "")
+        note = data.get("note", "")
 
-    rec = {
-        "id": str(uuid.uuid4()),
-        "agent_id": agent["id"],
-        "agent_name": agent.get("name", agent.get("email", "")),
-        "amount": amount,
-        "bank_details": bank_details,
-        "note": note,
-        "status": "pending_approval",
-        "reject_reason": "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "resolved_at": None,
-        "resolved_by": None,
-    }
-    await db.agent_withdrawals.insert_one(rec)
-    rec.pop("_id", None)
-    return rec
+        rec = {
+            "id": str(uuid.uuid4()),
+            "agent_id": agent["id"],
+            "agent_name": agent.get("name", agent.get("email", "")),
+            "amount": amount,
+            "bank_details": bank_details,
+            "note": note,
+            "status": "pending_approval",
+            "reject_reason": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "resolved_at": None,
+            "resolved_by": None,
+        }
+        await db.agent_withdrawals.insert_one(rec)
+        rec.pop("_id", None)
+        return rec
+    finally:
+        await _release_withdraw_lock(agent["id"])
 
 
 @router.get("/saas/agent/commissions/withdrawals")
@@ -381,8 +409,8 @@ async def admin_reject_withdrawal(
     resolved_by = admin.get("email", admin.get("id", "admin"))
     reason = (data or {}).get("reason", "") if data else ""
 
-    await db.agent_withdrawals.update_one(
-        {"id": withdrawal_id},
+    res = await db.agent_withdrawals.update_one(
+        {"id": withdrawal_id, "status": "pending_approval"},
         {"$set": {
             "status": "rejected",
             "reject_reason": reason,
@@ -390,6 +418,8 @@ async def admin_reject_withdrawal(
             "resolved_by": resolved_by,
         }},
     )
+    if not res.modified_count:
+        raise HTTPException(status_code=409, detail="تمت معالجة هذا الطلب مسبقاً (تعارض متزامن)")
     return {"message": "تم رفض طلب السحب"}
 
 
@@ -487,16 +517,22 @@ async def put_service_commission_config(service: str, body: dict, admin: dict = 
     sms takes platform_cost (per credit, DZD); other services take platform_margin_pct."""
     now = datetime.now(timezone.utc).isoformat()
     if service == "sms":
-        cost = float(body.get("platform_cost") or 0)
-        if cost < 0 or cost > 1000:
+        try:
+            cost = float(body.get("platform_cost") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="تكلفة غير صالحة")
+        if not math.isfinite(cost) or cost < 0 or cost > 1000:
             raise HTTPException(status_code=400, detail="تكلفة غير صالحة")
         await main_db.platform_config.update_one(
             {"id": "global"}, {"$set": {"sms_platform_cost": cost}}, upsert=True)
         return {"ok": True, "service": "sms", "platform_cost": cost}
     if service == "ai":
         raise HTTPException(status_code=400, detail="هامش الذكاء الاصطناعي يُضبط من /saas/ai-billing/config")
-    pct = float(body.get("platform_margin_pct") or 0)
-    if pct < 0 or pct > 100:
+    try:
+        pct = float(body.get("platform_margin_pct") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="النسبة يجب أن تكون بين 0 و 100")
+    if not math.isfinite(pct) or pct < 0 or pct > 100:
         raise HTTPException(status_code=400, detail="النسبة يجب أن تكون بين 0 و 100")
     await main_db.platform_service_config.update_one(
         {"id": service},
