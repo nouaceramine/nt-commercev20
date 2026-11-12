@@ -150,6 +150,59 @@ async def create_system_error(request: Request, error: SystemErrorCreate, admin:
     await main_db.system_errors.insert_one(error_doc)
     return SystemErrorResponse(**error_doc)
 
+# ============ INTERNAL LOGGING (no HTTP/auth — used by services) ============
+
+_VALID_TYPES = {"api", "database", "payment", "auth", "system", "integration"}
+_VALID_SEVERITIES = {"critical", "warning", "info"}
+
+def _db():
+    """Return main_db, falling back to config.database if init_routes not called yet."""
+    global main_db
+    if main_db is None:
+        from config.database import main_db as _fallback
+        main_db = _fallback
+    return main_db
+
+async def log_system_error(
+    error_type: str,
+    severity: str,
+    message: str,
+    tenant_id: Optional[str] = None,
+    tenant_name: Optional[str] = None,
+    details: Optional[dict] = None,
+    auto_fixable: bool = False,
+    fix_action: Optional[str] = None,
+) -> dict:
+    """Insert a system_errors row directly (same schema as POST "").
+
+    Used by internal services (e.g. module_watchdog) that detect failures
+    without an HTTP context. Defensive coercion keeps the chain alive even
+    if a caller passes an unknown type/severity.
+    """
+    if error_type not in _VALID_TYPES:
+        error_type = "system"
+    if severity not in _VALID_SEVERITIES:
+        severity = "warning"
+    if len(json.dumps(details or {}, ensure_ascii=False)) > 16384:
+        details = {"truncated": True}
+    error_doc = {
+        "id": str(uuid.uuid4()),
+        "type": error_type,
+        "severity": severity,
+        "message": (message or "")[:4000],
+        "tenant_id": tenant_id,
+        "tenant_name": tenant_name or "النظام",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": "active",
+        "auto_fixable": bool(auto_fixable),
+        "fix_action": fix_action,
+        "details": details or {},
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+    await _db().system_errors.insert_one(error_doc)
+    return error_doc
+
 @router.post("/{error_id}/fix")
 async def auto_fix_error(
     error_id: str,

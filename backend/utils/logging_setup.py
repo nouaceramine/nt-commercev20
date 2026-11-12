@@ -105,7 +105,7 @@ def setup_logging(level: str = "INFO", *, force_json: bool | None = None) -> Non
     root.addHandler(handler)
 
     # Quiet noisy libraries
-    for noisy in ("uvicorn.access", "botocore", "urllib3", "asyncio"):
+    for noisy in ("uvicorn.access", "botocore", "urllib3", "asyncio", "httpx"):
         logging.getLogger(noisy).setLevel("WARNING")
 
 
