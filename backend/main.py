@@ -1317,6 +1317,7 @@ _AUTO_REG_MODULES = [
     'routes.auto_reorder_routes',  # M5: auto-reorder draft purchase orders
     'routes.payroll_routes',  # M6: payroll payslips (salary + commission − advances)
     'routes.bookings_routes',  # M7: generalized bookings (resources + clash detection + deposits)
+    'routes.van_sales_routes',  # M9: van sales (mobile warehouse + day close reconciliation)
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

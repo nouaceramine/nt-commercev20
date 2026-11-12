@@ -506,6 +506,7 @@ export const Layout = ({ children }) => {
         { path: '/gift-cards', icon: Gift, label: language === 'ar' ? 'بطاقات الهدايا' : 'Cartes cadeaux' },  // M2
         { path: '/fixed-assets', icon: Building2, label: language === 'ar' ? 'الأصول الثابتة' : 'Immobilisations' },  // M3
         { path: '/cod-settlements', icon: HandCoins, label: language === 'ar' ? 'مصالحة COD' : 'Règlements COD' },  // M4
+          { path: '/van-sales', icon: Truck, label: language === 'ar' ? 'البيع المتجول' : 'Vente ambulante' },  // M9
         { path: '/installments', icon: CreditCard, label: language === 'ar' ? 'الأقساط' : 'Versements' },
         { path: '/daily-sessions', icon: Clock, label: language === 'ar' ? 'حصص البيع' : 'Sessions' },
         { path: '/daily-report', icon: Calendar, label: language === 'ar' ? 'التقرير اليومي' : 'Rapport Journalier' },
