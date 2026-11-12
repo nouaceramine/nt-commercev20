@@ -83,7 +83,9 @@ import {
   Handshake,
   ArrowLeft,
   ArrowRight,
-  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike, Cpu, Network } from 'lucide-react';
+  KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike, Cpu, Network,
+  PackagePlus,
+} from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { defaultMenuSections } from '../config/sidebarMenu';
@@ -485,6 +487,7 @@ export const Layout = ({ children }) => {
       icon: ShoppingBag,
       items: [
         { path: '/purchases', icon: ShoppingBag, label: t.purchases, subFeature: 'purchase_orders' },
+        { path: '/auto-reorder', icon: PackagePlus, label: language === 'ar' ? 'إعادة الطلب التلقائي' : 'Réassort auto' },  // M5
         { path: '/suppliers', icon: Truck, label: t.suppliers, subFeature: 'suppliers' },
         { path: '/supplier-families', icon: FolderTree, label: language === 'ar' ? 'عائلات الموردين' : 'Familles fournisseurs' },
         { path: '/supplier-tracking', icon: Truck, label: language === 'ar' ? 'تتبع الموردين' : 'Suivi fournisseurs' },
