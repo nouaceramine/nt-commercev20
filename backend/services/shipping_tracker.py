@@ -37,11 +37,25 @@ class ShippingTracker:
         }
     }
 
+    VALID_STATUSES = {"pending", "processing", "shipped", "in_transit",
+                      "out_for_delivery", "delivered", "cancelled", "returned"}
+
     @staticmethod
     async def create_tracking(db, order_id: str, carrier: str, 
                               tracking_number: str, 
                               status: str = "pending") -> Dict[str, Any]:
-        """إنشاء سجل تتبع"""
+        """إنشاء سجل تتبع (متحقق منه، سجل واحد لكل طلب)"""
+        if carrier not in ShippingTracker.CARRIERS:
+            raise ValueError("شركة شحن غير مدعومة")
+        if status not in ShippingTracker.VALID_STATUSES:
+            raise ValueError("حالة شحن غير صالحة")
+        if not str(tracking_number or "").strip():
+            raise ValueError("رقم التتبع مطلوب")
+        order = await db.store_orders.find_one({"id": order_id}, {"_id": 0, "id": 1})
+        if not order:
+            raise LookupError("الطلب غير موجود")
+        # سجل تتبع واحد لكل طلب
+        await db.shipping_tracking.delete_many({"order_id": order_id})
         tracking = {
             "id": str(__import__('uuid').uuid4()),
             "order_id": order_id,
@@ -79,6 +93,8 @@ class ShippingTracker:
     async def update_status(db, order_id: str, new_status: str, 
                             location: str = "", note: str = "") -> bool:
         """تحديث حالة الشحن"""
+        if new_status not in ShippingTracker.VALID_STATUSES:
+            raise ValueError("حالة شحن غير صالحة")
         tracking = await db.shipping_tracking.find_one({"order_id": order_id})
         if not tracking:
             return False

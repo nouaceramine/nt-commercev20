@@ -313,8 +313,14 @@ async def _sync_inventory_on_status_change(db, order: dict, new_status: str, now
     if new_status == "confirmed" and not already_deducted:
         return await deduct_order_inventory(db, order, now_iso)
 
-    # Restore on transition to cancelled / refunded
+    # Restore on transition to cancelled / refunded — p494i: atomic flag claim
+    # (read-then-write raced concurrent cancels into a double restore)
     if new_status in ("cancelled", "refunded") and already_deducted:
+        _claimed = await db.ecom_orders.find_one_and_update(
+            {"id": order_id, "inventory_deducted": True},
+            {"$set": {"inventory_deducted": False, "inventory_restored_at": now_iso}})
+        if not _claimed:
+            return result
         deductions = order.get("inventory_deductions") or []
         if not deductions:
             deductions = [{"product_id": it["product_id"], "qty": int(it.get("qty", 0) or 0),
@@ -332,10 +338,6 @@ async def _sync_inventory_on_status_change(db, order: dict, new_status: str, now
                 result["warnings"].append(f"⚠️ تعذَّرت إعادة المخزون لمنتج محذوف: {pid}")
                 continue
             result["restored"].append({"product_id": pid, "qty": qty})
-        await db.ecom_orders.update_one(
-            {"id": order_id},
-            {"$set": {"inventory_deducted": False, "inventory_restored_at": now_iso}},
-        )
         return result
 
     return result

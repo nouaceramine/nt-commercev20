@@ -14,7 +14,42 @@ class CouponService:
 
     @staticmethod
     async def create_coupon(db, coupon_data: Dict[str, Any]) -> Dict[str, Any]:
-        """إنشاء كوبون جديد"""
+        """إنشاء كوبون جديد (مع تحقق صارم من المدخلات)"""
+        import math
+        value = coupon_data.get("value", 0)
+        ctype = coupon_data.get("type", "percentage")
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+            raise ValueError("قيمة الكوبون غير صالحة")
+        if value < 0:
+            raise ValueError("قيمة الكوبون لا يمكن أن تكون سالبة")
+        if ctype == "percentage" and value > 100:
+            raise ValueError("نسبة الخصم لا يمكن أن تتجاوز 100%")
+        if ctype not in ("percentage", "fixed", "free_shipping"):
+            raise ValueError("نوع الكوبون غير مدعوم")
+        min_order = coupon_data.get("min_order", 0)
+        if min_order is not None and (not isinstance(min_order, (int, float)) or min_order < 0):
+            raise ValueError("الحد الأدنى للطلب غير صالح")
+        usage_limit = coupon_data.get("usage_limit", None)
+        if usage_limit is not None and (not isinstance(usage_limit, int) or usage_limit < 1):
+            raise ValueError("حد الاستخدام يجب أن يكون عدداً صحيحاً >= 1")
+        start_date = coupon_data.get("start_date")
+        end_date = coupon_data.get("end_date")
+        if start_date and end_date:
+            try:
+                sd = datetime.fromisoformat(str(start_date).replace("Z", "+00:00"))
+                ed = datetime.fromisoformat(str(end_date).replace("Z", "+00:00"))
+                if ed <= sd:
+                    raise ValueError("DATE_ORDER")
+            except ValueError as ve:
+                if "DATE_ORDER" in str(ve):
+                    raise ValueError("تاريخ الانتهاء يجب أن يكون بعد تاريخ البدء")
+                raise ValueError("صيغة التاريخ غير صالحة")
+        code_u = str(coupon_data.get("code", "")).upper().strip()
+        if not code_u:
+            raise ValueError("كود الكوبون مطلوب")
+        dup = await db.coupons.find_one({"code": code_u, "is_active": True})
+        if dup:
+            raise LookupError("كود الكوبون موجود مسبقاً")
         coupon = {
             "id": str(uuid.uuid4()),
             "code": coupon_data["code"].upper().strip(),
@@ -85,6 +120,7 @@ class CouponService:
             discount = subtotal * (coupon["value"] / 100)
             if coupon.get("max_discount"):
                 discount = min(discount, coupon["max_discount"])
+            discount = min(discount, subtotal)
         elif coupon["type"] == "fixed":
             discount = min(coupon["value"], subtotal)
         elif coupon["type"] == "free_shipping":
@@ -102,12 +138,17 @@ class CouponService:
 
     @staticmethod
     async def apply_coupon(db, coupon_id: str, order_id: str, 
-                          customer_phone: str) -> None:
-        """تسجيل استخدام الكوبون"""
-        await db.coupons.update_one(
-            {"id": coupon_id},
+                          customer_phone: str) -> bool:
+        """تسجيل استخدام الكوبون بشكل ذرّي — False عند بلوغ حد الاستخدام"""
+        res = await db.coupons.update_one(
+            {"id": coupon_id, "is_active": True,
+             "$or": [{"usage_limit": None}, {"usage_limit": {"$exists": False}},
+                     {"$expr": {"$lt": ["$usage_count", "$usage_limit"]}}]},
             {"$inc": {"usage_count": 1}}
         )
+        if res.modified_count == 0:
+            logger.warning(f"Coupon {coupon_id} usage limit reached - claim rejected")
+            return False
         await db.coupon_usage.insert_one({
             "coupon_id": coupon_id,
             "order_id": order_id,
@@ -115,6 +156,7 @@ class CouponService:
             "used_at": datetime.now(timezone.utc).isoformat()
         })
         logger.info(f"Coupon {coupon_id} applied to order {order_id}")
+        return True
 
     @staticmethod
     async def get_coupons(db, active_only: bool = True) -> List[Dict[str, Any]]:

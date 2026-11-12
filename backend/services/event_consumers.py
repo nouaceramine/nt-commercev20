@@ -271,8 +271,13 @@ async def handle_ecom_order_confirmed(event: Event) -> None:
         "name": "ecom_fulfillment", "context.order_id": order_id,
         "status": {"$in": ["running", "completed"]},
     })
+    # p494i: webstore orders deduct stock at creation (inventory_deducted=True)
+    # — running the fulfillment saga would deduct a SECOND time (defect M).
+    _ord_flags = await tdb.ecom_orders.find_one({"id": order_id}, {"_id": 0, "inventory_deducted": 1})
     if existing:
         log.debug("fulfillment saga already ran for order %s — skipping", order_id)
+    elif (_ord_flags or {}).get("inventory_deducted"):
+        log.info("order %s pre-deducted at creation — fulfillment saga skipped", order_id)
     else:
         saga_doc = await run_saga(tdb, "ecom_fulfillment", _fulfillment_steps(),
                                   {"order_id": order_id, "items": items})

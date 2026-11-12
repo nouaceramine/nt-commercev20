@@ -151,7 +151,14 @@ def create_marketplace_routes(db, main_db, get_current_user) -> dict:
         """Place a COD order on a catalog product. The order lands in the OWNING
         tenant's ecom inbox (channel='marketplace') with an atomic stock guard,
         and a platform-side marketplace_orders row is kept for settlements."""
-        qty = int(data.quantity or 1)
+        # p494i: لا تحويل صامت — 0 قيمة صريحة مرفوضة (كانت `0 or 1` تمرّرها كـ 1)
+        if data.quantity is None:
+            qty = 1
+        else:
+            try:
+                qty = int(data.quantity)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="الكمية غير صالحة")
         if qty < 1 or qty > 50:
             raise HTTPException(status_code=400, detail="الكمية بين 1 و 50")
         name = (data.customer_name or "").strip()

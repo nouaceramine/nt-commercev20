@@ -85,22 +85,32 @@ class LoyaltyService:
         }
 
     @staticmethod
-    async def redeem_points(db, phone: str, points_to_redeem: int, order_id: str) -> Dict[str, Any]:
-        """استبدال نقاط بخصم"""
-        customer = await db.loyalty_customers.find_one({"phone": phone})
-        if not customer:
-            return {"success": False, "error": "لا يوجد حساب ولاء"}
+    async def redeem_points(db, phone: str, points_to_redeem, order_id: str) -> Dict[str, Any]:
+        """استبدال نقاط بخصم — p494i: تحقق + خصم ذري شرطي.
 
-        current_points = customer.get("points", 0)
-        if current_points < points_to_redeem:
-            return {"success": False, "error": f"نقاطك غير كافية (لديك {current_points})"}
+        كان يقبل نقاطًا سالبة فيضيفها للرصيد (خلق نقاط)، ويقرأ الرصيد ثم
+        يخصم في عمليتين منفصلتين (سباق سحب فائض). الآن: عدد صحيح موجب فقط،
+        والخصم بعملية واحدة شرطية لا تنجح إلا إذا كان الرصيد يكفي."""
+        try:
+            points_to_redeem = int(points_to_redeem)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "عدد نقاط غير صالح"}
+        if points_to_redeem <= 0 or points_to_redeem > 1_000_000:
+            return {"success": False, "error": "عدد نقاط غير صالح"}
+
+        claimed = await db.loyalty_customers.find_one_and_update(
+            {"phone": phone, "points": {"$gte": points_to_redeem}},
+            {"$inc": {"points": -points_to_redeem}},
+        )
+        if not claimed:
+            customer = await db.loyalty_customers.find_one({"phone": phone}, {"points": 1})
+            if not customer:
+                return {"success": False, "error": "لا يوجد حساب ولاء"}
+            return {"success": False,
+                    "error": f"نقاطك غير كافية (لديك {customer.get('points', 0)})"}
 
         discount = (points_to_redeem / 100) * LoyaltyService.POINTS_VALUE
-
-        await db.loyalty_customers.update_one(
-            {"phone": phone},
-            {"$inc": {"points": -points_to_redeem}}
-        )
+        remaining = claimed.get("points", 0) - points_to_redeem
 
         await db.loyalty_transactions.insert_one({
             "id": str(uuid.uuid4()),
@@ -116,8 +126,27 @@ class LoyaltyService:
             "success": True,
             "points_redeemed": points_to_redeem,
             "discount": discount,
-            "remaining_points": current_points - points_to_redeem
+            "remaining_points": remaining
         }
+
+    @staticmethod
+    async def revoke_points(db, phone: str, points: int, order_id: str,
+                            reason: str = "order_cancelled") -> None:
+        """p494i: استرجاع نقاط مكتسبة من طلب أُلغي/أُرجع (idempotent عبر الحالة)."""
+        points = int(points or 0)
+        if not phone or points <= 0:
+            return
+        await db.loyalty_customers.update_one(
+            {"phone": phone}, {"$inc": {"points": -points}})
+        await db.loyalty_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "phone": phone,
+            "type": "clawback",
+            "points": -points,
+            "order_id": order_id,
+            "reason": reason,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
 
     @staticmethod
     async def get_customer_points(db, phone: str) -> Dict[str, Any]:

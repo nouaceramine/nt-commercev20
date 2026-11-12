@@ -158,6 +158,8 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         payment_method: str = "cod"
         shipping_company: str = ""  # p150: الشركة التي اختارها الزبون
         utm: Optional[dict] = None  # p78: campaign attribution
+        coupon_code: str = ""       # p494i: كوبون الخصم — يُتحقق منه ويُحتسب خادمياً
+        coupon_discount: float = 0  # p494i: قيمة الخصم (يحدّدها الخادم، يتجاهل قيمة العميل)
 
     class WooCommerceSettings(BaseModel):
         enabled: bool = False
@@ -537,17 +539,79 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
         now = datetime.now(timezone.utc).isoformat()
-        # Restore stock exactly once when transitioning into cancelled/refunded
-        if status in STOCK_RESTORING_STATUSES and not order.get("stock_restored"):
-            for item in order.get("items", []):
-                pid = item.get("product_id")
-                qty = item.get("quantity", 1)
-                if pid:
+        old_status = order.get("status", "pending")
+        _entering_terminal = status in STOCK_RESTORING_STATUSES and old_status not in STOCK_RESTORING_STATUSES
+        _reactivating = status not in STOCK_RESTORING_STATUSES and old_status in STOCK_RESTORING_STATUSES
+        # p494i: استعادة المخزون مرة واحدة بالضبط — استحواذ ذرّي على العلم
+        # (كان فحصاً ثم كتابة منفصلين: إلغاءات متزامنة استعادت المخزون مضاعفاً)
+        if _entering_terminal:
+            _claimed_restore = await db.store_orders.find_one_and_update(
+                {"id": order_id, "stock_restored": {"$ne": True}},
+                {"$set": {"stock_restored": True}})
+            if _claimed_restore:
+                for item in order.get("items", []):
+                    pid = item.get("product_id")
+                    qty = item.get("quantity", 1)
+                    if not pid:
+                        continue
+                    _p = await db.products.find_one({"id": pid}, {"_id": 0, "is_non_stockable": 1})
+                    if _p and _p.get("is_non_stockable"):
+                        continue  # لم يُحسم أصلاً عند الإنشاء
                     await db.products.update_one({"id": pid}, {"$inc": {"quantity": qty}})
                     _vidx = item.get("variant_index")  # p73
                     if isinstance(_vidx, int):
                         await db.products.update_one({"id": pid}, {"$inc": {f"variants.{_vidx}.quantity": qty}})
-            await db.store_orders.update_one({"id": order_id}, {"$set": {"stock_restored": True}})
+        # p494i: إعادة التفعيل من إلغاء/استرجاع — إعادة حسم المخزون ذرّياً
+        # (الكل أو لا شيء؛ كان يعيد التفعيل بلا حسم فينشئ مخزوناً وهمياً)
+        if _reactivating:
+            _released = await db.store_orders.find_one_and_update(
+                {"id": order_id, "stock_restored": True},
+                {"$set": {"stock_restored": False}})
+            if _released:
+                _reclaimed = []
+                try:
+                    for item in order.get("items", []):
+                        pid = item.get("product_id")
+                        if not pid:
+                            continue
+                        qty = int(item.get("quantity", 1) or 1)
+                        _p = await db.products.find_one({"id": pid}, {"_id": 0, "is_non_stockable": 1})
+                        if _p and _p.get("is_non_stockable"):
+                            continue
+                        res = await db.products.find_one_and_update(
+                            {"id": pid, "quantity": {"$gte": qty}},
+                            {"$inc": {"quantity": -qty}})
+                        if res is None:
+                            raise RuntimeError(f"insufficient stock for {pid}")
+                        _vidx = item.get("variant_index")
+                        if isinstance(_vidx, int):
+                            await db.products.update_one({"id": pid}, {"$inc": {f"variants.{_vidx}.quantity": -qty}})
+                        _reclaimed.append((pid, qty, _vidx if isinstance(_vidx, int) else None))
+                except HTTPException:
+                    raise
+                except Exception:
+                    for _pid, _qty, _vidx in _reclaimed:
+                        await db.products.update_one({"id": _pid}, {"$inc": {"quantity": _qty}})
+                        if _vidx is not None:
+                            await db.products.update_one({"id": _pid}, {"$inc": {f"variants.{_vidx}.quantity": _qty}})
+                    await db.store_orders.update_one({"id": order_id}, {"$set": {"stock_restored": True}})
+                    raise HTTPException(status_code=400, detail="المخزون لم يعد يكفي لإعادة تفعيل الطلب")
+        # p494i: استرجاع نقاط الولاء المكتسبة عند أول إلغاء/استرجاع، وإعادة منحها عند إعادة التفعيل
+        if _entering_terminal or _reactivating:
+            _earned = int(order.get("loyalty_earned", 0) or 0)
+            if _earned > 0 and order.get("customer_phone"):
+                try:
+                    if _entering_terminal:
+                        await loyalty_service.revoke_points(db, order["customer_phone"], _earned, order_id)
+                    else:
+                        await db.loyalty_customers.update_one(
+                            {"phone": order["customer_phone"]}, {"$inc": {"points": _earned}})
+                        await db.loyalty_transactions.insert_one({
+                            "id": str(uuid.uuid4()), "phone": order["customer_phone"],
+                            "type": "reinstate", "points": _earned, "order_id": order_id,
+                            "created_at": now})
+                except Exception as _le:  # noqa: BLE001
+                    logger.warning(f"loyalty clawback/reinstate failed for {order_id}: {_le}")
         await db.store_orders.update_one(
             {"id": order_id},
             {"$set": {"status": status, "updated_at": now}}
@@ -558,13 +622,42 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                        "delivered": "delivered", "cancelled": "cancelled", "refunded": "refunded"}
             _est = _st_map.get(status)
             if _est:
+                _mirror_set = {"status": _est, "updated_at": now}
+                if _entering_terminal:
+                    # p494i: المخزون أُعيد من جهة المتجر — حدّث أعلام الصندوق لمنع إعادة مزدوجة
+                    _mirror_set["inventory_deducted"] = False
+                    _mirror_set["inventory_restored_at"] = now
                 await db.ecom_orders.update_one(
                     {"channel": "webstore", "external_id": order_id},
-                    {"$set": {"status": _est, "updated_at": now},
+                    {"$set": _mirror_set,
                      "$push": {"status_history": {"status": _est, "at": now, "by": admin.get("id"), "note": "مزامنة من صفحة المتجر"}}}
                 )
-        except Exception:
-            pass
+                # p494i: مزامنة سجل البيع + إبطال القيود المتوقعة عند الإلغاء/الاسترجاع
+                # (كان سجل البيع يبقى «غير مدفوع» وكأن الطلب قائم)
+                _eo = await db.ecom_orders.find_one(
+                    {"channel": "webstore", "external_id": order_id}, {"_id": 0})
+                if _eo:
+                    from services.application.ecom_order_service import sync_sale_doc, _void_financials
+                    await sync_sale_doc(db, _eo)
+                    if _entering_terminal:
+                        await _void_financials(db, _eo, now)
+        except Exception as _se:  # noqa: BLE001
+            logger.warning(f"webstore mirror sync failed for {order_id}: {_se}")
+        # p494i: حدث الإلغاء لخط الأحداث (تعويض الساغا للطلبات القديمة التي حُسمت مرتين؛
+        # لا أثر على الطلبات الجديدة — لا ساغا لها والمستهلك يتحقق)
+        if _entering_terminal:
+            try:
+                from services.event_bus import event_bus
+                _tid = admin.get("tenant_id") or "platform"
+                _eo2 = await db.ecom_orders.find_one(
+                    {"channel": "webstore", "external_id": order_id}, {"_id": 0, "id": 1})
+                if _eo2:
+                    await event_bus.publish(
+                        "ecom_order.cancelled",
+                        {"order_id": _eo2["id"], "new_status": _st_map.get(status)},
+                        tenant_id=_tid, source="online_store_routes")
+            except Exception:
+                pass
         return {"message": "تم تحديث حالة الطلب"}
 
     @router.put("/store/orders/{order_id}/delivery-type")
@@ -577,18 +670,56 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
         now = datetime.now(timezone.utc).isoformat()
+        # p494i: أعد احتساب رسوم التوصيل حسب النوع الجديد (كانت تبقى بسعر النوع القديم)
+        _new_fee = None
+        try:
+            if order.get("shipping_company"):
+                _w = str(order.get("delivery_wilaya") or "").strip()
+                _row = None
+                if order["shipping_company"] == "yalidine":
+                    _row = await db.delivery_rates.find_one(
+                        {"$or": [{"wilaya_name": _w}, {"id": _w.zfill(2)}, {"wilaya_id": _w.zfill(2)}]}, {"_id": 0})
+                if _row is None:
+                    _row = await db.ecom_courier_prices.find_one(
+                        {"courier": order["shipping_company"],
+                         "$or": [{"wilaya_name": _w}, {"wilaya_id": _w}, {"wilaya_id": _w.zfill(2)}]}, {"_id": 0})
+                if _row:
+                    _new_fee = float(_row.get("office_price", 0) if dt == "office" else _row.get("home_price", 0) or 0)
+            else:
+                _rates = {r["id"]: r for r in await db.delivery_rates.find({}, {"_id": 0}).to_list(100)}
+                _rate = _rates.get(str(order.get("delivery_wilaya") or "").zfill(2))
+                if _rate:
+                    _new_fee = float(_rate.get("office_price", 0) if dt == "office" else _rate.get("home_price", 0))
+        except Exception as _fe:  # noqa: BLE001
+            logger.warning(f"delivery fee recompute failed for {order_id}: {_fe}")
+        _set = {"delivery_type": dt, "updated_at": now}
+        if _new_fee is not None and _new_fee != float(order.get("delivery_fee", 0) or 0):
+            _set["delivery_fee"] = _new_fee
+            _set["total"] = round(
+                max(0.0, float(order.get("subtotal", 0) or 0) - float(order.get("coupon_discount", 0) or 0)) + _new_fee, 2)
         await db.store_orders.update_one(
             {"id": order_id},
-            {"$set": {"delivery_type": dt, "updated_at": now}}
+            {"$set": _set}
         )
         try:
+            _ecom_set = {"delivery_type": dt, "updated_at": now}
+            if "delivery_fee" in _set:
+                _ecom_set["shipping_fee"] = _set["delivery_fee"]
+                _ecom_set["total"] = _set["total"]
             await db.ecom_orders.update_one(
                 {"channel": "webstore", "external_id": order_id},
-                {"$set": {"delivery_type": dt, "updated_at": now}}
+                {"$set": _ecom_set}
             )
+            if "delivery_fee" in _set:
+                _eo = await db.ecom_orders.find_one(
+                    {"channel": "webstore", "external_id": order_id}, {"_id": 0})
+                if _eo:
+                    from services.application.ecom_order_service import sync_sale_doc
+                    await sync_sale_doc(db, _eo)
         except Exception:
             pass
-        return {"message": "تم تحديث نوع التوصيل", "delivery_type": dt}
+        return {"message": "تم تحديث نوع التوصيل", "delivery_type": dt,
+                "delivery_fee": _set.get("delivery_fee", order.get("delivery_fee", 0))}
 
     # Public store endpoints (no auth required)
     # ── تقديم صور المنتجات العامة محسّنة (JPEG مصغّر + كاش) ──
@@ -796,6 +927,44 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         settings = await tenant_db_inst.store_settings.find_one({"enabled": True})
         if not settings:
             raise HTTPException(status_code=404, detail="Store not available")
+        # p494i: لا نثق بأسعار العميل إطلاقاً — إعادة تسعير كل عنصر من قاعدة
+        # البيانات + بوابة ظهور المنتج في كتالوج المتجر (نفس قاعدة GET /shop):
+        # store_products النشطة أو عائلات visible_family_ids.
+        if not order.items:
+            raise HTTPException(status_code=400, detail="السلة فارغة")
+        _store_id = slug_mapping.get("store_id")
+        if _store_id:
+            _sp_query = {"is_active": True, "store_id": _store_id}
+        else:
+            _sp_query = {"is_active": True, "store_id": {"$in": [None, ""]}}
+        _catalog_ids = {sp["product_id"] for sp in await tenant_db_inst.store_products.find(
+            _sp_query, {"_id": 0, "product_id": 1}).to_list(100000)}
+        _vis_fams = {f for f in (settings.get("visible_family_ids") or []) if f}
+        _subtotal = 0.0
+        for item in order.items:
+            pid = item.get("product_id")
+            if not pid:
+                raise HTTPException(status_code=400, detail="عنصر بلا معرّف منتج")
+            _p = await tenant_db_inst.products.find_one(
+                {"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "retail_price": 1, "family_id": 1})
+            if not _p:
+                raise HTTPException(status_code=400, detail="منتج غير موجود")
+            if pid not in _catalog_ids and _p.get("family_id") not in _vis_fams:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"المنتج '{_p.get('name_ar') or _p.get('name_en') or pid}' غير متاح في هذا المتجر")
+            try:
+                _qty = int(item.get("quantity", 1) or 1)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="كمية غير صالحة")
+            if _qty < 1 or _qty > 999:
+                raise HTTPException(status_code=400, detail="كمية غير صالحة")
+            item["quantity"] = _qty
+            item["price"] = round(float(_p.get("retail_price", 0) or 0), 2)
+            if not item.get("name"):
+                item["name"] = _p.get("name_ar") or _p.get("name_en") or ""
+            _subtotal += item["price"] * _qty
+        order.subtotal = round(_subtotal, 2)
         if settings.get("min_order_amount", 0) > 0 and order.subtotal < settings["min_order_amount"]:
             raise HTTPException(status_code=400, detail=f"Minimum order amount is {settings['min_order_amount']}")
         # p149: payment-method policy — online only if store enabled AND every item allows it
@@ -836,7 +1005,26 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             if _rate:
                 _fee = float(_rate.get("office_price", 0) if order.delivery_type == "office" else _rate.get("home_price", 0))
         order.delivery_fee = _fee
-        order.total = round(float(order.subtotal) + _fee, 2)
+        # p494i: كوبون الخصم — تحقق خادمي كامل (صلاحية/حدود/حد أدنى)؛ الإجمالي
+        # يُحسب من قيم الخادم فقط، وقيمة الخصم من العميل تُتجاهل دائماً.
+        _coupon_row = None
+        _coupon_code = (order.coupon_code or "").strip().upper()
+        if _coupon_code:
+            _cv = await coupon_service.validate_coupon(
+                tenant_db_inst, _coupon_code, float(order.subtotal),
+                order.customer_phone or "",
+                [i.get("product_id") for i in order.items if i.get("product_id")])
+            if not _cv.get("valid"):
+                raise HTTPException(status_code=400, detail=_cv.get("error") or "الكوبون غير صالح")
+            _coupon_row = _cv
+            order.coupon_code = _coupon_code
+            order.coupon_discount = round(float(_cv.get("discount", 0) or 0), 2)
+            if _cv.get("free_shipping"):
+                order.delivery_fee = 0.0
+        else:
+            order.coupon_code = ""
+            order.coupon_discount = 0
+        order.total = round(max(0.0, float(order.subtotal) - float(order.coupon_discount or 0)) + float(order.delivery_fee or 0), 2)
         if order.delivery_type == "office":
             order.delivery_address = ""  # desk delivery: no detailed address needed
         # Atomic stock claim per product (merged duplicates), all-or-nothing —
@@ -888,11 +1076,20 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
             if vidx is not None and product.get("has_variants"):
                 await tenant_db_inst.products.update_one({"id": pid}, {"$inc": {f"variants.{vidx}.quantity": -qty}})
             _claimed.append((pid, qty, vidx))
+        # p494i: حسم استخدام الكوبون ذرّياً بعد نجاح حسم المخزون —
+        # بلوغ حد الاستخدام يُرجع المخزون المحسوم ويرفض الطلب.
+        _order_id = str(uuid.uuid4())
+        if _coupon_row is not None:
+            _ok_claim = await coupon_service.apply_coupon(
+                tenant_db_inst, _coupon_row["coupon_id"], _order_id, order.customer_phone or "")
+            if not _ok_claim:
+                await _rollback_claims()
+                raise HTTPException(status_code=400, detail="تم استنفاد الكوبون — حاول بدونه")
         # p258: atomic tenant-stamped code (race-proof; sequence continues from legacy max)
         order_number = await public_order_code(
             tenant_db_inst, "store_orders", "WEB", 6, field="order_number")
         order_data = {
-            "id": str(uuid.uuid4()),
+            "id": _order_id,
             "order_number": order_number,
             "store_slug": store_slug,
             **order.model_dump(),
@@ -1062,12 +1259,17 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                 order.customer_phone,
                 order.customer_name
             )
-            await loyalty_service.add_points(
+            _lp = await loyalty_service.add_points(
                 tenant_db_inst,
                 order.customer_phone,
                 order.total,
                 order_data["id"]
             )
+            # p494i: خزّن النقاط المكتسبة على الطلب لاسترجاعها عند الإلغاء
+            if isinstance(_lp, dict) and _lp.get("points_earned"):
+                await tenant_db_inst.store_orders.update_one(
+                    {"id": order_data["id"]},
+                    {"$set": {"loyalty_earned": int(_lp["points_earned"])}})
         except Exception as e:
             logger.error(f"Loyalty error: {e}")
         return {"message": "تم استلام طلبك بنجاح", "order_number": order_number, "order_id": order_data["id"]}
@@ -1295,7 +1497,12 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
 
     @router.post("/store/coupons")
     async def create_coupon(data: dict, admin: dict = Depends(get_tenant_admin)):
-        coupon = await coupon_service.create_coupon(db, data)
+        try:
+            coupon = await coupon_service.create_coupon(db, data)
+        except LookupError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         return {"success": True, "coupon": coupon}
 
     @router.delete("/store/coupons/{coupon_id}")
@@ -1356,11 +1563,16 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         data: dict,
         admin: dict = Depends(get_tenant_admin)
     ):
-        tracking = await shipping_tracker.create_tracking(
-            db, order_id, data.get("carrier", "manual"),
-            data.get("tracking_number", ""),
-            data.get("status", "pending")
-        )
+        try:
+            tracking = await shipping_tracker.create_tracking(
+                db, order_id, data.get("carrier", "manual"),
+                data.get("tracking_number", ""),
+                data.get("status", "pending")
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         return {"success": True, "tracking": tracking}
 
     @router.put("/store/orders/{order_id}/shipping/status")
@@ -1369,11 +1581,14 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         data: dict,
         admin: dict = Depends(get_tenant_admin)
     ):
-        result = await shipping_tracker.update_status(
-            db, order_id, data.get("status", ""),
-            data.get("location", ""),
-            data.get("note", "")
-        )
+        try:
+            result = await shipping_tracker.update_status(
+                db, order_id, data.get("status", ""),
+                data.get("location", ""),
+                data.get("note", "")
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # Send WhatsApp notification if status changed
         if result:
@@ -1409,9 +1624,34 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         if not tracking and not order:
             raise HTTPException(status_code=404, detail="Order not found")
 
+        # p494i: قائمة بيضاء فقط — كان المسار يسرّب وثيقة الطلب كاملة
+        # (هاتف الزبون وعنوانه وبريده) لأي حامل للرابط
+        _safe_order = None
+        if order:
+            _safe_order = {
+                "id": order.get("id"),
+                "order_number": order.get("order_number"),
+                "status": order.get("status"),
+                "customer_name": order.get("customer_name"),
+                "created_at": order.get("created_at"),
+                "updated_at": order.get("updated_at"),
+                "delivery_type": order.get("delivery_type"),
+                "delivery_wilaya": order.get("delivery_wilaya"),
+                "delivery_city": order.get("delivery_city"),
+                "shipping_carrier": order.get("shipping_carrier"),
+                "tracking_number": order.get("tracking_number"),
+                "shipping_status": order.get("shipping_status"),
+                "payment_method": order.get("payment_method"),
+                "payment_status": order.get("payment_status"),
+                "total": order.get("total"),
+                "items": [
+                    {"name": it.get("name"), "quantity": it.get("quantity"), "price": it.get("price")}
+                    for it in (order.get("items") or [])
+                ],
+            }
         return {
             "success": True,
-            "order": order,
+            "order": _safe_order,
             "tracking": tracking,
             "status_display": shipping_tracker.get_status_display(tracking.get("status", "pending")) if tracking else None
         }
