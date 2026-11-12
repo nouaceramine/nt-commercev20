@@ -6,6 +6,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
 
+from utils.money import parse_amount
+
 
 
 def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> dict:
@@ -80,9 +82,7 @@ def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> d
         name_ar = (data.get("name_ar") or data.get("name") or "").strip()
         if not name_ar:
             raise HTTPException(status_code=400, detail="اسم الخدمة مطلوب")
-        price = float(data.get("price", 0) or 0)
-        if price <= 0:
-            raise HTTPException(status_code=400, detail="سعر الخدمة يجب أن يكون أكبر من صفر")
+        price = parse_amount(data.get("price", 0))
         service = {
             "id": str(uuid.uuid4()),
             "name_ar": name_ar,
@@ -104,10 +104,7 @@ def create_wallet_services_routes(main_db, get_current_user, block_cashier) -> d
             if k in data:
                 updates[k] = data[k]
         if "price" in data:
-            price = float(data.get("price", 0) or 0)
-            if price <= 0:
-                raise HTTPException(status_code=400, detail="سعر الخدمة يجب أن يكون أكبر من صفر")
-            updates["price"] = price
+            updates["price"] = parse_amount(data.get("price"))
         if "is_active" in data:
             updates["is_active"] = bool(data["is_active"])
         if updates:

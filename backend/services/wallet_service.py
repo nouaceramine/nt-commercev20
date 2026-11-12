@@ -11,7 +11,7 @@ from fastapi import HTTPException
 import uuid
 import logging
 
-from services.code_generator import generate_code
+from services.code_generator import generate_code, next_code
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,8 @@ async def transfer_balance(
     HTTP 400 with ``insufficient_message`` when the source balance is too low.
     Returns a dict with from_balance / to_balance / debit_txn / credit_txn / transfer.
     """
-    if amount <= 0:
+    import math as _math
+    if not _math.isfinite(amount) or amount <= 0:
         raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
 
     await get_or_create_wallet(main_db, to_id, to_type)
@@ -241,10 +242,12 @@ async def transfer_balance(
             )
         raise
 
-    count = await main_db.wallet_transfers.count_documents({}) + 1
+    # p495c: atomic counter — count+1 duplicated TRF numbers under races.
+    number = await next_code(main_db, "wallet_transfers", "TRF-", 5,
+                             with_year=False, field="transfer_number")
     transfer = {
         "id": str(uuid.uuid4()),
-        "transfer_number": f"TRF-{count:05d}",
+        "transfer_number": number,
         "from_entity_type": from_type,
         "from_entity_id": from_id,
         "to_entity_type": to_type,

@@ -112,6 +112,28 @@ def create_wallet_billing_routes(db, main_db, get_current_user, get_super_admin)
             wallet, "debit", amount, "subscription", entity_id,
             f"دفع اشتراك ({sub_type})", by_label,
         )
+        # p495c: if anything after the debit fails, refund so money is
+        # never lost without a subscription extension.
+        try:
+            return await _apply_subscription_extension(
+                tenant, sub_type, amount, txn, new_balance, by_label)
+        except Exception:
+            try:
+                from services.wallet_service import credit_wallet
+                await credit_wallet(
+                    main_db, entity_id, amount, "subscription_refund",
+                    txn["id"], "استرجاع دفع اشتراك فاشل", by_label, "tenant")
+            except Exception:
+                import logging
+                logging.getLogger(__name__).critical(
+                    "WALLET SUBSCRIPTION COMPENSATION FAILED: %s debited from "
+                    "tenant %s but extension failed and refund failed; txn=%s",
+                    amount, entity_id, txn["id"])
+            raise
+
+    async def _apply_subscription_extension(tenant, sub_type, amount, txn,
+                                            new_balance, by_label):
+        entity_id = tenant["id"]
         current_end_str = tenant.get("subscription_ends_at") or datetime.now(timezone.utc).isoformat()
         try:
             current_end = datetime.fromisoformat(current_end_str.replace("Z", "+00:00"))
@@ -154,19 +176,23 @@ def create_wallet_billing_routes(db, main_db, get_current_user, get_super_admin)
     @router.post("/settle-credit")
     async def settle_credit(data: dict, admin: dict = Depends(get_super_admin)):
         """Settle (part of) a tenant's outstanding credit debt."""
-        entity_id = data.get("entity_id", "")
-        amount = float(data.get("amount") or 0)
+        from utils.money import parse_amount
+        entity_id = (data.get("entity_id") or "").strip()
+        amount = parse_amount(data.get("amount") or 0)
         description = data.get("description") or "تسديد دين"
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
         if not wallet:
             raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
-        current_debt = float(wallet.get("credit_debt") or 0)
-        if amount > current_debt:
+        # p495c: atomic conditional settlement — concurrent settles cannot
+        # push the debt negative.
+        updated = await main_db.wallets.find_one_and_update(
+            {"entity_id": entity_id, "credit_debt": {"$gte": amount}},
+            {"$inc": {"credit_debt": -amount}},
+            return_document=ReturnDocument.AFTER, projection={"_id": 0})
+        if not updated:
             raise HTTPException(status_code=400, detail="المبلغ يفوق الدين المسجَّل")
-        new_debt = round(current_debt - amount, 2)
-        await main_db.wallets.update_one({"entity_id": entity_id}, {"$set": {"credit_debt": new_debt}})
+        new_debt = round(updated.get("credit_debt") or 0, 2)
+        current_debt = round(new_debt + amount, 2)
         code = await generate_code(main_db, "wallet_transactions", "PF", 5, with_year=True)
         txn = {
             "id": str(uuid.uuid4()),

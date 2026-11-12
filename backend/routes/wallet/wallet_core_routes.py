@@ -7,8 +7,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
 
+from pymongo import ReturnDocument
+
 from services.code_generator import generate_code
 from services.wallet_service import PLATFORM_WALLET_ID
+from utils.money import parse_amount
 
 DEFAULT_LOW_BALANCE = 1000.0
 
@@ -86,24 +89,23 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
 
     @router.post("/add-funds")
     async def add_funds(data: dict, admin: dict = Depends(get_super_admin)):
-        entity_id = data.get("entity_id", "")
-        amount = data.get("amount", 0)
+        entity_id = (data.get("entity_id") or "").strip()
+        amount = parse_amount(data.get("amount", 0))
         payment_method = (data.get("payment_method") or "cash").lower()
         if payment_method not in ("cash", "credit"):
             raise HTTPException(status_code=400, detail="payment_method يجب أن يكون cash أو credit")
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
         if not wallet:
             raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
-        old_balance = wallet.get("balance", 0)
-        new_balance = old_balance + amount
-        await main_db.wallets.update_one({"entity_id": entity_id}, {"$set": {"balance": new_balance}})
+        # p495c: one atomic $inc — no read-modify-write window, no NaN writes.
+        inc = {"balance": amount}
         if payment_method == "credit" and wallet.get("entity_type") == "tenant":
-            await main_db.wallets.update_one(
-                {"entity_id": entity_id},
-                {"$inc": {"credit_debt": float(amount)}},
-            )
+            inc["credit_debt"] = amount
+        updated = await main_db.wallets.find_one_and_update(
+            {"entity_id": entity_id}, {"$inc": inc},
+            return_document=ReturnDocument.AFTER, projection={"_id": 0})
+        new_balance = updated["balance"]
+        old_balance = new_balance - amount
         code = await generate_code(main_db, "wallet_transactions", "PF", 5, with_year=True)
         txn = {
             "id": str(uuid.uuid4()),
@@ -133,18 +135,20 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
 
     @router.post("/deduct")
     async def deduct_funds(data: dict, admin: dict = Depends(get_super_admin)):
-        entity_id = data.get("entity_id", "")
-        amount = data.get("amount", 0)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        entity_id = (data.get("entity_id") or "").strip()
+        amount = parse_amount(data.get("amount", 0))
         wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
         if not wallet:
             raise HTTPException(status_code=404, detail="المحفظة غير موجودة")
-        old_balance = wallet.get("balance", 0)
-        if old_balance < amount:
+        # p495c: atomic conditional debit — concurrent deducts cannot overdraw.
+        updated = await main_db.wallets.find_one_and_update(
+            {"entity_id": entity_id, "balance": {"$gte": amount}},
+            {"$inc": {"balance": -amount}},
+            return_document=ReturnDocument.AFTER, projection={"_id": 0})
+        if not updated:
             raise HTTPException(status_code=400, detail="الرصيد غير كافي")
-        new_balance = old_balance - amount
-        await main_db.wallets.update_one({"entity_id": entity_id}, {"$set": {"balance": new_balance}})
+        new_balance = updated["balance"]
+        old_balance = new_balance + amount
         code = await generate_code(main_db, "wallet_transactions", "PF", 5, with_year=True)
         txn = {
             "id": str(uuid.uuid4()),
@@ -164,6 +168,19 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
         }
         await main_db.wallet_transactions.insert_one(txn)
         txn.pop("_id", None)
+        threshold = wallet.get("low_balance_threshold", DEFAULT_LOW_BALANCE)
+        if new_balance < threshold:
+            await main_db.wallet_alerts.insert_one({
+                "id": str(uuid.uuid4()),
+                "wallet_id": wallet["id"],
+                "entity_id": entity_id,
+                "type": "low_balance",
+                "balance": new_balance,
+                "threshold": threshold,
+                "message": f"الرصيد منخفض: {new_balance:.2f} دج (الحد الأدنى {threshold:.2f} دج)",
+                "read": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
         return {"message": "تم الخصم", "new_balance": new_balance, "transaction": txn}
 
     @router.get("/all")
@@ -211,7 +228,8 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
         await _get_or_create_wallet(entity_id, entity_type)
         updates = {}
         if "low_balance_threshold" in data:
-            updates["low_balance_threshold"] = float(data["low_balance_threshold"])
+            updates["low_balance_threshold"] = parse_amount(
+                data["low_balance_threshold"], allow_zero=True)
         if "auto_pay_subscription" in data:
             updates["auto_pay_subscription"] = bool(data["auto_pay_subscription"])
         if updates:
@@ -232,7 +250,9 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
         query = {"id": alert_id}
         if user.get("role") != "super_admin":
             query["entity_id"] = user.get("tenant_id", user.get("id", ""))
-        await main_db.wallet_alerts.update_one(query, {"$set": {"read": True}})
+        res = await main_db.wallet_alerts.update_one(query, {"$set": {"read": True}})
+        if res.matched_count == 0:
+            raise HTTPException(status_code=404, detail="التنبيه غير موجود")
         return {"success": True}
 
     @router.put("/auto-pay")

@@ -73,9 +73,8 @@ def create_wallet_requests_routes(main_db, get_current_user, get_super_admin, bl
         request_type = data.get("request_type", "topup")
         if request_type not in ["topup", "withdraw"]:
             raise HTTPException(status_code=400, detail="نوع الطلب غير صحيح")
-        amount = float(data.get("amount", 0) or 0)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        from utils.money import parse_amount
+        amount = parse_amount(data.get("amount", 0))
         entity_id, entity_type = _entity_ref(user)
         wallet = await _get_or_create_wallet(entity_id, entity_type)
         if request_type == "withdraw" and wallet.get("balance", 0) < amount:
@@ -167,17 +166,23 @@ def create_wallet_requests_routes(main_db, get_current_user, get_super_admin, bl
 
     @router.post("/requests/{request_id}/reject")
     async def reject_wallet_request(request_id: str, data: dict = None, admin: dict = Depends(get_super_admin)):
-        req = await main_db.wallet_requests.find_one({"id": request_id}, {"_id": 0})
+        # p495c: atomic claim — a reject racing an approve can no longer
+        # overwrite a processed request.
+        req = await main_db.wallet_requests.find_one_and_update(
+            {"id": request_id, "status": "pending"},
+            {"$set": {
+                "status": "rejected",
+                "reject_reason": (data or {}).get("reason", ""),
+                "processed_by": admin.get("name", admin.get("email", "")),
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            projection={"_id": 0},
+        )
         if not req:
-            raise HTTPException(status_code=404, detail="الطلب غير موجود")
-        if req.get("status") != "pending":
+            existing = await main_db.wallet_requests.find_one({"id": request_id})
+            if not existing:
+                raise HTTPException(status_code=404, detail="الطلب غير موجود")
             raise HTTPException(status_code=400, detail="تمت معالجة الطلب مسبقاً")
-        await main_db.wallet_requests.update_one({"id": request_id}, {"$set": {
-            "status": "rejected",
-            "reject_reason": (data or {}).get("reason", ""),
-            "processed_by": admin.get("name", admin.get("email", "")),
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-        }})
         return {"message": "تم رفض الطلب"}
 
     return router

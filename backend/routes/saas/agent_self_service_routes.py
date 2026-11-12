@@ -272,9 +272,8 @@ async def get_agent_wallet_transactions(limit: int = 100, agent: dict = Depends(
 @router.post("/saas/agent/wallet/request")
 async def create_agent_wallet_request(data: dict, agent: dict = Depends(get_current_agent)):
     """Agent buys balance: requests a top-up from its parent agent (if any) or the super admin."""
-    amount = float(data.get("amount", 0) or 0)
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    from utils.money import parse_amount
+    amount = parse_amount(data.get("amount", 0))
     await get_or_create_wallet(db, agent["id"], "agent")
     parent_id = agent.get("parent_agent_id") or ""
     req = {

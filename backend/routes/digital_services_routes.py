@@ -3,12 +3,14 @@ wallet payments and affiliate system (FastAPI + MongoDB implementation)."""
 import csv
 import io
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from pymongo import ReturnDocument
 
 logger = logging.getLogger(__name__)
 
@@ -307,11 +309,21 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 order["status"] = "COMPLETED"
             else:
                 order["status"] = "PENDING"  # DIRECT_TOPUP / SMS need manual or provider API
-            before = wallet.get("balance", 0)
-            await db.wallets.update_one(
-                {"entity_type": "user", "entity_id": user.get("id")},
-                {"$inc": {"balance": -amount}}
-            )
+            # p495c: atomic conditional debit — concurrent wallet orders
+            # cannot overdraw; claimed codes are released if the debit fails.
+            debited = await db.wallets.find_one_and_update(
+                {"entity_type": "user", "entity_id": user.get("id"),
+                 "balance": {"$gte": amount}},
+                {"$inc": {"balance": -amount}},
+                return_document=ReturnDocument.AFTER, projection={"_id": 0})
+            if not debited:
+                if order["code_ids"]:
+                    await db.digital_codes.update_many(
+                        {"id": {"$in": order["code_ids"]}, "order_id": order["id"]},
+                        {"$set": {"is_used": False, "used_at": None,
+                                  "order_id": None}})
+                raise HTTPException(status_code=400, detail="رصيد المحفظة غير كافٍ")
+            before = debited["balance"] + amount
             await _wallet_txn(user.get("id"), "PURCHASE", amount, before, before - amount,
                               f"شراء {product['name']}", order["id"])
             await db.digital_orders.insert_one(dict(order))
@@ -388,7 +400,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
 
     @router.post("/wallet/deposit")
     async def wallet_deposit(data: DepositBody, user: dict = Depends(get_current_user)):
-        if data.amount <= 0:
+        if not math.isfinite(data.amount) or data.amount <= 0:
             raise HTTPException(status_code=400, detail="المبلغ غير صالح")
         wallet = await _get_wallet(user.get("id"))
         before = wallet.get("balance", 0)
@@ -411,24 +423,42 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             raise HTTPException(status_code=403, detail="غير مصرّح")
         if order["status"] == "COMPLETED":
             return {"message": "مدفوع مسبقاً"}
-        wallet = await _get_wallet(user.get("id"))
+        # p495c: atomically claim the order so concurrent pays cannot
+        # double-debit; revert to PENDING on any failure.
+        claimed = await db.digital_orders.find_one_and_update(
+            {"id": order_id, "status": "PENDING"},
+            {"$set": {"status": "PAYING"}},
+            projection={"_id": 0})
+        if not claimed:
+            return {"message": "مدفوع مسبقاً"}
+        await _get_wallet(user.get("id"))
         amount = order["amount"]
-        if wallet.get("balance", 0) < amount:
-            raise HTTPException(status_code=400, detail="رصيد غير كافٍ")
         product = await db.digital_products.find_one({"id": order["product_id"]}, {"_id": 0})
         code_ids = []
         status = "PENDING"
-        if product and product["delivery_method"] in ("INSTANT_CODE", "QR_CODE"):
-            stock = await _product_stock(product["id"])
-            if stock < order.get("quantity", 1):
-                raise HTTPException(status_code=400, detail="نفدت الأكواد")
-            code_ids = await _assign_codes(product["id"], order_id, order.get("quantity", 1))
-            status = "COMPLETED"
-        before = wallet.get("balance", 0)
-        await db.wallets.update_one(
-            {"entity_type": "user", "entity_id": user.get("id")},
-            {"$inc": {"balance": -amount}}
-        )
+        try:
+            if product and product["delivery_method"] in ("INSTANT_CODE", "QR_CODE"):
+                stock = await _product_stock(product["id"])
+                if stock < order.get("quantity", 1):
+                    raise HTTPException(status_code=400, detail="نفدت الأكواد")
+                code_ids = await _assign_codes(product["id"], order_id, order.get("quantity", 1))
+                status = "COMPLETED"
+            debited = await db.wallets.find_one_and_update(
+                {"entity_type": "user", "entity_id": user.get("id"),
+                 "balance": {"$gte": amount}},
+                {"$inc": {"balance": -amount}},
+                return_document=ReturnDocument.AFTER, projection={"_id": 0})
+            if not debited:
+                raise HTTPException(status_code=400, detail="رصيد غير كافٍ")
+            before = debited["balance"] + amount
+        except Exception:
+            if code_ids:
+                await db.digital_codes.update_many(
+                    {"id": {"$in": code_ids}, "order_id": order_id},
+                    {"$set": {"is_used": False, "used_at": None, "order_id": None}})
+            await db.digital_orders.update_one(
+                {"id": order_id, "status": "PAYING"}, {"$set": {"status": "PENDING"}})
+            raise
         await _wallet_txn(user.get("id"), "PURCHASE", amount, before, before - amount,
                           f"شراء {order['product_name']}", order_id)
         await db.digital_orders.update_one(

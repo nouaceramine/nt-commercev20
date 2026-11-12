@@ -102,31 +102,43 @@ def create_wallet_transactions_routes(main_db, get_current_user, get_super_admin
 
     @router.post("/transfer")
     async def transfer_funds(data: dict, admin: dict = Depends(get_super_admin)):
-        from_id = data.get("from_entity_id", "")
-        to_id = data.get("to_entity_id", "")
-        amount = data.get("amount", 0)
-        fee = data.get("fee", 0)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        # p495c: validated, race-safe, transactional transfer.
+        # Conservation: source pays `amount`, destination receives
+        # `amount - fee`, and the platform wallet collects `fee`.
+        from config.database import client as _client
+        from pymongo import ReturnDocument
+        from pymongo.errors import PyMongoError
+        from services.code_generator import next_code
+        from services.wallet_service import (
+            PLATFORM_WALLET_ID, get_or_create_wallet as _gcw)
+        from utils.money import parse_amount
+
+        from_id = (data.get("from_entity_id") or "").strip()
+        to_id = (data.get("to_entity_id") or "").strip()
+        amount = parse_amount(data.get("amount", 0))
+        fee = parse_amount(data.get("fee", 0), allow_zero=True)
+        if fee >= amount:
+            raise HTTPException(status_code=400,
+                                detail="العمولة يجب أن تكون أقل من المبلغ")
+        if from_id == to_id:
+            raise HTTPException(status_code=400,
+                                detail="لا يمكن التحويل إلى المحفظة نفسها")
 
         from_wallet = await main_db.wallets.find_one({"entity_id": from_id}, {"_id": 0})
         to_wallet = await main_db.wallets.find_one({"entity_id": to_id}, {"_id": 0})
         if not from_wallet or not to_wallet:
             raise HTTPException(status_code=404, detail="محفظة غير موجودة")
-        if from_wallet.get("balance", 0) < (amount + fee):
+        if from_wallet.get("balance", 0) < amount:
             raise HTTPException(status_code=400, detail="الرصيد غير كافي")
+        if fee > 0:
+            await _gcw(main_db, PLATFORM_WALLET_ID, "admin")
 
-        _from_old = from_wallet["balance"]
-        _to_old = to_wallet["balance"]
-        net_amount = amount - fee
-
-        await main_db.wallets.update_one({"entity_id": from_id}, {"$inc": {"balance": -(amount + fee)}})
-        await main_db.wallets.update_one({"entity_id": to_id}, {"$inc": {"balance": net_amount}})
-
-        count = await main_db.wallet_transfers.count_documents({}) + 1
+        net_amount = round(amount - fee, 2)
+        number = await next_code(main_db, "wallet_transfers", "TRF-", 5,
+                                 with_year=False, field="transfer_number")
         transfer = {
             "id": str(uuid.uuid4()),
-            "transfer_number": f"TRF-{count:05d}",
+            "transfer_number": number,
             "from_entity_type": data.get("from_entity_type", "tenant"),
             "from_entity_id": from_id,
             "to_entity_type": data.get("to_entity_type", "tenant"),
@@ -139,8 +151,34 @@ def create_wallet_transactions_routes(main_db, get_current_user, get_super_admin
             "created_by": admin.get("name", admin.get("email", "")),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        await main_db.wallet_transfers.insert_one(transfer)
-        transfer.pop("_id", None)
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as session:
+                    async with session.start_transaction():
+                        debited = await main_db.wallets.find_one_and_update(
+                            {"entity_id": from_id, "balance": {"$gte": amount}},
+                            {"$inc": {"balance": -amount}},
+                            return_document=ReturnDocument.AFTER,
+                            session=session)
+                        if not debited:
+                            raise HTTPException(status_code=400,
+                                                detail="الرصيد غير كافي")
+                        await main_db.wallets.update_one(
+                            {"entity_id": to_id},
+                            {"$inc": {"balance": net_amount}}, session=session)
+                        if fee > 0:
+                            await main_db.wallets.update_one(
+                                {"entity_id": PLATFORM_WALLET_ID},
+                                {"$inc": {"balance": fee}}, session=session)
+                        await main_db.wallet_transfers.insert_one(
+                            dict(transfer), session=session)
+                break
+            except PyMongoError as _exc:
+                if _attempt == 4 or not _exc.has_error_label(
+                        "TransientTransactionError"):
+                    raise
+                import asyncio as _asyncio
+                await _asyncio.sleep(0.03 * (2 ** _attempt))
         return transfer
 
     return router

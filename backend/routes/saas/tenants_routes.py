@@ -839,9 +839,8 @@ async def admin_credit_tenant_wallet(
     if not tenant:
         raise HTTPException(status_code=404, detail="المستأجر غير موجود")
 
-    amount = float(body.get("amount", 0))
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="يجب أن يكون المبلغ أكبر من صفر")
+    from utils.money import parse_amount
+    amount = parse_amount(body.get("amount", 0))
 
     notes = body.get("notes", "").strip() or "شحن من المدير العام"
     admin_id = admin.get("id", "super_admin")
