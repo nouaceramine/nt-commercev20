@@ -145,3 +145,9 @@ backups/
 
 # Local backup encryption key — keep on server and offline only
 .backup_key
+
+# p495: Dozzle credentials must live only on the server (untracked, same
+# precedent as .backup_key in p485). Rotation of the exposed password remains
+# the owner's call — git history is intentionally not rewritten.
+.dozzle_pass
+dozzle-users.yml

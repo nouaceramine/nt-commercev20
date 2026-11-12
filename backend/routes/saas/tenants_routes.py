@@ -452,7 +452,7 @@ async def update_tenant(tenant_id: str, updates: TenantUpdate, admin: dict = Dep
         }, {"_id": 0, "id": 1})
         if existing_email:
             raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
-        from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
+        from utils.identity import assert_email_globally_free, reserve_identity
         await assert_email_globally_free(new_email, exclude_user_id=tenant_id)
         await reserve_identity(new_email, "owner", tenant_id, tenant_id=tenant_id, name=update_data.get("name", tenant.get("name", "")))
         try:
