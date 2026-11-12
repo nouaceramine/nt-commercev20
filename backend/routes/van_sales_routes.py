@@ -189,17 +189,32 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
         src, dst = (main, van) if direction == "load" else (van, main)
         code = await _next_code("VL")
         now = _now()
-        moved, total_value = [], 0.0
+        # p503: TWO-PHASE — validate EVERY item (existence + source sufficiency)
+        # before moving a single unit. The old loop validated item-by-item, so a
+        # failure on item N left items 1..N-1 already transferred with no
+        # van_loads document (stock moved with no record).
+        # aggregate duplicate product lines so sufficiency is judged on the total
+        agg: dict = {}
         for it in body.items:
+            if it.product_id in agg:
+                agg[it.product_id].quantity += it.quantity
+            else:
+                agg[it.product_id] = it.model_copy()
+        prepared = []
+        for it in agg.values():
             product = await db.products.find_one({"id": it.product_id})
             if not product:
                 raise HTTPException(status_code=404, detail=f"المنتج {it.product_id} غير موجود")
             if direction == "load":
-                product_qty = float(product.get("quantity", 0) or 0)
-                if product_qty < it.quantity:
-                    raise HTTPException(status_code=400,
-                                        detail=f"الكمية غير كافية: {product.get('name') or it.product_id}")
-                src_before, src_init = product_qty, True
+                src_row = await db.warehouse_stock.find_one(
+                    {"product_id": it.product_id, "warehouse_id": src["id"]})
+                available = (float(src_row["quantity"]) if src_row
+                             else float(product.get("quantity", 0) or 0))
+                if available < it.quantity:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"الكمية غير كافية: {product.get('name') or it.product_id} ({available:g} < {it.quantity})")
+                src_before, src_init = float(product.get("quantity", 0) or 0), True
             else:
                 row = await db.warehouse_stock.find_one(
                     {"product_id": it.product_id, "warehouse_id": van["id"]})
@@ -209,6 +224,9 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
                         status_code=400,
                         detail=f"رصيد الشاحنة غير كافٍ: {product.get('name') or it.product_id} ({have:g} < {it.quantity})")
                 src_before, src_init = have, False
+            prepared.append((it, product, src_before, src_init))
+        moved, total_value = [], 0.0
+        for it, product, src_before, src_init in prepared:
             await adjust_warehouse_stock(db, it.product_id, src["id"], -it.quantity,
                                          product_quantity_before=src_before,
                                          initialize_from_product=src_init)
@@ -249,9 +267,19 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
         return {"items": items, "count": len(items)}
 
     # ── Days (tours) ──
+    async def _ensure_day_index():
+        # p503: one open day per (van, date) — enforced ATOMICALLY by a partial
+        # unique index; the find-then-insert precheck below is only for the
+        # friendly message and is race-prone on its own (two concurrent opens
+        # both passed it). Lazy + idempotent; db is the per-request tenant proxy.
+        await db.van_days.create_index(
+            [("van_id", 1), ("date", 1)], unique=True, name="van_open_day_unique",
+            partialFilterExpression={"status": "open"})
+
     @router.post("/days/open", status_code=201)
     async def open_day(body: OpenDayIn, user: dict = Depends(get_tenant_admin)):
         van = await _get_van(body.van_id)
+        await _ensure_day_index()
         existing = await db.van_days.find_one(
             {"van_id": body.van_id, "date": body.date, "status": "open"})
         if existing:
@@ -262,7 +290,12 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
                "driver_name": body.driver_name or van.get("driver_name", ""),
                "date": body.date, "status": "open",
                "created_at": _now(), "created_by": user.get("name", "")}
-        await db.van_days.insert_one(doc)
+        from pymongo.errors import DuplicateKeyError
+        try:
+            await db.van_days.insert_one(doc)
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409,
+                                detail="يوم مفتوح مسبقاً لهذه الشاحنة في هذا التاريخ")
         doc.pop("_id", None)
         return doc
 
@@ -279,11 +312,28 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
 
     @router.post("/days/{day_id}/close")
     async def close_day(day_id: str, body: CloseDayIn, user: dict = Depends(get_tenant_admin)):
-        day = await db.van_days.find_one({"id": day_id})
+        # p503: atomic claim open→closing BEFORE computing or moving any money —
+        # the old check-then-act let N concurrent closes all read status=open and
+        # post N variance journals with N cash-box adjustments (seen live: 3/6).
+        day = await db.van_days.find_one_and_update(
+            {"id": day_id, "status": "open"},
+            {"$set": {"status": "closing", "closing_at": _now()}})
         if not day:
-            raise HTTPException(status_code=404, detail="اليوم غير موجود")
-        if day.get("status") != "open":
+            exists = await db.van_days.find_one({"id": day_id}, {"_id": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="اليوم غير موجود")
             raise HTTPException(status_code=400, detail="اليوم مغلق مسبقاً")
+        try:
+            return await _close_day_impl(day, body, user)
+        except Exception:
+            # rollback the claim so the day can be closed again after the failure
+            await db.van_days.update_one(
+                {"id": day_id, "status": "closing"},
+                {"$set": {"status": "open"}, "$unset": {"closing_at": ""}})
+            raise
+
+    async def _close_day_impl(day: dict, body: CloseDayIn, user: dict):
+        day_id = day["id"]
         date = day["date"]
         van_id = day["van_id"]
         # booked cash sales from this van on this date

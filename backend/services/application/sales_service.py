@@ -112,6 +112,7 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
                 session=_tx,
             )
 
+    _pre_qty = {}  # p503: global quantity per product BEFORE the claim (location init)
     for pid, qty in _claim_qty.items():
         product = await db.products.find_one({"id": pid}, {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1, "is_non_stockable": 1})
         # p494: a referenced product must EXIST — ghosts were silently exempt
@@ -121,6 +122,7 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
         if product.get("is_non_stockable"):
             continue
+        _pre_qty[pid] = float(product.get("quantity", 0) or 0)
         res = await db.products.find_one_and_update(
             {"id": pid, "quantity": {"$gte": qty}},
             {"$inc": {"quantity": -qty}},
@@ -134,6 +136,25 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
                 detail=f"مخزون غير كافٍ للمنتج '{pname}': المتاح {product.get('quantity', 0)} والمطلوب {qty}",
             )
         _claimed.append((pid, qty))
+
+    # p503/M9: a warehouse-tagged sale (van sales load a van location, then the
+    # agent sells from it through the POS) must ALSO move the per-location
+    # balance — the old code dropped warehouse_id entirely, so the van row
+    # never decremented and day-close reconciled against phantom stock. Runs
+    # inside the same transaction: a location shortfall aborts the whole sale.
+    _wh_name = None
+    if getattr(s, "warehouse_id", None):
+        _wh = await db.warehouses.find_one({"id": s.warehouse_id}, {"_id": 0, "name": 1}, session=_tx)
+        if not _wh:
+            await _rollback_claims()
+            raise HTTPException(status_code=404, detail="المخزن غير موجود")
+        _wh_name = _wh.get("name")
+        from services.warehouse_stock import adjust_warehouse_stock
+        for pid, qty in _claimed:
+            await adjust_warehouse_stock(
+                db, pid, s.warehouse_id, -qty,
+                product_quantity_before=_pre_qty.get(pid, 0.0),
+                session=_tx, initialize_from_product=True)
 
     # p184: variant-level claims — after all product-level claims succeed
     for (pid, vcolor, vsize), vqty in _claim_variants.items():
@@ -386,6 +407,10 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         "remaining": max(0, remaining),
         "payment_method": s.payment_method, "payment_type": s.payment_type,
         "cash_box_id": resolved_cash_box,
+        # p503/M9: persist the warehouse tag so van day-close can book the
+        # van's sales (the field used to be accepted by the schema then DROPPED)
+        **({"warehouse_id": s.warehouse_id, "warehouse_name": _wh_name}
+           if getattr(s, "warehouse_id", None) else {}),
         "payments": ([{"amount": s.paid_amount, "method": s.payment_method, "at": now}] if s.paid_amount > 0 else []),  # p67
         "installment_plan": installment_info,
         "status": status,
@@ -650,8 +675,20 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx, reason: str = "")
             raise HTTPException(status_code=409, detail="Sale already returned")
         raise HTTPException(status_code=404, detail="Sale not found")
 
+    # p503/M9: the return re-credits the ORIGINAL location for warehouse-tagged
+    # sales (mirror of the create-side location deduction).
+    _ret_wh = sale.get("warehouse_id")
     for item in sale["items"]:
         await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
+        if _ret_wh and item.get("product_id") and item.get("quantity"):
+            _p = await db.products.find_one({"id": item["product_id"]},
+                                            {"_id": 0, "is_non_stockable": 1}, session=_tx)
+            if _p and not _p.get("is_non_stockable"):
+                from services.warehouse_stock import adjust_warehouse_stock
+                await adjust_warehouse_stock(
+                    db, item["product_id"], _ret_wh, item["quantity"],
+                    product_quantity_before=0, session=_tx,
+                    initialize_from_product=False, allow_negative=True)
         for _cons in (item.get("recipe_consumption") or []):  # p303: restore consumed ingredients
             if _cons.get("product_id") and _cons.get("quantity"):
                 await db.products.update_one({"id": _cons["product_id"]}, {"$inc": {"quantity": _cons["quantity"]}}, session=_tx)

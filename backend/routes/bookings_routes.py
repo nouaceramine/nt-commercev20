@@ -109,6 +109,12 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
     async def _deposit_journal(booking: dict, amount: float, box_id: str, refund: bool):
         from services.accounting_auto import BOX_ACCOUNT, ensure_accounts, _insert_entry
         await ensure_accounts(db)
+        # p503: fail-closed box validation on BOTH paths — an unknown/ecom box
+        # used to post a journal against account 530 while the physical box
+        # mirror never moved (refund path took no validation at all).
+        box = await db.cash_boxes.find_one({"id": box_id})
+        if not box or box.get("type") == "ecom":
+            raise HTTPException(status_code=400, detail="صندوق العربون غير صالح")
         box_acc = await db.accounts.find_one({"code": BOX_ACCOUNT.get(box_id, "530")})
         dep_acc = await db.accounts.find_one({"code": "203"})
         if not box_acc or not dep_acc:
@@ -164,14 +170,33 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     @router.delete("/resources/{resource_id}")
     async def delete_resource(resource_id: str, user: dict = Depends(get_tenant_admin)):
-        active = await db.bookings.count_documents(
-            {"resource_id": resource_id, "status": {"$in": list(ACTIVE_STATUSES)}})
-        if active:
-            raise HTTPException(status_code=409, detail="للمورد حجوزات نشطة — ألغِها أولاً")
-        res = await db.booking_resources.delete_one({"id": resource_id})
-        if res.deleted_count == 0:
-            raise HTTPException(status_code=404, detail="المورد غير موجود")
-        return {"deleted": True, "id": resource_id}
+        # p503: hold the per-resource booking lock across the check+delete so a
+        # concurrent create_booking cannot slip a booking onto a deleted resource.
+        lock_at = _now_dt()
+        stale = (lock_at.timestamp() - 30)
+        lock = await db.booking_resources.find_one_and_update(
+            {"id": resource_id,
+             "$or": [{"_booking_lock": {"$ne": True}},
+                     {"_booking_lock_ts": {"$lt": stale}}]},
+            {"$set": {"_booking_lock": True, "_booking_lock_ts": lock_at.timestamp()}})
+        if not lock:
+            exists = await db.booking_resources.find_one({"id": resource_id}, {"_id": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="المورد غير موجود")
+            raise HTTPException(status_code=409, detail="حجز آخر قيد التنفيذ على هذا المورد — أعد المحاولة")
+        try:
+            active = await db.bookings.count_documents(
+                {"resource_id": resource_id, "status": {"$in": list(ACTIVE_STATUSES)}})
+            if active:
+                raise HTTPException(status_code=409, detail="للمورد حجوزات نشطة — ألغِها أولاً")
+            res = await db.booking_resources.delete_one({"id": resource_id})
+            if res.deleted_count == 0:
+                raise HTTPException(status_code=404, detail="المورد غير موجود")
+            return {"deleted": True, "id": resource_id}
+        finally:
+            await db.booking_resources.update_one(
+                {"id": resource_id},
+                {"$set": {"_booking_lock": False}})
 
     # ── Bookings ──
     @router.get("")
@@ -262,6 +287,11 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     @router.put("/{booking_id}/status")
     async def set_status(booking_id: str, body: StatusIn, user: dict = Depends(get_tenant_admin)):
+        # p503: the transition is an ATOMIC CLAIM, not check-then-act — the old
+        # code read the state then acted, so concurrent transitions (notably
+        # cancel+refund) all passed the guard and only the journal unique index
+        # (missing on freshly provisioned tenant DBs) stood between the tenant
+        # and a double refund. The claim filter IS the guard now.
         b = await db.bookings.find_one({"id": booking_id})
         if not b:
             raise HTTPException(status_code=404, detail="الحجز غير موجود")
@@ -269,19 +299,46 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
             raise HTTPException(
                 status_code=400,
                 detail=f"لا يمكن الانتقال من {b['status']} إلى {body.status}")
+        # p503 fail-safe: a crash between the deposit journal and the flag
+        # update leaves deposit_paid=False with money actually collected —
+        # already_posted detects it so the deposit can never vanish silently.
+        from services.accounting_auto import already_posted
+        deposit_held = (b.get("deposit_paid") or
+                        await already_posted(db, b["id"], "booking_deposit"))
+        needs_refund = (body.status == "cancelled" and deposit_held
+                        and not b.get("deposit_refunded") and float(b.get("deposit") or 0) > 0)
+        if needs_refund and not body.refund_deposit:
+            raise HTTPException(
+                status_code=422,
+                detail="للحجز عربون مدفوع — حدّد refund_deposit=true لاسترداده أو أعد العربون يدوياً")
+        if needs_refund:
+            box = await db.cash_boxes.find_one({"id": body.refund_box})
+            if not box or box.get("type") == "ecom":
+                raise HTTPException(status_code=400, detail="صندوق الاسترداد غير صالح")
         upd = {"status": body.status, "updated_at": _now(),
                "status_by": user.get("name", "")}
-        if body.status == "cancelled" and b.get("deposit_paid") and not b.get("deposit_refunded"):
-            if not body.refund_deposit:
-                raise HTTPException(
-                    status_code=422,
-                    detail="للحجز عربون مدفوع — حدّد refund_deposit=true لاسترداده أو أعد العربون يدوياً")
-            await _deposit_journal(b, b["deposit"], body.refund_box, refund=True)
-            upd["deposit_refunded"] = True
-            upd["refund_box"] = body.refund_box
-        await db.bookings.update_one({"id": booking_id}, {"$set": upd})
+        claim_filter = {"id": booking_id, "status": b["status"]}
+        if needs_refund:
+            claim_filter["deposit_refunded"] = {"$ne": True}
+        claimed = await db.bookings.find_one_and_update(claim_filter, {"$set": upd})
+        if not claimed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"تعذّر الانتقال — حالة الحجز تغيّرت للتو (أعد المحاولة)")
+        if needs_refund:
+            try:
+                await _deposit_journal(b, b["deposit"], body.refund_box, refund=True)
+            except Exception:
+                # rollback the claim — the booking returns to its prior state
+                await db.bookings.update_one(
+                    {"id": booking_id, "status": body.status},
+                    {"$set": {"status": b["status"], "updated_at": _now()}})
+                raise
+            await db.bookings.update_one(
+                {"id": booking_id},
+                {"$set": {"deposit_refunded": True, "refund_box": body.refund_box}})
         return {"id": booking_id, "code": b["code"], "status": body.status,
-                "deposit_refunded": upd.get("deposit_refunded", False)}
+                "deposit_refunded": bool(needs_refund)}
 
     @router.put("/{booking_id}")
     async def edit_booking(booking_id: str, body: BookingUpdate, user: dict = Depends(get_tenant_admin)):
@@ -300,12 +357,35 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
         if not new_start or not new_end or new_end <= new_start:
             raise HTTPException(status_code=400, detail="فترة الحجز غير صالحة")
         if new_start != b["start"] or new_end != b["end"]:
-            clash = await _check_clash(b["resource_id"], new_start, new_end, exclude_id=booking_id)
-            if clash:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"تعارض مع الحجز {clash['code']} ({clash['customer_name']})")
-            upd["start"], upd["end"] = new_start, new_end
+            # p503: the time-change clash check runs under the SAME per-resource
+            # lock as create_booking — without it a concurrent create+edit both
+            # passed their clash checks and double-booked the resource.
+            lock_at = _now_dt()
+            stale = (lock_at.timestamp() - 30)
+            lock = await db.booking_resources.find_one_and_update(
+                {"id": b["resource_id"],
+                 "$or": [{"_booking_lock": {"$ne": True}},
+                         {"_booking_lock_ts": {"$lt": stale}}]},
+                {"$set": {"_booking_lock": True, "_booking_lock_ts": lock_at.timestamp()}})
+            if not lock:
+                raise HTTPException(status_code=409,
+                                    detail="حجز آخر قيد التنفيذ على هذا المورد — أعد المحاولة")
+            try:
+                clash = await _check_clash(b["resource_id"], new_start, new_end, exclude_id=booking_id)
+                if clash:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"تعارض مع الحجز {clash['code']} ({clash['customer_name']})")
+                upd["start"], upd["end"] = new_start, new_end
+                if not upd:
+                    raise HTTPException(status_code=400, detail="لا تعديلات")
+                upd["updated_at"] = _now()
+                await db.bookings.update_one({"id": booking_id}, {"$set": upd})
+            finally:
+                await db.booking_resources.update_one(
+                    {"id": b["resource_id"]},
+                    {"$set": {"_booking_lock": False}})
+            return await db.bookings.find_one({"id": booking_id}, {"_id": 0})
         if not upd:
             raise HTTPException(status_code=400, detail="لا تعديلات")
         upd["updated_at"] = _now()
