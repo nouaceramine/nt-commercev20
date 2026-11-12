@@ -6797,3 +6797,23 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 **النشر:** إعادة إقلاع backend الإنتاج (سطر M1 غير المثبت آنذاك عُطّل مؤقتًا ثم أُعيد — عمل جلسة موازية لم يُمس)؛ health=200 مباشرة/nginx/Cloudflare؛ OpenAPI ثابتة 1176/1451؛ المجهول 401 حيًا على السبعة؛ log_system_error وreap_stale_identity قابلتان للاستيراد في الإنتاج؛ **md5 الإنتاج مطابق لـstaging المختبَرة** للملفات الستة؛ الدفع إلى origin/main (ضمن سلسلة تنتهي بـ400b858).
 **التنظيف:** staging ‏residue=0 ‏(12 فئة، تحقق مباشر)؛ الإنتاج بلا أي بيانات اختبار (قراءات/401 فقط)؛ نسخة ما قبل الرقعة `/opt/ntcommerce/backups/p500/`.
 **الحالة:** المصفوفة 1719 صفًا، **صفر «لم يبدأ»** — التدقيق الشامل مغلق بالكامل. المتبقي تطوير وظيفي (خارطة الوحدات M + 9 بنود محالة + M13) وبنود المالك.
+
+
+---
+
+## P501 — دفعة إغلاق الجزئيات (2026-11-12، commit 18b5b56)
+
+**النطاق:** إغلاق 9/10 صفوف «مختبر جزئيًا» (UI /products, /products/add, /products/:id/edit, /price-history من p492؛ UI /purchases + API GET /api/purchases من p493؛ UI /data-import-export, /import-wizard, /settings من p498) ترابطيًا UI↔API↔DB. `/products/:id` يبقى جزئيًا عن قصد (P492-042 مؤجل لما بعد P499).
+
+**العيوب والإصلاحات (18b5b56):**
+- **P501-001:** إنشاء/تعديل منتج بعائلة القالب `default-product-family` كان 400 كاذب — `find_one` بإسقاط `{name_ar:1}` على وثيقة خاملة يُرجع `{}` (falsy). الإصلاح: فحص `is None` + سقوط name_ar→name في products_routes وfamilies_permissions_routes + بذر القالب بـname_ar/name_en + **ترقيع template_tenant الحي في الإنتاج** ($set name_ar/name_en، modifiedCount=1).
+- **P501-002:** حذف/إعادة فتح شراء استُهلك مخزونه كان يُحظر 400 أبديًا (حارس adjust_warehouse_stock على كل دلتا سالب) بينما products.quantity يُخفض بلا حارس. الإصلاح: معامل `allow_negative=False` افتراضيًا، يُمرَّر True في مساري العكس فقط (_apply_purchase_stock إشارة سالبة + _delete_purchase_impl)؛ المبيعات/التحويلات محروسة.
+- **P501-003 (جلسة موازية):** price-history?limit سالب/ضخم ⇒ 500 — clamp [1,500].
+- **P501-004 (جلسة موازية):** NaN/Inf عبر التحديث/الاستيراد — مدققات finite في catalog.py + whitelist _allowed_update_fields + تصفير عند الاستيراد + حفظ sold_by_weight/scale_plu + clamp page/page_size.
+
+**الاختبار:** API/DB ترابطي **129/129 مرتان** (إحداها على الكود المدموج) داخل حاوية staging؛ متصفح حقيقي **46/46** (Playwright 1440px عبر نفق nginx) لكل الصفحات الثماني مع ربط API بعد كل إجراء واجهة؛ انحدار: نواة 83/83، خضراء 59/59، Ruff نظيف؛ legacy 57F/259P/194E بلا تغيير.
+**موثّق بمبرر:** 403 store/products + store/orders + ecom/shipping/providers = ميزة ecommerce_hub معطّلة في خطة TEST؛ 403 serials/product = ميزة maintenance معطّلة (catch{} تصميمي)؛ 400 DELETE المنتج المخزّن = فحص سلبي مقصود.
+
+**النشر:** إعادة إقلاع backend الإنتاج مع مبادلة WIP الجلسة الموازية (main.py تسجيل M4 نُسخ لـ/tmp واستُرجع بعد الإقلاع — **M4 لم يُنشر**، صفر مسارات cod-settlement)؛ health=200 مباشرة/nginx/Cloudflare ×3؛ OpenAPI **1193/1473** (خط أساس جديد بعد M1–M3 الملتزم بها سابقًا؛ p501 لم تضف مسارات)؛ **md5 الإنتاج مطابق للمختبَر** للملفات الثمانية؛ الدفع إلى origin/main (18b5b56).
+**التنظيف:** staging residue=0 (purge نهائي: tenants/identities/outbox/plan/admin/databases/redis)؛ الإنتاج بلا بيانات اختبار؛ نسخ ما قبل الرقعة `/opt/ntcommerce/backups/p501/`.
+**الحالة:** المصفوفة 1719 ← 1723 صفًا (9 أُغلقت «مختبر ترابطيًا (p501-جزئيات)» + 4 DEFECT)؛ صفر «لم يبدأ» وصفر جزئي غير مقصود. المتبقي: تطوير وظيفي (M + 9 بنود + M13) وبنود المالك.
