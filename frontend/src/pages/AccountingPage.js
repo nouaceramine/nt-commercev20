@@ -9,7 +9,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark, Wallet, Plus, Trash2, Check } from 'lucide-react';
+import { Scale, RefreshCw, BookOpen, TrendingUp, Landmark, Wallet, Plus, Trash2, Check, Banknote, Receipt } from 'lucide-react';
 import { startRealtime, onEvent } from '../lib/realtime';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -22,6 +22,8 @@ const AccountingPage = () => {
   const [tb, setTb] = useState(null);
   const [income, setIncome] = useState(null);  // p197
   const [bs, setBs] = useState(null);  // p198
+  const [cashFlow, setCashFlow] = useState(null);  // M8: cash-flow statement
+  const [taxSum, setTaxSum] = useState(null);  // M8: Algerian tax summary (TAP/TVA/IBS)
   const [ob, setOb] = useState(null);  // p199: opening-balance preview
   const [obBusy, setObBusy] = useState(false);
   const [ledgerAcc, setLedgerAcc] = useState(null);  // p200: account selected for the ledger
@@ -48,13 +50,15 @@ const AccountingPage = () => {
   const fetchAll = useCallback(async (dateStr) => {
     try {
       const monthStart = `${dateStr.slice(0, 8)}01`;  // p197: month-to-date range
-      const [tbRes, jeRes, isRes, bsRes, obRes, accountsRes] = await Promise.all([
+      const [tbRes, jeRes, isRes, bsRes, obRes, accountsRes, cfRes, taxRes] = await Promise.all([
         apiClient.get(`/accounting/reports/trial-balance?as_of_date=${dateStr}`),
         apiClient.get('/accounting/journal-entries?limit=15'),
         apiClient.get(`/accounting/reports/income-statement?start_date=${monthStart}&end_date=${dateStr}`),
         apiClient.get(`/accounting/reports/balance-sheet-journal?as_of_date=${dateStr}`),
         apiClient.get('/accounting/opening-balance/preview'),  // p199
         apiClient.get('/accounting/accounts'),  // p208
+        apiClient.get(`/accounting/reports/cash-flow?start_date=${monthStart}&end_date=${dateStr}`),  // M8
+        apiClient.get(`/accounting/reports/tax-summary?period=${dateStr.slice(0, 4)}`),  // M8
       ]);
       setTb(tbRes.data);
       setEntries(Array.isArray(jeRes.data?.items) ? jeRes.data.items : []);
@@ -62,6 +66,8 @@ const AccountingPage = () => {
       setBs(bsRes.data);
       setOb(obRes.data);
       setAccounts(Array.isArray(accountsRes.data) ? accountsRes.data : []);  // p208
+      setCashFlow(cfRes.data);  // M8
+      setTaxSum(taxRes.data);  // M8
     } catch (e) {
       console.error('accounting fetch failed', e);
     } finally {
@@ -455,6 +461,68 @@ const AccountingPage = () => {
                   </tfoot>
                 </table>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {cashFlow && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Banknote className="h-5 w-5" />
+                {isAr ? `قائمة التدفقات النقدية — ${cashFlow.period_start || ''} ← ${cashFlow.period_end || ''}` : `Flux de trésorerie — ${cashFlow.period_start || ''} → ${cashFlow.period_end || ''}`}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <table className="w-full text-sm" data-testid="cash-flow-table">
+                <tbody>
+                  <tr className="border-b bg-muted/30"><td className="p-2 font-semibold" colSpan={2}>{isAr ? 'الأنشطة التشغيلية' : 'Activités opérationnelles'}</td></tr>
+                  <tr className="border-b"><td className="p-2 ps-6">{isAr ? 'نقد من المبيعات' : 'Encaissements ventes'}</td><td className="p-2 text-end font-mono">{fmt(cashFlow.operating_activities?.cash_from_sales || 0)}</td></tr>
+                  <tr className="border-b"><td className="p-2 ps-6">{isAr ? 'مدفوعات المشتريات' : 'Paiements achats'}</td><td className="p-2 text-end font-mono">({fmt(cashFlow.operating_activities?.cash_paid_for_purchases || 0)})</td></tr>
+                  <tr className="border-b"><td className="p-2 ps-6">{isAr ? 'مدفوعات المصاريف' : 'Paiements charges'}</td><td className="p-2 text-end font-mono">({fmt(cashFlow.operating_activities?.cash_paid_for_expenses || 0)})</td></tr>
+                  <tr className="border-b font-semibold"><td className="p-2">{isAr ? 'صافي التشغيل' : 'Net opérationnel'}</td><td className="p-2 text-end font-mono" data-testid="cf-operating">{fmt(cashFlow.operating_activities?.net_cash_from_operating || 0)}</td></tr>
+                  <tr className="border-b font-semibold"><td className="p-2">{isAr ? 'صافي الاستثمار' : 'Net investissement'}</td><td className="p-2 text-end font-mono">{fmt(cashFlow.investing_activities?.net_cash_from_investing || 0)}</td></tr>
+                  <tr className="border-b font-semibold"><td className="p-2">{isAr ? 'صافي التمويل' : 'Net financement'}</td><td className="p-2 text-end font-mono">{fmt(cashFlow.financing_activities?.net_cash_from_financing || 0)}</td></tr>
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 font-bold">
+                    <td className="p-2">{isAr ? 'صافي التدفق النقدي' : 'Flux net'}</td>
+                    <td className={`p-2 text-end font-mono ${(cashFlow.net_cash_flow || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-testid="cf-net">{fmt(cashFlow.net_cash_flow || 0)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+
+        {taxSum && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Receipt className="h-5 w-5" />
+                {isAr ? `الملخص الضريبي — ${taxSum.period}` : `Résumé fiscal — ${taxSum.period}`}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <table className="w-full text-sm" data-testid="tax-summary-table">
+                <tbody>
+                  <tr className="border-b"><td className="p-2">{isAr ? 'إجمالي الإيرادات' : 'Revenus totaux'}</td><td className="p-2 text-end font-mono">{fmt(taxSum.total_revenue || 0)}</td></tr>
+                  <tr className="border-b"><td className="p-2">{isAr ? 'المصاريف القابلة للخصم' : 'Charges déductibles'}</td><td className="p-2 text-end font-mono">({fmt(taxSum.total_deductible_expenses || 0)})</td></tr>
+                  <tr className="border-b font-semibold"><td className="p-2">{isAr ? 'الوعاء الضريبي' : 'Revenu imposable'}</td><td className="p-2 text-end font-mono" data-testid="tax-base">{fmt(taxSum.taxable_income || 0)}</td></tr>
+                  {Object.entries(taxSum.tax_breakdown || {}).map(([k, v]) => (
+                    <tr key={k} className="border-b" data-testid={`tax-${k}`}>
+                      <td className="p-2 ps-6">{k}</td>
+                      <td className="p-2 text-end font-mono">{fmt(v)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 font-bold">
+                    <td className="p-2">{isAr ? `الضريبة المقدّرة (نسبة ${(taxSum.tax_rate || 0) * 100}%)` : `Impôt estimé (${(taxSum.tax_rate || 0) * 100}%)`}</td>
+                    <td className="p-2 text-end font-mono text-orange-600" data-testid="tax-estimated">{fmt(taxSum.estimated_tax || 0)}</td>
+                  </tr>
+                </tfoot>
+              </table>
             </CardContent>
           </Card>
         )}
