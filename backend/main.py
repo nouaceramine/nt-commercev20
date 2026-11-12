@@ -1310,6 +1310,7 @@ _AUTO_REG_MODULES = [
     'routes.ecom.intake_routes',  # p251: YouCan/LightFunnels/Sheets order intake
     'routes.ecom.social_inbox_routes',  # p249: social inbox -> order conversion
     'routes.store_multi_routes',  # p250: multi-store per tenant
+    'routes.quotations_routes',  # M1: quotations module pack
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
