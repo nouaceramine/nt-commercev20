@@ -15,6 +15,7 @@ Security: every endpoint is tenant-scoped via require_tenant; platform aggregate
 counts-only (no cross-tenant PII leakage).
 """
 import logging
+import math
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -301,7 +302,14 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
 
     @router.put("/smart/competitor-watch/{watch_id}/price")
     async def update_competitor_price(watch_id: str, body: dict, user: dict = Depends(get_tenant_admin)):
-        price = float(body.get("competitor_price") or 0)
+        # p497a: strict money parsing — text must not 500, NaN must not reach the
+        # price history, and a competitor price is never negative.
+        try:
+            price = float(body.get("competitor_price"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="سعر المنافس غير صالح")
+        if not math.isfinite(price) or price < 0:
+            raise HTTPException(status_code=400, detail="سعر المنافس يجب أن يكون رقماً موجباً صحيحاً")
         now = datetime.now(timezone.utc).isoformat()
         w = await db.competitor_watch.find_one({"id": watch_id})
         if not w:

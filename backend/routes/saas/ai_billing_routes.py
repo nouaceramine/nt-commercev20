@@ -14,20 +14,25 @@ Flow (report §3.4):
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
+import math
 import re
 import uuid
+
+from pymongo.errors import DuplicateKeyError
 
 from config.database import main_db
 from .helpers import get_super_admin
 from services.ai.usage_meter import get_billing_config, month_key
+from services.code_generator import generate_code
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["AI Usage Billing (p224)"])
 
-MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+# p497a: real calendar months only (2026-13 must not "run")
+MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 class BillingConfigIn(BaseModel):
@@ -80,9 +85,10 @@ async def get_config(admin: dict = Depends(get_super_admin)):
 
 @router.put("/saas/ai-billing/config")
 async def put_config(data: BillingConfigIn, admin: dict = Depends(get_super_admin)):
-    if data.margin_pct < 0 or data.margin_pct > 500:
+    # p497a: NaN slips past every ordered comparison — guard finiteness explicitly
+    if not math.isfinite(data.margin_pct) or data.margin_pct < 0 or data.margin_pct > 500:
         raise HTTPException(status_code=400, detail="هامش غير صالح")
-    if data.usd_dzd_rate <= 0:
+    if not math.isfinite(data.usd_dzd_rate) or data.usd_dzd_rate <= 0:
         raise HTTPException(status_code=400, detail="سعر الصرف غير صالح")
     doc = {
         "id": "global",
@@ -100,7 +106,7 @@ async def put_config(data: BillingConfigIn, admin: dict = Depends(get_super_admi
 
 @router.put("/saas/ai-billing/cap")
 async def set_cap(data: CapIn, admin: dict = Depends(get_super_admin)):
-    if data.monthly_cap_usd < 0:
+    if not math.isfinite(data.monthly_cap_usd) or data.monthly_cap_usd < 0:
         raise HTTPException(status_code=400, detail="السقف لا يمكن أن يكون سالباً")
     res = await main_db.saas_tenants.update_one(
         {"id": data.tenant_id},
@@ -193,17 +199,21 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
         billed_usd = round(r["cost_usd"] * (1 + cfg["margin_pct"] / 100), 4)
         amount_dzd = round(billed_usd * cfg["usd_dzd_rate"], 2)
         existing = await main_db.ai_invoices.find_one(
-            {"tenant_id": tid, "month": data.month, "status": "billed"}, {"_id": 0}
+            {"tenant_id": tid, "month": data.month}, {"_id": 0}
         )
-        if existing:
+        if existing and existing.get("status") == "billed":
             results["skipped"].append({"tenant_id": tid, "reason": "invoiced"})
             # p295: backfill commission for invoices billed before the hook existed
             await _record_ai_commission(tid, data.month, r["cost_usd"], cfg, amount_dzd)
             continue
-        count = await main_db.ai_invoices.count_documents({})
+        # p497a: atomic per-(tenant, month) claim — the ai_invoice_unique index turns
+        # the loser's insert into DuplicateKeyError, so concurrent runs can never
+        # double-debit the wallet. Code comes from the atomic counter (no dupes).
+        code = await generate_code(main_db, "ai_invoices",
+                                   f"AIB-{data.month.replace('-', '')}-", 4, False)
         inv = {
             "id": str(uuid.uuid4()),
-            "code": f"AIB-{data.month.replace('-', '')}-{str(count + 1).zfill(4)}",
+            "code": code,
             "tenant_id": tid,
             "month": data.month,
             "calls": r["calls"],
@@ -214,24 +224,58 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
             "billed_usd": billed_usd,
             "usd_dzd_rate": cfg["usd_dzd_rate"],
             "amount_dzd": amount_dzd,
-            "status": "pending",
+            "status": "processing",
             "error": "",
             "wallet_txn_id": "",
             "created_at": now,
+            "claimed_at": now,
             "billed_at": None,
             "created_by": admin.get("email", ""),
         }
-        if amount_dzd <= 0:
-            inv["status"] = "billed"
-            inv["billed_at"] = now
-            await main_db.ai_invoices.update_one(
-                {"tenant_id": tid, "month": data.month}, {"$set": inv}, upsert=True
-            )
-            results["billed"].append(
-                {"tenant_id": tid, "amount_dzd": 0, "code": inv["code"]}
-            )
+        claimed = False
+        if existing is None:
+            try:
+                await main_db.ai_invoices.insert_one(dict(inv))
+                claimed = True
+            except DuplicateKeyError:
+                claimed = False  # a concurrent runner holds this (tenant, month)
+        else:
+            # Retriable paths: failed/pending always; "processing" only when the
+            # holder crashed — steal the claim after a 60s lock timeout so a slow
+            # live winner is never double-debited (p495d lock-steal pattern).
+            st = existing.get("status")
+            stealable = False
+            if st in ("failed", "pending"):
+                stealable = True
+            elif st == "processing":
+                try:
+                    claimed_at = datetime.fromisoformat(
+                        (existing.get("claimed_at") or existing.get("created_at") or ""
+                         ).replace("Z", "+00:00"))
+                    stealable = (datetime.now(timezone.utc) - claimed_at) > timedelta(seconds=60)
+                except Exception:
+                    stealable = False
+            if stealable:
+                res = await main_db.ai_invoices.update_one(
+                    {"tenant_id": tid, "month": data.month, "status": st},
+                    {"$set": {**inv, "id": existing.get("id", inv["id"]),
+                              "created_at": existing.get("created_at", now),
+                              "claimed_at": now}},
+                )
+                claimed = res.modified_count == 1
+        if not claimed:
+            results["skipped"].append({"tenant_id": tid, "reason": "in_progress"})
             continue
         try:
+            if amount_dzd <= 0:
+                await main_db.ai_invoices.update_one(
+                    {"tenant_id": tid, "month": data.month},
+                    {"$set": {"status": "billed", "billed_at": now}},
+                )
+                results["billed"].append(
+                    {"tenant_id": tid, "amount_dzd": 0, "code": code}
+                )
+                continue
             from services.wallet_service import debit_wallet
 
             txn_id = str(uuid.uuid4())
@@ -241,28 +285,28 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
                 amount_dzd,
                 "ai_billing",
                 txn_id,
-                f"فاتورة استهلاك الذكاء الاصطناعي {data.month} ({inv['code']})",
+                f"فاتورة استهلاك الذكاء الاصطناعي {data.month} ({code})",
                 admin.get("email", "system"),
             )
-            inv["status"] = "billed"
-            inv["billed_at"] = now
-            inv["wallet_txn_id"] = txn_id
+            await main_db.ai_invoices.update_one(
+                {"tenant_id": tid, "month": data.month},
+                {"$set": {"status": "billed", "billed_at": now,
+                          "wallet_txn_id": txn_id, "error": ""}},
+            )
             # p295: platform margin ledger
             await _record_ai_commission(tid, data.month, r["cost_usd"], cfg, amount_dzd)
+            results["billed"].append(
+                {"tenant_id": tid, "amount_dzd": amount_dzd, "code": code, "error": ""}
+            )
         except Exception as exc:
-            inv["status"] = "failed"
-            inv["error"] = str(getattr(exc, "detail", exc))[:300]
-        await main_db.ai_invoices.update_one(
-            {"tenant_id": tid, "month": data.month}, {"$set": inv}, upsert=True
-        )
-        results["billed" if inv["status"] == "billed" else "failed"].append(
-            {
-                "tenant_id": tid,
-                "amount_dzd": amount_dzd,
-                "code": inv["code"],
-                "error": inv["error"],
-            }
-        )
+            err = str(getattr(exc, "detail", exc))[:300]
+            await main_db.ai_invoices.update_one(
+                {"tenant_id": tid, "month": data.month},
+                {"$set": {"status": "failed", "error": err}},
+            )
+            results["failed"].append(
+                {"tenant_id": tid, "amount_dzd": amount_dzd, "code": code, "error": err}
+            )
     return {"month": data.month, **results}
 
 
