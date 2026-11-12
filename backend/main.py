@@ -1316,6 +1316,7 @@ _AUTO_REG_MODULES = [
     'routes.cod_settlements_routes',  # M4: COD settlement batches
     'routes.auto_reorder_routes',  # M5: auto-reorder draft purchase orders
     'routes.payroll_routes',  # M6: payroll payslips (salary + commission − advances)
+    'routes.bookings_routes',  # M7: generalized bookings (resources + clash detection + deposits)
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

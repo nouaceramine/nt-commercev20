@@ -85,6 +85,7 @@ import {
   ArrowRight,
   KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike, Cpu, Network,
   PackagePlus,
+  CalendarCheck,
 } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
@@ -548,6 +549,15 @@ export const Layout = ({ children }) => {
         { path: '/restaurant-pos', icon: UtensilsCrossed, label: language === 'ar' ? 'POS المطعم' : 'POS Resto' },  // p339
         { path: '/delivery', icon: Bike, label: language === 'ar' ? 'طلبات التوصيل' : 'Livraisons' },
       ]  // p329: شاشات العرض انتقلت للإعدادات — صارت لكل الأنشطة
+    },
+    {
+      id: 'bookings',
+      featureKey: null,
+      title: language === 'ar' ? 'الحجوزات' : 'Réservations',
+      icon: CalendarCheck,
+      items: [
+        { path: '/bookings', icon: CalendarCheck, label: language === 'ar' ? 'الحجوزات العامة' : 'Réservations' },  // M7
+      ]
     },
     {
       id: 'expenses',

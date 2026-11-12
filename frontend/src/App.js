@@ -164,6 +164,7 @@ const FixedAssetsPage = lazy(() => import("./pages/FixedAssetsPage"));  // M3
 const CodSettlementsPage = lazy(() => import("./pages/CodSettlementsPage"));  // M4
 const AutoReorderPage = lazy(() => import("./pages/AutoReorderPage"));  // M5
 const PayrollPage = lazy(() => import("./pages/PayrollPage"));  // M6
+const BookingsPage = lazy(() => import("./pages/BookingsPage"));  // M7
 const MarginRulesPage = lazy(() => import("./pages/MarginRulesPage"));  // p273  // p223
 const MarketplacePage = lazy(() => import("./pages/MarketplacePage"));  // p273  // p227
 
@@ -580,6 +581,16 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PayrollPage />
+          </ProtectedRoute>
+        }
+      />
+
+
+      <Route
+        path="/bookings"
+        element={
+          <ProtectedRoute>
+            <BookingsPage />
           </ProtectedRoute>
         }
       />
