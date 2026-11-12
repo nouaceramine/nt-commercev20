@@ -584,6 +584,7 @@ export const Layout = ({ children }) => {
       items: [
         ...(isAdmin ? [
           { path: '/employees', icon: Users, label: language === 'ar' ? 'الموظفين' : 'Employés' },
+          { path: '/payroll', icon: Wallet, label: language === 'ar' ? 'قسائم الرواتب' : 'Fiches de paie' },  // M6
           { path: '/employee-activity', icon: Activity, label: language === 'ar' ? 'سجل النشاط' : 'Activité' },
           { path: '/employee-alerts', icon: Bell, label: language === 'ar' ? 'تنبيهات الحدود' : 'Alertes' },
           { path: '/task-management', icon: CheckSquare, label: language === 'ar' ? 'المهام' : 'Tâches' },

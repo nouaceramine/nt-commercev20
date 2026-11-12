@@ -1315,6 +1315,7 @@ _AUTO_REG_MODULES = [
     'routes.fixed_assets_routes',  # M3: fixed assets + depreciation
     'routes.cod_settlements_routes',  # M4: COD settlement batches
     'routes.auto_reorder_routes',  # M5: auto-reorder draft purchase orders
+    'routes.payroll_routes',  # M6: payroll payslips (salary + commission − advances)
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
