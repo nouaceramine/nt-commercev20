@@ -7,6 +7,7 @@ from typing import Literal, Optional
 import csv
 import io
 import json
+import math
 from datetime import datetime, timezone
 from bson import ObjectId
 from openpyxl import Workbook, load_workbook
@@ -314,6 +315,8 @@ def create_import_export_routes(db, get_current_user) -> dict:
                             if f in ["retail_price", "wholesale_price", "purchase_price", "amount", "total", "discount", "salary", "remaining", "tax_rate", "quantity", "min_stock"]:
                                 try:
                                     val = float(val)
+                                    if not math.isfinite(val):  # p501: nan/inf must not reach the database
+                                        val = 0
                                 except (ValueError, TypeError):
                                     val = 0
                             record[f] = val
@@ -339,6 +342,8 @@ def create_import_export_routes(db, get_current_user) -> dict:
                             if field in ["retail_price", "wholesale_price", "purchase_price", "amount", "total", "discount", "salary", "remaining", "tax_rate", "quantity", "min_stock"]:
                                 try:
                                     val = float(val) if val else 0
+                                    if not math.isfinite(val):  # p501: nan/inf must not reach the database
+                                        val = 0
                                 except (ValueError, TypeError):
                                     val = 0
                             record[field] = val
@@ -368,6 +373,8 @@ def create_import_export_routes(db, get_current_user) -> dict:
                             if field in ["retail_price", "wholesale_price", "purchase_price", "amount", "total", "discount", "salary", "remaining", "tax_rate", "quantity", "min_stock"]:
                                 try:
                                     val = float(val) if val else 0
+                                    if not math.isfinite(val):  # p501: nan/inf must not reach the database
+                                        val = 0
                                 except (ValueError, TypeError):
                                     val = 0
                             record[field] = val
@@ -413,6 +420,8 @@ def create_import_export_routes(db, get_current_user) -> dict:
                             if field in ["retail_price", "wholesale_price", "purchase_price", "amount", "total", "discount", "salary", "remaining", "tax_rate", "quantity", "min_stock"]:
                                 try:
                                     val = float(val) if val else 0
+                                    if not math.isfinite(val):  # p501: nan/inf must not reach the database
+                                        val = 0
                                 except (ValueError, TypeError):
                                     val = 0
                             record[field] = val

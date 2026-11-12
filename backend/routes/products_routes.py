@@ -126,17 +126,19 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
         family_name = ""
         if p.family_id:
-            family = await db.product_families.find_one({"id": p.family_id}, {"_id": 0, "name_ar": 1})
-            if not family:
+            # p501: `is None`, not falsy — a legacy/template family without name_ar
+            # projects to {} and must not masquerade as "not found".
+            family = await db.product_families.find_one({"id": p.family_id}, {"_id": 0, "name_ar": 1, "name": 1})
+            if family is None:
                 raise HTTPException(status_code=400, detail="عائلة المنتجات المحددة غير موجودة")
-            family_name = family["name_ar"]
+            family_name = family.get("name_ar") or family.get("name") or ""
 
         brand_name = ""  # p217
         if p.brand_id:
-            brand = await db.product_brands.find_one({"id": p.brand_id}, {"_id": 0, "name_ar": 1})
-            if not brand:
+            brand = await db.product_brands.find_one({"id": p.brand_id}, {"_id": 0, "name_ar": 1, "name": 1})
+            if brand is None:
                 raise HTTPException(status_code=400, detail="الماركة المحددة غير موجودة")
-            brand_name = brand["name_ar"]
+            brand_name = brand.get("name_ar") or brand.get("name") or ""
 
         product_doc = {
             "id": product_id,
@@ -175,6 +177,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "force_qty_entry": p.force_qty_entry or False,
             "force_price_entry": p.force_price_entry or False,
             "serial_number_tracking": p.serial_number_tracking or False,
+            "sold_by_weight": p.sold_by_weight or False,  # p501: was silently dropped on create
+            "scale_plu": p.scale_plu or "",
             "tax_rate": p.tax_rate or 0,
             "internal_notes": p.internal_notes or "",
             "additional_barcodes": p.additional_barcodes or [],
@@ -254,8 +258,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         family_ids = list(set(p.get("family_id") for p in products if p.get("family_id") and not p.get("family_name")))
         families_map = {}
         if family_ids:
-            families = await db.product_families.find({"id": {"$in": family_ids}}, {"_id": 0, "id": 1, "name_ar": 1}).to_list(len(family_ids))
-            families_map = {f["id"]: f.get("name_ar", "") for f in families}
+            families = await db.product_families.find({"id": {"$in": family_ids}}, {"_id": 0, "id": 1, "name_ar": 1, "name": 1}).to_list(len(family_ids))
+            families_map = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in families}  # p501: legacy name-only docs
 
         product_ids = [p["id"] for p in products if p.get("id") and not p.get("last_purchase_date")]
         last_purchases_map = {}
@@ -316,15 +320,17 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             else:
                 query["family_id"] = family_id
 
+        page = max(1, page)  # p501: clamp — page=0/negative made skip negative (500)
+        page_size = max(1, min(page_size, 500))
         total = await db.products.count_documents(query)
-        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 1
+        total_pages = (total + page_size - 1) // page_size
         skip = (page - 1) * page_size
         products = await db.products.find(query, {"_id": 0}).skip(skip).limit(page_size).to_list(page_size)
 
         for product in products:
             if product.get("family_id") and not product.get("family_name"):
-                family = await db.product_families.find_one({"id": product["family_id"]}, {"_id": 0, "name_ar": 1})
-                product["family_name"] = family["name_ar"] if family else ""
+                family = await db.product_families.find_one({"id": product["family_id"]}, {"_id": 0, "name_ar": 1, "name": 1})
+                product["family_name"] = (family.get("name_ar") or family.get("name") or "") if family else ""
             elif not product.get("family_name"):
                 product["family_name"] = ""
             if not product.get("article_code"):
@@ -552,7 +558,11 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     async def update_product(product_id: str, updates: dict, admin: dict = Depends(require_permission("products.edit"))):
         from models.schemas import ProductUpdate
         validated = ProductUpdate(**updates)
-        update_data = {k: v for k, v in updates.items() if v is not None and k != "id"}
+        # p501: whitelist declared schema fields — the raw pass-through stored
+        # unknown keys verbatim and bypassed validation for undeclared ones.
+        _allowed_update_fields = set(ProductUpdate.model_fields)
+        update_data = {k: v for k, v in updates.items()
+                       if v is not None and k != "id" and k in _allowed_update_fields}
         for k, v in validated.model_dump(exclude_unset=True).items():
             if v is not None:
                 update_data[k] = v
@@ -571,22 +581,22 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         if "family_id" in update_data:
                             if update_data["family_id"]:
                                 family = await db.product_families.find_one(
-                                    {"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1}, session=tx_session
+                                    {"id": update_data["family_id"]}, {"_id": 0, "name_ar": 1, "name": 1}, session=tx_session
                                 )
-                                if not family:
+                                if family is None:  # p501: legacy docs may lack name_ar -> {} is still a hit
                                     raise HTTPException(status_code=400, detail="عائلة المنتجات المحددة غير موجودة")
-                                update_data["family_name"] = family["name_ar"]
+                                update_data["family_name"] = family.get("name_ar") or family.get("name") or ""
                             else:
                                 update_data["family_name"] = ""
 
                         if "brand_id" in update_data:
                             if update_data["brand_id"]:
                                 brand = await db.product_brands.find_one(
-                                    {"id": update_data["brand_id"]}, {"_id": 0, "name_ar": 1}, session=tx_session
+                                    {"id": update_data["brand_id"]}, {"_id": 0, "name_ar": 1, "name": 1}, session=tx_session
                                 )
-                                if not brand:
+                                if brand is None:
                                     raise HTTPException(status_code=400, detail="الماركة المحددة غير موجودة")
-                                update_data["brand_name"] = brand["name_ar"]
+                                update_data["brand_name"] = brand.get("name_ar") or brand.get("name") or ""
                             else:
                                 update_data["brand_name"] = ""
 
@@ -644,6 +654,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                                 await adjust_warehouse_stock(
                                     db, product_id, main_warehouse["id"], new_quantity - old_quantity,
                                     product_quantity_before=old_quantity, session=tx_session,
+                                    allow_negative=True,  # p501: absolute quantity set follows the product, even under drift
                                 )
                         update_data["updated_at"] = now
                         await db.products.update_one({"id": product_id}, {"$set": update_data}, session=tx_session)

@@ -151,6 +151,18 @@ class ProductCreate(BaseModel):
             raise ValueError('الكمية يجب أن تكون رقمًا منتهيًا يساوي صفر أو أكثر')
         return v or 0
 
+    # p501: the remaining numeric fields accepted NaN/Inf (stored poison, then
+    # response serialization 500). Same finite+non-negative contract as prices.
+    @field_validator('tariff_a', 'tariff_b', 'tariff_c', 'tariff_d', 'tax_rate', 'qty_per_package')
+    @classmethod
+    def validate_extra_numbers(cls, v):
+        import math
+        if v is not None and not math.isfinite(v):
+            raise ValueError('القيمة الرقمية يجب أن تكون منتهية')
+        if v is not None and v < 0:
+            raise ValueError('القيمة الرقمية يجب أن تساوي صفر أو أكثر')
+        return v
+
 class ProductUpdate(BaseModel):
     name_en: Optional[str] = None
     name_ar: Optional[str] = None
@@ -177,6 +189,26 @@ class ProductUpdate(BaseModel):
     variants: Optional[List[dict]] = None
     sold_by_weight: Optional[bool] = None  # p165
     scale_plu: Optional[str] = None  # p165
+    # p501: complete the editable surface — these fields used to bypass
+    # validation through the raw update dict (NaN poisoning / type confusion).
+    tariff_a: Optional[float] = None
+    tariff_b: Optional[float] = None
+    tariff_c: Optional[float] = None
+    tariff_d: Optional[float] = None
+    tax_rate: Optional[float] = None
+    qty_per_package: Optional[float] = None
+    min_quantity: Optional[float] = None
+    images: Optional[List[str]] = None
+    additional_barcodes: Optional[List[str]] = None
+    unit_of_measure: Optional[str] = None
+    storage_location: Optional[str] = None
+    is_non_stockable: Optional[bool] = None
+    internal_notes: Optional[str] = None
+    is_blocked: Optional[bool] = None
+    fixed_price: Optional[bool] = None
+    force_qty_entry: Optional[bool] = None
+    force_price_entry: Optional[bool] = None
+    serial_number_tracking: Optional[bool] = None
 
     @field_validator('name_en')
     @classmethod
@@ -217,6 +249,24 @@ class ProductUpdate(BaseModel):
         import math
         if v is not None and (not math.isfinite(v) or v < 0):
             raise ValueError('الكمية يجب أن تكون رقمًا منتهيًا يساوي صفر أو أكثر')
+        return v
+
+    @field_validator('tariff_a', 'tariff_b', 'tariff_c', 'tariff_d', 'tax_rate',
+                     'qty_per_package', 'min_quantity')
+    @classmethod
+    def validate_update_extra_numbers(cls, v):
+        import math
+        if v is not None and not math.isfinite(v):
+            raise ValueError('القيمة الرقمية يجب أن تكون منتهية')
+        if v is not None and v < 0:
+            raise ValueError('القيمة الرقمية يجب أن تساوي صفر أو أكثر')
+        return v
+
+    @field_validator('images')
+    @classmethod
+    def validate_update_images(cls, v):
+        if v and len(v) > 5:
+            raise ValueError('الحد الأقصى 5 صور للمنتج')
         return v
 
 class ProductResponse(BaseModel):

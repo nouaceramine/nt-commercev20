@@ -13,6 +13,7 @@ def warehouse_stock_id(product_id: str, warehouse_id: str) -> str:
 async def adjust_warehouse_stock(
     db, product_id: str, warehouse_id: str, delta: float,
     product_quantity_before: float, session=None, initialize_from_product: bool = True,
+    allow_negative: bool = False,
 ):
     """Adjust one location while the caller's transaction controls atomicity.
 
@@ -31,14 +32,17 @@ async def adjust_warehouse_stock(
     if stock is None:
         initial = float(product_quantity_before or 0) if initialize_from_product else 0.0
         new_quantity = initial + delta
-        if new_quantity < -1e-9:
+        # p501: reversal paths (purchase delete/reopen, manual quantity set) pass
+        # allow_negative — products.quantity already goes negative there, and
+        # blocking the reversal made such purchases undeletable/unreopenable.
+        if new_quantity < -1e-9 and not allow_negative:
             raise HTTPException(status_code=400, detail="Insufficient warehouse quantity")
         stock = {
             "_id": stock_id,
             "id": stock_id,
             "product_id": product_id,
             "warehouse_id": warehouse_id,
-            "quantity": max(0.0, new_quantity),
+            "quantity": new_quantity if allow_negative else max(0.0, new_quantity),
             "created_at": now,
             "updated_at": now,
         }
@@ -46,7 +50,7 @@ async def adjust_warehouse_stock(
         return stock["quantity"]
 
     query = {"_id": stock["_id"]}
-    if delta < 0:
+    if delta < 0 and not allow_negative:
         query["quantity"] = {"$gte": -delta}
     updated = await db.warehouse_stock.find_one_and_update(
         query,

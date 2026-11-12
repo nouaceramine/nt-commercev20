@@ -640,8 +640,8 @@ async def get_family_products(family_id: str, user: dict = Depends(require_tenan
     # Add family names
     for product in products:
         if product.get("family_id"):
-            family = await db.product_families.find_one({"id": product["family_id"]}, {"_id": 0, "name_ar": 1})
-            product["family_name"] = family["name_ar"] if family else ""
+            family = await db.product_families.find_one({"id": product["family_id"]}, {"_id": 0, "name_ar": 1, "name": 1})
+            product["family_name"] = (family.get("name_ar") or family.get("name") or "") if family else ""
         else:
             product["family_name"] = ""
 

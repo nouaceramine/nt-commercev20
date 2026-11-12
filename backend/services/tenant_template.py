@@ -80,7 +80,10 @@ def seed_data() -> dict:
              "is_default": True, "created_at": now},
         ],
         "product_families": [
-            {"id": "default-product-family", "name": "عام", "name_fr": "Général", "created_at": now},
+            # p501: name_ar/name_en are the canonical keys used by products routes;
+            # keep name/name_fr for marketplace-style readers.
+            {"id": "default-product-family", "name": "عام", "name_ar": "عام", "name_en": "General",
+             "name_fr": "Général", "created_at": now},
         ],
         "currencies": [
             {"code": "DZD", "name": "Algerian Dinar", "name_ar": "دينار جزائري", "symbol": "دج",

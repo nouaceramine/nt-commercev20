@@ -152,6 +152,7 @@ def create_utility_routes(db, require_tenant, get_tenant_admin, PriceHistoryResp
         if price_type:
             query["price_type"] = price_type
 
+        limit = max(1, min(limit, 500))  # p501: clamp — negative limit raised 500
         history = await db.price_history.find(
             query,
             {"_id": 0}

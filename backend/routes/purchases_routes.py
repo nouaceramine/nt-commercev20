@@ -128,6 +128,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                     db, pid, warehouse_id, sign * qty,
                     product_quantity_before=old_quantity, session=session,
                     initialize_from_product=True,
+                    allow_negative=sign < 0,  # p501: reversal must not be blocked by consumed stock
                 )
             if sign > 0:
                 if sync_item_price and abs(new_pp - old_pp) > 1e-9:
@@ -701,6 +702,7 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                         db, item["product_id"], purchase["warehouse_id"], -item["quantity"],
                         product_quantity_before=float(product.get("quantity", 0) or 0), session=session,
                         initialize_from_product=True,
+                        allow_negative=True,  # p501: deletion reversal must not be blocked by consumed stock
                     )
                 await db.products.update_one(
                     {"id": item["product_id"]}, {"$inc": {"quantity": -item["quantity"]}}, session=session
