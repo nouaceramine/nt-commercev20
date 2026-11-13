@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { ExportPrintButtons } from '../components/ExportPrintButtons';
 import PurchaseDialogs from './purchases/PurchaseDialogs';
+import LandedCostsDialog from './purchases/LandedCostsDialog';  // D3
 import { PurchaseStats } from './purchases/PurchaseStats';
 import { PurchaseHistoryTab } from './purchases/PurchaseHistoryTab';
 import { SupplierDebtsTab } from './purchases/SupplierDebtsTab';
@@ -63,6 +64,7 @@ export default function PurchasesPage() {
   const [purchaseToDelete, setPurchaseToDelete] = useState(null);
   const [deletingPurchase, setDeletingPurchase] = useState(false);
   const [showViewPurchaseDialog, setShowViewPurchaseDialog] = useState(false);
+  const [landedPurchase, setLandedPurchase] = useState(null);  // D3
   const [viewingPurchase, setViewingPurchase] = useState(null);
   
   // New supplier dialog
@@ -765,6 +767,7 @@ export default function PurchasesPage() {
               confirmDeletePurchase={confirmDeletePurchase}
               confirmStockPurchase={confirmStockPurchase}
               reopenPurchase={reopenPurchase}
+              openLandedCosts={setLandedPurchase}
               t={t}
               language={language}
             />
@@ -817,6 +820,12 @@ export default function PurchasesPage() {
           purchaseToDelete={purchaseToDelete} deletingPurchase={deletingPurchase}
           handleDeletePurchase={handleDeletePurchase}
           language={language} isRTL={isRTL} t={t} formatDate={formatDate} getStatusBadge={getStatusBadge}
+        />
+        <LandedCostsDialog
+          purchase={landedPurchase}
+          onClose={() => setLandedPurchase(null)}
+          onChanged={fetchData}
+          language={language} t={t}
         />
       </div>
     </Layout>

@@ -3,11 +3,11 @@ import { Button } from '../../components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../../components/ui/table';
-import { ShoppingBag, Eye, Pencil, Trash2, FileText, Undo2, CheckSquare } from 'lucide-react';
+import { ShoppingBag, Eye, Pencil, Trash2, FileText, Undo2, CheckSquare, Ship } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import PrintButton from '../../components/print/PrintButton';
 
-export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, viewPurchaseDetails, openEditPurchaseDialog, confirmDeletePurchase, confirmStockPurchase, reopenPurchase, t, language }) {
+export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, viewPurchaseDetails, openEditPurchaseDialog, confirmDeletePurchase, confirmStockPurchase, reopenPurchase, openLandedCosts, t, language }) {
   return (
     <Card>
       <CardHeader>
@@ -69,6 +69,12 @@ export function PurchaseHistoryTab({ purchases, formatDate, getStatusBadge, view
                           title={language === 'ar' ? 'عرض' : 'Voir'}
                           data-testid={`view-purchase-${purchase.id}`}>
                           <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className={`h-8 w-8 ${purchase.landed ? 'text-emerald-600 hover:bg-emerald-50' : 'text-cyan-600 hover:bg-cyan-50'}`}
+                          onClick={() => openLandedCosts && openLandedCosts(purchase)}
+                          title={language === 'ar' ? 'التكاليف الإضافية (شحن/جمركة)' : 'Couts additionnels'}
+                          data-testid={`landed-purchase-${purchase.id}`}>
+                          <Ship className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-600 hover:bg-amber-50"
                           onClick={() => openEditPurchaseDialog(purchase)}
