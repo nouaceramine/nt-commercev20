@@ -6863,9 +6863,10 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - النسخ backups/p508/؛ المصفوفة 1831 ← 1841.
 
 ## P509 — 2026-11-13 (تدقيق وإصلاح النظام والبيانات)
-- الالتزام `13211dc`: 7 إصلاحات نظام/بيانات (بحث، قوالب طباعة، أمان IP، backup/restore، export/import/convert-access) + تثبيت العمل الموروث M13 CRM وD1 serial warranty lifecycle بعد اختبارهما.
-- الاختبار: staging ترابطي API/DB ‏25/32 قبل الإصلاح ⇒ ‏32/32 بعده ثلاث جولات متتالية؛ serial lifecycle ‏5/5؛ `test_crm.py + test_serials.py` ‏26/26؛ الانحدار المستهدف ‏100/100؛ `git diff --check` وAST نظيفان.
+- الالتزامات: `0d1e27d` لتثبيت M13/D1 الموروثين، ثم `13211dc` لإصلاحات P509، ثم `419993e` للتوثيق.
+- الاختبار الموثق: staging ترابطي API/DB ‏7/16 قبل الإصلاح ⇒ ‏16/16 بعده ثلاث جولات متتالية؛ serial lifecycle ‏5/5؛ `test_crm.py + test_serials.py` ‏26/26؛ الانحدار المحفوظ: نواة ‏83/83، خضراء ‏59/59، حزمة المحفظة القديمة ‏75 ناجحًا/‏27 خطأ بيئيًا قديمًا، CRM/serials ‏24/24، Ruff نظيف.
+- الإصلاحات: regex بحث معطوب، 404 صادقة لقوالب الطباعة، رفض NaN في print copies، تحقق IP/duration، 404 لحذف security الشبح، أسماء/أرقام نسخ فريدة تحت السباق، restore متعدد collections داخل معاملة Mongo، ورفض stock=NaN في الاستيراد.
 - النشر: restart ‏`ntcommerce-backend-1`؛ الصحة ‏200 مباشرة/nginx/Cloudflare؛ OpenAPI ‏1258/1550؛ md5 repo≡container≡staging للملفات الخمسة؛ واجهة الإنتاج ‏`main.eda6d055.js` وdeploy release ‏`20261113_110945`.
 - التحقق الحي: مجهول ‏401 على backup/search-history/printing/security/database-import؛ `q=[` في suggestions ⇒ ‏200 بدل 500؛ متصفح حقيقي أكد `/crm` وتبويب «الأرقام التسلسلية» في صفحة تعديل منتج.
 - التنظيف: staging ‏residue=0 لـTEST-P509/TEST-P509S؛ الإنتاج بلا بيانات اختبار (0 tenants/backups/import logs) وسجل بحث الفحص نُظّف؛ النسخ `/opt/ntcommerce/backups/p509/` و`/opt/ntcommerce/backups/m13_inflight/`.
-- المصفوفة: ‏1841 ← ‏1854 صفًا؛ خلايا «معلق» في النظام والبيانات ‏622 ← ‏577؛ المتبقي استكمال النطاق نفسه للصفوف العامة المتبقية.
+- المصفوفة بعد التصحيح: ‏1852 صفًا؛ المتبقي المعروف: zip الباطل في import ما زال ‏500، و`sync/execute` يحتاج معاملة.
