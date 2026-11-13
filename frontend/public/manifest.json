@@ -23,18 +23,42 @@
   "background_color": "#ffffff",
   "dir": "rtl",
   "lang": "ar",
-  "categories": ["business", "finance", "productivity"],
+  "categories": [
+    "business",
+    "finance",
+    "productivity"
+  ],
   "screenshots": [],
   "shortcuts": [
     {
       "name": "لوحة التحكم",
       "url": "/dashboard",
-      "icons": [{"src": "favicon.ico", "sizes": "96x96"}]
+      "icons": [
+        {
+          "src": "favicon.ico",
+          "sizes": "96x96"
+        }
+      ]
     },
     {
       "name": "نقطة البيع",
       "url": "/pos",
-      "icons": [{"src": "favicon.ico", "sizes": "96x96"}]
+      "icons": [
+        {
+          "src": "favicon.ico",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "لوحة المدير",
+      "url": "/manager",
+      "icons": [
+        {
+          "src": "favicon.ico",
+          "sizes": "96x96"
+        }
+      ]
     }
   ]
 }

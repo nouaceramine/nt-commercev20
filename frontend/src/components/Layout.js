@@ -448,6 +448,7 @@ export const Layout = ({ children }) => {
       icon: LayoutDashboard,
       items: [
         { path: '/', icon: LayoutDashboard, label: t.dashboard },
+        { path: '/manager', icon: Smartphone, label: language === 'ar' ? 'لوحة المدير' : 'Manager' },  // M11
       ]
     },
     {
