@@ -17,6 +17,7 @@ own balance (a tenant-local ledger) by the sale PRICE.
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+import asyncio
 import calendar
 import math
 import uuid
@@ -574,7 +575,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         # cash box — a ghost payment method created a prepaid asset from nothing.
         from config.database import client as _client
         result = None
-        for _attempt in range(5):
+        for _attempt in range(12):
             try:
                 async with await _client.start_session() as _tx:
                     async with _tx.start_transaction():
@@ -611,10 +612,10 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             except HTTPException:
                 raise
             except PyMongoError:
-                if _attempt == 4:
+                if _attempt == 11:
                     logger.exception("panel topup failed after retries")
                     raise HTTPException(status_code=500, detail="فشل شحن رصيد البانل")
-                continue
+                await asyncio.sleep(0.05 * (_attempt + 1))
         return result
 
     @router.get("/panel-balance/transactions")
