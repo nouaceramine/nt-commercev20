@@ -702,6 +702,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                         )
                         updated = await _orders().find_one({"id": active_id})
                         await _publish("kitchen_order.updated", updated, user)
+                        try:  # D2: kitchen thermal ticket (opt-in via printer settings)
+                            from services.escpos import maybe_auto_fire_kitchen_ticket
+                            asyncio.create_task(maybe_auto_fire_kitchen_ticket(db, updated))
+                        except Exception:
+                            pass
                         return _order_out(updated)
                     # p494: active_order_id يشير لطلب منتهٍ/مفقود — حرّر ذرّيًا وأعد
                     freed = await _tables().update_one(
@@ -752,6 +757,11 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 {"$set": {"status": "occupied", "active_order_id": doc["id"]}},
             )
         await _publish("kitchen_order.created", doc, user)
+        try:  # D2: kitchen thermal ticket (opt-in via printer settings)
+            from services.escpos import maybe_auto_fire_kitchen_ticket
+            asyncio.create_task(maybe_auto_fire_kitchen_ticket(db, doc))
+        except Exception:
+            pass
         return _order_out(doc)
 
     @router.put("/kitchen-orders/{order_id}/status")

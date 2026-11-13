@@ -43,6 +43,29 @@ export default function KitchenDisplayPage() {
   // p338: طبع تلقائي + فلتر المصدر + تذكرة الطبع
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem("kds_autoprint") === "1");
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("kds_sound") !== "0");  // p381
+  // D2: طابعة المطبخ الحرارية (ESC/POS عبر الشبكة)
+  const [kpOpen, setKpOpen] = useState(false);
+  const [kp, setKp] = useState({ enabled: false, host: "", port: 9100, auto_print: false, encoding: "cp1256", width: 42, copies: 1, store_name: "" });
+  const [kpBusy, setKpBusy] = useState(false);
+  const fetchKp = async () => {
+    try { const r = await apiClient.get("/kitchen-print/settings"); setKp({ ...kp, ...(r.data?.kitchen_printer || {}) }); } catch (_e) {}
+  };
+  const saveKp = async () => {
+    setKpBusy(true);
+    try {
+      await apiClient.put("/kitchen-print/settings", kp);
+      toast.success("حُفظت إعدادات طابعة المطبخ");
+    } catch (e) { toast.error(e?.response?.data?.detail ? JSON.stringify(e.response.data.detail) : "تعذر الحفظ"); }
+    setKpBusy(false);
+  };
+  const testKp = async () => {
+    setKpBusy(true);
+    try {
+      await apiClient.post("/kitchen-print/test");
+      toast.success("أُرسلت تذكرة الاختبار للطابعة");
+    } catch (e) { toast.error(typeof e?.response?.data?.detail === "string" ? e.response.data.detail : "فشلت الطباعة التجريبية"); }
+    setKpBusy(false);
+  };
   const [srcFilter, setSrcFilter] = useState("all");
   // p473: بحث أرشيف المطبخ
   const [kdsQuery, setKdsQuery] = useState("");
@@ -260,11 +283,69 @@ export default function KitchenDisplayPage() {
             onClick={() => { const v = !soundOn; setSoundOn(v); localStorage.setItem("kds_sound", v ? "1" : "0"); toast.success(v ? "التنبيه الصوتي مفعّل" : "التنبيه الصوتي متوقف"); }}>
             {soundOn ? <Volume2 className="h-4 w-4 ml-1" /> : <VolumeX className="h-4 w-4 ml-1" />} {soundOn ? "الصوت: مفعّل" : "الصوت: متوقف"}
           </Button>
+          <Button variant={kp.enabled ? "default" : "outline"} size="sm" onClick={() => { if (!kpOpen) fetchKp(); setKpOpen(!kpOpen); }} data-testid="kds-printer-btn">
+            <Printer className="h-4 w-4 ml-1" /> طابعة{kp.enabled ? ": مفعّلة" : ""}
+          </Button>
           <Button variant="outline" size="sm" onClick={fetchOrders} data-testid="kds-refresh">
             <RefreshCw className="h-4 w-4 ml-1" /> تحديث
           </Button>
         </div>
       </div>
+      {/* D2: لوحة إعدادات طابعة المطبخ */}
+      {kpOpen && (
+        <div className="rounded-lg border bg-background p-3 shadow-sm space-y-2 max-w-xl" data-testid="kds-printer-panel">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm">طابعة المطبخ الحرارية (ESC/POS عبر الشبكة)</h3>
+            <Button variant="ghost" size="sm" onClick={() => setKpOpen(false)}>✕</Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={kp.enabled} onChange={(e) => setKp({ ...kp, enabled: e.target.checked })} data-testid="kp-enabled" />
+              مفعّلة
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={kp.auto_print} onChange={(e) => setKp({ ...kp, auto_print: e.target.checked })} data-testid="kp-autoprint" />
+              طبع تلقائي عند الطلب
+            </label>
+            <label className="col-span-2 flex items-center gap-2">
+              <span className="w-20">عنوان IP</span>
+              <input dir="ltr" className="flex-1 h-9 rounded-md border bg-background px-2" placeholder="192.168.1.50"
+                value={kp.host} onChange={(e) => setKp({ ...kp, host: e.target.value })} data-testid="kp-host" />
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="w-14">المنفذ</span>
+              <input dir="ltr" type="number" className="flex-1 h-9 rounded-md border bg-background px-2"
+                value={kp.port} onChange={(e) => setKp({ ...kp, port: parseInt(e.target.value) || 9100 })} data-testid="kp-port" />
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="w-14">الترميز</span>
+              <select className="flex-1 h-9 rounded-md border bg-background px-2" value={kp.encoding}
+                onChange={(e) => setKp({ ...kp, encoding: e.target.value })} data-testid="kp-encoding">
+                <option value="cp1256">cp1256 (عربي)</option>
+                <option value="utf-8">UTF-8</option>
+                <option value="cp864">cp864</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="w-14">العرض</span>
+              <select className="flex-1 h-9 rounded-md border bg-background px-2" value={kp.width}
+                onChange={(e) => setKp({ ...kp, width: parseInt(e.target.value) })} data-testid="kp-width">
+                <option value={42}>80mm (42)</option>
+                <option value={32}>58mm (32)</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="w-14">نسخ</span>
+              <input dir="ltr" type="number" min="1" max="3" className="flex-1 h-9 rounded-md border bg-background px-2"
+                value={kp.copies} onChange={(e) => setKp({ ...kp, copies: Math.min(3, Math.max(1, parseInt(e.target.value) || 1)) })} data-testid="kp-copies" />
+            </label>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={saveKp} disabled={kpBusy} data-testid="kp-save">حفظ</Button>
+            <Button size="sm" variant="outline" onClick={testKp} disabled={kpBusy} data-testid="kp-test">طباعة تجريبية</Button>
+          </div>
+        </div>
+      )}
       {/* p478: مصدر الطلب وإجراءات الشاشة للموبايل فقط */}
       <div className="lg:hidden flex items-center gap-2 relative">
         <select value={srcFilter} onChange={(e) => setSrcFilter(e.target.value)} data-testid="kds-mobile-src"
