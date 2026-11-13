@@ -1328,6 +1328,8 @@ _AUTO_REG_MODULES = [
     'routes.bookings_routes',  # M7: generalized bookings (resources + clash detection + deposits)
     'routes.van_sales_routes',  # M9: van sales (mobile warehouse + day close reconciliation)
     'routes.kyc_routes',  # M12: tenant KYC (submission + super-admin review)
+    'routes.crm_routes',  # M13a: real-estate CRM (clients, follow-ups, viewings, projects, units, matching)
+    'routes.crm_growth_routes',  # M13b: campaigns, omnichannel inbox, marketer performance
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

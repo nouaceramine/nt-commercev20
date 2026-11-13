@@ -448,6 +448,7 @@ export const Layout = ({ children }) => {
       items: [
         { path: '/', icon: LayoutDashboard, label: t.dashboard },
         { path: '/manager', icon: Smartphone, label: language === 'ar' ? 'لوحة المدير' : 'Manager' },  // M11
+        { path: '/crm', icon: Building2, label: language === 'ar' ? 'CRM العقاري' : 'CRM immobilier' },  // M13
       ]
     },
     {

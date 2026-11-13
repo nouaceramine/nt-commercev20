@@ -61,6 +61,7 @@ const ProductFamiliesPage = lazy(() => import("./pages/ProductFamiliesPage"));  
 const CustomerDebtsPage = lazy(() => import("./pages/CustomerDebtsPage"));  // p273
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));  // p273
 const KycPage = lazy(() => import("./pages/KycPage"));  // M12
+const CrmPage = lazy(() => import("./pages/CrmPage"));  // M13
 const BulkPriceUpdatePage = lazy(() => import("./pages/BulkPriceUpdatePage"));  // p273
 const PurchasesPage = lazy(() => import("./pages/PurchasesPage"));  // p273
 const WarehousesPage = lazy(() => import("./pages/WarehousesPage"));  // p273
@@ -633,6 +634,7 @@ function AppRoutes() {
       <Route path="/legacy-migration" element={<ProtectedRoute><LegacyMigrationPage /></ProtectedRoute>} />  {/* p349 */}
       <Route path="/security-dashboard" element={<ProtectedRoute><SecurityDashboardPage /></ProtectedRoute>} />
       <Route path="/manager" element={<ProtectedRoute><ManagerDashboardPage /></ProtectedRoute>} />  {/* M11 */}
+      <Route path="/crm" element={<ProtectedRoute><CrmPage /></ProtectedRoute>} />  {/* M13 */}
       <Route path="/motherboard" element={<ProtectedRoute superAdminOnly><MotherboardPage /></ProtectedRoute>} />
       <Route path="/daily-report" element={<ProtectedRoute><DailyReportPage /></ProtectedRoute>} />
       <Route path="/wallet-management" element={<ProtectedRoute featureKey="wallet"><WalletPage /></ProtectedRoute>} />
