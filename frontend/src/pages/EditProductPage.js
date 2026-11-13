@@ -27,7 +27,7 @@ import CameraBarcodeScanner from '../components/forms/CameraBarcodeScanner';
 import {
   ArrowRight, ArrowLeft, Save, Camera, Loader2, RefreshCw, Plus, FolderTree,
   Calculator, Trash2, Package, Tag, Warehouse, ShieldAlert, Barcode, CalendarDays,
-  Truck, Clock, AlertTriangle, Sparkles, Palette,
+  Truck, Clock, AlertTriangle, Sparkles, Palette, Wrench, History, Shield,
 } from 'lucide-react';
 
 const UOM_OPTIONS = ['U', 'KG', 'G', 'L', 'ML', 'M', 'CM', 'BOX', 'PKT'];
@@ -234,6 +234,41 @@ export default function EditProductPage() {
     try {
       await apiClient.delete(`/serials/${serialId}`);
       fetchSerials();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
+  // D1: IMEI lifecycle — status transitions, warranty, history
+  const [serialHistory, setSerialHistory] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const SERIAL_BADGE = {
+    in_stock: { v: 'default', ar: 'في المخزون', fr: 'En stock' },
+    sold: { v: 'secondary', ar: 'مُباع', fr: 'Vendu' },
+    defective: { v: 'destructive', ar: 'تالف', fr: 'Defectueux' },
+    repaired: { v: 'outline', ar: 'تم إصلاحه', fr: 'Repare' },
+  };
+  const setSerialStatus = async (serialId, status) => {
+    try {
+      await apiClient.put(`/serials/${serialId}/status`, { status });
+      toast.success(isAr ? 'حُدّثت حالة الرقم التسلسلي' : 'Statut mis a jour');
+      fetchSerials();
+    } catch (e) { toast.error(errText(e)); }
+  };
+  const setSerialWarranty = async (serialId) => {
+    const months = window.prompt(isAr ? 'مدة الضمان بالأشهر (1-120):' : 'Garantie en mois (1-120):', '12');
+    if (months === null) return;
+    const m = parseInt(months, 10);
+    if (!m || m < 1 || m > 120) { toast.error(isAr ? 'مدة غير صالحة' : 'Duree invalide'); return; }
+    try {
+      await apiClient.post(`/serials/${serialId}/warranty`, { months: m });
+      toast.success(isAr ? 'ضُبط الضمان' : 'Garantie definie');
+      fetchSerials();
+    } catch (e) { toast.error(errText(e)); }
+  };
+  const openSerialHistory = async (sn) => {
+    try {
+      const r = await apiClient.get(`/serials/${sn.id}/history`);
+      setSerialHistory(r.data);
+      setHistoryOpen(true);
     } catch (e) { toast.error(errText(e)); }
   };
 
@@ -1028,10 +1063,46 @@ export default function EditProductPage() {
                         {serials.map(sn => (
                           <div key={sn.id} className="flex items-center justify-between p-2 border rounded-lg text-xs">
                             <span className="font-mono font-medium" dir="ltr">{sn.serial}</span>
-                            <div className="flex items-center gap-2">
-                              <Badge variant={sn.status === 'sold' ? 'secondary' : 'default'} className="text-[10px]">
-                                {sn.status === 'sold' ? (isAr ? 'مُباع' : 'Vendu') : (isAr ? 'في المخزون' : 'En stock')}
+                            <div className="flex items-center gap-1 flex-wrap justify-end">
+                              <Badge variant={(SERIAL_BADGE[sn.status] || SERIAL_BADGE.in_stock).v} className="text-[10px]" data-testid={`serial-badge-${sn.status}`}>
+                                {isAr ? (SERIAL_BADGE[sn.status] || SERIAL_BADGE.in_stock).ar : (SERIAL_BADGE[sn.status] || SERIAL_BADGE.in_stock).fr}
                               </Badge>
+                              {sn.warranty_months > 0 && (
+                                <Badge variant="outline" className={`text-[10px] gap-0.5 ${sn.warranty_status === 'expired' ? 'text-destructive border-destructive/40' : 'text-emerald-600 border-emerald-500/40'}`} data-testid="serial-warranty-badge">
+                                  <Shield className="h-2.5 w-2.5" />{sn.warranty_months}{isAr ? ' شهر' : ' m'}{sn.warranty_status === 'expired' ? (isAr ? ' (منتهٍ)' : ' (expire)') : ''}
+                                </Badge>
+                              )}
+                              {sn.status === 'in_stock' && (
+                                <Button type="button" variant="ghost" size="sm" title={isAr ? 'تالف' : 'Defectueux'} onClick={() => setSerialStatus(sn.id, 'defective')} className="h-6 px-1.5 text-[10px] text-destructive hover:text-destructive" data-testid={`serial-defect-btn-${sn.id}`}>
+                                  <AlertTriangle className="h-3 w-3" />
+                                </Button>
+                              )}
+                              {sn.status === 'sold' && (
+                                <Button type="button" variant="ghost" size="sm" title={isAr ? 'إرجاع تالف' : 'Retour defectueux'} onClick={() => setSerialStatus(sn.id, 'defective')} className="h-6 px-1.5 text-[10px] text-destructive hover:text-destructive" data-testid={`serial-defect-btn-${sn.id}`}>
+                                  <AlertTriangle className="h-3 w-3" />
+                                </Button>
+                              )}
+                              {sn.status === 'defective' && (
+                                <>
+                                  <Button type="button" variant="ghost" size="sm" title={isAr ? 'تم الإصلاح' : 'Repare'} onClick={() => setSerialStatus(sn.id, 'repaired')} className="h-6 px-1.5 text-[10px] text-amber-600 hover:text-amber-600" data-testid={`serial-repair-btn-${sn.id}`}>
+                                    <Wrench className="h-3 w-3" />
+                                  </Button>
+                                  <Button type="button" variant="ghost" size="sm" title={isAr ? 'أرجع للمخزون' : 'Remettre en stock'} onClick={() => setSerialStatus(sn.id, 'in_stock')} className="h-6 px-1.5 text-[10px]" data-testid={`serial-restock-btn-${sn.id}`}>
+                                    <Package className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
+                              {sn.status === 'repaired' && (
+                                <Button type="button" variant="ghost" size="sm" title={isAr ? 'أرجع للمخزون' : 'Remettre en stock'} onClick={() => setSerialStatus(sn.id, 'in_stock')} className="h-6 px-1.5 text-[10px]" data-testid={`serial-restock-btn-${sn.id}`}>
+                                  <Package className="h-3 w-3" />
+                                </Button>
+                              )}
+                              <Button type="button" variant="ghost" size="sm" title={isAr ? 'ضبط الضمان' : 'Definir garantie'} onClick={() => setSerialWarranty(sn.id)} className="h-6 px-1.5 text-[10px]" data-testid={`serial-warranty-btn-${sn.id}`}>
+                                <Shield className="h-3 w-3" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="sm" title={isAr ? 'السجل' : 'Historique'} onClick={() => openSerialHistory(sn)} className="h-6 px-1.5 text-[10px]" data-testid={`serial-history-btn-${sn.id}`}>
+                                <History className="h-3 w-3" />
+                              </Button>
                               {sn.status !== 'sold' && (
                                 <Button type="button" variant="ghost" size="sm" onClick={() => deleteSerial(sn.id)} className="h-6 w-6 p-0 text-destructive hover:text-destructive">
                                   <Trash2 className="h-3 w-3" />
@@ -1042,6 +1113,46 @@ export default function EditProductPage() {
                         ))}
                       </div>
                     )}
+                    <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+                      <DialogContent className="max-w-md">
+                        <DialogHeader>
+                          <DialogTitle className="text-sm">{isAr ? 'سجل الرقم التسلسلي' : 'Historique du numero'} <span className="font-mono" dir="ltr">{serialHistory?.serial}</span></DialogTitle>
+                        </DialogHeader>
+                        {serialHistory && (
+                          <div className="space-y-2 text-xs" data-testid="serial-history-dialog">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant={(SERIAL_BADGE[serialHistory.status] || SERIAL_BADGE.in_stock).v} className="text-[10px]">
+                                {isAr ? (SERIAL_BADGE[serialHistory.status] || SERIAL_BADGE.in_stock).ar : (SERIAL_BADGE[serialHistory.status] || SERIAL_BADGE.in_stock).fr}
+                              </Badge>
+                              {serialHistory.warranty_months > 0 && (
+                                <span className="text-muted-foreground">
+                                  {isAr ? `الضمان: ${serialHistory.warranty_months} شهر` : `Garantie: ${serialHistory.warranty_months} mois`}
+                                  {serialHistory.warranty_expires_at ? ` — ${isAr ? 'ينتهي' : 'expire'} ${String(serialHistory.warranty_expires_at).slice(0, 10)}` : ''}
+                                  {serialHistory.warranty_status === 'active' ? (isAr ? ' (ساري)' : ' (active)') : serialHistory.warranty_status === 'expired' ? (isAr ? ' (منتهٍ)' : ' (expiree)') : ''}
+                                </span>
+                              )}
+                            </div>
+                            {(serialHistory.events || []).length === 0 ? (
+                              <p className="text-muted-foreground py-2">{isAr ? 'لا أحداث مسجّلة بعد' : 'Aucun evenement'}</p>
+                            ) : (
+                              <div className="space-y-1 max-h-64 overflow-y-auto" data-testid="serial-history-events">
+                                {serialHistory.events.map((ev, i) => (
+                                  <div key={i} className="flex items-start justify-between gap-2 p-2 border rounded-lg">
+                                    <span>
+                                      {ev.to === 'warranty_set'
+                                        ? (isAr ? `ضُبط الضمان: ${ev.note || ''}` : `Garantie: ${ev.note || ''}`)
+                                        : (isAr ? `${SERIAL_BADGE[ev.from]?.ar || ev.from || '—'} ← ${SERIAL_BADGE[ev.to]?.ar || ev.to || '—'}` : `${ev.from || '—'} -> ${ev.to || '—'}`)}
+                                      {ev.to !== 'warranty_set' && ev.note ? <span className="text-muted-foreground"> — {ev.note}</span> : null}
+                                    </span>
+                                    <span className="text-muted-foreground whitespace-nowrap" dir="ltr">{String(ev.at || '').slice(0, 16).replace('T', ' ')}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </DialogContent>
+                    </Dialog>
                   </TabsContent>
                 )}
               </Tabs>

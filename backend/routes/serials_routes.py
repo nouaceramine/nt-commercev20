@@ -37,6 +37,8 @@ def warranty_info(doc: dict) -> dict:
     try:
         from datetime import timedelta
         start = sold_at if isinstance(sold_at, datetime) else datetime.fromisoformat(str(sold_at).replace("Z", "+00:00"))
+        if start.tzinfo is None:  # BSON round-trip strips tzinfo — treat as UTC
+            start = start.replace(tzinfo=timezone.utc)
         expires = start + timedelta(days=30 * int(months))
         status = "active" if datetime.now(timezone.utc) <= expires else "expired"
         return {"warranty_status": status, "warranty_expires_at": expires.isoformat()}
@@ -62,7 +64,12 @@ def create_serials_routes(db, get_current_user, get_tenant_admin) -> dict:
         if status:
             q["status"] = status
         cursor = _serials().find(q).sort("created_at", -1).limit(500)
-        return [_out(x) async for x in cursor]
+        out = []
+        async for x in cursor:
+            d = _out(x)
+            d.update(warranty_info(d))  # D1: warranty badge state in list
+            out.append(d)
+        return out
 
     @router.post("/register")
     async def register_serials(data: RegisterSerials, admin: dict = Depends(get_tenant_admin)):
@@ -170,6 +177,7 @@ def create_serials_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not doc:
             raise HTTPException(status_code=404, detail="غير موجود")
         return {"serial": doc.get("serial"), "status": doc.get("status"),
+                "warranty_months": doc.get("warranty_months"),
                 **warranty_info(doc), "events": doc.get("events", [])}
 
     return {"router": router}

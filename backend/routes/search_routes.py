@@ -2,10 +2,19 @@
 Ultra Search System Routes
 Collections: search_history, search_suggestions
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 import uuid
 import time
+import re
+
+
+def _bounded_limit(value, default: int, maximum: int = 100) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="حد القائمة غير صالح")
+    return max(1, min(number, maximum)) if number > 0 else default
 
 
 # p260: every entity with a public code is searchable from one endpoint.
@@ -64,12 +73,12 @@ def create_search_routes(db, get_current_user) -> dict:
         if not q or len(q.strip()) < 2:
             return {"results": [], "groups": {}, "total": 0}
         q = q.strip()
+        limit = _bounded_limit(limit, 20, 100)
 
         import asyncio
-        import re as _re
 
         start = time.time()
-        esc = _re.escape(q)
+        esc = re.escape(q)
         sub = {"$regex": esc, "$options": "i"}
         pre = {"$regex": f"^{esc}", "$options": "i"}
 
@@ -92,7 +101,7 @@ def create_search_routes(db, get_current_user) -> dict:
             items = []
             for d in docs:
                 link = link_t
-                for m in _re.findall(r"{(\w+)}", link_t):
+                for m in re.findall(r"{(\w+)}", link_t):
                     link = link.replace("{%s}" % m, str(_dig(d, m) or d.get("id") or ""))
                 items.append({
                     "type": group,
@@ -140,18 +149,21 @@ def create_search_routes(db, get_current_user) -> dict:
 
     @router.get("/suggestions")
     async def get_suggestions(q: str = "", limit: int = 10, user: dict = Depends(get_current_user)):
+        limit = _bounded_limit(limit, 10, 100)
         if not q:
             popular = await db.search_suggestions.find(
                 {}, {"_id": 0}
             ).sort("search_count", -1).limit(limit).to_list(limit)
             return popular
+        # p509: escape user regex — a bare "[" used to crash Mongo with 500.
         suggestions = await db.search_suggestions.find(
-            {"suggestion_text": {"$regex": q, "$options": "i"}}, {"_id": 0}
+            {"suggestion_text": {"$regex": re.escape(q), "$options": "i"}}, {"_id": 0}
         ).sort("search_count", -1).limit(limit).to_list(limit)
         return suggestions
 
     @router.get("/history")
     async def get_search_history(limit: int = 20, user: dict = Depends(get_current_user)):
+        limit = _bounded_limit(limit, 20, 100)
         return await db.search_history.find(
             {"user_id": user.get("id", "")}, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)

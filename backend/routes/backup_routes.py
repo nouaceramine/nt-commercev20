@@ -124,9 +124,10 @@ async def _auto_pre_restore_snapshot(db, main_db, admin: dict) -> dict:
     }
     pre_size = await _write_to_disk(pre_filename, pre_envelope)
     pre_count = await main_db.backups.count_documents({}) + 1
+    # p509: suffix prevents same-second concurrent runs from sharing a number.
     pre_rec = {
         "id": str(uuid.uuid4()),
-        "backup_number": f"PRE-{pre_count:05d}",
+        "backup_number": f"PRE-{pre_count:05d}-{uuid.uuid4().hex[:6]}",
         "entity_type": "tenant",
         "entity_id": entity_id,
         "entity_name": admin.get("company_name", admin.get("name", "")),
@@ -146,26 +147,31 @@ async def _auto_pre_restore_snapshot(db, main_db, admin: dict) -> dict:
     return pre_rec, pre_data
 
 
-async def _do_restore(db, restore_data: dict) -> tuple:
-    """Restore collections. Returns (restored_coll, restored_records, errors)."""
+async def _do_restore(db, restore_data: dict, session=None) -> tuple:
+    """Restore collections inside the caller's transaction.
+
+    p509: the old loop swallowed a bad collection AFTER deleting it, so a file
+    with one good collection followed by one malformed document returned
+    success while silently erasing tenant data. Any write error now aborts the
+    surrounding transaction instead of producing a partial restore.
+    """
     restored_collections = 0
     restored_records = 0
-    errors = []
     for coll_name, docs in restore_data.items():
         if not isinstance(docs, list):
             continue
         if coll_name.startswith("system."):
             continue
         try:
-            await db[coll_name].delete_many({})
+            await db[coll_name].delete_many({}, session=session)
             if docs:
-                await db[coll_name].insert_many(docs)
+                await db[coll_name].insert_many(docs, session=session)
                 restored_records += len(docs)
             restored_collections += 1
         except Exception as e:
             logger.error(f"Restore error for collection {coll_name}: {e}")
-            errors.append(f"{coll_name}: {str(e)}")
-    return restored_collections, restored_records, errors
+            raise HTTPException(status_code=422, detail=f"فشلت استعادة المجموعة {coll_name}: {str(e)}")
+    return restored_collections, restored_records, []
 
 
 def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_super_admin) -> dict:
@@ -326,7 +332,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         entity_id = admin.get("tenant_id", admin.get("id", ""))
         ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         count = await main_db.backups.count_documents({}) + 1
-        backup_num = f"BKP-{count:05d}"
+        backup_num = f"BKP-{count:05d}-{uuid.uuid4().hex[:6]}"
         filename = f"tenant_{entity_id}_{ts}_{backup_num}.json.gz"
 
         envelope = {
@@ -408,7 +414,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
                 global_data["databases"][db_name] = {"_error": str(e)}
 
         count = await main_db.backups.count_documents({}) + 1
-        backup_num = f"GLB-{count:05d}"
+        backup_num = f"GLB-{count:05d}-{uuid.uuid4().hex[:6]}"
         filename = f"global_all_tenants_{ts}_{backup_num}.json.gz"
         global_data["backup_number"] = backup_num
         global_data["records_count"] = total_records
@@ -481,30 +487,26 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         # Step 1: Auto-snapshot before restore
         pre_rec, pre_data = await _auto_pre_restore_snapshot(db, main_db, admin)
 
-        # Step 2: Perform restore
-        restored_coll, restored_records, errors = await _do_restore(db, restore_data)
+        # Step 2: Perform restore atomically — any bad collection aborts all writes.
+        from config.database import client as mongo_client
+        async with await mongo_client.start_session() as _tx:
+            async with _tx.start_transaction():
+                restored_coll, restored_records, errors = await _do_restore(db, restore_data, session=_tx)
 
-        # Step 3: Integrity check — compare record counts
+        # Step 3: Integrity check on the restored collections only. Older code
+        # compared against EVERY tenant collection, so a valid partial backup
+        # falsely reported drift whenever unrelated collections existed.
         post_data = await _dump_db(db)
-        post_records = _count_records(post_data)
+        post_records = sum(len(post_data.get(c, [])) for c in restore_data if isinstance(restore_data.get(c), list))
         expected = _count_records(restore_data)
         integrity_ok = (post_records == expected)
-
-        # Step 4: Rollback if critical errors
-        if errors and not integrity_ok:
-            logger.error(f"Restore failed — rolling back. Errors: {errors}")
-            await _do_restore(db, pre_data)
-            raise HTTPException(
-                status_code=500,
-                detail=f"فشلت الاستعادة وتم التراجع تلقائياً إلى الحالة السابقة. الأخطاء: {'; '.join(errors[:3])}"
-            )
 
         # Step 5: Log restore operation
         count = await main_db.backups.count_documents({}) + 1
         entity_id = admin.get("tenant_id", admin.get("id", ""))
         rst_rec = {
             "id": str(uuid.uuid4()),
-            "backup_number": f"RST-{count:05d}",
+            "backup_number": f"RST-{count:05d}-{uuid.uuid4().hex[:6]}",
             "entity_type": "tenant",
             "entity_id": entity_id,
             "entity_name": admin.get("company_name", admin.get("name", "")),
@@ -581,15 +583,11 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         # Pre-restore snapshot
         pre_rec, pre_data = await _auto_pre_restore_snapshot(db, main_db, admin)
 
-        # Restore
-        restored_coll, restored_records, errors = await _do_restore(db, restore_data)
-
-        if errors and not restored_records:
-            await _do_restore(db, pre_data)
-            raise HTTPException(
-                status_code=500,
-                detail=f"فشلت الاستعادة وتم التراجع. الأخطاء: {'; '.join(errors[:3])}"
-            )
+        # Restore atomically; a malformed collection aborts with zero partial writes.
+        from config.database import client as mongo_client
+        async with await mongo_client.start_session() as _tx:
+            async with _tx.start_transaction():
+                restored_coll, restored_records, errors = await _do_restore(db, restore_data, session=_tx)
 
         return {
             "success": True,

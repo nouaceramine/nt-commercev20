@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import secrets
 import logging
+import ipaddress
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +54,21 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
 
     @router.post("/blocked-ips")
     async def block_ip(data: dict, admin: dict = Depends(get_super_admin)):
-        ip = data.get("ip_address", "")
-        if not ip:
-            raise HTTPException(status_code=400, detail="عنوان IP مطلوب")
+        ip = str(data.get("ip_address", "")).strip()
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="عنوان IP غير صالح")
         expires = data.get("duration_hours")
+        if expires not in (None, ""):
+            try:
+                expires = float(expires)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="مدة الحظر غير صالحة")
+            if not math.isfinite(expires) or not 0 < expires <= 8760:
+                raise HTTPException(status_code=400, detail="مدة الحظر يجب أن تكون بين ساعة وسنة")
+        else:
+            expires = None
         entry = {
             "id": str(uuid.uuid4()),
             "ip_address": ip,
@@ -79,7 +92,9 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
 
     @router.delete("/blocked-ips/{block_id}")
     async def unblock_ip(block_id: str, admin: dict = Depends(get_super_admin)):
-        entry = await main_db.blocked_ips.find_one({"id": block_id}, {"_id": 0})
+        entry = await main_db.blocked_ips.find_one_and_delete({"id": block_id}, projection={"_id": 0})
+        if not entry:
+            raise HTTPException(status_code=404, detail="الحظر غير موجود")
         if entry:
             await main_db.security_logs.insert_one({
                 "id": str(uuid.uuid4()),
@@ -90,7 +105,6 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
                 "details": {},
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
-        await main_db.blocked_ips.delete_one({"id": block_id})
         return {"message": "تم رفع الحظر"}
 
     # ── Login Attempts ──
@@ -152,7 +166,9 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
 
     @router.delete("/api-keys/{key_id}")
     async def delete_api_key(key_id: str, admin: dict = Depends(get_super_admin)):
-        await main_db.api_keys.delete_one({"id": key_id})
+        result = await main_db.api_keys.delete_one({"id": key_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="المفتاح غير موجود")
         return {"message": "تم حذف المفتاح"}
 
     @router.put("/api-keys/{key_id}/toggle")
@@ -174,7 +190,9 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
 
     @router.delete("/sessions/{session_id}")
     async def terminate_session(session_id: str, admin: dict = Depends(get_super_admin)):
-        await main_db.user_sessions.delete_one({"id": session_id})
+        result = await main_db.user_sessions.delete_one({"id": session_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
         return {"message": "تم إنهاء الجلسة"}
 
     return router

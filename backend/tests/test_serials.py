@@ -44,3 +44,13 @@ def test_warranty_expired():
 def test_warranty_bad_date_graceful():
     doc = {"warranty_months": 6, "sold_at": "not-a-date"}
     assert warranty_info(doc)["warranty_status"] == "unknown"
+
+
+def test_warranty_tz_naive_mongo_roundtrip():
+    # BSON strips tzinfo — pymongo returns naive datetimes; must not degrade to "unknown"
+    doc = {"warranty_months": 12, "sold_at": datetime.utcnow() - timedelta(days=30)}
+    w = warranty_info(doc)
+    assert w["warranty_status"] == "active"
+    assert w["warranty_expires_at"]
+    doc2 = {"warranty_months": 6, "sold_at": datetime.utcnow() - timedelta(days=400)}
+    assert warranty_info(doc2)["warranty_status"] == "expired"

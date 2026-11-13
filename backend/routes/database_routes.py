@@ -16,6 +16,7 @@ import uuid
 import subprocess
 import sys
 import logging
+import math
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,17 @@ IMPORTS_DIR = _BASE_DIR / "imports"
 IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
 MAX_IMPORT_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_IMPORT_JSON_BYTES = 512 * 1024 * 1024
+
+
+def _import_number(value, field: str) -> float:
+    """Finite non-negative numeric field for imported business data."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        number = float("nan")
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"invalid numeric field: {field}")
+    return number
 
 # ============ PYDANTIC MODELS ============
 
@@ -269,13 +281,13 @@ async def import_to_tenant(
                         "category_id": category_id,
                         "category": prod.get("category", ""),
                         "description": prod.get("description", ""),
-                        "cost_price": prod.get("cost_price", 0),
-                        "retail_price": prod.get("selling_price", 0) or prod.get("retail_price", 0),  # p171: canonical
-                        "wholesale_price": prod.get("price_a", 0),
-                        "min_price": prod.get("price_c", 0),
-                        "purchase_price": prod.get("purchase_price", 0),
-                        "stock": prod.get("stock", 0),
-                        "low_stock_threshold": prod.get("stock_alert", 5),
+                        "cost_price": _import_number(prod.get("cost_price", 0), "cost_price"),
+                        "retail_price": _import_number(prod.get("selling_price", 0) or prod.get("retail_price", 0), "retail_price"),  # p171: canonical
+                        "wholesale_price": _import_number(prod.get("price_a", 0), "wholesale_price"),
+                        "min_price": _import_number(prod.get("price_c", 0), "min_price"),
+                        "purchase_price": _import_number(prod.get("purchase_price", 0), "purchase_price"),
+                        "stock": _import_number(prod.get("stock", 0), "stock"),
+                        "low_stock_threshold": _import_number(prod.get("stock_alert", 5), "low_stock_threshold"),
                         "unit": "قطعة",
                         "warehouse_id": "main",
                         "is_active": prod.get("is_active", True),
@@ -320,8 +332,8 @@ async def import_to_tenant(
                         "address": cust.get("address", ""),
                         "city": cust.get("city", ""),
                         "notes": cust.get("notes", ""),
-                        "debt_balance": cust.get("account_balance", 0),
-                        "total_purchases": cust.get("total_purchased", 0),
+                        "debt_balance": _import_number(cust.get("account_balance", 0), "account_balance"),
+                        "total_purchases": _import_number(cust.get("total_purchased", 0), "total_purchased"),
                         "is_active": cust.get("is_active", True),
                         "created_at": cust.get("created_at") or datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -354,8 +366,8 @@ async def import_to_tenant(
                         "address": sup.get("address", ""),
                         "city": sup.get("city", ""),
                         "notes": sup.get("notes", ""),
-                        "debt_balance": sup.get("account_balance", 0),
-                        "total_purchases": sup.get("total_purchased", 0),
+                        "debt_balance": _import_number(sup.get("account_balance", 0), "account_balance"),
+                        "total_purchases": _import_number(sup.get("total_purchased", 0), "total_purchased"),
                         "is_active": sup.get("is_active", True),
                         "created_at": sup.get("created_at") or datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat()

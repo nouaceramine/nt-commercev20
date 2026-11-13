@@ -3,6 +3,7 @@ Printing & Barcode System Routes
 Collections: print_templates, print_logs, printer_settings, product_barcodes, label_designs
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
+import math
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -25,7 +26,7 @@ def create_printing_routes(db, get_current_user, get_tenant_admin) -> dict:
         blocks: Optional[List[dict]] = None
         accent_color: str = "#0f766e"
 
-    @router.post("/templates")
+    @router.post("/templates", status_code=201)
     async def create_template(data: TemplateCreate, admin: dict = Depends(get_tenant_admin)):
         if data.is_default:
             await db.print_templates.update_many(
@@ -43,6 +44,11 @@ def create_printing_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.put("/templates/{template_id}")
     async def update_template(template_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
+        # p509: a ghost id (including another tenant's id) must be a real 404,
+        # not HTTP 200 with a null body — the UI relied on the false success.
+        existing = await db.print_templates.find_one({"id": template_id}, {"_id": 0, "type": 1})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Template not found")
         data.pop("id", None)
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         # If marking as default, atomically unset all other templates of the same type first
@@ -75,7 +81,9 @@ def create_printing_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.delete("/templates/{template_id}")
     async def delete_template(template_id: str, admin: dict = Depends(get_tenant_admin)):
-        await db.print_templates.delete_one({"id": template_id})
+        result = await db.print_templates.delete_one({"id": template_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Template not found")
         return {"message": "تم حذف القالب"}
 
     # ── Printer Settings ──
@@ -102,12 +110,18 @@ def create_printing_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ── Print Log ──
     @router.post("/log")
     async def log_print(data: dict, user: dict = Depends(get_current_user)):
+        try:
+            copies = int(data.get("copies", 1))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="عدد النسخ غير صالح")
+        if not 1 <= copies <= 20:
+            raise HTTPException(status_code=422, detail="عدد النسخ يجب أن يكون بين 1 و20")
         log = {
             "id": str(uuid.uuid4()),
             "document_type": data.get("document_type", "receipt"),
             "document_id": data.get("document_id", ""),
             "printer_type": data.get("printer_type", "thermal"),
-            "copies": data.get("copies", 1),
+            "copies": copies,
             "printed_by": user.get("name", user.get("email", "")),
             "printed_at": datetime.now(timezone.utc).isoformat(),
         }
