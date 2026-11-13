@@ -338,8 +338,10 @@ async def list_sync_tokens(user: dict = Depends(get_tenant_admin)):
     tenant_id = user.get("tenant_id")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="حساب غير مرتبط بمستأجر")
+    # p513: revoked agents stay in the collection as an audit trail but must
+    # not clutter the list (UI rendered them indistinguishable from active ones)
     agents = await main_db[AGENTS_COLL].find(
-        {"tenant_id": tenant_id},
+        {"tenant_id": tenant_id, "enabled": True},
         {"_id": 0, "token_hash": 0}).sort("created_at", -1).to_list(10)
     return {"agents": agents}
 

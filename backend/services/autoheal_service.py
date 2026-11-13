@@ -21,6 +21,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime, timezone, timedelta
+from pymongo.errors import DuplicateKeyError  # p513 race guard
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +56,30 @@ def start_autoheal_scheduler(interval_seconds: int = SCAN_INTERVAL_SECONDS, firs
                 leader = True
                 if eng._redis:
                     try:
+                        _pid = str(os.getpid())
                         leader = bool(await asyncio.to_thread(
-                            eng._redis.set, "autoheal:leader", str(os.getpid()),
+                            eng._redis.set, "autoheal:leader", _pid,
                             nx=True, ex=interval_seconds + 120,
                         ))
+                        if not leader:
+                            # p513: sticky leadership — nx also fails while OUR
+                            # OWN lock from the previous cycle is still alive
+                            # (ex=interval+120 > interval). Refresh it instead
+                            # of idling; otherwise scans slip to ~2x the
+                            # configured interval and the key vanishes for
+                            # (interval-120)s every cycle.
+                            holder = await asyncio.to_thread(
+                                eng._redis.get, "autoheal:leader")
+                            if holder == _pid:
+                                await asyncio.to_thread(
+                                    eng._redis.set, "autoheal:leader", _pid,
+                                    ex=interval_seconds + 120)
+                                leader = True
                     except Exception:  # noqa: BLE001
                         leader = True  # redis hiccup — scan anyway; dedupe handles overlap
                 if leader:
                     logger.info("AutoHeal leader pid=%s running scan", os.getpid())
+                    await eng.ensure_indexes()  # p513: idempotent race-guard index
                     await eng.run_scan("scheduled")
                     # p225: morning report — once daily from 06:00 Africa/Algiers
                     try:
@@ -1020,27 +1037,37 @@ class AutoHealEngine:
         }
 
     async def _upsert_finding(self, scan_id: str, f: dict):
-        """Dedupe: same active signature → bump occurrences; else insert."""
-        existing = await self._main_db.autoheal_findings.find_one(
-            {"signature": f["signature"], "status": {"$in": ["active", "awaiting_approval"]}}
+        """Dedupe: same active signature → bump occurrences; else insert.
+
+        p513 race-safe: the old find-then-insert let N concurrent emits of a
+        FRESH signature all find nothing and insert N duplicates (proven live:
+        8-way gather -> 8 findings). Now: (1) atomic conditional bump first —
+        no read window; (2) insert guarded by the unique partial index
+        uniq_active_finding_signature; DuplicateKeyError -> bump the winner.
+        """
+        sig = f["signature"]
+        _bump = {"last_seen": _iso(_now()), "scan_id": scan_id}
+        bumped = await self._main_db.autoheal_findings.update_one(
+            {"signature": sig, "status": {"$in": ["active", "awaiting_approval"]}},
+            {"$set": _bump, "$inc": {"occurrences": 1}},
         )
-        if not existing:
-            # a dismissed Low/Medium advisory stays dismissed (no 5-min spam);
-            # Critical/High always re-surface while the problem persists.
-            dismissed = await self._main_db.autoheal_findings.find_one(
-                {"signature": f["signature"], "status": "dismissed"}
-            )
-            if dismissed and f.get("severity") in ("Low", "Medium"):
-                return None
-        if existing:
-            _bump = {"last_seen": _iso(_now()), "scan_id": scan_id}
-            if f.get("location") and not existing.get("location"):
-                _bump["location"] = f["location"]  # p271: backfill location on legacy rows
-            await self._main_db.autoheal_findings.update_one(
-                {"id": existing["id"]},
-                {"$set": _bump,
-                 "$inc": {"occurrences": 1}},
-            )
+        if bumped.matched_count:
+            if f.get("location"):
+                # p271 parity: backfill location on legacy rows missing it
+                await self._main_db.autoheal_findings.update_one(
+                    {"signature": sig,
+                     "status": {"$in": ["active", "awaiting_approval"]},
+                     "$or": [{"location": {"$exists": False}},
+                             {"location": None}, {"location": {}}]},
+                    {"$set": {"location": f["location"]}},
+                )
+            return None
+        # a dismissed Low/Medium advisory stays dismissed (no 5-min spam);
+        # Critical/High always re-surface while the problem persists.
+        dismissed = await self._main_db.autoheal_findings.find_one(
+            {"signature": sig, "status": "dismissed"}
+        )
+        if dismissed and f.get("severity") in ("Low", "Medium"):
             return None
         doc = dict(f)
         doc.update({
@@ -1052,8 +1079,61 @@ class AutoHealEngine:
             "occurrences": 1,
             "affected_users_count": len((f.get("remediation_payload") or {}).get("tenant_ids") or []),
         })
-        await self._main_db.autoheal_findings.insert_one(doc)
+        try:
+            await self._main_db.autoheal_findings.insert_one(doc)
+        except DuplicateKeyError:
+            # lost a concurrent first-insert race on this signature — bump the winner
+            await self._main_db.autoheal_findings.update_one(
+                {"signature": sig, "status": {"$in": ["active", "awaiting_approval"]}},
+                {"$set": _bump, "$inc": {"occurrences": 1}},
+            )
+            return None
         return doc
+
+    async def ensure_indexes(self):
+        """p513: unique partial index backing race-safe _upsert_finding.
+        Partial on active/awaiting_approval so resolved/dismissed history with
+        recycled signatures never conflicts. Idempotent.
+
+        The pre-guard race left duplicate ACTIVE rows per signature in the
+        legacy collection, which blocks the unique index build (E11000). So
+        first merge duplicates into one row per signature (keep earliest,
+        sum occurrences, latest last_seen), then create the index.
+        """
+        try:
+            pipeline = [
+                {"$match": {"status": {"$in": ["active", "awaiting_approval"]}}},
+                {"$group": {"_id": "$signature", "n": {"$sum": 1}}},
+                {"$match": {"n": {"$gt": 1}}},
+            ]
+            dups = await self._main_db.autoheal_findings.aggregate(
+                pipeline).to_list(None)
+            for d in dups:
+                rows = await self._main_db.autoheal_findings.find(
+                    {"signature": d["_id"],
+                     "status": {"$in": ["active", "awaiting_approval"]}},
+                ).sort("_id", 1).to_list(None)
+                if len(rows) < 2:
+                    continue
+                keep, rest = rows[0], rows[1:]
+                occ = sum(int(r.get("occurrences", 1)) for r in rows)
+                last = max(str(r.get("last_seen", "")) for r in rows)
+                await self._main_db.autoheal_findings.update_one(
+                    {"id": keep["id"]},
+                    {"$set": {"occurrences": occ, "last_seen": last}})
+                await self._main_db.autoheal_findings.delete_many(
+                    {"id": {"$in": [r["id"] for r in rest]}})
+                logger.info("autoheal dedupe: merged %d rows for signature %s",
+                            len(rows), d["_id"])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("autoheal findings dedupe sweep: %s", exc)
+        try:
+            await self._main_db.autoheal_findings.create_index(
+                "signature", unique=True, name="uniq_active_finding_signature",
+                partialFilterExpression={"status": {"$in": ["active", "awaiting_approval"]}},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("autoheal uniq_active_finding_signature index: %s", exc)
 
     async def _update_known_issues(self, findings: list):
         for f in findings:

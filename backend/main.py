@@ -626,8 +626,11 @@ async def startup_event():
 
     # p54: AutoHeal self-healing scanner (scheduled every 5 min)
     try:
-        from services.autoheal_service import start_autoheal_scheduler
+        from services.autoheal_service import start_autoheal_scheduler, get_engine as _ah_engine
         start_autoheal_scheduler()
+        # p513: the unique signature index must exist before any real-time emit
+        # (the scheduler's first leader scan only runs after first_delay).
+        await _ah_engine().ensure_indexes()
     except Exception as e:
         logger.warning("AutoHeal scheduler: %s", e)
 
@@ -1340,6 +1343,7 @@ _AUTO_REG_MODULES = [
     'routes.crm_growth_routes',  # M13b: campaigns, omnichannel inbox, marketer performance
     'routes.kitchen_print_routes',  # D2: kitchen thermal printing (ESC/POS over TCP)
     'routes.landed_costs_routes',  # D3: landed costs distribution on purchases
+    'routes.kiosk_routes',  # K1: self-service kiosk (customer tablet requests)
 ]
 
 for _mod_path in _AUTO_REG_MODULES:
@@ -1405,7 +1409,18 @@ robot_router = APIRouter(prefix="/robots", tags=["robots"])
 
 @robot_router.get("/status")
 async def get_robot_status(user: dict = Depends(block_cashier)) -> dict:
-    return robot_manager.get_status()
+    st = robot_manager.get_status()
+    try:
+        # p513: multi-worker — report the persisted interval (source of truth);
+        # in-memory convergence across workers happens via robot_manager's
+        # Redis pub/sub propagation (nt:robot_config channel).
+        async for _cfg in main_db.robot_config.find({}, {"_id": 0, "robot": 1, "interval_seconds": 1}):
+            _n = _cfg.get("robot")
+            if _n in st.get("robots", {}) and isinstance(_cfg.get("interval_seconds"), (int, float)):
+                st["robots"][_n]["check_interval"] = int(_cfg["interval_seconds"])
+    except Exception:
+        pass  # status stays memory-based if the read fails
+    return st
 
 @robot_router.post("/restart/{robot_name}")
 async def restart_robot(robot_name: str, user: dict = Depends(block_cashier)) -> dict:

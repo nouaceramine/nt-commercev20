@@ -97,12 +97,16 @@ def create_auth_routes(db, get_current_user, get_admin_user):
             from config.database import main_db as _mdb
             tenant = await _mdb.saas_tenants.find_one({"id": out["tenant_id"]}, {"_id": 0, "password": 0})
             if tenant:
-                plan = await _mdb.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
-                if plan:
-                    feats = {**plan.get("features", {}), **tenant.get("features_override", {})}
-                    feats.setdefault("ecommerce_hub", False)
-                    out["features"] = feats
-                    out["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
+                # p513: merge plan ⊕ overrides even without a plan (canon:
+                # core.business_profiles.get_effective_features) — the previous
+                # `if plan:` gate silently dropped explicit overrides.
+                plan = await _mdb.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0}) or {}
+                feats = {**(plan.get("features") or {}), **(tenant.get("features_override") or {})}
+                feats.setdefault("ecommerce_hub", False)
+                out["features"] = feats
+                lims = {**(plan.get("limits") or {}), **(tenant.get("limits_override") or {})}
+                if lims:
+                    out["limits"] = lims
                 out["company_name"] = out["company_name"] or tenant.get("company_name")
         # p56: surface subscription/trial state so the expiry banner survives
         # session restore (AuthContext rebuilds the user from /auth/me).

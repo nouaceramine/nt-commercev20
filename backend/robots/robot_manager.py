@@ -9,7 +9,9 @@ Enhanced with:
 - Alert escalation: tracks consecutive alerts per tenant
 """
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime, timezone
 from .inventory_robot import InventoryRobot
 from .debt_robot import DebtRobot
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 _WATCHDOG_INTERVAL = 300       # 5 minutes
 _MAX_RUN_HISTORY = 200         # records kept in main_db.robot_runs
+_CONFIG_CHANNEL = "nt:robot_config"  # p513: cross-worker interval propagation
 
 
 class RobotManager:
@@ -43,6 +46,8 @@ class RobotManager:
         self.robots = {}
         self.tasks = {}
         self._watchdog_task = None
+        self._redis = None
+        self._config_listener = None
         self.started_at = None
         self.is_running = False
 
@@ -96,8 +101,20 @@ class RobotManager:
             logger.info(f"Started robot: {robot.name}")
         self._watchdog_task = asyncio.create_task(self._watchdog(), name="robot_watchdog")
         logger.info("Watchdog started")
+        # p513: listen for interval changes made via OTHER uvicorn workers
+        self._config_listener = asyncio.create_task(
+            self._config_sub(), name="robot_config_listener")
 
     async def stop_all(self) -> None:
+        if self._config_listener:
+            self._config_listener.cancel()
+            self._config_listener = None
+        if self._redis is not None:
+            try:
+                await self._redis.aclose()
+            except Exception:
+                pass
+            self._redis = None
         if self._watchdog_task:
             self._watchdog_task.cancel()
             self._watchdog_task = None
@@ -187,14 +204,69 @@ class RobotManager:
             )
         except Exception as e:
             logger.warning(f"Could not persist interval for {name}: {e}")
+        # p513: propagate to the other uvicorn workers (their in-memory robots
+        # would otherwise keep the old interval until restart). The local robot
+        # was already updated above; the echoed message applies idempotently.
+        try:
+            r = await self._get_redis()
+            if r is not None:
+                await r.publish(_CONFIG_CHANNEL, json.dumps(
+                    {"robot": name, "interval_seconds": interval_seconds}))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not broadcast interval for {name}: {e}")
         logger.info(f"Interval for {name} set to {interval_seconds}s")
         return True
+
+    async def _get_redis(self):
+        # Lazy async Redis client shared by publisher + subscriber.
+        if self._redis is None:
+            try:
+                import redis.asyncio as aioredis
+                self._redis = aioredis.from_url(
+                    os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+                    decode_responses=True, socket_connect_timeout=2)
+                await self._redis.ping()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"robot config redis unavailable: {e}")
+                self._redis = None
+        return self._redis
+
+    async def _config_sub(self) -> None:
+        # Apply interval changes broadcast by sibling workers.
+        try:
+            r = await self._get_redis()
+            if r is None:
+                return
+            pubsub = r.pubsub()
+            await pubsub.subscribe(_CONFIG_CHANNEL)
+            async for msg in pubsub.listen():
+                if msg.get("type") != "message":
+                    continue
+                try:
+                    data = json.loads(msg["data"])
+                except Exception:  # noqa: BLE001
+                    continue
+                name = data.get("robot")
+                interval = data.get("interval_seconds")
+                if (name in self.robots and isinstance(interval, (int, float))
+                        and interval >= 60):
+                    self.robots[name].check_interval = int(interval)
+                    logger.info(f"Applied broadcast interval {int(interval)}s for {name}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"robot config listener stopped: {e}")
 
     async def _watchdog(self) -> None:
         """Background loop: detect crashed robot tasks and auto-restart them."""
         while self.is_running:
             try:
                 await asyncio.sleep(_WATCHDOG_INTERVAL)
+                # p513: multi-worker convergence — intervals changed via the API
+                # land in robot_config immediately but only in the handling
+                # worker's memory; every worker re-applies the persisted values
+                # each watchdog cycle so all converge within _WATCHDOG_INTERVAL.
+                await self._apply_saved_intervals()
                 for name, task in list(self.tasks.items()):
                     if task.done():
                         exc = task.exception() if not task.cancelled() else None

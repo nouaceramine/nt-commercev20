@@ -299,6 +299,12 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "tenant_id": directory["tenant_id"],
                         }
                         access_token = create_access_token(token_data)
+                        # p513: employees receive the same plan ⊕ override features as
+                        # the tenant owner (canon: get_effective_features); previously
+                        # absent → opt-in UI gates stayed shut until a /me refresh.
+                        _plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
+                        _feats = {**((_plan or {}).get("features") or {}), **(tenant.get("features_override") or {})}
+                        _lims = {**((_plan or {}).get("limits") or {}), **(tenant.get("limits_override") or {})}
                         return await _2fa_gate(emp_user, {
                             "access_token": access_token,
                             "user_type": "tenant",
@@ -311,6 +317,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                                 "company_name": tenant.get("company_name", ""),
                                 "permissions": emp_user.get("permissions", {}),
                                 "is_employee": True,
+                                "features": _feats,
+                                "limits": _lims,
                             },
                         })
 
@@ -420,9 +428,11 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     access_token = create_access_token(token_data)
 
                     # Get plan info with features and limits
+                    # p513: plan-less tenants keep their explicit overrides (canon:
+                    # core.business_profiles.get_effective_features merges regardless of plan)
                     plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
-                    features = {**plan.get("features", {}), **tenant.get("features_override", {})} if plan else {}
-                    limits = {**plan.get("limits", {}), **tenant.get("limits_override", {})} if plan else {}
+                    features = {**((plan or {}).get("features") or {}), **(tenant.get("features_override") or {})}
+                    limits = {**((plan or {}).get("limits") or {}), **(tenant.get("limits_override") or {})}
 
                     # 2FA is enrolled on the tenant DB user, not on saas_tenants.
                     # Preserve legacy tenant-level flags only when the user has none.
