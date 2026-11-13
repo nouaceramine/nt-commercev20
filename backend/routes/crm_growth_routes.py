@@ -6,6 +6,7 @@ Tenant-scoped (tenant db). Codes: CMP_YYYY / CNV_YYYY counters.
 """
 from datetime import datetime, timezone
 from typing import Optional, List
+import math
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -20,10 +21,18 @@ CONV_STATUSES = ["open", "pending", "resolved", "converted", "closed"]
 
 
 # ── Pure helpers (unit-tested) ──────────────────────────────────────────────
+def _finite_float(value, default=0.0) -> float:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
+
+
 def campaign_metrics(spend: float, leads: int, conversions: int) -> dict:
-    spend = float(spend or 0)
-    leads = int(leads or 0)
-    conversions = int(conversions or 0)
+    spend = max(0.0, _finite_float(spend))
+    leads = max(0, int(_finite_float(leads)))
+    conversions = max(0, int(_finite_float(conversions)))
     return {
         "cost_per_lead": round(spend / leads, 2) if leads > 0 else None,
         "cost_per_conversion": round(spend / conversions, 2) if conversions > 0 else None,
@@ -42,10 +51,7 @@ def performance_score(conversations: int, conversions: int, tasks_done: int,
 
 
 def minutes_active_or_zero(v) -> float:
-    try:
-        return float(v or 0)
-    except (TypeError, ValueError):
-        return 0.0
+    return _finite_float(v)
 
 
 async def _next(db, prefix: str) -> str:
@@ -122,12 +128,14 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             items.append(_clean(c) | {"conversations_count": conv_count, "conversions": converted, "metrics": m})
         return {"items": items}
 
-    @router.post("/campaigns")
+    @router.post("/campaigns", status_code=201)
     async def create_campaign(payload: CampaignIn, user: dict = Depends(get_tenant_admin)):
         if not payload.name.strip():
             raise HTTPException(status_code=422, detail="name_required")
         if payload.platform not in CAMPAIGN_PLATFORMS:
             raise HTTPException(status_code=422, detail="bad_platform")
+        if not math.isfinite(float(payload.spend or 0)) or payload.spend < 0 or payload.leads_count < 0:
+            raise HTTPException(status_code=422, detail="bad_campaign_metrics")
         doc = payload.model_dump()
         doc.update({"id": new_id(), "code": await _next(db, "CMP"), "decision": "review",
                     "created_at": _now(), "created_by": user.get("id")})
@@ -137,6 +145,8 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
     @router.put("/campaigns/{cid}")
     async def update_campaign(cid: str, payload: CampaignUpdate, user: dict = Depends(get_tenant_admin)):
         data = {k: v for k, v in payload.model_dump().items() if v is not None}
+        if ("spend" in data and (not math.isfinite(float(data["spend"])) or data["spend"] < 0)) or ("leads_count" in data and data["leads_count"] < 0):
+            raise HTTPException(status_code=422, detail="bad_campaign_metrics")
         if "decision" in data and data["decision"] not in CAMPAIGN_DECISIONS:
             raise HTTPException(status_code=422, detail="bad_decision")
         data["updated_at"] = _now()
@@ -165,19 +175,21 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
         cursor = db.crm_conversations.find(q, {"messages": 0, "internal_notes": 0}).sort("last_message_at", -1).limit(200)
         return {"items": [_clean(d) async for d in cursor]}
 
-    @router.post("/inbox/conversations")
+    @router.post("/inbox/conversations", status_code=201)
     async def create_conversation(payload: ConversationIn, user: dict = Depends(get_tenant_admin)):
         if payload.channel not in CHANNELS:
             raise HTTPException(status_code=422, detail="bad_channel")
         client = await _identify_client(payload.client_phone)
-        existing = None
-        if payload.external_user_id:
+        external_id = (payload.external_user_id or "").strip()
+        if external_id:
+            # Backward-compatible fast path for rows created before dedupe_key.
             existing = await db.crm_conversations.find_one(
-                {"channel": payload.channel, "external_user_id": payload.external_user_id,
+                {"channel": payload.channel, "external_user_id": external_id,
                  "status": {"$nin": ["closed"]}})
-        if existing:
-            return _clean(existing) | {"deduplicated": True}
+            if existing:
+                return _clean(existing) | {"deduplicated": True}
         doc = payload.model_dump()
+        doc["external_user_id"] = external_id
         doc["client_phone"] = normalize_phone(payload.client_phone)
         doc.update({
             "id": new_id(), "code": await _next(db, "CNV"),
@@ -188,7 +200,26 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             "assigned_to": payload.assigned_to or user.get("id"),
             "created_at": _now(), "last_message_at": _now(),
         })
-        await db.crm_conversations.insert_one(doc)
+        if external_id:
+            # Atomic cross-worker dedupe: a unique partial key makes concurrent
+            # webhook imports collapse to one conversation instead of read-then-insert.
+            doc["dedupe_key"] = f"{payload.channel}:{external_id}"
+            await db.crm_conversations.create_index(
+                "dedupe_key", unique=True,
+                partialFilterExpression={"dedupe_key": {"$type": "string"}},
+            )
+            from pymongo.errors import DuplicateKeyError
+            try:
+                res = await db.crm_conversations.update_one(
+                    {"dedupe_key": doc["dedupe_key"]}, {"$setOnInsert": doc}, upsert=True)
+            except DuplicateKeyError:
+                res = None
+            if res is None or res.upserted_id is None:
+                existing = await db.crm_conversations.find_one({"dedupe_key": doc["dedupe_key"]})
+                if existing:
+                    return _clean(existing) | {"deduplicated": True}
+        else:
+            await db.crm_conversations.insert_one(doc)
         return _clean(doc)
 
     @router.get("/inbox/conversations/{cid}")
@@ -198,7 +229,7 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             raise HTTPException(status_code=404, detail="not_found")
         return _clean(doc)
 
-    @router.post("/inbox/conversations/{cid}/messages")
+    @router.post("/inbox/conversations/{cid}/messages", status_code=201)
     async def add_message(cid: str, payload: MessageIn, user: dict = Depends(require_tenant)):
         if payload.direction not in ("in", "out"):
             raise HTTPException(status_code=422, detail="bad_direction")
@@ -213,7 +244,7 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             raise HTTPException(status_code=404, detail="not_found")
         return msg
 
-    @router.post("/inbox/conversations/{cid}/notes")
+    @router.post("/inbox/conversations/{cid}/notes", status_code=201)
     async def add_note(cid: str, payload: NoteIn, user: dict = Depends(require_tenant)):
         if not payload.text.strip():
             raise HTTPException(status_code=422, detail="text_required")
@@ -235,7 +266,14 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
         if not data:
             raise HTTPException(status_code=422, detail="nothing_to_update")
         data["updated_at"] = _now()
-        r = await db.crm_conversations.update_one({"id": cid}, {"$set": data})
+        update = {"$set": data}
+        if data.get("status") == "closed":
+            update["$unset"] = {"dedupe_key": ""}
+        elif data.get("status") and data["status"] != "closed":
+            existing = await db.crm_conversations.find_one({"id": cid}, {"_id": 0, "channel": 1, "external_user_id": 1})
+            if existing and existing.get("external_user_id"):
+                update["$set"]["dedupe_key"] = f"{existing['channel']}:{existing['external_user_id']}"
+        r = await db.crm_conversations.update_one({"id": cid}, update)
         if not r.matched_count:
             raise HTTPException(status_code=404, detail="not_found")
         return {"message": "updated"}
@@ -291,5 +329,59 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
         for i, row in enumerate(board, 1):
             row["rank"] = i
         return {"generated_at": _now(), "items": board}
+
+    # ── Matching-report snapshots (M13c) ────────────────────────────────────
+    @router.get("/reports")
+    async def list_reports(period: Optional[str] = None, user: dict = Depends(require_tenant)):
+        q = {"period": period} if period in ("weekly", "monthly") else {}
+        cursor = db.crm_reports.find(q).sort("generated_at", -1).limit(60)
+        return {"items": [_clean(d) async for d in cursor]}
+
+    @router.post("/reports/generate")
+    async def generate_report(payload: dict, user: dict = Depends(get_tenant_admin)):
+        from services.crm_reports import generate_and_store
+        period = (payload or {}).get("period", "weekly")
+        if period not in ("weekly", "monthly"):
+            raise HTTPException(status_code=422, detail="bad_period")
+        doc = await generate_and_store(db, period, trigger="manual")
+        return doc
+
+    # ── Performance → payroll commission link (M13c) ────────────────────────
+    @router.post("/performance/apply-commissions")
+    async def apply_commissions(payload: dict, user: dict = Depends(get_tenant_admin)):
+        """Convert CRM conversions into payroll commissions for a month.
+
+        Writes db.crm_commissions {employee_id, month} — payroll (M6) adds
+        that amount to the employee's commission when generating the payslip.
+        """
+        month = (payload or {}).get("month") or ""
+        rate = float((payload or {}).get("rate_per_conversion") or 0)
+        if not month or len(month) != 7:
+            raise HTTPException(status_code=422, detail="month_required_YYYY-MM")
+        if rate <= 0:
+            raise HTTPException(status_code=422, detail="rate_required")
+        start, end = f"{month}-01", f"{month}-32"
+        applied = []
+        # group converted conversations by assignee for the month
+        pipeline = [
+            {"$match": {"status": "converted", "updated_at": {"$gte": start, "$lt": end}}},
+            {"$group": {"_id": "$assigned_to", "conversions": {"$sum": 1}}},
+        ]
+        async for row in db.crm_conversations.aggregate(pipeline):
+            eid = row.get("_id")
+            if not eid:
+                continue
+            amount = round(row["conversions"] * rate, 2)
+            await db.crm_commissions.update_one(
+                {"employee_id": eid, "month": month},
+                {"$set": {"employee_id": eid, "month": month, "conversions": row["conversions"],
+                          "rate": rate, "amount": amount, "source": "crm_performance",
+                          "applied_by": user.get("id"), "applied_at": _now()}},
+                upsert=True,
+            )
+            emp = await db.employees.find_one({"id": eid}, {"_id": 0, "name": 1, "full_name": 1})
+            applied.append({"employee_id": eid, "name": (emp or {}).get("name") or (emp or {}).get("full_name"),
+                            "conversions": row["conversions"], "amount": amount})
+        return {"month": month, "rate": rate, "applied": applied}
 
     return router

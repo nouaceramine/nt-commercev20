@@ -99,12 +99,17 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
             {"total": 1}).to_list(2000)
         total_sales = round(sum(s.get("total", 0) for s in sales), 2)
         commission = round(total_sales * (emp.get("commission_rate", 0) / 100), 2)
+        # M13c: CRM conversion commission (applied via /crm/performance/apply-commissions)
+        _crm_row = await db.crm_commissions.find_one({"employee_id": emp["id"], "month": month})
+        crm_commission = round((_crm_row or {}).get("amount", 0), 2)
+        commission = round(commission + crm_commission, 2)
         base = round(emp.get("salary", 0), 2)
         return {
             "base_salary": base,
             "commission_rate": emp.get("commission_rate", 0),
             "total_sales": total_sales,
             "commission": commission,
+            "crm_commission": crm_commission,
             "advances": total_advances,
             "advance_ids": [a["id"] for a in advances],
             "attendance_days": present,

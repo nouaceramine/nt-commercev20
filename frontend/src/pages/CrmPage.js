@@ -52,6 +52,9 @@ const CrmPage = () => {
   const [conversations, setConversations] = useState([]);
   const [board, setBoard] = useState([]);
   const [report, setReport] = useState(null);
+  const [savedReports, setSavedReports] = useState([]);
+  const [commDlg, setCommDlg] = useState(false);
+  const [commForm, setCommForm] = useState({ month: new Date().toISOString().slice(0, 7), rate: '' });
 
   // dialogs
   const [clientDlg, setClientDlg] = useState(false);
@@ -93,6 +96,19 @@ const CrmPage = () => {
   const loadReport = async () => {
     const r = await safe(apiClient.get('/crm/matching-report'));
     if (r.data) setReport(r.data);
+    const s = await safe(apiClient.get('/crm/reports'));
+    if (s.data) setSavedReports(s.data.items || []);
+  };
+
+  const applyCommissions = async () => {
+    if (!Number(commForm.rate)) return;
+    await doSubmit(async () => {
+      const r = await apiClient.post('/crm/performance/apply-commissions', {
+        month: commForm.month, rate_per_conversion: Number(commForm.rate),
+      });
+      toast.success(isAr ? `طُبّقت ${r.data.applied.length} عمولة` : `${r.data.applied.length} commissions appliquées`);
+      setCommDlg(false);
+    }, isAr ? 'طُبّقت العمولات' : 'Commissions appliquées');
   };
 
   const openClient = async (c) => {
@@ -331,11 +347,20 @@ const CrmPage = () => {
                     </div>
                   </div>
                 )}
+                {savedReports.length > 0 && (
+                  <div className="mt-4 pt-3 border-t" data-testid="crm-saved-reports">
+                    <div className="text-sm font-semibold mb-2">{isAr ? 'التقارير المحفوظة (تلقائية أسبوعية/شهرية)' : 'Rapports sauvegardés (auto)'}</div>
+                    {savedReports.map(r => (
+                      <div key={r.id} className="flex justify-between border rounded px-2 py-1.5 text-xs mb-1">
+                        <span>{r.period_key} — {isAr ? (r.period === 'weekly' ? 'أسبوعي' : 'شهري') : r.period} · {r.trigger === 'auto' ? (isAr ? 'تلقائي' : 'auto') : (isAr ? 'يدوي' : 'manuel')}</span>
+                        <span className="text-muted-foreground">{(r.generated_at || '').slice(0, 16).replace('T', ' ')} · {r.unit_matches.length + r.client_matches.length} {isAr ? 'مطابقة' : 'matches'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
-
-          {/* ── Campaigns ── */}
           <TabsContent value="campaigns">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -396,7 +421,10 @@ const CrmPage = () => {
           {/* ── Performance ── */}
           <TabsContent value="performance">
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">{isAr ? 'ترتيب المسوقين' : 'Classement marketers'}</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-base">{isAr ? 'ترتيب المسوقين' : 'Classement marketers'}</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => setCommDlg(true)} data-testid="crm-apply-commissions">{isAr ? 'تطبيق العمولات' : 'Appliquer commissions'}</Button>
+              </CardHeader>
               <CardContent className="space-y-2" data-testid="crm-performance-list">
                 {board.map(b => (
                   <div key={b.employee_id} className="flex items-center justify-between border rounded-md px-3 py-2 text-sm">
@@ -517,6 +545,19 @@ const CrmPage = () => {
               <div><Label>{isAr ? 'هاتف العميل' : 'Téléphone'}</Label><Input value={convForm.client_phone} onChange={e => setConvForm(f => ({ ...f, client_phone: e.target.value }))} placeholder="0555..." data-testid="crm-conv-phone" /></div>
               <div><Label>{isAr ? 'اسم العميل' : 'Nom'}</Label><Input value={convForm.client_name} onChange={e => setConvForm(f => ({ ...f, client_name: e.target.value }))} /></div>
               <Button className="w-full" onClick={submitConversation} disabled={saving} data-testid="crm-conv-submit">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (isAr ? 'فتح' : 'Ouvrir')}</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Apply commissions dialog (M13c) */}
+        <Dialog open={commDlg} onOpenChange={setCommDlg}>
+          <DialogContent dir={isAr ? 'rtl' : 'ltr'}>
+            <DialogHeader><DialogTitle>{isAr ? 'تطبيق عمولات التحويلات على الرواتب' : 'Appliquer les commissions'}</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div><Label>{isAr ? 'الشهر' : 'Mois'}</Label><Input type="month" value={commForm.month} onChange={e => setCommForm(f => ({ ...f, month: e.target.value }))} data-testid="crm-comm-month" /></div>
+              <div><Label>{isAr ? 'قيمة العمولة لكل تحويل (دج)' : 'Commission par conversion (DA)'}</Label><Input type="number" value={commForm.rate} onChange={e => setCommForm(f => ({ ...f, rate: e.target.value }))} data-testid="crm-comm-rate" /></div>
+              <p className="text-xs text-muted-foreground">{isAr ? 'تُضاف العمولة تلقائياً لقسيمة راتب الشهر المختار (محادثات محوَّلة × القيمة).' : 'Ajoutée à la fiche de paie du mois (conversions × taux).'}</p>
+              <Button className="w-full" onClick={applyCommissions} disabled={saving || !Number(commForm.rate)} data-testid="crm-comm-submit">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (isAr ? 'تطبيق' : 'Appliquer')}</Button>
             </div>
           </DialogContent>
         </Dialog>

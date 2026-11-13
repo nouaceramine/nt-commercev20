@@ -109,3 +109,35 @@ def test_score_activity_capped():
 def test_score_zero():
     assert performance_score(0, 0, 0, 0, 0) == 0.0
     assert performance_score(0, 0, 0, 0, None) == 0.0
+
+
+# ── M13c: report scheduling helpers ─────────────────────────────────────────
+def test_period_key_weekly_monthly():
+    from datetime import datetime, timezone, timedelta
+    from services.crm_reports import period_key
+    tz = timezone(timedelta(hours=1))
+    d = datetime(2026, 11, 13, 10, 0, tzinfo=tz)  # Friday
+    assert period_key("weekly", d) == "W:2026-W46"
+    assert period_key("monthly", d) == "M:2026-11"
+    try:
+        period_key("daily", d)
+        assert False
+    except ValueError:
+        pass
+
+
+def test_is_report_due_rules():
+    from datetime import datetime, timezone, timedelta
+    from services.crm_reports import is_report_due
+    tz = timezone(timedelta(hours=1))
+    mon_8 = datetime(2026, 11, 16, 8, 0, tzinfo=tz)   # Monday 08:00
+    mon_9 = datetime(2026, 11, 16, 9, 0, tzinfo=tz)
+    tue_8 = datetime(2026, 11, 17, 8, 0, tzinfo=tz)
+    first_8 = datetime(2026, 12, 1, 8, 0, tzinfo=tz)
+    second_8 = datetime(2026, 12, 2, 8, 0, tzinfo=tz)
+    assert is_report_due("weekly", mon_8)
+    assert not is_report_due("weekly", mon_9)
+    assert not is_report_due("weekly", tue_8)
+    assert is_report_due("monthly", first_8)
+    assert not is_report_due("monthly", second_8)
+    assert not is_report_due("monthly", mon_8)

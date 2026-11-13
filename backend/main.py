@@ -616,6 +616,14 @@ async def startup_event():
     except Exception as e:
         logger.warning("Telegram daily scheduler start: %s", e)
 
+    # M13c: CRM weekly/monthly matching reports (08:00 Algiers, per-tenant)
+    try:
+        from config.database import get_tenant_db as _crm_get_tenant_db, main_db as _crm_main_db
+        from services.crm_reports import start_crm_reports_scheduler
+        start_crm_reports_scheduler(_crm_main_db, _crm_get_tenant_db)
+    except Exception as e:
+        logger.warning("CRM reports scheduler start: %s", e)
+
     # p54: AutoHeal self-healing scanner (scheduled every 5 min)
     try:
         from services.autoheal_service import start_autoheal_scheduler
