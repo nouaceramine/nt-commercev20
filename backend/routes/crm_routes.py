@@ -5,6 +5,7 @@ Tenant-scoped (tenant db). Codes: CLT_YYYY / PRJ_YYYY / UNT_YYYY counters.
 """
 from datetime import datetime, timezone
 from typing import Optional, List
+import math
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -35,13 +36,32 @@ def client_status_transition(current: str, target: str) -> bool:
     return target in CLIENT_STATUSES and target != current
 
 
+def _finite_float(value, default=0.0) -> float:
+    """Finite numeric coercion — legacy NaN/inf docs must not break matching/JSON."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
+
+
+def _finite_or_422(value, field_name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float("nan")
+    if not math.isfinite(number):
+        raise HTTPException(status_code=422, detail=f"{field_name}_must_be_finite")
+    return number
+
+
 def score_unit_for_client(unit: dict, client: dict) -> int:
     """0–100 match score: budget fit 50, wilaya 25, unit type 25."""
     score = 0
-    price = float(unit.get("price") or 0)
-    bmin = client.get("budget_min")
-    bmax = client.get("budget_max")
-    if price > 0 and (bmin := float(bmin or 0)) >= 0 and (bmax := float(bmax or 0)) > 0:
+    price = _finite_float(unit.get("price"))
+    bmin = _finite_float(client.get("budget_min"))
+    bmax = _finite_float(client.get("budget_max"))
+    if price > 0 and bmin >= 0 and bmax > 0:
         if bmin <= price <= bmax:
             score += 50
         elif price < bmin:
@@ -161,12 +181,16 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         cursor = db.crm_clients.find(query).sort("created_at", -1).limit(500)
         return {"items": [_clean(d) async for d in cursor]}
 
-    @router.post("/clients")
+    @router.post("/clients", status_code=201)
     async def create_client(payload: ClientIn, user: dict = Depends(get_tenant_admin)):
         if not payload.name.strip():
             raise HTTPException(status_code=422, detail="name_required")
         if payload.unit_type_pref and payload.unit_type_pref not in UNIT_TYPES:
             raise HTTPException(status_code=422, detail="bad_unit_type")
+        if payload.budget_min is not None:
+            _finite_or_422(payload.budget_min, "budget_min")
+        if payload.budget_max is not None:
+            _finite_or_422(payload.budget_max, "budget_max")
         doc = payload.model_dump()
         doc["phones"] = [normalize_phone(p) for p in doc["phones"] if normalize_phone(p)]
         doc.update({
@@ -202,12 +226,15 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
             data["phones"] = [normalize_phone(p) for p in data["phones"] if normalize_phone(p)]
         if data.get("unit_type_pref") and data["unit_type_pref"] not in UNIT_TYPES:
             raise HTTPException(status_code=422, detail="bad_unit_type")
+        for _field in ("budget_min", "budget_max"):
+            if _field in data:
+                _finite_or_422(data[_field], _field)
         data["updated_at"] = _now()
         await db.crm_clients.update_one({"id": cid}, {"$set": data})
         return {"message": "updated"}
 
     # ── Follow-ups (reminders) ──────────────────────────────────────────────
-    @router.post("/clients/{cid}/followups")
+    @router.post("/clients/{cid}/followups", status_code=201)
     async def add_followup(cid: str, payload: FollowUpIn, user: dict = Depends(get_tenant_admin)):
         if not await db.crm_clients.find_one({"id": cid}):
             raise HTTPException(status_code=404, detail="client_not_found")
@@ -239,7 +266,7 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         return {"items": items}
 
     # ── Viewings (معاينات) ──────────────────────────────────────────────────
-    @router.post("/clients/{cid}/viewings")
+    @router.post("/clients/{cid}/viewings", status_code=201)
     async def add_viewing(cid: str, payload: ViewingIn, user: dict = Depends(get_tenant_admin)):
         if not await db.crm_clients.find_one({"id": cid}):
             raise HTTPException(status_code=404, detail="client_not_found")
@@ -264,7 +291,7 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
             items.append(_clean(p) | {"units_count": units, "available_count": avail})
         return {"items": items}
 
-    @router.post("/projects")
+    @router.post("/projects", status_code=201)
     async def create_project(payload: ProjectIn, user: dict = Depends(get_tenant_admin)):
         if not payload.name.strip():
             raise HTTPException(status_code=422, detail="name_required")
@@ -285,12 +312,14 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         cursor = db.crm_units.find(query, {"photos": 0}).sort("created_at", -1).limit(500)
         return {"items": [_clean(d) async for d in cursor]}
 
-    @router.post("/units")
+    @router.post("/units", status_code=201)
     async def create_unit(payload: UnitIn, user: dict = Depends(get_tenant_admin)):
         if payload.unit_type not in UNIT_TYPES:
             raise HTTPException(status_code=422, detail="bad_unit_type")
-        if payload.price is None or payload.price <= 0:
+        if payload.price is None or not math.isfinite(float(payload.price)) or payload.price <= 0:
             raise HTTPException(status_code=422, detail="price_required")
+        if payload.area_m2 is not None:
+            _finite_or_422(payload.area_m2, "area_m2")
         if payload.project_id and not await db.crm_projects.find_one({"id": payload.project_id}):
             raise HTTPException(status_code=404, detail="project_not_found")
         doc = payload.model_dump()
