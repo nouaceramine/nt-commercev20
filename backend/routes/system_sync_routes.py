@@ -683,7 +683,7 @@ async def push_settings(data: SettingsPush, admin: dict = Depends(get_super_admi
     updated_count = 0
     for tenant in tenants:
         try:
-            tenant_db = client[tenant["database_name"]]
+            tenant_db = client[tenant.get("database_name") or resolve_db_name(tenant["id"])]
             for key, value in admin_settings.items():
                 if key == "receipt":
                     await tenant_db.settings.update_one(
@@ -850,50 +850,57 @@ async def execute_sync(data: SyncAction, admin: dict = Depends(get_super_admin))
 
     for tenant in tenants:
         try:
-            tenant_db = client[tenant["database_name"]]
+            tenant_db = client[tenant.get("database_name") or resolve_db_name(tenant["id"])]
 
-            for key, value in sync_data.items():
-                if key == "receipt":
-                    await tenant_db.settings.update_one(
-                        {"type": "receipt"}, {"$set": value}, upsert=True
-                    )
-                elif key == "notifications":
-                    await tenant_db.notification_settings.update_one(
-                        {}, {"$set": value}, upsert=True
-                    )
-                elif key == "loyalty":
-                    await tenant_db.loyalty_settings.update_one(
-                        {}, {"$set": value}, upsert=True
-                    )
-                elif key == "pos":
-                    await tenant_db.settings.update_one(
-                        {"type": "pos"}, {"$set": value}, upsert=True
-                    )
-                elif key == "products":
-                    if value:
-                        await tenant_db.products.delete_many({})
-                        await tenant_db.products.insert_many(value)
-                elif key == "families":
-                    if value:
-                        await tenant_db.product_families.delete_many({})
-                        await tenant_db.product_families.insert_many(value)
-                elif key == "theme":
-                    await tenant_db.settings.update_one(
-                        {"type": "theme"}, {"$set": value}, upsert=True
-                    )
+            # p510: destructive product/family sync is atomic per tenant. A bad
+            # source row must abort the whole fan-out instead of leaving the
+            # tenant with deleted products or a partially inserted batch.
+            async with await client.start_session() as sync_tx:
+                async with sync_tx.start_transaction():
+                    for key, value in sync_data.items():
+                        if key == "receipt":
+                            await tenant_db.settings.update_one(
+                                {"type": "receipt"}, {"$set": value}, upsert=True, session=sync_tx
+                            )
+                        elif key == "notifications":
+                            await tenant_db.notification_settings.update_one(
+                                {}, {"$set": value}, upsert=True, session=sync_tx
+                            )
+                        elif key == "loyalty":
+                            await tenant_db.loyalty_settings.update_one(
+                                {}, {"$set": value}, upsert=True, session=sync_tx
+                            )
+                        elif key == "pos":
+                            await tenant_db.settings.update_one(
+                                {"type": "pos"}, {"$set": value}, upsert=True, session=sync_tx
+                            )
+                        elif key == "products":
+                            if value:
+                                await tenant_db.products.delete_many({}, session=sync_tx)
+                                await tenant_db.products.insert_many(value, session=sync_tx)
+                        elif key == "families":
+                            if value:
+                                await tenant_db.product_families.delete_many({}, session=sync_tx)
+                                await tenant_db.product_families.insert_many(value, session=sync_tx)
+                        elif key == "theme":
+                            await tenant_db.settings.update_one(
+                                {"type": "theme"}, {"$set": value}, upsert=True, session=sync_tx
+                            )
 
-            # Send notification to tenant
-            await tenant_db.notifications.insert_one(
-                {
-                    "id": str(uuid.uuid4()),
-                    "type": "system_update",
-                    "title": "تحديث من الإدارة",
-                    "message": f"تم تحديث: {', '.join([sync_labels.get(t, t) for t in data.sync_types])}",
-                    "priority": "high",
-                    "read": False,
-                    "created_at": now,
-                }
-            )
+                    # Send notification to tenant only after every destructive
+                    # replacement succeeded inside the same transaction.
+                    await tenant_db.notifications.insert_one(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "type": "system_update",
+                            "title": "تحديث من الإدارة",
+                            "message": f"تم تحديث: {', '.join([sync_labels.get(t, t) for t in data.sync_types])}",
+                            "priority": "high",
+                            "read": False,
+                            "created_at": now,
+                        },
+                        session=sync_tx,
+                    )
 
             success_count += 1
         except Exception as e:
@@ -1001,7 +1008,7 @@ async def lock_tenant_settings(
     for tenant_id in tenant_ids:
         tenant = await db.saas_tenants.find_one({"id": tenant_id})
         if tenant:
-            tenant_db = client[tenant["database_name"]]
+            tenant_db = client[tenant.get("database_name") or resolve_db_name(tenant["id"])]
             await tenant_db.settings.update_one(
                 {"type": "admin_lock"},
                 {"$set": {"locked": lock, "updated_at": now}},

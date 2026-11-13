@@ -2,7 +2,7 @@
 Database Import/Export Routes
 Handles database backup, restore, and data import from external sources
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timezone
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/database", tags=["Database Management"])
 security = HTTPBearer()
 
 # Import from main server
-from config.database import main_db, get_tenant_db
+from config.database import client, main_db, get_tenant_db
 
 # JWT Settings
 from utils.jwt_config import SECRET_KEY
@@ -45,6 +45,7 @@ IMPORTS_DIR = _BASE_DIR / "imports"
 IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
 MAX_IMPORT_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_IMPORT_JSON_BYTES = 512 * 1024 * 1024
+MAX_ACCESS_UPLOAD_BYTES = MAX_IMPORT_UPLOAD_BYTES
 
 
 def _import_number(value, field: str) -> float:
@@ -56,6 +57,45 @@ def _import_number(value, field: str) -> float:
     if not math.isfinite(number) or number < 0:
         raise ValueError(f"invalid numeric field: {field}")
     return number
+
+
+def _validate_import_payload(data, strict: bool) -> None:
+    """Validate import shape; strict mode protects destructive clear_existing imports."""
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Import payload must be a JSON object")
+    for section in ("categories", "products", "customers", "suppliers"):
+        if section in data and not isinstance(data[section], list):
+            raise HTTPException(status_code=400, detail=f"Import section must be a list: {section}")
+    if not strict:
+        return
+
+    def _strict_number(row: dict, section: str, index: int, field: str, value) -> None:
+        try:
+            _import_number(value, field)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid {section}[{index}].{field}: {exc}",
+            ) from exc
+
+    for section in ("categories", "products", "customers", "suppliers"):
+        for index, row in enumerate(data.get(section, [])):
+            if not isinstance(row, dict):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid {section}[{index}]: each imported row must be an object",
+                )
+            if section == "products":
+                _strict_number(row, section, index, "cost_price", row.get("cost_price", 0))
+                _strict_number(row, section, index, "retail_price", row.get("selling_price", 0) or row.get("retail_price", 0))
+                _strict_number(row, section, index, "wholesale_price", row.get("price_a", 0))
+                _strict_number(row, section, index, "min_price", row.get("price_c", 0))
+                _strict_number(row, section, index, "purchase_price", row.get("purchase_price", 0))
+                _strict_number(row, section, index, "stock", row.get("stock", 0))
+                _strict_number(row, section, index, "low_stock_threshold", row.get("stock_alert", 5))
+            elif section in ("customers", "suppliers"):
+                _strict_number(row, section, index, "account_balance", row.get("account_balance", 0))
+                _strict_number(row, section, index, "total_purchased", row.get("total_purchased", 0))
 
 # ============ PYDANTIC MODELS ============
 
@@ -179,6 +219,9 @@ async def import_to_tenant(
     # Save uploaded file temporarily
     temp_path = IMPORTS_DIR / f"temp_{uuid.uuid4()}.json"
     
+    import_session = None
+    import_tx = None
+
     try:
         # Read and decompress with hard compressed/uncompressed caps.
         chunks = []
@@ -221,15 +264,24 @@ async def import_to_tenant(
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}")
         
+        # p510: validate the whole payload before any destructive clear. Invalid
+        # rows are tolerated only for additive imports; clear_existing must be
+        # all-or-nothing and must never erase tenant data first.
+        _validate_import_payload(data, strict=clear_existing)
+
         # Get tenant database
         tenant_db = get_tenant_db(tenant_id)
-        
+        if clear_existing:
+            import_session = await client.start_session()
+            import_tx = import_session.start_transaction()
+            await import_tx.__aenter__()
+
         # Clear existing data if requested
         if clear_existing:
-            await tenant_db.categories.delete_many({})
-            await tenant_db.products.delete_many({})
-            await tenant_db.customers.delete_many({})
-            await tenant_db.suppliers.delete_many({})
+            await tenant_db.categories.delete_many({}, session=import_session)
+            await tenant_db.products.delete_many({}, session=import_session)
+            await tenant_db.customers.delete_many({}, session=import_session)
+            await tenant_db.suppliers.delete_many({}, session=import_session)
             logger.info(f"Cleared existing data for tenant {tenant_id}")
         
         statistics = {
@@ -259,13 +311,13 @@ async def import_to_tenant(
                     }
                     
                     # Check if category with same name exists
-                    existing = await tenant_db.categories.find_one({"name": cat.get("name", "")})
+                    existing = await tenant_db.categories.find_one({"name": cat.get("name", "")}, session=import_session)
                     if existing:
                         category_map[cat.get("original_id")] = existing.get("id")
                         statistics["categories"]["imported"] += 1
                         continue
                     
-                    await tenant_db.categories.insert_one(category_doc)
+                    await tenant_db.categories.insert_one(category_doc, session=import_session)
                     category_map[cat.get("original_id")] = new_id
                     statistics["categories"]["imported"] += 1
                 except Exception as e:
@@ -309,20 +361,21 @@ async def import_to_tenant(
                     
                     # Check if product with same SKU or barcode exists
                     if prod.get("sku"):
-                        existing = await tenant_db.products.find_one({"sku": prod.get("sku")})
+                        existing = await tenant_db.products.find_one({"sku": prod.get("sku")}, session=import_session)
                         if existing:
                             # Update existing product
                             await tenant_db.products.update_one(
                                 {"id": existing["id"]},
                                 {"$set": {
-                                    "stock": existing.get("stock", 0) + prod.get("stock", 0),
+                                    "stock": _import_number(existing.get("stock", 0), "stock") + _import_number(prod.get("stock", 0), "stock"),
                                     "updated_at": datetime.now(timezone.utc).isoformat()
-                                }}
+                                }},
+                                session=import_session
                             )
                             statistics["products"]["imported"] += 1
                             continue
                     
-                    await tenant_db.products.insert_one(product_doc)
+                    await tenant_db.products.insert_one(product_doc, session=import_session)
                     statistics["products"]["imported"] += 1
                 except Exception as e:
                     logger.error(f"Error importing product: {e}")
@@ -350,12 +403,12 @@ async def import_to_tenant(
                     
                     # Check if customer with same phone exists
                     if cust.get("phone"):
-                        existing = await tenant_db.customers.find_one({"phone": cust.get("phone")})
+                        existing = await tenant_db.customers.find_one({"phone": cust.get("phone")}, session=import_session)
                         if existing:
                             statistics["customers"]["imported"] += 1
                             continue
                     
-                    await tenant_db.customers.insert_one(customer_doc)
+                    await tenant_db.customers.insert_one(customer_doc, session=import_session)
                     statistics["customers"]["imported"] += 1
                 except Exception as e:
                     logger.error(f"Error importing customer: {e}")
@@ -383,17 +436,31 @@ async def import_to_tenant(
                     }
                     
                     # Check if supplier with same name exists
-                    existing = await tenant_db.suppliers.find_one({"name": sup.get("name", "")})
+                    existing = await tenant_db.suppliers.find_one({"name": sup.get("name", "")}, session=import_session)
                     if existing:
                         statistics["suppliers"]["imported"] += 1
                         continue
                     
-                    await tenant_db.suppliers.insert_one(supplier_doc)
+                    await tenant_db.suppliers.insert_one(supplier_doc, session=import_session)
                     statistics["suppliers"]["imported"] += 1
                 except Exception as e:
                     logger.error(f"Error importing supplier: {e}")
                     statistics["suppliers"]["errors"] += 1
         
+        # A destructive import with any row-level error must abort and leave
+        # the tenant untouched. The transaction commit happens before the
+        # platform log so a failed import never appears as a successful one.
+        if clear_existing and any(section.get("errors", 0) for section in statistics.values()):
+            raise HTTPException(status_code=422, detail="Import validation failed; existing data was not replaced")
+        if import_tx is not None:
+            tx_to_commit = import_tx
+            import_tx = None
+            await tx_to_commit.__aexit__(None, None, None)
+        if import_session is not None:
+            session_to_close = import_session
+            import_session = None
+            await session_to_close.end_session()
+
         # Log the import
         await main_db.import_logs.insert_one({
             "id": str(uuid.uuid4()),
@@ -418,6 +485,11 @@ async def import_to_tenant(
         logger.error(f"Import error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
+        # Abort an uncommitted clear_existing transaction and close its session.
+        if import_tx is not None:
+            await import_tx.__aexit__(*sys.exc_info())
+        if import_session is not None:
+            await import_session.end_session()
         # Cleanup temp file
         if temp_path.exists():
             temp_path.unlink()
@@ -439,6 +511,7 @@ async def get_import_logs(
 
 @router.post("/convert-access")
 async def convert_access_database(
+    request: Request,
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     admin: dict = Depends(verify_super_admin)
@@ -457,14 +530,37 @@ async def convert_access_database(
             detail=f"Invalid file type. Supported: {', '.join(valid_extensions)}"
         )
     
-    # Save uploaded file
-    temp_db_path = IMPORTS_DIR / f"temp_{uuid.uuid4()}{file_ext}"
+    # Reject obviously oversized multipart requests before creating a temp file.
+    declared_size = getattr(file, "size", None)
+    if declared_size is None:
+        content_length = request.headers.get("content-length")
+        try:
+            declared_size = int(content_length) if content_length else None
+        except ValueError:
+            declared_size = None
+        # Content-Length includes multipart boundaries; keep a small allowance.
+        declared_limit = MAX_ACCESS_UPLOAD_BYTES + 1024 * 1024
+    else:
+        declared_limit = MAX_ACCESS_UPLOAD_BYTES
+    if declared_size is not None and declared_size > declared_limit:
+        raise HTTPException(status_code=413, detail="Access database exceeds the upload limit")
+
+    # Save uploaded file outside the root-owned application directory.
+    temp_db_path = Path("/tmp") / f"temp_{uuid.uuid4()}{file_ext}"
     
     try:
-        # Save uploaded file
-        content = await file.read()
+        # Save uploaded file with a streaming cap; never load an unbounded
+        # Access upload into memory before validation.
+        uploaded_size = 0
         with open(temp_db_path, 'wb') as f:
-            f.write(content)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                uploaded_size += len(chunk)
+                if uploaded_size > MAX_ACCESS_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Access database exceeds the upload limit")
+                f.write(chunk)
         
         # Generate output filename - sanitize base_name to prevent path traversal
         import re as _re
@@ -473,7 +569,7 @@ async def convert_access_database(
         output_path = EXPORTS_DIR / output_filename
         
         # Verify paths stay within expected directories
-        if not str(temp_db_path.resolve()).startswith(str(IMPORTS_DIR.resolve())):
+        if temp_db_path.resolve().parent != Path("/tmp"):
             raise HTTPException(status_code=400, detail="Invalid file path")
         if not str(output_path.resolve()).startswith(str(EXPORTS_DIR.resolve())):
             raise HTTPException(status_code=400, detail="Invalid output path")
