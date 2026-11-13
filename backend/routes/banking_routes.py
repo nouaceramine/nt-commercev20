@@ -6,12 +6,19 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import asyncio
+import math
 import uuid
 import logging
+
+from pymongo.errors import PyMongoError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/banking", tags=["Banking"])
+
+# p505: whitelisted movement types - deposit/interest add, the rest subtract.
+_TX_TYPES = {"deposit", "withdrawal", "transfer", "fee", "interest"}
 
 
 class BankAccount(BaseModel):
@@ -60,6 +67,9 @@ def create_banking_routes(db, get_current_user) -> dict:
         current_user: dict = Depends(block_cashier),
     ):
         """Create a new bank account"""
+        # p505-002: NaN/inf initial balance used to poison the account forever
+        if not math.isfinite(float(account.initial_balance or 0)):
+            raise HTTPException(status_code=400, detail="الرصيد الافتتاحي غير صالح")
         doc = account.model_dump()
         doc["id"] = str(uuid.uuid4())
         doc["tenant_id"] = current_user.get("tenant_id")
@@ -91,10 +101,19 @@ def create_banking_routes(db, get_current_user) -> dict:
         account_id: str,
         current_user: dict = Depends(block_cashier),
     ):
-        result = await db.bank_accounts.delete_one({"id": account_id})
-        if result.deleted_count == 0:
+        # p505-003: atomic claim - an account holding money cannot vanish
+        # silently (same guard as cash boxes). Epsilon absorbs float dust.
+        deleted = await db.bank_accounts.find_one_and_delete(
+            {"id": account_id,
+             "$or": [{"current_balance": {"$gte": -0.005, "$lte": 0.005}},
+                     {"current_balance": {"$exists": False}}]})
+        if deleted:
+            return {"success": True}
+        account = await db.bank_accounts.find_one({"id": account_id}, {"_id": 0, "current_balance": 1})
+        if not account:
             raise HTTPException(status_code=404, detail="Account not found")
-        return {"success": True}
+        raise HTTPException(status_code=400,
+                            detail="لا يمكن حذف حساب بنكي فيه رصيد — سوِّ الرصيد أولاً")
 
     @router.get("/transactions")
     async def get_transactions(
@@ -118,31 +137,50 @@ def create_banking_routes(db, get_current_user) -> dict:
         current_user: dict = Depends(block_cashier),
     ):
         """Record a bank transaction"""
-        # Verify account exists
-        account = await db.bank_accounts.find_one({"id": tx.bank_account_id})
-        if not account:
-            raise HTTPException(status_code=404, detail="Bank account not found")
+        # p505-002: validate before touching anything - a zero/negative/NaN
+        # amount or an unknown type used to move (or poison) real balances.
+        if tx.type not in _TX_TYPES:
+            raise HTTPException(status_code=400, detail="نوع الحركة غير صالح")
+        amount = float(tx.amount or 0)
+        if not math.isfinite(amount) or amount <= 0:
+            raise HTTPException(status_code=400, detail="المبلغ غير صالح")
 
         doc = tx.model_dump()
+        doc["amount"] = amount
         doc["id"] = str(uuid.uuid4())
         doc["tenant_id"] = current_user.get("tenant_id")
         doc["created_by"] = current_user.get("name", "")
         doc["created_at"] = datetime.now(timezone.utc).isoformat()
+        now = doc["created_at"]
 
-        # Update account balance
-        balance_change = doc["amount"] if doc["type"] in ["deposit", "interest"] else -doc["amount"]
-        new_balance = account.get("current_balance", 0) + balance_change
-
-        await db.bank_accounts.update_one(
-            {"id": tx.bank_account_id},
-            {"$set": {
-                "current_balance": round(new_balance, 2),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }}
-        )
-
-        doc["balance_after"] = round(new_balance, 2)
-        await db.bank_transactions.insert_one(doc)
+        # p505-001: the balance read-modify-write used to run outside any
+        # transaction with an absolute $set - concurrent postings lost updates
+        # and wrote lying balance_after values. Same pattern as cash-box
+        # transfer (p180): transaction + TransientTransactionError retry.
+        balance_change = amount if tx.type in ["deposit", "interest"] else -amount
+        from config.database import client as _client
+        new_balance = None
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        account = await db.bank_accounts.find_one(
+                            {"id": tx.bank_account_id}, session=_tx)
+                        if not account:
+                            raise HTTPException(status_code=404, detail="Bank account not found")
+                        new_balance = round(account.get("current_balance", 0) + balance_change, 2)
+                        await db.bank_accounts.update_one(
+                            {"id": tx.bank_account_id},
+                            {"$set": {"current_balance": new_balance, "updated_at": now}},
+                            session=_tx,
+                        )
+                        doc["balance_after"] = new_balance
+                        await db.bank_transactions.insert_one(doc, session=_tx)
+                break
+            except PyMongoError as exc:
+                if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
+                    raise
+                await asyncio.sleep(0.15 * (_attempt + 1))
         doc.pop("_id", None)
         return doc
 
