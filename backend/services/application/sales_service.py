@@ -66,6 +66,16 @@ async def create_sale_op(db, s, user: dict) -> dict:
 
 async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     """Create a sale with all side effects. Returns the sale document."""
+    # p504: offline-POS idempotency — a queued offline sale whose response was
+    # lost (network drop after commit) replays its client_ref on sync; return
+    # the original document instead of double-selling (stock/cash/journal).
+    # The check sits before ANY side effect so a replay is a pure read.
+    client_ref = (getattr(s, "client_ref", None) or "").strip() or None
+    if client_ref:
+        _replay = await db.sales.find_one({"client_ref": client_ref}, {"_id": 0}, session=_tx)
+        if _replay:
+            _replay["_idempotent_replay"] = True
+            return _replay
     sale_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     invoice_number = await generate_invoice_number(db, "INV")
@@ -398,6 +408,7 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
     sale_doc = {
         "id": sale_id, "invoice_number": invoice_number,
         "code": s.code or "",
+        "client_ref": client_ref,
         "customer_id": s.customer_id, "customer_name": customer_name,
         "items": enriched_items,
         "subtotal": s.subtotal, "discount": s.discount,

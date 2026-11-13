@@ -539,6 +539,15 @@ async def startup_event():
                 await _d.sales.create_index([("code", 1)], sparse=True, name="p257_sales_code")
             except Exception:
                 pass
+            # p504: offline-POS idempotency key — unique when present (new tenants
+            # inherit it via the template DB copy in services/tenant_template.py)
+            try:
+                await _d.sales.create_index(
+                    [("client_ref", 1)], unique=True,
+                    partialFilterExpression={"client_ref": {"$type": "string"}},
+                    name="p504_client_ref")
+            except Exception:
+                pass
             # p266: tenant wallets — atomic codes + no entity duplicates
             try:
                 await _d.wallets.create_index(

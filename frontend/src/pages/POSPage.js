@@ -162,32 +162,46 @@ export default function POSPage() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [offlineQueue, setOfflineQueue] = useState(readOfflineQueue);
   const [syncingQueue, setSyncingQueue] = useState(false);
+  // === M10: offline catalog cache — sell from the last known catalog when the network drops ===
+  const POS_CACHE_PRODUCTS = 'pos_cache_products_v1';
+  const POS_CACHE_CUSTOMERS = 'pos_cache_customers_v1';
+  const readCache = (key) => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } };
+  const writeCache = (key, items) => { try { localStorage.setItem(key, JSON.stringify({ at: new Date().toISOString(), items })); } catch { /* storage full */ } };
+  const [productsCacheAt, setProductsCacheAt] = useState(null);   // non-null = showing cached catalog
+  const [_customersCacheAt, setCustomersCacheAt] = useState(null);
+  const [queueOpen, setQueueOpen] = useState(false);              // M10: offline queue manager dialog
+  const removeQueuedSale = (idx) => {
+    const q = readOfflineQueue().filter((_, i) => i !== idx);
+    persistQueue(q);
+  };
   const persistQueue = (q) => { setOfflineQueue(q); try { localStorage.setItem(POS_QUEUE_KEY, JSON.stringify(q)); } catch { /* storage full */ } };
   const enqueueOfflineSale = (saleData) => {
     const q = [...readOfflineQueue(), { ...saleData, _offline_at: new Date().toISOString() }];
     persistQueue(q);
   };
-  const syncOfflineSales = useCallback(async () => {
-    if (syncingQueue) return;
+  const syncingRef = useRef(false);  // M10/p504: synchronous re-entry guard — state arrives a render too late (online event + interval can double-fire)
+  const syncOfflineSales = useCallback(async (manual = false) => {
+    if (syncingRef.current) return;
     const q = readOfflineQueue();
     if (q.length === 0 || !navigator.onLine) return;
+    syncingRef.current = true;
     setSyncingQueue(true);
     let synced = 0, failed = 0;
     const remaining = [];
     for (const item of q) {
-      const { _offline_at, ...saleData } = item;
+      const { _offline_at, _sync_attempts, _sync_error, _sync_dead, ...saleData } = item;
+      if (_sync_dead && !manual) { remaining.push(item); continue; }  // dead-letter: manual retry only
       try {
         await apiClient.post('/sales', saleData);
         synced += 1;
       } catch (e) {
         if (e && e.response) {
-          // Server rejected (e.g. duplicate code): retry once with an offline suffix
-          try {
-            await apiClient.post('/sales', { ...saleData, code: `${saleData.code}-O${Date.now() % 1000}` });
-            synced += 1;
-          } catch (e2) {
-            if (e2 && e2.response) { failed += 1; } else { remaining.push(item); }
-          }
+          // Server rejected (validation/stock/session closed): NEVER drop the
+          // sale — goods left the drawer. Keep it queued with the error so the
+          // cashier can retry (auto ≤3 attempts, then manual) or delete it.
+          failed += 1;
+          const attempts = (_sync_attempts || 0) + 1;
+          remaining.push({ ...item, _sync_attempts: attempts, _sync_error: errText(e), _sync_dead: attempts >= 3 });
         } else {
           remaining.push(item); // still offline
         }
@@ -195,10 +209,12 @@ export default function POSPage() {
     }
     persistQueue(remaining);
     if (synced > 0) toast.success(language === 'ar' ? `تمت مزامنة ${synced} بيع أوفلاين` : `${synced} vente(s) synchronisee(s)`);
-    if (failed > 0) toast.error(language === 'ar' ? `فشلت مزامنة ${failed} بيع` : `${failed} vente(s) echouee(s)`);
+    if (failed > 0) toast.error(language === 'ar' ? `تعذّرت مزامنة ${failed} بيع — بقيت في الطابور` : `${failed} vente(s) refusee(s) — conservee(s)`);
     if (synced > 0) { fetchProducts(); fetchSaleCode(); if (currentSession) fetchSessionStats(currentSession.id); }
+    syncingRef.current = false;
     setSyncingQueue(false);
-  }, [syncingQueue, language, currentSession, fetchSessionStats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language, currentSession, fetchSessionStats]);
   useEffect(() => {
     const goOffline = () => setIsOffline(true);
     const goOnline = () => { setIsOffline(false); syncOfflineSales(); };
@@ -261,10 +277,28 @@ export default function POSPage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchProducts = async () => {
-    try { const res = await apiClient.get('/products'); setProducts(res.data); } catch (e) { console.error(e); }
+    try {
+      const res = await apiClient.get('/products');
+      setProducts(res.data);
+      setProductsCacheAt(null);
+      writeCache(POS_CACHE_PRODUCTS, res.data);  // M10
+    } catch (e) {
+      console.error(e);
+      const c = readCache(POS_CACHE_PRODUCTS);  // M10: offline → serve last known catalog
+      if (c && Array.isArray(c.items)) { setProducts(c.items); setProductsCacheAt(c.at); }
+    }
   };
   const fetchCustomers = async () => {
-    try { const res = await apiClient.get('/customers'); setCustomers(res.data); } catch (e) { console.error(e); }
+    try {
+      const res = await apiClient.get('/customers');
+      setCustomers(res.data);
+      setCustomersCacheAt(null);
+      writeCache(POS_CACHE_CUSTOMERS, res.data);  // M10
+    } catch (e) {
+      console.error(e);
+      const c = readCache(POS_CACHE_CUSTOMERS);
+      if (c && Array.isArray(c.items)) { setCustomers(c.items); setCustomersCacheAt(c.at); }
+    }
   };
   const fetchFamilies = async () => {
     try { const res = await apiClient.get('/product-families'); setFamilies(res.data); } catch (e) { console.error(e); }
@@ -743,6 +777,9 @@ export default function POSPage() {
 
       saleData = {
         code: saleCode,
+        // M10/p504: idempotency key — generated BEFORE the first attempt so a
+        // lost-response sale replays server-side instead of double-selling
+        client_ref: `POS-${(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2))}`,
         customer_id: selectedCustomer,
         warehouse_id: selectedWarehouse || null,
         items: cart.cart.map(item => ({
@@ -957,9 +994,26 @@ export default function POSPage() {
             <h1 className="text-base sm:text-xl font-bold">{language === 'ar' ? 'نقطة البيع' : 'Point de Vente'}</h1>
             {barcodeBuffer.length > 0 && <Badge variant="secondary" className="animate-pulse text-xs gap-1"><Barcode className="h-3 w-3" />{barcodeBuffer}</Badge>}
             {cart.returnMode && <Badge variant="destructive" className="animate-pulse text-xs">{language === 'ar' ? 'إرجاع' : 'Retour'}</Badge>}
-            {isOffline && <Badge variant="destructive" className="text-xs" data-testid="pos-offline-badge">{language === 'ar' ? 'بدون اتصال' : 'Hors ligne'}</Badge>}
+            {isOffline && (
+              <Badge variant="destructive" className="text-xs cursor-pointer" data-testid="pos-offline-badge"
+                onClick={() => setQueueOpen(true)}>
+                {language === 'ar' ? `بدون اتصال (${offlineQueue.length} بالانتظار)` : `Hors ligne (${offlineQueue.length})`}
+              </Badge>
+            )}
+            {productsCacheAt && (
+              <Badge variant="outline" className="text-xs" data-testid="pos-cache-badge"
+                title={productsCacheAt}>
+                {language === 'ar' ? 'كتالوج مخزّن' : 'Catalogue local'}
+              </Badge>
+            )}
+            {!isOffline && offlineQueue.length > 0 && (
+              <Badge variant="secondary" className="text-xs cursor-pointer" data-testid="pos-queue-badge"
+                onClick={() => setQueueOpen(true)}>
+                {language === 'ar' ? `${offlineQueue.length} بيعاً بالانتظار` : `${offlineQueue.length} en attente`}
+              </Badge>
+            )}
             {offlineQueue.length > 0 && (
-              <Badge variant="secondary" className="text-xs cursor-pointer" data-testid="pos-offline-queue-badge" onClick={syncOfflineSales}>
+              <Badge variant="secondary" className="text-xs cursor-pointer" data-testid="pos-offline-queue-badge" onClick={() => syncOfflineSales(true)}>
                 {language === 'ar' ? `${offlineQueue.length} بيع بانتظار المزامنة` : `${offlineQueue.length} vente(s) en attente`}
               </Badge>
             )}
@@ -1370,6 +1424,40 @@ export default function POSPage() {
         <PrintDocumentDialog open={showPrintDocDialog} onOpenChange={setShowPrintDocDialog} docType="sale" documentId={lastSaleId} />
         <SellPlatformCardDialog open={showSellCardDialog} onClose={() => setShowSellCardDialog(false)} />
       </div>
-    </Layout>
+            {/* M10: offline queue manager */}
+        <Dialog open={queueOpen} onOpenChange={setQueueOpen}>
+          <DialogContent dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            <DialogHeader>
+              <DialogTitle>{language === 'ar' ? 'طابور البيع الأوفلاين' : 'File hors ligne'}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              {offlineQueue.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{language === 'ar' ? 'الطابور فارغ — كل المبيعات مزامَنة' : 'File vide'}</p>
+              ) : (
+                <>
+                  {offlineQueue.map((q, i) => (
+                    <div key={i} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
+                      <div>
+                        <span className="font-mono">{q.code || '—'}</span>
+                        <span className="ms-2 font-semibold">{(q.total || 0).toLocaleString()}</span>
+                        <div className="text-xs text-muted-foreground">{(q._offline_at || '').slice(0, 16).replace('T', ' ')}</div>
+                        {q._sync_error && <div className="text-xs text-red-600" data-testid="pos-sync-error">{language === 'ar' ? 'رفضه الخادم — راجعه أو احذفه: ' : 'Refuse: '}{q._sync_error}</div>}
+                      </div>
+                      <Button size="icon" variant="ghost"
+                        onClick={() => { if (window.confirm(language === 'ar' ? 'حذف هذا البيع من الطابور؟' : 'Supprimer ?')) removeQueuedSale(i); }}>
+                        <UndoIcon className="h-4 w-4 text-red-600" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button className="w-full" disabled={syncingQueue || !navigator.onLine}
+                    onClick={() => syncOfflineSales(true)} data-testid="pos-sync-now">
+                    {language === 'ar' ? (navigator.onLine ? 'مزامنة الآن' : 'لا يوجد اتصال') : (navigator.onLine ? 'Synchroniser' : 'Hors ligne')}
+                  </Button>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+</Layout>
   );
 }

@@ -71,6 +71,7 @@ class SaleCreate(BaseModel):
     notes: Optional[str] = ""
     delivery: Optional[DeliveryInfo] = None
     code: Optional[str] = ""
+    client_ref: Optional[str] = None  # p504: offline-sync idempotency key (POS offline queue)
     installment_plan: Optional[InstallmentPlan] = None
     payment_details: Optional[dict] = None
 
