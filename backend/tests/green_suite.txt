@@ -13,3 +13,4 @@ tests/test_crm.py
 tests/test_serials.py
 tests/test_kitchen_print.py
 tests/test_landed_costs.py
+tests/test_kiosk.py

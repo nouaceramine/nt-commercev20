@@ -53,6 +53,7 @@ const ReportsPage = lazy(() => import("./pages/ReportsPage"));  // p273
 const ApiKeysPage = lazy(() => import("./pages/ApiKeysPage"));  // p273
 const IntegrationsHubPage = lazy(() => import("./pages/IntegrationsHubPage"));  // p287
 const RechargePage = lazy(() => import("./pages/RechargePage"));  // p273
+const SelfKioskPage = lazy(() => import("./pages/SelfKioskPage"));  // K1: public self-service recharge kiosk
 const DigitalPanelPage = lazy(() => import("./pages/DigitalPanelPage"));  // p273
 const IptvSubscriptionsPage = lazy(() => import("./pages/IptvSubscriptionsPage"));  // p273
 const ResellersPage = lazy(() => import("./pages/ResellersPage"));  // p273
@@ -388,6 +389,8 @@ function AppRoutes() {
       <Route path="/worker/login" element={<WorkerLoginPage />} />
       <Route path="/worker" element={<WorkerWorkspacePage />} />
       <Route path="/portal" element={<UnifiedLoginPage />} />
+      {/* K1: public self-service kiosk (token-gated, no login) */}
+      <Route path="/flexy-kiosk/:token" element={<SelfKioskPage />} />
       <Route path="/login" element={<Navigate to="/portal" replace />} />
       <Route path="/tenant-login" element={<Navigate to="/portal" replace />} />
       <Route path="/agent-login" element={<Navigate to="/portal" replace />} />

@@ -1,4 +1,5 @@
 import { errText } from '../lib/errorText';
+import KioskTab from './recharge/KioskTab';  // K1
 import { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../lib/apiClient';
 import { Layout } from '../components/Layout';
@@ -36,7 +37,7 @@ const STATUS_BADGE = {
   failed:    { label: 'فاشل', labelFr: 'Échoué', variant: 'destructive', icon: XCircle, cls: 'text-red-600 bg-red-50 border-red-200' },
 };
 
-const TABS = ['pos', 'bridge', 'history'];
+const TABS = ['pos', 'kiosk', 'bridge', 'history'];  // K1: kiosk tab
 
 export default function RechargePage() {
   const { t: _t, language } = useLanguage();
@@ -297,6 +298,7 @@ export default function RechargePage() {
     pos:     { ar: 'نقطة شحن', fr: 'Point de vente' },
     bridge:  { ar: 'الجسر', fr: 'Bridge' },
     history: { ar: 'السجل', fr: 'Historique' },
+    kiosk:   { ar: 'كشك الخدمة الذاتية', fr: 'Kiosque' },  // K1
   };
 
   return (
@@ -929,6 +931,9 @@ export default function RechargePage() {
             </CardContent>
           </Card>
         )}
+
+        {/* ===================== TAB: KIOSK (K1) ===================== */}
+        {tab === 'kiosk' && <KioskTab isAdmin={isAdmin} />}
 
         {loading && (
           <div className="flex items-center justify-center py-20">
