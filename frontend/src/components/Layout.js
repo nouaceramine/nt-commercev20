@@ -85,8 +85,7 @@ import {
   ArrowRight,
   KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike, Cpu, Network,
   PackagePlus,
-  CalendarCheck,
-} from 'lucide-react';
+  CalendarCheck, ShieldCheck } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { defaultMenuSections } from '../config/sidebarMenu';
@@ -685,6 +684,7 @@ export const Layout = ({ children }) => {
       items: [
         ...(isAdmin ? [
           { path: '/settings', icon: Settings, label: t.settings },
+          { path: '/kyc', icon: ShieldCheck, label: language === 'ar' ? 'توثيق الهوية' : 'KYC' },  // M12
           { path: '/backup-system', icon: Database, label: language === 'ar' ? 'النسخ الاحتياطي' : 'Sauvegardes', featureKey: 'backup' },
           { path: '/data-import-export', icon: FileSpreadsheet, label: language === 'ar' ? 'استيراد/تصدير' : 'Import/Export' },
           { path: '/import-wizard', icon: Sparkles, label: language === 'ar' ? 'الاستيراد الذكي' : 'Import intelligent' },  // p151

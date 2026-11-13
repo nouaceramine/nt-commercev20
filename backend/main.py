@@ -1327,6 +1327,7 @@ _AUTO_REG_MODULES = [
     'routes.payroll_routes',  # M6: payroll payslips (salary + commission − advances)
     'routes.bookings_routes',  # M7: generalized bookings (resources + clash detection + deposits)
     'routes.van_sales_routes',  # M9: van sales (mobile warehouse + day close reconciliation)
+    'routes.kyc_routes',  # M12: tenant KYC (submission + super-admin review)
 ]
 
 for _mod_path in _AUTO_REG_MODULES:

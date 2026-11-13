@@ -60,6 +60,7 @@ const DigitalServicesCatalogPage = lazy(() => import("./pages/DigitalServicesCat
 const ProductFamiliesPage = lazy(() => import("./pages/ProductFamiliesPage"));  // p273
 const CustomerDebtsPage = lazy(() => import("./pages/CustomerDebtsPage"));  // p273
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));  // p273
+const KycPage = lazy(() => import("./pages/KycPage"));  // M12
 const BulkPriceUpdatePage = lazy(() => import("./pages/BulkPriceUpdatePage"));  // p273
 const PurchasesPage = lazy(() => import("./pages/PurchasesPage"));  // p273
 const WarehousesPage = lazy(() => import("./pages/WarehousesPage"));  // p273
@@ -982,6 +983,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/kyc"
+        element={
+          <ProtectedRoute adminOnly>
+            <KycPage />
+          </ProtectedRoute>
+        }
+      />  {/* M12 */}
       <Route
         path="/settings/sidebar"
         element={
