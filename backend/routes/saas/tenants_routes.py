@@ -682,6 +682,9 @@ async def store_template_rebuild(admin: dict = Depends(get_super_admin)):
 
 @router.post("/saas/store-template/copy/{tenant_id}")
 async def store_template_copy(tenant_id: str, admin: dict = Depends(get_super_admin)):
+    tenant = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "id": 1})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
     from services.store_template import copy_store_to_tenant
     return await copy_store_to_tenant(tenant_id)
 
@@ -1003,6 +1006,9 @@ async def template_rebuild(admin: dict = Depends(get_super_admin)):
 
 @router.get("/saas/template/doctor/{tenant_id}")
 async def template_doctor_one(tenant_id: str, fix: bool = False, admin: dict = Depends(get_super_admin)):
+    tenant = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "id": 1})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
     return await _tpl_doctor(tenant_id, fix=fix)
 
 

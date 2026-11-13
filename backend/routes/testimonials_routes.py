@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 SEED = [
@@ -14,11 +14,18 @@ SEED = [
 
 
 class TestimonialCreate(BaseModel):
-    name: str
-    role: str = ""
-    text: str
-    rating: int = 5
+    name: str = Field(min_length=1, max_length=200)
+    role: str = Field(default="", max_length=200)
+    text: str = Field(min_length=1, max_length=4000)
+    rating: int = Field(default=5, ge=1, le=5)
     is_active: bool = True
+
+    @field_validator("name", "text")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
+        return v.strip()
 
 
 def create_testimonials_routes(main_db, get_super_admin) -> dict:
@@ -54,6 +61,18 @@ def create_testimonials_routes(main_db, get_super_admin) -> dict:
     @router.put("/saas/testimonials/{tid}")
     async def update_testimonial(tid: str, data: dict, admin: dict = Depends(get_super_admin)):
         allowed = {k: v for k, v in data.items() if k in ("name", "role", "text", "rating", "is_active")}
+        if "rating" in allowed:
+            try:
+                allowed["rating"] = int(allowed["rating"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="rating must be an integer between 1 and 5")
+            if not 1 <= allowed["rating"] <= 5:
+                raise HTTPException(status_code=422, detail="rating must be between 1 and 5")
+        for _f in ("name", "text"):
+            if _f in allowed:
+                if not str(allowed[_f]).strip():
+                    raise HTTPException(status_code=422, detail=f"{_f} must not be blank")
+                allowed[_f] = str(allowed[_f]).strip()
         res = await main_db.testimonials.update_one({"id": tid}, {"$set": allowed})
         if res.matched_count == 0:
             raise HTTPException(status_code=404, detail="غير موجود")

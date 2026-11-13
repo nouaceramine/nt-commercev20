@@ -225,7 +225,7 @@ async def auto_fix_error(
         {"$set": {
             "status": "resolved",
             "resolved_at": now,
-            "resolved_by": admin.get("sub", "admin"),
+            "resolved_by": admin.get("id") or admin.get("email") or "admin",
             "fix_result": fix_result
         }}
     )
@@ -253,7 +253,7 @@ async def resolve_error(
         {"$set": {
             "status": "resolved",
             "resolved_at": now,
-            "resolved_by": admin.get("sub", "admin"),
+            "resolved_by": admin.get("id") or admin.get("email") or "admin",
             "resolution_notes": notes
         }}
     )
