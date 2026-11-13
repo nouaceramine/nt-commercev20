@@ -6861,3 +6861,11 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - الاختبار: staging ترابطي API/DB ‏19/29 قبل (إثبات 10 عيوب) ⇒ ‏29/29 بعد ثلاث جولات متتالية؛ سباقات إرجاع/حذف ×6 ودفعات ×4 كلها تحرك المال والمخزون مرة واحدة بالضبط؛ عزل A/B؛ residue=0. الانحدار: نواة ‏83/83، خضراء ‏59/59، حزم M+المحفظة ‏75ن/27خطأ بيئي مطابق، Ruff نظيف.
 - النشر: restart ntcommerce-backend-1؛ health ‏200 ×3 (مباشر/nginx/Cloudflare)؛ OpenAPI ‏1223/1509 ثابتة؛ md5 repo≡حاوية≡staging للملفات الأربعة؛ حراسات المجهول 401 حية. لا تغيير واجهة ولا بيانات اختبار في الإنتاج.
 - النسخ backups/p508/؛ المصفوفة 1831 ← 1841.
+
+## P509 — 2026-11-13 (تدقيق وإصلاح النظام والبيانات)
+- الالتزام `13211dc`: 7 إصلاحات نظام/بيانات (بحث، قوالب طباعة، أمان IP، backup/restore، export/import/convert-access) + تثبيت العمل الموروث M13 CRM وD1 serial warranty lifecycle بعد اختبارهما.
+- الاختبار: staging ترابطي API/DB ‏25/32 قبل الإصلاح ⇒ ‏32/32 بعده ثلاث جولات متتالية؛ serial lifecycle ‏5/5؛ `test_crm.py + test_serials.py` ‏26/26؛ الانحدار المستهدف ‏100/100؛ `git diff --check` وAST نظيفان.
+- النشر: restart ‏`ntcommerce-backend-1`؛ الصحة ‏200 مباشرة/nginx/Cloudflare؛ OpenAPI ‏1258/1550؛ md5 repo≡container≡staging للملفات الخمسة؛ واجهة الإنتاج ‏`main.eda6d055.js` وdeploy release ‏`20261113_110945`.
+- التحقق الحي: مجهول ‏401 على backup/search-history/printing/security/database-import؛ `q=[` في suggestions ⇒ ‏200 بدل 500؛ متصفح حقيقي أكد `/crm` وتبويب «الأرقام التسلسلية» في صفحة تعديل منتج.
+- التنظيف: staging ‏residue=0 لـTEST-P509/TEST-P509S؛ الإنتاج بلا بيانات اختبار (0 tenants/backups/import logs) وسجل بحث الفحص نُظّف؛ النسخ `/opt/ntcommerce/backups/p509/` و`/opt/ntcommerce/backups/m13_inflight/`.
+- المصفوفة: ‏1841 ← ‏1854 صفًا؛ خلايا «معلق» في النظام والبيانات ‏622 ← ‏577؛ المتبقي استكمال النطاق نفسه للصفوف العامة المتبقية.
