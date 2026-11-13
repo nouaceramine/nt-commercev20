@@ -60,19 +60,21 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
         The flag is atomically cleared on read so the bridge only runs one extra check.
         """
         now = datetime.now(timezone.utc).isoformat()
-        # Fetch up to 50 pending tasks
-        tasks = await tenant_db.mobile_recharge_tasks.find(
-            {"status": "pending"}, {"_id": 0}
-        ).sort("created_at", 1).to_list(50)
-        if tasks:
-            task_ids = [t["id"] for t in tasks]
-            # Atomically move claimed tasks to "processing"
-            await tenant_db.mobile_recharge_tasks.update_many(
-                {"id": {"$in": task_ids}, "status": "pending"},
+        # p506-009: claim each task with its own atomic transition. The old
+        # find-then-update_many window let two concurrent bridge workers return
+        # the SAME pending task before either marked it processing (double USSD).
+        tasks = []
+        for _ in range(50):
+            claimed = await tenant_db.mobile_recharge_tasks.find_one_and_update(
+                {"status": "pending"},
                 {"$set": {"status": "processing", "updated_at": now}},
+                sort=[("created_at", 1)],
+                return_document=True,
+                projection={"_id": 0},
             )
-            for t in tasks:
-                t["status"] = "processing"
+            if not claimed:
+                break
+            tasks.append(claimed)
 
         # Atomically read-and-clear the on-demand balance-check flag
         flag_doc = await tenant_db.settings.find_one_and_update(

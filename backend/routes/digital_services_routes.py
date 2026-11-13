@@ -128,8 +128,15 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             if payload.get("delivery_method") not in DELIVERY_METHODS:
                 raise HTTPException(status_code=400, detail="طريقة التسليم غير صالحة")
         for field in ("price", "cost_price"):
-            if field in payload and (payload[field] is None or payload[field] < 0):
-                raise HTTPException(status_code=400, detail="السعر غير صالح")
+            if field in payload:
+                try:
+                    numeric = float(payload[field])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="السعر غير صالح")
+                # p506: NaN passed the old `value < 0` check and poisoned orders.
+                if not math.isfinite(numeric) or numeric < 0:
+                    raise HTTPException(status_code=400, detail="السعر غير صالح")
+                payload[field] = numeric
         if "name" in payload and not (payload["name"] or "").strip():
             raise HTTPException(status_code=400, detail="اسم المنتج مطلوب")
 
@@ -272,6 +279,11 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
     async def create_order(data: OrderCreate, user: dict = Depends(get_current_user)):
         if data.payment_method not in PAYMENT_METHODS:
             raise HTTPException(status_code=400, detail="طريقة الدفع غير صالحة")
+        # p506-002: quantity=-2 used to make amount negative; the conditional
+        # wallet "debit" then CREDITED the user's wallet and completed an order
+        # with zero codes. Quantity is a positive integer before anything moves.
+        if not isinstance(data.quantity, int) or isinstance(data.quantity, bool) or data.quantity <= 0:
+            raise HTTPException(status_code=400, detail="الكمية يجب أن تكون عددًا صحيحًا أكبر من صفر")
         product = await db.digital_products.find_one({"id": data.product_id, "is_active": True}, {"_id": 0})
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
@@ -378,15 +390,45 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         if order["status"] == "COMPLETED":
             return {"message": "الطلب مسلَّم مسبقاً", "status": "COMPLETED"}
-        stock = await _product_stock(order["product_id"])
-        if stock >= order.get("quantity", 1):
-            order["code_ids"] = await _assign_codes(order["product_id"], order_id, order.get("quantity", 1))
-        await db.digital_orders.update_one(
-            {"id": order_id},
-            {"$set": {"status": "COMPLETED", "code_ids": order["code_ids"], "delivered_by": admin.get("name", ""), "delivered_at": _now()}}
+
+        # p506-003: claim PENDING -> DELIVERING atomically. The old read-then-update
+        # allowed concurrent admins to assign one code each while the order row
+        # retained only the last code_ids list (inventory vanished untracked).
+        claimed = await db.digital_orders.find_one_and_update(
+            {"id": order_id, "status": "PENDING"},
+            {"$set": {"status": "DELIVERING"}},
+            projection={"_id": 0},
         )
+        if not claimed:
+            current = await db.digital_orders.find_one({"id": order_id}, {"_id": 0, "status": 1})
+            return {"message": "التسليم جارٍ أو مكتمل", "status": (current or {}).get("status", "COMPLETED")}
+
+        quantity = order.get("quantity", 1)
+        code_ids = []
+        try:
+            product = await db.digital_products.find_one({"id": order["product_id"]}, {"_id": 0, "delivery_method": 1})
+            if product and product.get("delivery_method") in ("INSTANT_CODE", "QR_CODE"):
+                code_ids = await _assign_codes(order["product_id"], order_id, quantity)
+                if len(code_ids) < quantity:
+                    raise HTTPException(status_code=400, detail="نفدت الأكواد المتاحة لهذا المنتج")
+            await db.digital_orders.update_one(
+                {"id": order_id, "status": "DELIVERING"},
+                {"$set": {"status": "COMPLETED", "code_ids": code_ids,
+                          "delivered_by": admin.get("name", ""), "delivered_at": _now()}},
+            )
+        except Exception:
+            if code_ids:
+                await db.digital_codes.update_many(
+                    {"id": {"$in": code_ids}, "order_id": order_id},
+                    {"$set": {"is_used": False, "used_at": None, "order_id": None}})
+            await db.digital_orders.update_one(
+                {"id": order_id, "status": "DELIVERING"}, {"$set": {"status": "PENDING"}})
+            raise
+
+        order["status"] = "COMPLETED"
+        order["code_ids"] = code_ids
         await _notify_order_completed(order)
-        return {"message": "تم التسليم", "status": "COMPLETED", "codes_assigned": len(order["code_ids"])}
+        return {"message": "تم التسليم", "status": "COMPLETED", "codes_assigned": len(code_ids)}
 
     # ── Wallet ──
     @router.get("/wallet")

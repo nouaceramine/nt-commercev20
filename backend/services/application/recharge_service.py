@@ -5,6 +5,7 @@ bridge task dispatch, and full rollback on any failure.
 """
 from datetime import datetime, timezone
 import logging
+import math
 import uuid
 
 import httpx
@@ -25,6 +26,19 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     operator_config = effective_config.get(recharge.operator)
     if not operator_config:
         raise HTTPException(status_code=400, detail="Invalid operator")
+    # p506-001: a negative amount used to run the whole saga backwards —
+    # debit_wallet(balance >= -97) CREDITED the tenant wallet, while the cash
+    # box was decremented and a bridge task was created. Reject before any write.
+    try:
+        amount_value = float(recharge.amount)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="مبلغ الشحن غير صالح")
+    if not math.isfinite(amount_value) or amount_value <= 0:
+        raise HTTPException(status_code=400, detail="مبلغ الشحن يجب أن يكون أكبر من صفر")
+    if not (recharge.phone_number or "").strip():
+        raise HTTPException(status_code=400, detail="رقم الهاتف مطلوب")
+    recharge.amount = amount_value
+    recharge.phone_number = recharge.phone_number.strip()
 
     # --- Resolve recharge mode for this tenant ---
     entity_id_for_mode = user.get("tenant_id") or user.get("id", "")

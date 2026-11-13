@@ -24,6 +24,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from pymongo import ReturnDocument
 
 logger = logging.getLogger(__name__)
 
@@ -132,13 +133,6 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
                     "last_updated": now, "prefix": op["prefix"]}
             await db.sim_slots.insert_one(dict(slot))
 
-        # Empty-SIM stock gate (stock tracking is part of the chosen design)
-        if int(slot.get("empty_sims", 0) or 0) <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"لا توجد شرائح فارغة متبقية لدى {op['name_ar']} — حدّث مخزون الشرائح من صفحة إدارة الشرائح",
-            )
-
         profit = round(payload.sale_price + payload.bonus - payload.offer_value - payload.sim_cost, 2)
         activation_id = str(uuid.uuid4())
 
@@ -167,14 +161,27 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
         # ── side effects with best-effort rollback ──
         slot_updated = sale_inserted = cash_done = False
         try:
-            # 1) operator SIM: deduct offer value, add bonus, consume one empty SIM
-            await db.sim_slots.update_one(
-                {"prefix": op["prefix"]},
+            # 1) p506-008: atomically claim ONE empty SIM and enough operator
+            # balance. The old check-then-$inc let six concurrent activations all
+            # pass with one SIM in stock, ending at empty_sims=-2 after 3 sales.
+            claimed_slot = await db.sim_slots.find_one_and_update(
+                {"prefix": op["prefix"], "empty_sims": {"$gte": 1},
+                 "balance": {"$gte": payload.offer_value}},
                 {"$inc": {"balance": -payload.offer_value,
                           "bonus_balance": payload.bonus,
                           "empty_sims": -1},
                  "$set": {"last_updated": now}},
+                return_document=ReturnDocument.BEFORE, projection={"_id": 0},
             )
+            if not claimed_slot:
+                fresh = await db.sim_slots.find_one({"prefix": op["prefix"]}, {"_id": 0})
+                if not fresh or int(fresh.get("empty_sims", 0) or 0) <= 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"لا توجد شرائح فارغة متبقية لدى {op['name_ar']} — حدّث مخزون الشرائح من صفحة إدارة الشرائح",
+                    )
+                raise HTTPException(status_code=400, detail="رصيد شريحة المتعامل غير كافٍ لتفعيل هذا العرض")
+            slot = claimed_slot
             slot_updated = True
             if payload.offer_value:
                 await db.sim_balance_logs.insert_one({

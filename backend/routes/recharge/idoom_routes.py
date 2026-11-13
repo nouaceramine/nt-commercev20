@@ -7,6 +7,7 @@ import uuid
 import io
 import csv
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,26 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
         txn_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
+        # p506-006/007: validate money/debt counterparts BEFORE claiming stock or
+        # debiting the tenant's platform wallet. The old order claimed+sold a code
+        # and debited the wallet even when the receiving cash box / debtor was a ghost.
+        if not math.isfinite(float(body.denomination or 0)) or float(body.denomination) <= 0:
+            raise HTTPException(status_code=400, detail="قيمة الكود غير صالحة")
+        sell_price = float(body.sell_price) if body.sell_price is not None else float(body.denomination)
+        if not math.isfinite(sell_price) or sell_price <= 0:
+            raise HTTPException(status_code=400, detail="سعر البيع غير صالح")
+        is_credit_precheck = body.payment_method == "credit"
+        customer_doc = None
+        if is_credit_precheck:
+            if not body.customer_id:
+                raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+            customer_doc = await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
+            if not customer_doc:
+                raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        elif body.payment_method != "wallet":
+            if not await db.cash_boxes.find_one({"id": body.payment_method}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الصندوق غير موجود")
+
         # Atomically claim one available code (prevents race conditions)
         claimed = await claim_codes(
             db, "idoom_codes",
@@ -146,14 +167,10 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
                 {"id": code_doc["id"]},
                 {"$set": {"status": "sold"}},
             )
-            sell_price = float(body.sell_price) if body.sell_price else float(body.denomination)
+            sell_price = float(body.sell_price) if body.sell_price is not None else float(body.denomination)
             is_credit = body.payment_method == "credit"
-            customer_name = ""
+            customer_name = (customer_doc or {}).get("name", "") if is_credit else ""
             if is_credit:
-                if not body.customer_id:
-                    raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
-                cust = await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
-                customer_name = (cust or {}).get("name", "")
                 # Insert a sales row so customer debt picks it up
                 await db.sales.insert_one({
                     "id": str(uuid.uuid4()),
@@ -165,13 +182,22 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
                     }],
                     "subtotal": sell_price, "discount_total": 0, "tax_total": 0,
                     "total": sell_price, "paid_amount": 0, "debt_amount": sell_price,
-                    "payment_method": "credit",
+                    "remaining": sell_price, "payment_method": "credit", "payment_type": "credit",
+                    "status": "unpaid", "payments": [],
                     "customer_id": body.customer_id, "customer_name": customer_name,
                     "customer_phone": body.customer_phone,
                     "type": "idoom_credit", "source": "pos_quick_idoom",
                     "user_id": user.get("id"), "user_name": user.get("name", ""),
                     "created_at": now,
                 })
+                # Mirror the debt on the customer record immediately; this route
+                # does not emit an outbox event, so the sales row alone was invisible
+                # to the customer's balance mirror.
+                await db.customers.update_one(
+                    {"id": body.customer_id},
+                    {"$inc": {"total_purchases": sell_price, "balance": sell_price,
+                              "total_debt": sell_price}},
+                )
                 # Daily session credit sales
                 try:
                     await db.daily_sessions.update_one(

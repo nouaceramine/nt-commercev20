@@ -18,10 +18,12 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 import calendar
+import math
 import uuid
 import logging
 
 from pymongo import ReturnDocument
+from pymongo.errors import PyMongoError
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +63,14 @@ def _sub_status(end_date_iso: str, alert_days: int = 7) -> str:
 
 def _to_float(v, default=0.0) -> float:
     try:
-        return float(v)
+        value = float(v)
     except (TypeError, ValueError):
         return default
+    # p506-005: NaN/Inf are not ordinary parse failures — they used to sail
+    # through `value <= 0` and poison panel/cash balances with BSON NaN.
+    if not math.isfinite(value):
+        return default
+    return value
 
 
 def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -> APIRouter:
@@ -560,40 +567,55 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         pm = payload.get("payment_method") or "cash"
         now = datetime.now(timezone.utc).isoformat()
+        topup_id = str(uuid.uuid4())
 
-        panel = await db.digital_panel_balance.find_one_and_update(
-            {"id": "default"},
-            {"$inc": {"balance": amount}, "$set": {"updated_at": now},
-             "$setOnInsert": {"id": "default", "created_at": now}},
-            upsert=True, return_document=ReturnDocument.AFTER, projection={"_id": 0},
-        )
-        try:
-            await db.cash_boxes.update_one(
-                {"id": pm},
-                {"$inc": {"balance": -amount}, "$set": {"updated_at": now}},
-            )
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()), "cash_box_id": pm,
-                "type": "expense", "amount": amount,
-                "description": "شحن رصيد بانل IPTV المدفوع مسبقاً",
-                "reference_type": "panel_topup", "reference_id": str(uuid.uuid4()),
-                "created_at": now, "created_by": admin.get("name", ""),
-            })
-            await db.digital_panel_transactions.insert_one({
-                "id": str(uuid.uuid4()), "type": "topup", "amount": amount,
-                "balance_after": panel["balance"],
-                "payment_method": pm,
-                "notes": payload.get("notes") or "",
-                "created_at": now, "created_by": admin.get("name", ""),
-            })
-        except Exception as e:
+        # p506-004: validate and move BOTH sides atomically. The old sequence
+        # credited the panel first, then blindly updated a possibly-nonexistent
+        # cash box — a ghost payment method created a prepaid asset from nothing.
+        from config.database import client as _client
+        result = None
+        for _attempt in range(5):
             try:
-                await db.digital_panel_balance.update_one({"id": "default"}, {"$inc": {"balance": -amount}})
-            except Exception:
-                logger.exception("panel topup rollback failed")
-            logger.exception("panel topup failed: %s", e)
-            raise HTTPException(status_code=500, detail="فشل شحن رصيد البانل") from e
-        return {"balance": round(_to_float(panel.get("balance")), 2)}
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        box = await db.cash_boxes.find_one({"id": pm}, {"_id": 0, "id": 1}, session=_tx)
+                        if not box:
+                            raise HTTPException(status_code=404, detail="الصندوق غير موجود")
+                        panel = await db.digital_panel_balance.find_one_and_update(
+                            {"id": "default"},
+                            {"$inc": {"balance": amount}, "$set": {"updated_at": now},
+                             "$setOnInsert": {"id": "default", "created_at": now}},
+                            upsert=True, return_document=ReturnDocument.AFTER,
+                            projection={"_id": 0}, session=_tx,
+                        )
+                        await db.cash_boxes.update_one(
+                            {"id": pm},
+                            {"$inc": {"balance": -amount}, "$set": {"updated_at": now}},
+                            session=_tx,
+                        )
+                        await db.transactions.insert_one({
+                            "id": str(uuid.uuid4()), "cash_box_id": pm,
+                            "type": "expense", "amount": amount,
+                            "description": "شحن رصيد بانل IPTV المدفوع مسبقاً",
+                            "reference_type": "panel_topup", "reference_id": topup_id,
+                            "created_at": now, "created_by": admin.get("name", ""),
+                        }, session=_tx)
+                        await db.digital_panel_transactions.insert_one({
+                            "id": str(uuid.uuid4()), "type": "topup", "amount": amount,
+                            "balance_after": panel["balance"], "payment_method": pm,
+                            "notes": payload.get("notes") or "",
+                            "created_at": now, "created_by": admin.get("name", ""),
+                        }, session=_tx)
+                        result = {"balance": round(_to_float(panel.get("balance")), 2)}
+                break
+            except HTTPException:
+                raise
+            except PyMongoError:
+                if _attempt == 4:
+                    logger.exception("panel topup failed after retries")
+                    raise HTTPException(status_code=500, detail="فشل شحن رصيد البانل")
+                continue
+        return result
 
     @router.get("/panel-balance/transactions")
     async def panel_balance_transactions(admin: dict = Depends(get_tenant_admin)):
