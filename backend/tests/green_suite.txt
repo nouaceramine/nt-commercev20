@@ -4,3 +4,12 @@ tests/test_iter20_email_templates.py
 tests/test_iter21_email_validation.py
 tests/test_iter22_multi_provider_email.py
 tests/test_repository.py
+tests/test_auto_reorder.py
+tests/test_bookings.py
+tests/test_van_sales.py
+tests/test_payroll.py
+tests/test_kyc.py
+tests/test_crm.py
+tests/test_serials.py
+tests/test_kitchen_print.py
+tests/test_landed_costs.py
