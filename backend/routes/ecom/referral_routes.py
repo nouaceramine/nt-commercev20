@@ -16,6 +16,7 @@ merchant settles with a payout that marks due rewards as paid.
 from datetime import datetime, timezone
 from typing import Optional
 import logging
+import math
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -61,6 +62,10 @@ async def resolve_referral(code: str) -> Optional[dict]:
 def _validate_reward(reward_type: str, reward_value: float):
     if reward_type not in REWARD_TYPES:
         raise HTTPException(status_code=400, detail="نوع المكافأة fixed أو percent فقط")
+    # p507-005: NaN slipped past `reward_value < 0` (NaN compares False) and was
+    # stored, poisoning every reward/payout computation downstream.
+    if not math.isfinite(float(reward_value)):
+        raise HTTPException(status_code=400, detail="قيمة المكافأة غير صالحة")
     if reward_value < 0:
         raise HTTPException(status_code=400, detail="قيمة المكافأة سالبة")
     if reward_type == "percent" and reward_value > 100:
@@ -174,12 +179,19 @@ async def payout_referral(rid: str, user: dict = Depends(require_tenant)):
     ref = await db.ecom_referrals.find_one({"id": rid}, {"_id": 0})
     if not ref:
         raise HTTPException(status_code=404, detail="الإحالة غير موجودة")
-    due = await db.ecom_referral_rewards.find(
-        {"referral_id": rid, "status": "due"}, {"_id": 0, "id": 1, "amount": 1}).to_list(1000)
-    if not due:
-        raise HTTPException(status_code=400, detail="لا مكافآت مستحقة")
-    total = round(sum(float(r["amount"]) for r in due), 2)
     now = datetime.now(timezone.utc).isoformat()
+    # p507-009: atomically claim the due rewards BEFORE writing the payout doc.
+    # The old find-then-write let 6 concurrent payouts all read the same due
+    # set and insert 6 payout docs (double payment risk).
+    claim_id = str(uuid.uuid4())
+    claimed = await db.ecom_referral_rewards.update_many(
+        {"referral_id": rid, "status": "due"},
+        {"$set": {"status": "paying", "payout_claim_id": claim_id}})
+    if claimed.modified_count == 0:
+        raise HTTPException(status_code=400, detail="لا مكافآت مستحقة")
+    due = await db.ecom_referral_rewards.find(
+        {"payout_claim_id": claim_id}, {"_id": 0, "id": 1, "amount": 1}).to_list(1000)
+    total = round(sum(float(r["amount"]) for r in due), 2)
     payout = {
         "id": str(uuid.uuid4()),
         "referral_id": rid,
@@ -188,9 +200,17 @@ async def payout_referral(rid: str, user: dict = Depends(require_tenant)):
         "created_by": user.get("id"),
         "created_at": now,
     }
-    await db.ecom_referral_payouts.insert_one(payout)
-    await db.ecom_referral_rewards.update_many(
-        {"id": {"$in": payout["reward_ids"]}},
-        {"$set": {"status": "paid", "paid_at": now, "payout_id": payout["id"]}})
+    try:
+        await db.ecom_referral_payouts.insert_one(payout)
+        await db.ecom_referral_rewards.update_many(
+            {"payout_claim_id": claim_id},
+            {"$set": {"status": "paid", "paid_at": now, "payout_id": payout["id"]},
+             "$unset": {"payout_claim_id": ""}})
+    except Exception:
+        # release the claim so rewards never get stuck in "paying"
+        await db.ecom_referral_rewards.update_many(
+            {"payout_claim_id": claim_id},
+            {"$set": {"status": "due"}, "$unset": {"payout_claim_id": ""}})
+        raise
     payout.pop("_id", None)
     return {"ok": True, "payout": payout}

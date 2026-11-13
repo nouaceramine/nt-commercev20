@@ -12,6 +12,7 @@ Index (main_db):         ecom_worker_index  {phone → tenant_id, worker_id}
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import logging
+import math
 import re
 import uuid
 
@@ -263,6 +264,16 @@ def _valid_pin(pin: str) -> bool:
     return bool(re.fullmatch(r"\d{4,8}", (pin or "").strip()))
 
 
+def _valid_commission(v) -> bool:
+    """p507-004: NaN/inf commission used to be stored (500 on response) and would
+    poison the cash box at settle time (total=nan slips past the `total <= 0` guard)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(f) and f >= 0
+
+
 @router.get("/ecom-workers")
 async def list_workers(user: dict = Depends(require_tenant)):
     await require_ecom_feature(user)
@@ -285,6 +296,8 @@ async def create_worker(body: WorkerCreate, user: dict = Depends(require_tenant)
         raise HTTPException(status_code=400, detail="هاتف العامل مطلوب")
     if not _valid_pin(pin):
         raise HTTPException(status_code=400, detail="رمز الدخول: 4 إلى 8 أرقام")
+    if not _valid_commission(body.commission_fixed) or not _valid_commission(body.commission_percent):
+        raise HTTPException(status_code=400, detail="قيمة العمولة غير صالحة")
     if await main_db.ecom_worker_index.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="هذا الهاتف مسجّل لعامل آخر")
     tenant_id = user.get("tenant_id")
@@ -316,8 +329,12 @@ async def update_worker(worker_id: str, body: WorkerUpdate, user: dict = Depends
     if body.active is not None:
         upd["active"] = bool(body.active)
     if body.commission_fixed is not None:
+        if not _valid_commission(body.commission_fixed):
+            raise HTTPException(status_code=400, detail="قيمة العمولة غير صالحة")
         upd["commission_fixed"] = round(float(body.commission_fixed), 2)
     if body.commission_percent is not None:
+        if not _valid_commission(body.commission_percent):
+            raise HTTPException(status_code=400, detail="قيمة العمولة غير صالحة")
         upd["commission_percent"] = round(float(body.commission_percent), 2)
     if body.pin:
         if not _valid_pin(body.pin):
@@ -398,9 +415,19 @@ async def settle_worker_commissions(worker_id: str, body: dict, user: dict = Dep
         raise HTTPException(status_code=404, detail="العامل غير موجود")
     base = {"executor.id": worker_id, "executor.type": "worker", "status": "delivered",
             "commission_settled": {"$exists": False}}
-    orders = await db.ecom_orders.find(base, {"_id": 0, "id": 1, "total": 1}).to_list(length=10000)
-    if not orders:
+    # p507-012: atomic claim of the unsettled set BEFORE any money write. The old
+    # find-then-write let 6 concurrent settles produce 2 settlements + 2 expenses
+    # + double cash decrement. Stale claims (>10min, crashed run) are re-claimable.
+    claim_id = str(uuid.uuid4())
+    _stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    _claimed = await db.ecom_orders.update_many(
+        {**base, "$or": [{"commission_settling": {"$exists": False}},
+                         {"commission_settling_at": {"$lt": _stale}}]},
+        {"$set": {"commission_settling": claim_id, "commission_settling_at": _now()}})
+    if _claimed.modified_count == 0:
         raise HTTPException(status_code=400, detail="لا عمولات مستحقة للتصفية")
+    orders = await db.ecom_orders.find(
+        {"commission_settling": claim_id}, {"_id": 0, "id": 1, "total": 1}).to_list(length=10000)
     fixed = float(worker.get("commission_fixed") or 0)
     pct = float(worker.get("commission_percent") or 0)
     fixed_total = round(len(orders) * fixed, 2)
@@ -413,13 +440,18 @@ async def settle_worker_commissions(worker_id: str, body: dict, user: dict = Dep
         raise HTTPException(status_code=400, detail="اختر صندوقاً نظامياً (المال الخاص خارج الصناديق)")
     box = await db.cash_boxes.find_one({"id": box_id})
     if not box:
+        # release the claim — nothing was stamped or paid
+        await db.ecom_orders.update_many(
+            {"commission_settling": claim_id},
+            {"$unset": {"commission_settling": "", "commission_settling_at": ""}})
         raise HTTPException(status_code=400, detail="الصندوق المختار غير موجود")
     now = _now()
     sid = str(uuid.uuid4())
     order_ids = [o["id"] for o in orders]
     # 1) ختم الطلبات
     await db.ecom_orders.update_many({"id": {"$in": order_ids}},
-        {"$set": {"commission_settled": sid, "updated_at": now}})
+        {"$set": {"commission_settled": sid, "updated_at": now},
+         "$unset": {"commission_settling": "", "commission_settling_at": ""}})
     # 2) وثيقة التصفية
     settlement = {"id": sid, "worker_id": worker_id, "worker_name": worker.get("name", ""),
                   "order_ids": order_ids, "orders_count": len(orders),

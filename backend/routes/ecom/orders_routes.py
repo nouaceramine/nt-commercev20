@@ -17,6 +17,7 @@ Each ecom_order doc:
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+import math
 import uuid
 import re
 
@@ -97,9 +98,24 @@ def _validate_items(items_raw) -> list:
         name = (it.get("name") or "").strip()
         if not name:
             continue
-        qty = max(1, int(it.get("qty", 1) or 1))
-        price = max(0.0, float(it.get("price", 0) or 0))
+        # p507-001/002: malformed or non-finite qty/price used to crash with a
+        # bare 500 — and an infinite price even persisted an inf-total order
+        # that would poison the store wallet at delivery. Reject cleanly first.
+        try:
+            qty = int(float(it.get("qty", 1) or 1))
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=400, detail="كمية المنتج غير صالحة")
+        try:
+            price = float(it.get("price", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=400, detail="سعر المنتج غير صالح")
+        if not math.isfinite(price) or price < 0:
+            raise HTTPException(status_code=400, detail="سعر المنتج غير صالح")
+        if qty < 1:
+            qty = 1
         total = round(qty * price, 2)
+        if not math.isfinite(total):
+            raise HTTPException(status_code=400, detail="إجمالي سطر المنتج غير صالح")
         item_doc = {
             "name": name,
             "sku": (it.get("sku") or "").strip(),
@@ -292,6 +308,33 @@ async def get_order(order_id: str, user: dict = Depends(require_tenant)):
     return order
 
 
+async def _resync_inventory_on_edit(order: dict, new_items: list, now_iso: str) -> None:
+    """p507: keep the stock reservation coherent when items are edited pre-shipping.
+
+    Restores the old deduction quantities, then deducts the new product-linked
+    quantities, and rewrites inventory_deductions so a later cancel/refund
+    restores exactly the NEW basket (never the stale one)."""
+    old = order.get("inventory_deductions") or []
+    for d in old:
+        pid, qty = d.get("product_id"), int(d.get("qty", 0) or 0)
+        if pid and qty > 0:
+            await db.products.update_one({"id": pid},
+                                         {"$inc": {"quantity": qty}, "$set": {"updated_at": now_iso}})
+    new_deductions = []
+    for it in new_items:
+        pid = it.get("product_id")
+        qty = int(it.get("qty", 0) or 0)
+        if pid and qty > 0:
+            await db.products.update_one({"id": pid},
+                                         {"$inc": {"quantity": -qty}, "$set": {"updated_at": now_iso}})
+            new_deductions.append({"product_id": pid, "qty": qty, "deducted_at": now_iso})
+    await db.ecom_orders.update_one(
+        {"id": order.get("id")},
+        {"$set": {"inventory_deductions": new_deductions,
+                  "inventory_deducted": bool(new_deductions),
+                  "inventory_deducted_at": now_iso}})
+
+
 @router.post("/ecom/orders")
 async def create_order(body: dict, user: dict = Depends(require_tenant)):
     """Create a new order. Supports manual entry AND mock-channel webhook simulation.
@@ -318,7 +361,14 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
         raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
 
     items = _validate_items(body.get("items"))
-    totals = _compute_totals(items, float(body.get("shipping_fee", 0) or 0))
+    # p507-003: inf/NaN shipping fee must never reach the totals (500 + inf doc)
+    try:
+        shipping_fee = float(body.get("shipping_fee", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=400, detail="رسوم الشحن غير صالحة")
+    if not math.isfinite(shipping_fee) or shipping_fee < 0:
+        raise HTTPException(status_code=400, detail="رسوم الشحن غير صالحة")
+    totals = _compute_totals(items, shipping_fee)
 
     now = datetime.now(timezone.utc).isoformat()
     order_id = str(uuid.uuid4())
@@ -608,18 +658,43 @@ async def update_order(order_id: str, body: dict, user: dict = Depends(require_t
     if not order:
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
 
+    # p507-010: items/shipping/packaging edits on a shipped+ order desync the
+    # wallet income booked at delivery, the POS sale mirror and the financials
+    # ledger (proven: delivered order total dropped 1100 -> 5 while 1000 stayed
+    # booked in the ecom wallet). Metadata edits stay open.
+    _locked = order.get("status") in ("shipped", "delivered", "refunded", "cancelled")
+    if _locked and any(k in body for k in ("items", "shipping_fee", "packaging_cost")):
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن تعديل المنتجات أو الرسوم بعد الشحن/التسليم/الإغلاق — أنشئ طلباً جديداً",
+        )
     updates: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if "customer" in body and isinstance(body["customer"], dict):
         merged = {**(order.get("customer") or {}), **{k: (v or "").strip() if isinstance(v, str) else v for k, v in body["customer"].items()}}
         updates["customer"] = merged
     if "items" in body:
         items = _validate_items(body["items"])
+        try:
+            _sf = float(body.get("shipping_fee", order.get("shipping_fee", 0)) or 0)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=400, detail="رسوم الشحن غير صالحة")
+        if not math.isfinite(_sf) or _sf < 0:
+            raise HTTPException(status_code=400, detail="رسوم الشحن غير صالحة")
+        # p507: item edits after a stock reservation must re-sync the reservation
+        if order.get("inventory_deducted"):
+            await _resync_inventory_on_edit(order, items, updates["updated_at"])
         updates["items"] = items
-        totals = _compute_totals(items, float(body.get("shipping_fee", order.get("shipping_fee", 0)) or 0))
+        totals = _compute_totals(items, _sf)
         updates.update(totals)
     elif "shipping_fee" in body:
         items = order.get("items") or []
-        totals = _compute_totals(items, float(body["shipping_fee"] or 0))
+        try:
+            _sf = float(body["shipping_fee"] or 0)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=400, detail="رسوم الشحن غير صالحة")
+        if not math.isfinite(_sf) or _sf < 0:
+            raise HTTPException(status_code=400, detail="رسوم الشحن غير صالحة")
+        totals = _compute_totals(items, _sf)
         updates.update(totals)
     if "notes" in body:
         updates["notes"] = (body.get("notes") or "").strip()

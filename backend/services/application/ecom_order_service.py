@@ -119,13 +119,23 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    await db.ecom_orders.update_one(
-        {"id": order_id},
+    # p507-011: atomic transition claim. The old read-then-update window let
+    # concurrent transitions ALL pass validation and run the money hooks twice
+    # (proven: 6x delivered->refunded double-booked reversal + return fees).
+    from pymongo import ReturnDocument as _RD
+    _claimed = await db.ecom_orders.find_one_and_update(
+        {"id": order_id, "status": current},
         {
             "$set": {"status": new_status, "updated_at": now},
             "$push": {"status_history": {"status": new_status, "at": now, "by": user.get("id"), "note": note or ""}},
         },
+        return_document=_RD.BEFORE,
     )
+    if not _claimed:
+        raise HTTPException(
+            status_code=409,
+            detail="تغيّرت حالة الطلب أثناء المعالجة — أعد المحاولة",
+        )
 
     # p293: سجّل «منفّذ الطلب» — أول من يؤكده (عامل أو مستخدم)؛ للّوحة وعمولات العمال
     if new_status == "confirmed":

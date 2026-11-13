@@ -74,6 +74,14 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
     if not order:
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
 
+    # p507-007/008: labels on terminal orders are pure loss — a real provider
+    # would book (and bill) a parcel for a cancelled/delivered order.
+    if order.get("status") in ("cancelled", "refunded", "delivered"):
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن إنشاء بوليصة لطلب ملغى/مسترد/مسلَّم",
+        )
+
     # ── p109: قاعدة «لا تشحن» — منع آلي قبل إنشاء البوليصة ──────────────
     if not body.get("force"):
         try:
@@ -108,84 +116,108 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
         except Exception as exc:  # noqa: BLE001
             logger.warning("p109 do-not-ship check failed (non-blocking): %s", exc)
 
-    now = datetime.now(timezone.utc).isoformat()
-    label_id = str(uuid.uuid4())
-    mode = "mock"
-    tracking = None
-    label_url = ""
-
-    # ── Real provider path (Yalidine only for P2) ──────────────────────────
-    if provider == "yalidine":
-        # Find the tenant's active Yalidine integration (first match).
-        integration = await db.ecom_integrations.find_one({
-            "channel": "yalidine",
-            "is_active": True,
-        }) or await db.ecom_integrations.find_one({
-            "credentials.api_id": {"$exists": True},
-            "credentials.api_token": {"$exists": True},
-        })
-        if integration:
-            try:
-                result = await yalidine_create_parcel(integration, order)
-                tracking = result["tracking_number"]
-                label_url = result["label_url"]
-                mode = "live"
-                logger.info("Yalidine real parcel created: order=%s tracking=%s", order_id, tracking)
-            except YalidineCredentialsMissing:
-                logger.info("Yalidine creds missing — falling back to mock for order=%s", order_id)
-            except YalidineAPIError as exc:
-                logger.warning("Yalidine real call failed (%s) — falling back to mock", exc)
-
-    # ── Mock fallback (always works) ──────────────────────────────────────
-    if not tracking:
-        tracking = _mock_tracking_number(provider)
-        label_url = f"mock://labels/{label_id}.pdf"
-        mode = "mock" if provider == "mock" else "mock_real_provider_pending"
-
-    label_doc = {
-        "id": label_id,
-        "order_id": order_id,
-        "order_code": order.get("order_code"),
-        "provider": provider,
-        "mode": mode,
-        "tracking_number": tracking,
-        "label_url": label_url,
-        "customer_name": order.get("customer", {}).get("name", ""),
-        "customer_phone": order.get("customer", {}).get("phone", ""),
-        "city": order.get("customer", {}).get("city", ""),
-        "wilaya": order.get("customer", {}).get("wilaya", ""),
-        "total": order.get("total", 0),
-        "status": "created",
-        "created_at": now,
-        "created_by": user.get("id"),
-    }
-    await db.ecom_shipping_labels.insert_one(label_doc)
-
-    # Attach label info to the order + advance status if appropriate.
-    update: dict = {
-        "shipping_label_id": label_id,
-        "tracking_number": tracking,
-        "courier": provider,
-        "updated_at": now,
-    }
-    if order.get("status") in ("confirmed", "packed"):
-        update["status"] = "shipped"
-        await db.ecom_orders.update_one(
-            {"id": order_id},
-            {
-                "$set": update,
-                "$push": {
-                    "status_history": {
-                        "status": "shipped",
-                        "at": now,
-                        "by": user.get("id"),
-                        "note": f"تم إنشاء بطاقة شحن {provider} ({mode})",
-                    }
-                },
-            },
+    # p507-006: atomic claim so concurrent dispatches create ONE label. Without
+    # it, a 6-way race attached 6 labels to the same order (a real provider
+    # would have billed 6 parcels). The claim is transient (label_in_progress);
+    # the durable guard is shipping_label_id. force=True = deliberate re-label.
+    _claimed = False
+    if not body.get("force"):
+        _claimed_doc = await db.ecom_orders.find_one_and_update(
+            {"id": order_id,
+             "label_in_progress": {"$ne": True},
+             "$or": [{"shipping_label_id": None}, {"shipping_label_id": {"$exists": False}}]},
+            {"$set": {"label_in_progress": True}},
         )
-    else:
-        await db.ecom_orders.update_one({"id": order_id}, {"$set": update})
+        if not _claimed_doc:
+            raise HTTPException(
+                status_code=409,
+                detail="بوليصة شحن موجودة أو قيد الإنشاء لهذا الطلب",
+            )
+        _claimed = True
+
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        label_id = str(uuid.uuid4())
+        mode = "mock"
+        tracking = None
+        label_url = ""
+
+        # ── Real provider path (Yalidine only for P2) ──────────────────────────
+        if provider == "yalidine":
+            # Find the tenant's active Yalidine integration (first match).
+            integration = await db.ecom_integrations.find_one({
+                "channel": "yalidine",
+                "is_active": True,
+            }) or await db.ecom_integrations.find_one({
+                "credentials.api_id": {"$exists": True},
+                "credentials.api_token": {"$exists": True},
+            })
+            if integration:
+                try:
+                    result = await yalidine_create_parcel(integration, order)
+                    tracking = result["tracking_number"]
+                    label_url = result["label_url"]
+                    mode = "live"
+                    logger.info("Yalidine real parcel created: order=%s tracking=%s", order_id, tracking)
+                except YalidineCredentialsMissing:
+                    logger.info("Yalidine creds missing — falling back to mock for order=%s", order_id)
+                except YalidineAPIError as exc:
+                    logger.warning("Yalidine real call failed (%s) — falling back to mock", exc)
+
+        # ── Mock fallback (always works) ──────────────────────────────────────
+        if not tracking:
+            tracking = _mock_tracking_number(provider)
+            label_url = f"mock://labels/{label_id}.pdf"
+            mode = "mock" if provider == "mock" else "mock_real_provider_pending"
+
+        label_doc = {
+            "id": label_id,
+            "order_id": order_id,
+            "order_code": order.get("order_code"),
+            "provider": provider,
+            "mode": mode,
+            "tracking_number": tracking,
+            "label_url": label_url,
+            "customer_name": order.get("customer", {}).get("name", ""),
+            "customer_phone": order.get("customer", {}).get("phone", ""),
+            "city": order.get("customer", {}).get("city", ""),
+            "wilaya": order.get("customer", {}).get("wilaya", ""),
+            "total": order.get("total", 0),
+            "status": "created",
+            "created_at": now,
+            "created_by": user.get("id"),
+        }
+        await db.ecom_shipping_labels.insert_one(label_doc)
+
+        # Attach label info to the order + advance status if appropriate.
+        update: dict = {
+            "shipping_label_id": label_id,
+            "tracking_number": tracking,
+            "courier": provider,
+            "updated_at": now,
+        }
+        if order.get("status") in ("confirmed", "packed"):
+            update["status"] = "shipped"
+            await db.ecom_orders.update_one(
+                {"id": order_id},
+                {
+                    "$set": update,
+                    "$push": {
+                        "status_history": {
+                            "status": "shipped",
+                            "at": now,
+                            "by": user.get("id"),
+                            "note": f"تم إنشاء بطاقة شحن {provider} ({mode})",
+                        }
+                    },
+                },
+            )
+        else:
+            await db.ecom_orders.update_one({"id": order_id}, {"$set": update})
+    finally:
+        if _claimed:
+            await db.ecom_orders.update_one({"id": order_id},
+                                            {"$set": {"label_in_progress": False}})
 
     label_doc.pop("_id", None)
     return label_doc
