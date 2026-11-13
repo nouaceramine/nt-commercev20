@@ -7,11 +7,13 @@ class SaleItem(BaseModel):
     product_id: Optional[str] = None
     product_name: str
     barcode: Optional[str] = ""
-    quantity: float
-    unit_price: float
-    discount: float = 0
-    purchase_price: Optional[float] = None
-    total: float
+    # p508: money fields must be finite — NaN/inf sail through comparisons
+    # (nan > x is always False) and were stored, poisoning stats & ledgers
+    quantity: float = Field(allow_inf_nan=False)
+    unit_price: float = Field(allow_inf_nan=False)
+    discount: float = Field(0, allow_inf_nan=False)
+    purchase_price: Optional[float] = Field(None, allow_inf_nan=False)
+    total: float = Field(allow_inf_nan=False)
     note: Optional[str] = ""
     variant: Optional[dict] = None  # p184: {"color": ..., "size": ...} for variant products
     serial_number: Optional[str] = None  # p187: IMEI/serial tracking
@@ -34,7 +36,7 @@ class DeliveryInfo(BaseModel):
     city: Optional[str] = None
     address: Optional[str] = None
     delivery_type: Literal["desk", "home"] = "desk"
-    fee: float = 0
+    fee: float = Field(0, allow_inf_nan=False)  # p508
 
 class InstallmentPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -62,10 +64,10 @@ class SaleCreate(BaseModel):
     customer_id: Optional[str] = None
     warehouse_id: Optional[str] = None
     items: List[SaleItem]
-    subtotal: float = 0
-    discount: float = 0
-    total: float
-    paid_amount: float = 0
+    subtotal: float = Field(0, allow_inf_nan=False)  # p508
+    discount: float = Field(0, allow_inf_nan=False)
+    total: float = Field(allow_inf_nan=False)
+    paid_amount: float = Field(0, allow_inf_nan=False)
     payment_method: Literal["cash", "bank", "wallet", "mixed"] = "cash"
     payment_type: Literal["cash", "credit", "partial", "installment", "mixed"] = "cash"
     notes: Optional[str] = ""

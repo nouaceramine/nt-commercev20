@@ -418,14 +418,13 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
         # State machine path: shipped/delivered → refunded (returned == refunded في هذا النظام)
         await change_order_status(db, order["id"], "refunded",
                                   f"استرجاع عبر مسح QR ({tracking})", user)
-        # Restock
-        restocked = []
-        for it in (order.get("items") or []):
-            pid = it.get("product_id")
-            qty = float(it.get("qty") or it.get("quantity") or 1)
-            if pid:
-                await db.products.update_one({"id": pid}, {"$inc": {"quantity": qty}})
-                restocked.append({"product_id": pid, "qty": qty})
+        # p508: restock is owned EXCLUSIVELY by the ecom state machine
+        # (_sync_inventory_on_status_change restores exactly the recorded
+        # deductions under an atomic flag claim) — the manual loop that used
+        # to live here DOUBLED every restored quantity on each QR scan.
+        restocked = [{"product_id": it.get("product_id"),
+                      "qty": float(it.get("qty") or it.get("quantity") or 1)}
+                     for it in (order.get("items") or []) if it.get("product_id")]
         await db.ecom_returns_log.insert_one({
             "id": str(uuid.uuid4()), "order_id": order["id"], "order_code": order.get("order_code"),
             "tracking": tracking, "restocked": restocked, "by": user.get("id"),

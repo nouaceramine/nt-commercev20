@@ -397,6 +397,35 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         except Exception:
             resolved_cash_box = s.payment_method
 
+    # p508: per-box payment plan. "mixed" sales split paid_amount across the
+    # REAL cash/bank boxes via payment_details — the old code booked the whole
+    # amount against a phantom box literally named "mixed" (the update matched
+    # nothing and the transaction row referenced air, so mixed money vanished
+    # from every ledger). Each plan entry carries the RESOLVED box so returns
+    # and deletes reverse the money from the box that actually received it.
+    _pay_plan = []  # [(box_id, amount, method_label)]
+    if s.paid_amount > 0:
+        if s.payment_method == "mixed":
+            import math as _math
+            _pd = s.payment_details or {}
+            try:
+                _cash_part = float(_pd.get("cash") or 0)
+                _bank_part = float(_pd.get("bank") or 0)
+            except (TypeError, ValueError):
+                _cash_part = _bank_part = float("nan")
+            if (not _math.isfinite(_cash_part) or not _math.isfinite(_bank_part)
+                    or _cash_part < 0 or _bank_part < 0
+                    or abs((_cash_part + _bank_part) - s.paid_amount) > 0.01):
+                raise HTTPException(
+                    status_code=400,
+                    detail="تفاصيل الدفع المختلط يجب أن تطابق المبلغ المدفوع (cash + bank)")
+            if _cash_part > 0:
+                _pay_plan.append(("cash", _cash_part, "cash"))
+            if _bank_part > 0:
+                _pay_plan.append(("bank", _bank_part, "bank"))
+        else:
+            _pay_plan.append((resolved_cash_box, s.paid_amount, s.payment_method))
+
     # p310b: a client-supplied code that already exists (split-bill parts reuse
     # the prefetched code) is replaced by a fresh atomic one before insert
     if s.code:
@@ -422,7 +451,8 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
         # van's sales (the field used to be accepted by the schema then DROPPED)
         **({"warehouse_id": s.warehouse_id, "warehouse_name": _wh_name}
            if getattr(s, "warehouse_id", None) else {}),
-        "payments": ([{"amount": s.paid_amount, "method": s.payment_method, "at": now}] if s.paid_amount > 0 else []),  # p67
+        "payments": [{"amount": _amt, "method": _lbl, "cash_box_id": _bid, "at": now}
+                     for _bid, _amt, _lbl in _pay_plan],  # p67/p508: resolved box per entry
         "installment_plan": installment_info,
         "status": status,
         "notes": s.notes or "", "created_at": now, "created_by": user["name"],
@@ -476,12 +506,11 @@ async def _create_sale_impl(db, s, user: dict, _tx) -> dict:
             session=_tx,
         )
 
-    if s.paid_amount > 0:
-        cash_box_id = resolved_cash_box
-        await db.cash_boxes.update_one({"id": cash_box_id}, {"$inc": {"balance": s.paid_amount}, "$set": {"updated_at": now}}, session=_tx)
+    for _bid, _amt, _lbl in _pay_plan:  # p508: book each box its real share
+        await db.cash_boxes.update_one({"id": _bid}, {"$inc": {"balance": _amt}, "$set": {"updated_at": now}}, session=_tx)
         await db.transactions.insert_one({
-            "id": str(uuid.uuid4()), "cash_box_id": cash_box_id,
-            "type": "income", "amount": s.paid_amount,
+            "id": str(uuid.uuid4()), "cash_box_id": _bid,
+            "type": "income", "amount": _amt,
             "description": f"مبيعات - فاتورة {invoice_number}",
             "reference_type": "sale", "reference_id": sale_id,
             "created_at": now, "created_by": user["name"]
@@ -560,7 +589,13 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
         raise HTTPException(status_code=400, detail="يجب إدخال سبب الحذف")
     now = datetime.now(timezone.utc).isoformat()
     for item in sale.get("items", []):
-        await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
+        # p508: non-stockable lines were never claimed at sale time — the old
+        # unconditional restore INFLATED their stock on every delete
+        if item.get("product_id"):
+            _pd = await db.products.find_one({"id": item["product_id"]},
+                                             {"_id": 0, "id": 1, "is_non_stockable": 1}, session=_tx)
+            if _pd and not _pd.get("is_non_stockable"):
+                await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
         for _cons in (item.get("recipe_consumption") or []):  # p303: restore consumed ingredients
             if _cons.get("product_id") and _cons.get("quantity"):
                 await db.products.update_one({"id": _cons["product_id"]}, {"$inc": {"quantity": _cons["quantity"]}}, session=_tx)
@@ -588,7 +623,7 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
     if payments_log:
         # p67: reverse each payment from the box it actually entered
         for pay in payments_log:
-            m = pay.get("method")
+            m = pay.get("cash_box_id") or pay.get("method")  # p508: the box that actually received the money
             if pay.get("amount", 0) > 0 and m:  # p68
                 await db.cash_boxes.update_one({"id": m}, {"$inc": {"balance": -pay["amount"]}, "$set": {"updated_at": now}}, session=_tx)
                 await db.transactions.insert_one({
@@ -690,7 +725,12 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx, reason: str = "")
     # sales (mirror of the create-side location deduction).
     _ret_wh = sale.get("warehouse_id")
     for item in sale["items"]:
-        await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
+        # p508: skip the quantity restore for non-stockable lines (never claimed)
+        if item.get("product_id"):
+            _pd = await db.products.find_one({"id": item["product_id"]},
+                                             {"_id": 0, "id": 1, "is_non_stockable": 1}, session=_tx)
+            if _pd and not _pd.get("is_non_stockable"):
+                await db.products.update_one({"id": item["product_id"]}, {"$inc": {"quantity": item["quantity"]}}, session=_tx)
         if _ret_wh and item.get("product_id") and item.get("quantity"):
             _p = await db.products.find_one({"id": item["product_id"]},
                                             {"_id": 0, "is_non_stockable": 1}, session=_tx)
@@ -725,15 +765,25 @@ async def _return_sale_impl(db, sale_id: str, user: dict, _tx, reason: str = "")
             session=_tx,
         )
 
-    if sale.get("paid_amount", 0) > 0:
+    # p508: reverse each payment from the box that ACTUALLY received it
+    # (worker-box resolution / mixed split) — the old code drained the box
+    # named by payment_method, which for worker sales was never credited.
+    _ret_payments = [p for p in (sale.get("payments") or []) if p.get("amount", 0) > 0]
+    if not _ret_payments and sale.get("paid_amount", 0) > 0:
+        _ret_payments = [{"amount": sale["paid_amount"],
+                          "cash_box_id": sale.get("cash_box_id") or sale.get("payment_method")}]
+    for _pay in _ret_payments:
+        _box = _pay.get("cash_box_id") or _pay.get("method")
+        if not _box:
+            continue
         await db.cash_boxes.update_one(
-            {"id": sale["payment_method"]},
-            {"$inc": {"balance": -sale["paid_amount"]}, "$set": {"updated_at": now}},
+            {"id": _box},
+            {"$inc": {"balance": -_pay["amount"]}, "$set": {"updated_at": now}},
             session=_tx,
         )
         await db.transactions.insert_one({
-            "id": str(uuid.uuid4()), "cash_box_id": sale["payment_method"],
-            "type": "expense", "amount": sale["paid_amount"],
+            "id": str(uuid.uuid4()), "cash_box_id": _box,
+            "type": "expense", "amount": _pay["amount"],
             "description": f"إرجاع مبيعات - فاتورة {sale['invoice_number']}",
             "reference_type": "return", "reference_id": sale_id,
             "created_at": now, "created_by": user["name"]
