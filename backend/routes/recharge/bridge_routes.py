@@ -106,7 +106,7 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
         if entity_id and main_db is not None:
             tenant_doc = await main_db.saas_tenants.find_one(
                 {"id": entity_id},
-                {"_id": 0, "recharge_mode": 1, "self_bridge_url": 1, "self_bridge_api_key": 1},
+                {"_id": 0, "id": 1, "recharge_mode": 1, "self_bridge_url": 1, "self_bridge_api_key": 1},
             )
         if not tenant_doc:
             return {"recharge_mode": "owner_bridge", "self_bridge_url": "", "self_bridge_api_key": ""}
@@ -127,7 +127,8 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
 
         tenant_doc = await main_db.saas_tenants.find_one(
             {"id": entity_id},
-            {"_id": 0, "recharge_mode": 1},
+            # p510: project "id" so the existence check is reliable ({} is falsy)
+            {"_id": 0, "id": 1, "recharge_mode": 1},
         )
         if not tenant_doc:
             raise HTTPException(status_code=404, detail="بيانات المشترك غير موجودة")
@@ -152,7 +153,7 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
         if entity_id and main_db is not None:
             tenant_doc = await main_db.saas_tenants.find_one(
                 {"id": entity_id},
-                {"_id": 0, "recharge_mode": 1, "self_bridge_url": 1, "self_bridge_api_key": 1},
+                {"_id": 0, "id": 1, "recharge_mode": 1, "self_bridge_url": 1, "self_bridge_api_key": 1},
             )
         if not tenant_doc:
             raise HTTPException(status_code=404, detail="بيانات المشترك غير موجودة")

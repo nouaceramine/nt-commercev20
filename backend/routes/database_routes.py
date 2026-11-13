@@ -195,20 +195,29 @@ async def import_to_tenant(
         if file.filename.endswith(".gz"):
             raw_chunks = []
             raw_size = 0
-            with gzip.GzipFile(fileobj=io.BytesIO(content), mode="rb") as gz:
-                while True:
-                    chunk = gz.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    raw_size += len(chunk)
-                    if raw_size > MAX_IMPORT_JSON_BYTES:
-                        raise HTTPException(status_code=413, detail="Decompressed import exceeds the safety limit")
-                    raw_chunks.append(chunk)
+            try:
+                with gzip.GzipFile(fileobj=io.BytesIO(content), mode="rb") as gz:
+                    while True:
+                        chunk = gz.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        raw_size += len(chunk)
+                        if raw_size > MAX_IMPORT_JSON_BYTES:
+                            raise HTTPException(status_code=413, detail="Decompressed import exceeds the safety limit")
+                        raw_chunks.append(chunk)
+            except HTTPException:
+                raise
+            except (OSError, EOFError) as e:
+                # p510: invalid/corrupt .gz (incl. renamed zip) must be a client error, not a 500
+                raise HTTPException(status_code=400, detail=f"Invalid gzip file: {type(e).__name__}")
             content = b"".join(raw_chunks)
 
         # Parse JSON
         try:
             data = json.loads(content.decode('utf-8'))
+        except UnicodeDecodeError:
+            # p510: binary payloads (zip/xlsx/...) uploaded as .json must be a client error, not a 500
+            raise HTTPException(status_code=400, detail="File is not valid UTF-8 JSON (binary files such as .zip are not supported; upload .json or .json.gz)")
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}")
         

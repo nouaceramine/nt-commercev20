@@ -770,7 +770,7 @@ async def create_sync_config(
         "created_at": now,
         "last_sync": None,
     }
-    await db.sync_configs.insert_one(config)
+    await db.sync_configs.insert_one(dict(config))  # p510: insert a copy so the returned doc stays JSON-serializable (no _id)
     return config
 
 
