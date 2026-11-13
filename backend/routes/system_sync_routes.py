@@ -1028,8 +1028,9 @@ async def get_tenant_database_info(current_user: dict = Depends(require_tenant))
     """Get database info for current tenant"""
     tenant_id = current_user.get("tenant_id") or current_user.get("id")
 
-    # Get tenant info
-    tenant = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
+    # Get tenant info (p512: saas_tenants lives in the MAIN db — querying it via
+    # the tenant proxy always missed, so this endpoint returned fake fallback data)
+    tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
 
     if tenant:
         db_name = resolve_db_name(tenant_id)
@@ -1067,6 +1068,14 @@ async def request_tenant_backup(current_user: dict = Depends(require_tenant)):
     tenant_id = current_user.get("tenant_id") or current_user.get("id")
     now = datetime.now(timezone.utc).isoformat()
 
+    # p512: idempotent — a pending request for this tenant already covers the
+    # ask; double-clicks/retries must not pile up duplicate pending requests.
+    existing = await db.backup_requests.find_one(
+        {"tenant_id": tenant_id, "status": "pending"}, {"_id": 0})
+    if existing:
+        return {"message": "يوجد طلب نسخة احتياطية قيد الانتظار مسبقاً",
+                "request_id": existing["id"], "duplicate": True}
+
     # Create backup request
     request_id = str(uuid.uuid4())
     await db.backup_requests.insert_one(
@@ -1103,8 +1112,9 @@ async def export_tenant_data(current_user: dict = Depends(require_tenant)):
 
     tenant_id = current_user.get("tenant_id") or current_user.get("id")
 
-    # Check if frozen
-    tenant = await db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
+    # Check if frozen (p512: same main_db fix — the frozen guard never fired
+    # because the tenant doc was looked up in the tenant's own DB)
+    tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0})
     if tenant and tenant.get("is_frozen"):
         raise HTTPException(status_code=403, detail="قاعدة البيانات مجمدة")
 

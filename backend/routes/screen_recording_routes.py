@@ -111,6 +111,9 @@ async def update_device(device_id: str, body: DeviceUpdate, user: dict = Depends
             updates[k] = v.strip()
         else:
             updates[k] = v
+    # p512: a whitespace-only device_name was stored as "", hiding the device in the UI
+    if "device_name" in updates and not updates["device_name"]:
+        raise HTTPException(status_code=400, detail="اسم الجهاز لا يمكن أن يكون فارغاً")
     res = await main_db.screen_recording_devices.update_one(
         {"id": device_id, "tenant_id": tenant_id}, {"$set": updates}
     )

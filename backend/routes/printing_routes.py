@@ -3,7 +3,6 @@ Printing & Barcode System Routes
 Collections: print_templates, print_logs, printer_settings, product_barcodes, label_designs
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
-import math
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -102,6 +101,14 @@ def create_printing_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.put("/settings")
     async def update_printer_settings(data: dict, admin: dict = Depends(get_tenant_admin)):
+        # p512: validate print_copies when present (previously any value, e.g. -2 or 999, was stored)
+        if "print_copies" in data:
+            try:
+                data["print_copies"] = int(data["print_copies"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="عدد النسخ غير صالح")
+            if not 1 <= data["print_copies"] <= 20:
+                raise HTTPException(status_code=422, detail="عدد النسخ يجب أن يكون بين 1 و20")
         data["id"] = "default"
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.printer_settings.update_one({"id": "default"}, {"$set": data}, upsert=True)
@@ -130,7 +137,7 @@ def create_printing_routes(db, get_current_user, get_tenant_admin) -> dict:
         return log
 
     @router.get("/logs")
-    async def get_print_logs(limit: int = 50, user: dict = Depends(get_current_user)):
+    async def get_print_logs(limit: int = Query(default=50, ge=1, le=200), user: dict = Depends(get_current_user)):
         return await db.print_logs.find({}, {"_id": 0}).sort("printed_at", -1).limit(limit).to_list(limit)
 
     return router

@@ -89,8 +89,17 @@ async def _ensure_token(tenant_id: str, channel: str) -> dict:
         "created_at": _now(),
         "events_received": 0,
     }
-    await main_db.shipping_webhook_tokens.insert_one(dict(row))
-    row.pop("_id", None)
+    # p512: deterministic _id makes the check-then-insert race safe — the loser
+    # of a concurrent first read hits DuplicateKeyError and re-reads the winner's
+    # row instead of storing a second token for the same (tenant, channel).
+    from pymongo.errors import DuplicateKeyError
+    try:
+        await main_db.shipping_webhook_tokens.insert_one({"_id": f"{tenant_id}:{channel}", **row})
+    except DuplicateKeyError:
+        existing = await main_db.shipping_webhook_tokens.find_one(
+            {"tenant_id": tenant_id, "channel": channel}, {"_id": 0})
+        if existing:
+            return existing
     return row
 
 

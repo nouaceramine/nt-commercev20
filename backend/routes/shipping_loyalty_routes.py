@@ -451,7 +451,14 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
                     "is_default": False
                 }
             ]
-            await db.invoice_templates.insert_many(default_templates)
+            # p512: deterministic _id + unordered bulk insert — concurrent first
+            # reads used to each insert_many the 3 defaults (race -> duplicates).
+            from pymongo.errors import BulkWriteError
+            try:
+                await db.invoice_templates.insert_many(
+                    [{"_id": t["id"], **t} for t in default_templates], ordered=False)
+            except BulkWriteError:
+                pass  # a concurrent seeder won; docs are identical
             templates = await db.invoice_templates.find({}, {"_id": 0}).to_list(20)
 
         return templates

@@ -129,16 +129,32 @@ def create_search_routes(db, get_current_user) -> dict:
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
-        # Update suggestions
-        await db.search_suggestions.update_one(
-            {"query": q.lower().strip()},
-            {
-                "$set": {"suggestion_text": q, "suggestion_type": "popular"},
-                "$inc": {"search_count": 1},
-                "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()},
-            },
-            upsert=True,
+        # Update suggestions (p512: upsert on a non-indexed filter raced into
+        # duplicate docs; update-then-deterministic-id insert is race-safe)
+        from pymongo.errors import DuplicateKeyError
+        _key = q.lower().strip()
+        _res = await db.search_suggestions.update_one(
+            {"query": _key},
+            {"$set": {"suggestion_text": q, "suggestion_type": "popular"},
+             "$inc": {"search_count": 1}},
         )
+        if _res.matched_count == 0:
+            try:
+                await db.search_suggestions.insert_one({
+                    "_id": "q:" + _key,
+                    "id": str(uuid.uuid4()),
+                    "query": _key,
+                    "suggestion_text": q,
+                    "suggestion_type": "popular",
+                    "search_count": 1,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+            except DuplicateKeyError:
+                await db.search_suggestions.update_one(
+                    {"_id": "q:" + _key},
+                    {"$set": {"suggestion_text": q, "suggestion_type": "popular"},
+                     "$inc": {"search_count": 1}},
+                )
 
         return {
             "results": results[:limit],
