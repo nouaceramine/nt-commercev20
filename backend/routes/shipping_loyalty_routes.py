@@ -320,19 +320,23 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     @router.post("/loyalty/earn")
     async def earn_loyalty_points(transaction: LoyaltyTransaction, user: dict = Depends(require_tenant)):
         """Add loyalty points from a sale"""
-        customer = await db.customers.find_one({"id": transaction.customer_id})
-        if not customer:
+        # p515: reject non-positive amounts — previously a negative "earn" silently
+        # subtracted points without any redeem-style guard.
+        if transaction.points <= 0:
+            raise HTTPException(status_code=400, detail="قيمة النقاط يجب أن تكون موجبة")
+
+        # p515: atomic $inc — the old read-modify-write lost concurrent updates
+        # (4 uvicorn workers: N parallel earns could credit fewer points than sold).
+        from pymongo import ReturnDocument
+        updated = await db.customers.find_one_and_update(
+            {"id": transaction.customer_id},
+            {"$inc": {"loyalty_points": transaction.points}},
+            return_document=ReturnDocument.AFTER)
+        if not updated:
             raise HTTPException(status_code=404, detail="العميل غير موجود")
+        new_points = updated.get("loyalty_points", 0)
 
         now = datetime.now(timezone.utc).isoformat()
-        current_points = customer.get("loyalty_points", 0)
-        new_points = current_points + transaction.points
-
-        # Update customer points
-        await db.customers.update_one(
-            {"id": transaction.customer_id},
-            {"$set": {"loyalty_points": new_points}}
-        )
 
         # Log transaction
         await db.loyalty_transactions.insert_one({
@@ -352,30 +356,33 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     @router.post("/loyalty/redeem")
     async def redeem_loyalty_points(transaction: LoyaltyTransaction, user: dict = Depends(require_tenant)):
         """Redeem loyalty points"""
-        customer = await db.customers.find_one({"id": transaction.customer_id})
-        if not customer:
-            raise HTTPException(status_code=404, detail="العميل غير موجود")
-
-        current_points = customer.get("loyalty_points", 0)
+        if transaction.points <= 0:
+            raise HTTPException(status_code=400, detail="قيمة النقاط يجب أن تكون موجبة")
 
         # Check minimum redeem
         settings = await db.loyalty_settings.find_one({"id": "global"}, {"_id": 0})
         min_redeem = settings.get("min_redeem_points", 100) if settings else 100
 
-        if transaction.points > current_points:
-            raise HTTPException(status_code=400, detail="رصيد النقاط غير كافي")
-
         if transaction.points < min_redeem:
             raise HTTPException(status_code=400, detail=f"الحد الأدنى للاسترداد {min_redeem} نقطة")
 
-        now = datetime.now(timezone.utc).isoformat()
-        new_points = current_points - transaction.points
+        # p515: atomic conditional decrement — the old read-check-set allowed
+        # concurrent redeems to overdraw the balance (4 uvicorn workers).
+        from pymongo import ReturnDocument
+        updated = await db.customers.find_one_and_update(
+            {"id": transaction.customer_id,
+             "loyalty_points": {"$gte": transaction.points}},
+            {"$inc": {"loyalty_points": -transaction.points}},
+            return_document=ReturnDocument.AFTER)
+        if not updated:
+            exists = await db.customers.find_one({"id": transaction.customer_id},
+                                                 {"_id": 0, "id": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="العميل غير موجود")
+            raise HTTPException(status_code=400, detail="رصيد النقاط غير كافي")
+        new_points = updated.get("loyalty_points", 0)
 
-        # Update customer points
-        await db.customers.update_one(
-            {"id": transaction.customer_id},
-            {"$set": {"loyalty_points": new_points}}
-        )
+        now = datetime.now(timezone.utc).isoformat()
 
         # Log transaction
         points_value = settings.get("points_value", 0.1) if settings else 0.1
