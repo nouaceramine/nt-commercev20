@@ -6970,3 +6970,13 @@ short_id للمستأجر الناشر). يُسحب مرة واحدة عند أ�
 - النشر: 93e9ab4 مدفوع لـ origin/main؛ restart للإنتاج وstaging؛ health ‏200 محليًا وCloudflare؛ md5 repo≡staging≡إنتاج للملفات الثلاثة؛ حراسات مجهول 401 ×6 على الإنتاج عبر Cloudflare؛ OpenAPI ‏1270 بلا تغيير؛ صفر بقايا TEST-P519 في nt_main؛ فهرسا p519_pairings_ttl/p519_screen_token قائمان في الإنتاج؛ بلا تغيير واجهة (لا بناء).
 - ملاحظة جلسة: عمل D5+ المعلق (webhook body-cache + تقوية الاختبارات + البناء الحي main.4adb8a37.js) رُوجع والتزمت به الجلسة الموازية eb3c0fe قبل هذه الدفعة — تأكدنا من السلامة قبل المتابعة.
 - النسخ الاحتياطية قبل الرقعة: /opt/ntcommerce/backups/p519/.
+
+## 2026-11-15 — P520: «المبيعات والزبائن» — دفعة عزل المستأجرين والصلاحيات
+
+- النطاق: 21 صفًا بخلية «permissions_tenant_isolation» المعلقة (marketplace publish/unpublish/order + order_placed، driver token ×3، platform-cards ×2، digital orders/codes/affiliate ×3، recharge auto + bridge check-balances، shipping calculate-rate، smart call-script/auto-dispatch/competitor-watch، أحداث ecom_order ×3) — 60 فحصًا حيًا داخل حاوية staging.
+- العيب الوحيد: P520-001 (متوسط توفر/عزل) — حل توكن السائق مسح أول 50 مستأجرًا فقط ⇒ روابط سائقي ما بعد القطع تموت 404 صامتًا؛ مُثبت بـ55 حشوًا + مستأجر متأخر. الرقعة: خريطة driver_token_map بفهرس فريد كسول p520_driver_token + مسح احتياطي كامل بلا سقف مع ملء رجعي + دورة حياة (إنشاء/تدوير/تعطيل/حذف) على routes/ecom/driver_routes.py.
+- النتيجة: خط الأساس 52/60 (منها 4 فحوص صيغتها صُححت: 422 التحقق، 9000 رصيد، حقول المراقبة، سجل تدقيق الحدث المنتحل) ⇒ بعد الإصلاح 60/60 × ثلاث جولات متتالية + جولة رابعة على النسخة النهائية؛ residue=0 عبر 13 بُعدًا في كل جولة.
+- تأكيدات: طلب السوق يهبط للمالك فقط مع خصم ذرّي؛ رمز إحالة B على إدراج A ⇒ 400؛ توكن A لا يرى/يمسح/يسجل طلبات B؛ كروت A لا تُباع من B؛ أكواد الرقمية لصاحبها/إداريه فقط؛ سر الجسر مقيّد بالمستأجر؛ recharge/auto فشل مغلق 501؛ حدث منتحل الهوية صفر أثر؛ تسوية 5% لمحفظة A فقط بلا ازدواج؛ الإلغاء قبل التسوية بلا رسوم.
+- الانحدار: نواة 83/83؛ green ‏154/154 staging؛ live ‏243/243 (سقوط عرضي test_ai_categorize_lead بخطأ httpx عابر — 6/6 بإعادة ملفه)؛ Ruff فئات مطابقة لخط الأساس؛ git diff --check نظيف.
+- النشر: b7b4a1c مدفوع لـ origin/main؛ restart للإنتاج وstaging؛ health ‏200 محليًا وCloudflare؛ md5 repo≡staging≡إنتاج؛ حراسات مجهول 401 ×6 + توكن ميت 404 عبر Cloudflare؛ OpenAPI ‏1270 بلا تغيير؛ بلا بناء واجهة.
+- النسخة الاحتياطية قبل الرقعة: /opt/ntcommerce/backups/p520/.
