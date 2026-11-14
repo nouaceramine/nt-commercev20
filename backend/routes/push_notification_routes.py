@@ -2,7 +2,7 @@
 Push Notification Routes
 Web Push notification management - subscribe, unsubscribe, send notifications.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -29,6 +29,10 @@ def create_push_notification_routes(db, get_current_user, get_tenant_admin, requ
 
     @router.post("/subscribe")
     async def subscribe(subscription: PushSubscription, user: dict = Depends(get_current_user)):
+        if not subscription.endpoint.startswith("https://") \
+                or not isinstance(subscription.keys, dict) \
+                or not subscription.keys.get("p256dh") or not subscription.keys.get("auth"):
+            raise HTTPException(status_code=400, detail="اشتراك push غير صالح")
         sub_data = {
             "id": str(uuid.uuid4()),
             "user_id": user.get("id"),
@@ -47,10 +51,12 @@ def create_push_notification_routes(db, get_current_user, get_tenant_admin, requ
 
     @router.post("/unsubscribe")
     async def unsubscribe(subscription: PushSubscription, user: dict = Depends(get_current_user)):
-        await db.push_subscriptions.update_one(
-            {"endpoint": subscription.endpoint},
+        result = await db.push_subscriptions.update_one(
+            {"endpoint": subscription.endpoint, "user_id": user.get("id")},
             {"$set": {"active": False}}
         )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
         return {"success": True, "message": "تم إلغاء الإشعارات"}
 
     @router.get("/status")
@@ -62,6 +68,8 @@ def create_push_notification_routes(db, get_current_user, get_tenant_admin, requ
 
     @router.post("/send")
     async def send_push_notification(request: PushNotificationRequest, admin: dict = Depends(get_tenant_admin)):
+        if not (request.title or "").strip() or not (request.body or "").strip():
+            raise HTTPException(status_code=400, detail="العنوان والمحتوى مطلوبان")
         query = {"tenant_id": admin.get("tenant_id"), "active": True}
         if request.target_users:
             query["user_id"] = {"$in": request.target_users}
@@ -104,9 +112,10 @@ def create_push_notification_routes(db, get_current_user, get_tenant_admin, requ
                         vapid_claims={"sub": f"mailto:{vapid_email}"}
                     )
                     sent += 1
-                except WebPushException:
+                except WebPushException as exc:
                     failed += 1
-                    if "410" in str(WebPushException):
+                    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status_code in (404, 410) or "410" in str(exc):
                         await db.push_subscriptions.update_one({"endpoint": sub["endpoint"]}, {"$set": {"active": False}})
         except ImportError:
             await db.push_notification_logs.insert_one({

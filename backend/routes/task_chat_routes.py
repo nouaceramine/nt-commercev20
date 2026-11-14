@@ -24,10 +24,13 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.post("")
     async def create_task(data: TaskCreate, user: dict = Depends(get_current_user)):
-        count = await db.tasks.count_documents({}) + 1
+        if not (data.title_ar or "").strip():
+            raise HTTPException(status_code=400, detail="عنوان المهمة مطلوب")
+        from services.code_generator import next_code
+        task_number = await next_code(db, "tasks", "TASK-", 4, False, field="task_number")
         task = {
             "id": str(uuid.uuid4()),
-            "task_number": f"TASK-{count:04d}",
+            "task_number": task_number,
             **data.dict(),
             "status": "pending",
             "progress": 0,
@@ -78,12 +81,18 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.post("/{task_id}/comments")
     async def add_comment(task_id: str, data: dict, user: dict = Depends(get_current_user)):
+        task = await db.tasks.find_one({"id": task_id}, {"_id": 0, "id": 1})
+        if not task:
+            raise HTTPException(status_code=404, detail="المهمة غير موجودة")
+        content = (data.get("content") or "").strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="التعليق فارغ")
         comment = {
             "id": str(uuid.uuid4()),
             "task_id": task_id,
             "user_id": user.get("id", ""),
             "user_name": user.get("name", user.get("email", "")),
-            "content": data.get("content", ""),
+            "content": content,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.task_comments.insert_one(comment)
@@ -104,13 +113,22 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
 def create_chat_routes(db, get_current_user) -> dict:
     router = APIRouter(prefix="/chat", tags=["chat"])
 
+    async def _member_room(room_id: str, uid: str) -> dict:
+        """Room must exist and the caller must be a member/creator."""
+        room = await db.chat_rooms.find_one({"id": room_id}, {"_id": 0})
+        members = room.get("members") or [] if room else []
+        if not room or (uid not in members and uid != room.get("created_by")):
+            raise HTTPException(status_code=404, detail="الغرفة غير موجودة")
+        return room
+
     @router.post("/rooms")
     async def create_room(data: dict, user: dict = Depends(get_current_user)):
+        raw_members = data.get("members")
         room = {
             "id": str(uuid.uuid4()),
             "name_ar": data.get("name_ar", "غرفة جديدة"),
             "name_fr": data.get("name_fr", ""),
-            "members": data.get("members", [user.get("id")]),
+            "members": list(dict.fromkeys([user.get("id")] + (raw_members if isinstance(raw_members, list) else []))),
             "created_by": user.get("id", ""),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -135,18 +153,23 @@ def create_chat_routes(db, get_current_user) -> dict:
 
     @router.get("/rooms/{room_id}/messages")
     async def get_messages(room_id: str, limit: int = 50, user: dict = Depends(get_current_user)):
+        await _member_room(room_id, user.get("id", ""))
         return await db.chat_messages.find(
             {"room_id": room_id}, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)
 
     @router.post("/rooms/{room_id}/messages")
     async def send_message(room_id: str, data: dict, user: dict = Depends(get_current_user)):
+        await _member_room(room_id, user.get("id", ""))
+        content = (data.get("content") or "").strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="الرسالة فارغة")
         msg = {
             "id": str(uuid.uuid4()),
             "room_id": room_id,
             "user_id": user.get("id", ""),
             "user_name": user.get("name", user.get("email", "")),
-            "content": data.get("content", ""),
+            "content": content,
             "read_by": [user.get("id", "")],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

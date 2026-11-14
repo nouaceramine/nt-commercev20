@@ -45,6 +45,51 @@ SUBSCRIPTION_PACKAGES = {
     "enterprise_yearly": {"name": "باقة المؤسسات - سنوي", "amount": 100000.0, "duration_days": 365, "currency": "dzd"},
 }
 
+PAYMENT_STATUSES = ("pending", "paid", "failed", "refunded", "cancelled")
+
+
+async def apply_checkout_event(main_db, session: dict, event_type: str, event_id: str) -> str:
+    """Apply a checkout.session.* webhook to payment_transactions.
+
+    Idempotent (event_id recorded once per transaction) and regression-safe:
+    a late failure/expiry event never overwrites an already-paid transaction.
+    Returns: ignored | duplicate | applied | guarded.
+    """
+    session_id = (session or {}).get("id")
+    if not session_id:
+        return "ignored"
+    if event_id:
+        seen = await main_db.payment_transactions.count_documents(
+            {"session_id": session_id, "webhook_event_ids": event_id})
+        if seen:
+            return "duplicate"
+    payment_status = session.get("payment_status") or (
+        "paid" if event_type in ("checkout.session.completed",
+                                 "checkout.session.async_payment_succeeded")
+        else "failed"
+    )
+    filt = {"session_id": session_id}
+    if payment_status != "paid":
+        filt["payment_status"] = {"$ne": "paid"}  # never regress a paid txn
+    set_fields = {
+        "payment_status": payment_status,
+        "status": session.get("status"),
+        "event_type": event_type,
+        "webhook_received_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if event_id:
+        set_fields["event_id"] = event_id
+    update = {"$set": set_fields}
+    if event_id:
+        update["$addToSet"] = {"webhook_event_ids": event_id}
+    result = await main_db.payment_transactions.update_one(filt, update)
+    if result.matched_count == 0 and payment_status != "paid":
+        was_paid = await main_db.payment_transactions.count_documents(
+            {"session_id": session_id, "payment_status": "paid"})
+        if was_paid:
+            return "guarded"
+    return "applied"
+
 
 def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_super_admin) -> dict:
     router = APIRouter(tags=["payments"])
@@ -84,8 +129,8 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
         package = SUBSCRIPTION_PACKAGES.get(request.package_id)
         if not package:
             raise HTTPException(status_code=400, detail="الباقة غير موجودة")
-        client = _stripe_client()
         origin = _safe_origin(request.origin_url)
+        client = _stripe_client()
         transaction_id = str(uuid.uuid4())
         tenant_id = user.get("tenant_id")
         user_id = user.get("id")
@@ -186,24 +231,11 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
             raise HTTPException(status_code=401, detail="توقيع Stripe غير صالح")
         event_type = event.get("type", "")
         session = (event.get("data") or {}).get("object") or {}
-        session_id = session.get("id")
-        if session_id and event_type in {
+        if event_type in {
             "checkout.session.completed", "checkout.session.async_payment_succeeded",
             "checkout.session.async_payment_failed", "checkout.session.expired",
         }:
-            payment_status = session.get("payment_status") or (
-                "paid" if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded")
-                else "failed"
-            )
-            await main_db.payment_transactions.update_one(
-                {"session_id": session_id},
-                {"$set": {
-                    "payment_status": payment_status,
-                    "status": session.get("status"),
-                    "event_type": event_type, "event_id": event.get("id"),
-                    "webhook_received_at": datetime.now(timezone.utc).isoformat(),
-                }},
-            )
+            await apply_checkout_event(main_db, session, event_type, event.get("id"))
         return {"received": True}
 
     # Payment Records Management (manual/offline)
@@ -219,6 +251,10 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
 
     @router.post("/payments/records")
     async def create_payment_record(payment: PaymentRecord, admin: dict = Depends(get_super_admin)):
+        if not payment.amount or payment.amount <= 0:
+            raise HTTPException(status_code=400, detail="مبلغ غير صالح")
+        if payment.status not in PAYMENT_STATUSES:
+            raise HTTPException(status_code=400, detail="حالة دفع غير صالحة")
         record_id = str(uuid.uuid4())
         record = {"id": record_id, "tenant_id": payment.tenant_id, "amount": payment.amount, "currency": payment.currency, "payment_method": payment.payment_method, "description": payment.description, "invoice_number": payment.invoice_number or f"INV-{datetime.now().strftime('%Y%m%d')}-{record_id[:8].upper()}", "payment_status": payment.status, "metadata": payment.metadata, "created_by": admin.get("id"), "created_at": datetime.now(timezone.utc).isoformat()}
         await main_db.payment_transactions.insert_one(record)
