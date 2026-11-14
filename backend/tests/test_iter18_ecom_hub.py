@@ -12,6 +12,7 @@ Validates:
      - Create mock shipping label → order moves to 'shipped'
 """
 import asyncio
+import random
 import pytest
 import httpx
 
@@ -116,7 +117,7 @@ async def test_ecom_hub_full_flow():
                 "channel": "manual",
                 "customer": {
                     "name": "أحمد بن علي",
-                    "phone": "0555-12-34-56",
+                    "phone": f"0555{random.randint(100000, 999999)}",  # random per run: a fixed phone poisons customer_reputation (shipped>refunded counts as returned; rate>=0.4 flips later orders to awaiting_confirmation)
                     "city": "وهران",
                     "wilaya": "Oran",
                 },
@@ -131,7 +132,7 @@ async def test_ecom_hub_full_flow():
         order = r.json()
         order_id = order["id"]
         assert order["total"] == 1500 * 2 + 2500 + 400  # 5900
-        assert order["status"] == "new"
+        assert order["status"] in ("new", "awaiting_confirmation"), order["status"]  # night orders (+15 risk) legitimately start as awaiting_confirmation
         assert order["order_code"].startswith("ECO-")
 
         # ── State machine: new → confirmed → packed ──────────────────────
