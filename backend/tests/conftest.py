@@ -341,3 +341,10 @@ def p486_tenant_factory(p486_base_url, p486_admin_headers):
         main_db.saas_plans.delete_many({"id": {"$in": created_plan_ids}})
     client.close()
     assert not cleanup_errors, "; ".join(cleanup_errors)
+
+# p517-live: live-API legacy tests target the in-container API (both prod and
+# staging containers listen on 8001 internally). The staging image carries a
+# STALE REACT_APP_BACKEND_URL (dead preview host), so setdefault is not enough
+# — force it. Point elsewhere explicitly via LIVE_BASE_URL when needed.
+import os as _os
+_os.environ["REACT_APP_BACKEND_URL"] = _os.environ.get("LIVE_BASE_URL", "http://127.0.0.1:8001")
