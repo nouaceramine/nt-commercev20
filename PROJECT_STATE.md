@@ -308,3 +308,13 @@
 - **النشر:** health ‏200 محليًا وCloudflare؛ md5 repo≡حاوية للملفات الثلاثة؛ حراسات مجهول 401 ×8؛ OpenAPI ‏1270/1566؛ صفر بقايا TEST-P517؛ بلا بناء واجهة.
 - **المصفوفة:** 1888 ← 1896 صفًا (+8 DEFECT مغلقة)؛ خلايا «معلق» في «المبيعات والزبائن»: 745 ← 675.
 - **المتبقي في النطاق:** ~675 خلية (حملات SMS/بريد SendGrid، إشعارات النظام، marketplace، الصفحات العامة الباقية /r//b2b//kiosk//board//tv//neighbors//kitchen//screens، POS shortcuts/scale، مزامنة Woo الفعلية) — دفعات P518+.
+
+## 25) الحالة المعتمدة بعد P518 (2026-11-15، «المبيعات والزبائن»: إشعارات/بريد/SMS/واتساب)
+
+- **الالتزام:** `97f1b15` (9 إصلاحات عبر 7 ملفات: notifications_routes + sendgrid_email_routes + sendgrid_integration_routes + whatsapp_routes + whatsapp_integration_routes + sms_marketing_routes + families_permissions_routes) مدفوع إلى `origin/main`.
+- **النطاق:** 20 صف API (100 خلية مُعبأة) — 78 فحص تدقيق ×3 على staging؛ بلا متصفح (تحصين API خالص بلا تغيير واجهة).
+- **العيوب:** 9 مغلقة (مسار إشعارات مكسور 500 + بث عابر للأدوار؛ سباق generate؛ بريد اعتباطي بأي دور؛ تقارير مالية بأي دور؛ رسائل واتساب الواردة يتيمة؛ قوالب واتساب بأي دور؛ KeyError في قوالب SMS؛ تجاوز تعطيل التكاملات + سر واتساب صريح + تسريب أخطاء المزودين).
+- **النشر:** health ‏200 محليًا وCloudflare؛ md5 repo≡staging≡إنتاج للملفات السبعة؛ حراسات مجهول 401 ×17 + webhookَين 503؛ OpenAPI ‏1270/1566؛ صفر بقايا TEST-P518؛ بلا بناء واجهة.
+- **المصفوفة:** 1896 ← 1905 صفًا (+9 DEFECT مغلقة)؛ خلايا «معلق» في «المبيعات والزبائن»: 676 ← 576.
+- **المتبقي في النطاق:** 576 خلية (marketplace، الإشعارات الذكية/القنوات، الصفحات العامة /r//b2b//kiosk//board//tv//neighbors//kitchen//screens، POS shortcuts/scale، driver routes، platform-cards، smart dispatch، مزامنة Woo الفعلية) — دفعات P519+.
+- **ملاحظة:** GET /api/whatsapp/webhook (تحقق Meta بـverify_token) يبحث في main_db — خارج نطاق الدفعة، مرشح للمراجعة لاحقًا.
