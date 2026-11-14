@@ -954,7 +954,9 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
                     status_code=400,
                     detail=f"المنتج '{_p.get('name_ar') or _p.get('name_en') or pid}' غير متاح في هذا المتجر")
             try:
-                _qty = int(item.get("quantity", 1) or 1)
+                # p516: no silent coercion — quantity 0/None/"" must 400,
+                # not mutate into a 1-item order with a real stock deduction
+                _qty = int(item.get("quantity", 1))
             except (TypeError, ValueError):
                 raise HTTPException(status_code=400, detail="كمية غير صالحة")
             if _qty < 1 or _qty > 999:
@@ -1618,8 +1620,14 @@ def create_online_store_routes(db, main_db, get_current_user, get_tenant_admin, 
         tenant_id = slug_mapping.get("tenant_id")
         tenant_db_inst = main_db if tenant_id == "platform" else get_tenant_db(tenant_id)
 
-        tracking = await shipping_tracker.get_tracking(tenant_db_inst, order_id)
         order = await tenant_db_inst.store_orders.find_one({"id": order_id}, {"_id": 0})
+        if not order:
+            # p516: الزبون يعرف رقم الطلب المطبوع WEB-* لا المعرّف الداخلي —
+            # البحث به كان يعيد 404 فتبدو صفحة التتبع معطلة لكل زبون حقيقي
+            order = await tenant_db_inst.store_orders.find_one(
+                {"order_number": (order_id or "").strip()}, {"_id": 0})
+        tracking = await shipping_tracker.get_tracking(
+            tenant_db_inst, order["id"] if order else order_id)
 
         if not tracking and not order:
             raise HTTPException(status_code=404, detail="Order not found")

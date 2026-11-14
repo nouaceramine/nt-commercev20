@@ -64,7 +64,7 @@ export default function OrderTrackingPage() {
               type="text"
               value={orderId}
               onChange={e => setOrderId(e.target.value)}
-              placeholder="أدخل رقم الطلب (مثال: ORD-12345)"
+              placeholder="أدخل رقم الطلب (مثال: WEB-000123)"
               style={{ flex: 1, padding: '14px', borderRadius: '12px', border: '1px solid #ddd', fontSize: '16px' }}
               onKeyPress={e => e.key === 'Enter' && trackOrder()}
             />
@@ -83,7 +83,7 @@ export default function OrderTrackingPage() {
               <div style={{ borderBottom: '1px solid #eee', paddingBottom: '16px', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ color: '#636e72' }}>رقم الطلب</span>
-                  <span style={{ fontWeight: 700 }}>#{tracking.order.id}</span>
+                  <span style={{ fontWeight: 700 }}>#{tracking.order.order_number || tracking.order.id}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ color: '#636e72' }}>التاريخ</span>

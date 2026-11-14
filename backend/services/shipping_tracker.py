@@ -14,6 +14,34 @@ logger = logging.getLogger(__name__)
 class ShippingTracker:
     """تتبع الشحن عبر شركات التوصيل"""
 
+    _IDX_OK = set()  # p516: DBs whose shipping_tracking unique index was ensured
+
+    @staticmethod
+    async def _ensure_unique_order_index(db):
+        """p516: one tracking doc per order — dedupe legacy rows, then build a
+        unique index so concurrent creates converge instead of duplicating."""
+        name = getattr(db, "name", str(db))
+        if name in ShippingTracker._IDX_OK:
+            return
+        ShippingTracker._IDX_OK.add(name)
+        try:
+            await db.shipping_tracking.create_index("order_id", unique=True)
+        except Exception as e:  # noqa: BLE001 — legacy duplicates block the build
+            logger.warning(f"shipping_tracking index first attempt: {e}")
+            try:
+                dupes = await db.shipping_tracking.aggregate([
+                    {"$group": {"_id": "$order_id", "ids": {"$push": "$_id"},
+                                "n": {"$sum": 1}}},
+                    {"$match": {"n": {"$gt": 1}}},
+                ]).to_list(1000)
+                for d in dupes:
+                    ids = d.get("ids") or []
+                    if len(ids) > 1:  # keep the first, drop the rest
+                        await db.shipping_tracking.delete_many({"_id": {"$in": ids[1:]}})
+                await db.shipping_tracking.create_index("order_id", unique=True)
+            except Exception as e2:  # noqa: BLE001
+                logger.warning(f"shipping_tracking unique index unavailable: {e2}")
+
     CARRIERS = {
         "yalidine": {
             "name": "Yalidine",
@@ -54,10 +82,11 @@ class ShippingTracker:
         order = await db.store_orders.find_one({"id": order_id}, {"_id": 0, "id": 1})
         if not order:
             raise LookupError("الطلب غير موجود")
-        # سجل تتبع واحد لكل طلب
-        await db.shipping_tracking.delete_many({"order_id": order_id})
-        tracking = {
-            "id": str(__import__('uuid').uuid4()),
+        # سجل تتبع واحد لكل طلب — p516: upsert ذرّي على فهرس فريد بدل
+        # حذف-ثم-إدراج (كان يخلق مستندات مكررة للطلب نفسه تحت التزامن)
+        await ShippingTracker._ensure_unique_order_index(db)
+        now = datetime.now(timezone.utc).isoformat()
+        fields = {
             "order_id": order_id,
             "carrier": carrier,
             "tracking_number": tracking_number,
@@ -65,15 +94,24 @@ class ShippingTracker:
             "history": [{
                 "status": status,
                 "location": "",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": now,
                 "note": "تم إنشاء طلب التتبع"
             }],
             "estimated_delivery": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
+            "updated_at": now,
         }
-
-        await db.shipping_tracking.insert_one(tracking)
+        from pymongo.errors import DuplicateKeyError
+        try:
+            await db.shipping_tracking.update_one(
+                {"order_id": order_id},
+                {"$set": fields,
+                 "$setOnInsert": {"id": str(__import__('uuid').uuid4()),
+                                  "created_at": now}},
+                upsert=True)
+        except DuplicateKeyError:
+            # خسرنا سباق الإدراج — تحديث عادي يتقارب على مستند الفائز
+            await db.shipping_tracking.update_one({"order_id": order_id}, {"$set": fields})
+        tracking = await db.shipping_tracking.find_one({"order_id": order_id}, {"_id": 0})
 
         # Update order
         await db.store_orders.update_one(
