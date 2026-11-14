@@ -96,7 +96,24 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         if remaining:
             raise HTTPException(status_code=429, detail=f"الحساب مقفل. حاول بعد {remaining} دقيقة")
 
-    def _record_failed_login(email: str) -> None:
+    async def _persist_login_attempt(email: str, success: bool, request=None) -> None:
+        """p514-003: persist every login attempt — GET /api/security/login-attempts
+        (and the security stats counters) read main_db.login_attempts, but no
+        writer existed, so the dashboard was permanently empty."""
+        try:
+            await main_db.login_attempts.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": (email or "").strip().lower(),
+                "success": bool(success),
+                "ip": (request.client.host if request and request.client else ""),
+                "user_agent": (request.headers.get("user-agent", "")[:200] if request else ""),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:  # noqa: BLE001 — telemetry must never break login
+            pass
+
+    async def _record_failed_login(email: str, request=None) -> None:
+        await _persist_login_attempt(email, False, request)
         if _bf_redis:
             try:
                 cnt_key, lock_key = _bf_keys(email)
@@ -115,7 +132,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             info["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
         _login_attempts[e] = info
 
-    def _clear_failed_login(email: str) -> None:
+    async def _clear_failed_login(email: str, request=None, persist: bool = True) -> None:
+        if persist:
+            await _persist_login_attempt(email, True, request)
         if _bf_redis:
             try:
                 _bf_redis.delete(*_bf_keys(email))
@@ -220,7 +239,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         if user:
             stored_password = user.get("hashed_password") or user.get("password")
             if stored_password and verify_password(password, stored_password):
-                _clear_failed_login(email)
+                await _clear_failed_login(email, locals().get("request"))
                 access_token = create_access_token({"sub": user["id"], "role": user["role"]})
                 return await _2fa_gate(user, {
                     "access_token": access_token,
@@ -244,7 +263,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                 if bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8')):
                     if not agent.get("is_active", True):
                         raise HTTPException(status_code=403, detail="الحساب معطل")
-                    _clear_failed_login(email)
+                    await _clear_failed_login(email, locals().get("request"))
 
                     token_data = {
                         "sub": agent["id"],
@@ -290,7 +309,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     if stored and verify_password(password, stored):
                         if emp_user.get("is_active", True) is False:
                             raise HTTPException(status_code=403, detail="الحساب معطل")
-                        _clear_failed_login(email)
+                        await _clear_failed_login(email, locals().get("request"))
                         token_data = {
                             "sub": emp_user["id"],
                             "email": emp_user["email"],
@@ -339,7 +358,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                                 if _sent else
                                 "بريدك غير مؤكد — أدخل الرمز المرسل إلى بريدك في صفحة /verify-email")
                         raise HTTPException(status_code=403, detail=_msg)
-                    _clear_failed_login(email)
+                    await _clear_failed_login(email, locals().get("request"))
 
                     # Check subscription
                     if tenant.get("subscription_ends_at"):
@@ -464,7 +483,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                 pass
 
         # No user found
-        _record_failed_login(email)
+        await _record_failed_login(email, locals().get("request"))
         if _bf_locked_minutes(email):
             raise HTTPException(status_code=429, detail=f"تم قفل الحساب مؤقتاً لمدة {LOCKOUT_MINUTES} دقيقة بسبب تكرار محاولات الدخول الخاطئة")
         _remaining = MAX_LOGIN_ATTEMPTS - _bf_attempts_used(email)
@@ -609,13 +628,18 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         await main_db.password_reset_requests.update_one(
             {"email": email}, {"$set": {"used": True, "used_at": now.isoformat()}, "$unset": {"code": ""}}
         )
-        _clear_failed_login(email)
+        await _clear_failed_login(email, persist=False)
         return {"message": "تم تغيير كلمة المرور بنجاح — يمكنك تسجيل الدخول الآن"}
 
     @router.get("/auth/password-reset-requests")
     async def list_password_reset_requests(admin: dict = Depends(get_admin_user)):
         """p53: super-admin visibility into pending reset requests (needed while
         the email provider is in mock mode and codes are relayed manually)."""
+        # p514-001: get_admin_user also passes TENANT admins (role=admin inside
+        # their own tenant DB) — they could read live reset codes for every
+        # account platform-wide. Restrict to the super admin, as p53 intended.
+        if admin.get("user_type") != "super_admin" and admin.get("role") != "super_admin":
+            raise HTTPException(status_code=403, detail="Super admin access required")
         now_iso = datetime.now(timezone.utc).isoformat()
         items = []
         async for r in main_db.password_reset_requests.find({}, {"_id": 0}).sort("created_at", -1).limit(50):

@@ -72,7 +72,13 @@ async def get_databases_logs(admin: dict = Depends(get_super_admin)):
 
 @router.get("/saas/databases/backups")
 async def get_databases_backups(admin: dict = Depends(get_super_admin)):
-    return []
+    # p514-002: was a hardcoded [] stub — backups created via
+    # POST /saas/databases/{id}/backup live in main_db.database_backups, so the
+    # Databases > Backups tab could never list them. Return metadata only
+    # (the "data" payload is excluded; it is served by the restore flow).
+    return await db.database_backups.find(
+        {}, {"_id": 0, "data": 0}
+    ).sort("created_at", -1).limit(100).to_list(100)
 
 
 @router.post("/saas/databases/{db_id}/backup")

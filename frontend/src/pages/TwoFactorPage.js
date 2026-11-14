@@ -26,8 +26,11 @@ export default function TwoFactorPage() {
   const checkStatus = async () => {
     try {
       const res = await apiClient.get(`/2fa/status`, { headers });
-      setStatus(res.data);
-      setStep(res.data.is_enabled ? 'enabled' : 'check');
+      // p514-004: API returns {enabled} — the page read .is_enabled, so it
+      // always showed «معطل» and the disable form never rendered.
+      const enabled = !!(res.data?.is_enabled ?? res.data?.enabled);
+      setStatus({ ...(res.data || {}), is_enabled: enabled });
+      setStep(enabled ? 'enabled' : 'check');
     } catch (_e) {
       setStatus({ is_enabled: false });
       setStep('check');
