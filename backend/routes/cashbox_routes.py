@@ -189,13 +189,36 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         return {"message": "تم تعديل الرصيد بنجاح", "old_balance": old_balance, "new_balance": new_balance, "difference": new_balance - old_balance}
 
     @router.post("/cash-boxes/reset-all")
-    async def reset_all(admin: dict = Depends(require_permission("pos"))):
+    async def reset_all(admin: dict = Depends(get_tenant_admin)):
+        # p521-001: admin-only — the UI hides this destructive reset behind
+        # isAdmin, but the API guard was require_permission("pos"), so any
+        # seller/cashier token could zero EVERY cash box. Balances and their
+        # audit rows now commit/abort in one transaction (p521): a crash or a
+        # concurrent transfer mid-reset can no longer leave zeroed boxes
+        # without their adjustment log.
         now = datetime.now(timezone.utc).isoformat()
-        boxes = await db.cash_boxes.find({}, {"_id": 0}).to_list(100)
-        await db.cash_boxes.update_many({}, {"$set": {"balance": 0, "updated_at": now}})
-        for box in boxes:
-            if box.get("balance", 0) != 0:
-                await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": box["id"], "type": "adjustment", "amount": abs(box.get("balance", 0)), "description": f"إعادة تعيين الرصيد (كان {box.get('balance', 0)})", "reference_type": "reset", "created_at": now, "created_by": admin["name"]})
+        from config.database import client as _client
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        boxes = await db.cash_boxes.find({}, {"_id": 0}, session=_tx).to_list(100)
+                        await db.cash_boxes.update_many(
+                            {}, {"$set": {"balance": 0, "updated_at": now}}, session=_tx)
+                        for box in boxes:
+                            if box.get("balance", 0) != 0:
+                                await db.transactions.insert_one(
+                                    {"id": str(uuid.uuid4()), "cash_box_id": box["id"],
+                                     "type": "adjustment", "amount": abs(box.get("balance", 0)),
+                                     "description": f"إعادة تعيين الرصيد (كان {box.get('balance', 0)})",
+                                     "reference_type": "reset", "created_at": now,
+                                     "created_by": admin["name"]},
+                                    session=_tx)
+                break
+            except PyMongoError as exc:
+                if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
+                    raise
+                await asyncio.sleep(0.15 * (_attempt + 1))
         return {"message": "تم إعادة تعيين جميع الصناديق إلى صفر"}
 
     @router.get("/transactions")

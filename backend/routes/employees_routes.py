@@ -6,8 +6,13 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import math
+import re
 import uuid
 import bcrypt
+
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 
 def create_employees_routes(db, get_current_user, get_tenant_admin, require_tenant, DEFAULT_PERMISSIONS) -> dict:
@@ -25,12 +30,24 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
     async def create_employee(employee: dict, admin: dict = Depends(require_permission("employees.edit"))):
         from models.schemas import EmployeeCreate
         e = EmployeeCreate(**employee)
+        # p521-002: reject blank names and non-finite/negative money fields —
+        # they used to be stored verbatim.
+        name = (e.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="اسم الموظف مطلوب")
+        if len(name) > 200:
+            raise HTTPException(status_code=400, detail="اسم الموظف طويل جداً")
+        for value, label in ((e.salary, "الراتب"), (e.commission_rate, "نسبة العمولة"),
+                             (e.max_discount_percent, "حد الخصم"),
+                             (e.max_debt_amount, "حد الدين")):
+            if not math.isfinite(float(value or 0)) or float(value or 0) < 0:
+                raise HTTPException(status_code=400, detail=f"{label} غير صالح")
         eid = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         from services.code_generator import generate_code
         code = await generate_code(db, "employees", "EM", 5, with_year=False)
         doc = {
-            "id": eid, "code": code, "name": e.name, "phone": e.phone or "", "email": e.email or "",
+            "id": eid, "code": code, "name": name, "phone": e.phone or "", "email": e.email or "",
             "position": e.position or "", "salary": e.salary,
             "hire_date": e.hire_date or now[:10], "commission_rate": e.commission_rate,
             "total_advances": 0, "total_commission": 0, "created_at": now
@@ -61,9 +78,13 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         employees = await db.employees.find({}, {"_id": 0}).to_list(100)
         report = []
         for emp in employees:
-            advances = await db.employee_advances.find({"employee_id": emp["id"], "created_at": {"$gte": start_date.isoformat(), "$lt": end_date.isoformat()}}, {"_id": 0}).to_list(100)
+            # p521-007: read the WRITE-side collections that record_attendance /
+            # create_advance actually populate — the legacy employee_attendance /
+            # employee_advances collections stay empty, so the report used to
+            # show 0 days / 0 advances and an overstated net salary.
+            advances = await db.advances.find({"employee_id": emp["id"], "created_at": {"$gte": start_date.isoformat(), "$lt": end_date.isoformat()}}, {"_id": 0}).to_list(100)
             total_advances = sum(a.get("amount", 0) for a in advances)
-            attendance = await db.employee_attendance.find({"employee_id": emp["id"], "date": {"$gte": start_date.isoformat()[:10], "$lt": end_date.isoformat()[:10]}}, {"_id": 0}).to_list(31)
+            attendance = await db.attendance.find({"employee_id": emp["id"], "date": {"$gte": start_date.isoformat()[:10], "$lt": end_date.isoformat()[:10]}}, {"_id": 0}).to_list(31)
             present_days = len([a for a in attendance if a.get("status") == "present"])
             absent_days = len([a for a in attendance if a.get("status") == "absent"])
             sales = await db.sales.find({"created_by": emp.get("user_email") or emp.get("name"), "created_at": {"$gte": start_date.isoformat(), "$lt": end_date.isoformat()}}, {"_id": 0}).to_list(1000)
@@ -137,13 +158,23 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         from config.database import main_db
         from utils.auth import email_ci
         email_lower = account.email.strip().lower()
+        # p521-003: platform roles must never be handed to a tenant employee
+        # account (same forbidden list as auth_users_routes user creation);
+        # unknown roles get zero permissions, so reject anything outside the
+        # known tenant role catalogue. Passwords follow the platform minimum.
+        _forbidden = {"super_admin", "saas_admin", "superadmin", "tenant_admin", "owner"}
+        role = (account.role or "seller").strip().lower()
+        if role in _forbidden or role not in DEFAULT_PERMISSIONS:
+            raise HTTPException(status_code=400, detail="الدور غير مسموح لحسابات الموظفين")
+        if len(account.password or "") < 4:
+            raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 4 أحرف على الأقل")
         emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
         if await db.users.find_one({"email": email_ci(account.email)}):
             raise HTTPException(status_code=400, detail="Email already registered")
         # Email must also be globally unique across the platform (owners, agents, other tenants' staff)
-        from utils.identity import assert_email_globally_free, register_identity
+        from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
         await assert_email_globally_free(email_lower)
         if (await main_db.tenant_user_directory.find_one({"email": email_lower})
                 or await main_db.saas_tenants.find_one({"email": email_ci(account.email)})
@@ -155,13 +186,31 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         hashed = bcrypt.hashpw(account.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        user_doc = {"id": user_id, "email": email_lower, "password": hashed, "name": emp["name"], "role": account.role, "employee_id": employee_id, "permissions": DEFAULT_PERMISSIONS.get(account.role, {}), "created_at": now}
-        await db.users.insert_one(user_doc)
-        await db.employees.update_one({"id": employee_id}, {"$set": {"user_id": user_id, "user_email": email_lower}})
-        # p120: global registry entry so unified-login routes this email to the right tenant DB
-        if admin.get("tenant_id"):
-            await register_identity(email_lower, "employee", user_id, tenant_id=admin["tenant_id"], name=emp["name"])
-        return {"success": True, "user_id": user_id, "email": email_lower, "role": account.role}
+        user_doc = {"id": user_id, "email": email_lower, "password": hashed, "name": emp["name"], "role": role, "employee_id": employee_id, "permissions": DEFAULT_PERMISSIONS.get(role, {}), "created_at": now}
+        # p521-004: the registry entry is the global login route for this email —
+        # claim it ATOMICALLY before inserting so a concurrent create with the
+        # same email loses with 400 instead of leaving duplicate orphan users.
+        tenant_id = admin.get("tenant_id")
+        if tenant_id:
+            await reserve_identity(email_lower, "employee", user_id,
+                                   tenant_id=tenant_id, name=emp["name"])
+        try:
+            await db.users.insert_one(user_doc)
+            # Atomic employee claim: a second concurrent request for the SAME
+            # employee loses here and its user/identity are rolled back.
+            claimed = await db.employees.find_one_and_update(
+                {"id": employee_id,
+                 "$or": [{"user_id": {"$exists": False}}, {"user_id": None}, {"user_id": ""}]},
+                {"$set": {"user_id": user_id, "user_email": email_lower}})
+        except Exception:
+            await db.users.delete_one({"id": user_id})
+            await remove_identity(user_id=user_id)
+            raise
+        if not claimed:
+            await db.users.delete_one({"id": user_id})
+            await remove_identity(user_id=user_id)
+            raise HTTPException(status_code=400, detail="Employee already has an account")
+        return {"success": True, "user_id": user_id, "email": email_lower, "role": role}
 
     @router.delete("/{employee_id}/delete-account")
     async def delete_employee_account(employee_id: str, admin: dict = Depends(require_permission("employees.edit"))):
@@ -179,15 +228,46 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         return {"success": True}
 
     # ── Attendance ──
+    _attendance_idx = set()
+
+    async def _ensure_attendance_index():
+        """p521: one attendance row per employee+day. Lazy per-tenant unique
+        index; on DBs whose legacy duplicates block it, the upsert path still
+        prevents new duplicates for sequential writes."""
+        name = getattr(db, "name", None)
+        if not name or name in _attendance_idx:
+            return
+        _attendance_idx.add(name)
+        try:
+            await db.attendance.create_index(
+                [("employee_id", 1), ("date", 1)],
+                unique=True, name="p521_attendance_day")
+        except Exception:
+            pass
+
     @router.post("/attendance")
     async def record_attendance(attendance: dict, admin: dict = Depends(require_permission("employees.edit"))):
         from models.schemas import AttendanceCreate
         a = AttendanceCreate(**attendance)
+        # p521-005: strict day format + one row per employee+day. Re-recording
+        # the same day updates the existing row (idempotent), so double-clicks
+        # and concurrent posts can no longer inflate attendance counts.
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", a.date or ""):
+            raise HTTPException(status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)")
         emp = await db.employees.find_one({"id": a.employee_id}, {"_id": 0, "name": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
-        doc = {"id": str(uuid.uuid4()), "employee_id": a.employee_id, "employee_name": emp["name"], "date": a.date, "status": a.status, "notes": a.notes or ""}
-        await db.attendance.insert_one(doc)
+        await _ensure_attendance_index()
+        filt = {"employee_id": a.employee_id, "date": a.date}
+        update = {"$set": {"employee_name": emp["name"], "status": a.status,
+                           "notes": a.notes or ""},
+                  "$setOnInsert": {"id": str(uuid.uuid4())}}
+        try:
+            doc = await db.attendance.find_one_and_update(
+                filt, update, upsert=True, return_document=ReturnDocument.AFTER)
+        except DuplicateKeyError:
+            doc = await db.attendance.find_one_and_update(
+                filt, update, upsert=True, return_document=ReturnDocument.AFTER)
         doc.pop("_id", None)
         return doc
 
@@ -206,10 +286,16 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         emp = await db.employees.find_one({"id": a.employee_id}, {"_id": 0, "name": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
+        # p521-006: zero/negative/non-finite advances used to be stored and to
+        # shrink employee.total_advances — money fields must be positive.
+        amount = float(a.amount or 0)
+        if not math.isfinite(amount) or amount <= 0:
+            raise HTTPException(status_code=400, detail="مبلغ السلفة يجب أن يكون أكبر من صفر")
+        amount = round(amount, 2)
         now = datetime.now(timezone.utc).isoformat()
-        doc = {"id": str(uuid.uuid4()), "employee_id": a.employee_id, "employee_name": emp["name"], "amount": a.amount, "notes": a.notes or "", "created_at": now}
+        doc = {"id": str(uuid.uuid4()), "employee_id": a.employee_id, "employee_name": emp["name"], "amount": amount, "notes": a.notes or "", "created_at": now}
         await db.advances.insert_one(doc)
-        await db.employees.update_one({"id": a.employee_id}, {"$inc": {"total_advances": a.amount}})
+        await db.employees.update_one({"id": a.employee_id}, {"$inc": {"total_advances": amount}})
         doc.pop("_id", None)
         return doc
 
