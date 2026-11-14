@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ShortcutItem(BaseModel):
@@ -24,6 +24,29 @@ class ShortcutItem(BaseModel):
 
 class ShortcutsPayload(BaseModel):
     shortcuts: List[ShortcutItem]
+
+
+class ScaleConfigPayload(BaseModel):
+    """p519: EAN-13 = prefix(2) + PLU + weight + check(1) ⇒ plu+weight == 10."""
+    enabled: bool = False
+    prefix: str = "21"
+    plu_digits: int = Field(default=5, ge=3, le=6)
+    weight_digits: int = Field(default=5, ge=3, le=6)
+    weight_decimals: int = Field(default=3, ge=0, le=4)
+
+    @field_validator("prefix")
+    @classmethod
+    def _prefix_digits(cls, v):
+        v = (v or "").strip()
+        if not (len(v) == 2 and v.isdigit()):
+            raise ValueError("بادئة الميزان يجب أن تكون رقمين")
+        return v
+
+    @model_validator(mode="after")
+    def _ean13_length(self):
+        if self.plu_digits + self.weight_digits != 10:
+            raise ValueError("مجموع خانات PLU والوزن يجب أن يساوي 10 (EAN-13)")
+        return self
 
 
 def _now() -> str:
@@ -99,14 +122,18 @@ def create_pos_settings_routes(db, main_db, get_current_user, get_super_admin, g
         return doc
 
     @router.put("/pos/scale-config")
-    async def save_scale_config(payload: dict, user: dict = Depends(get_current_user)) -> dict:
+    async def save_scale_config(payload: ScaleConfigPayload,
+                                user: dict = Depends(get_tenant_admin or get_current_user)) -> dict:
+        # p519: إعداد الميزان عام على مستوى المستأجر وتبويبه adminOnly في الواجهة —
+        # كان get_current_user يسمح لأي كاشير بتغييره (P519-001)، وdict الخام كان
+        # يقبل قيمًا رديئة ترفع 500 (P519-002)
         doc = {
             "id": "default",
-            "enabled": bool(payload.get("enabled", False)),
-            "prefix": str(payload.get("prefix", "21"))[:2],
-            "plu_digits": int(payload.get("plu_digits", 5)),
-            "weight_digits": int(payload.get("weight_digits", 5)),
-            "weight_decimals": int(payload.get("weight_decimals", 3)),
+            "enabled": payload.enabled,
+            "prefix": payload.prefix,
+            "plu_digits": payload.plu_digits,
+            "weight_digits": payload.weight_digits,
+            "weight_decimals": payload.weight_decimals,
             "updated_at": _now(),
         }
         await db.pos_scale_config.update_one({"id": "default"}, {"$set": doc}, upsert=True)

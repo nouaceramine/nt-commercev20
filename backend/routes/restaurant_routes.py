@@ -8696,13 +8696,6 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=400, detail="طلب غير صالح")
         now_ts = _time.time()
         tdb = get_tenant_db(tenant_id)
-        # DB-backed throttle (works across the 4 uvicorn workers, unlike RAM)
-        _last = await tdb["_qr_throttle"].find_one({"_id": table_id})
-        if _last and now_ts - float(_last.get("last") or 0) < 10:
-            raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
-        await tdb["_qr_throttle"].update_one(
-            {"_id": table_id}, {"$set": {"last": now_ts}}, upsert=True
-        )
         table = await tdb.restaurant_tables.find_one({"id": table_id})
         if not table:
             raise HTTPException(status_code=404, detail="الطاولة غير موجودة")
@@ -8712,6 +8705,17 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 status_code=410,
                 detail="انتهت صلاحية رابط هذه الطاولة — اطلب من النادل الرمز الحالي",
             )
+        # p519: الخانق بعد التحقق من الرمز (رمز خاطئ كان يحجب الطاولة عن زبائنها)
+        # وذرّي عبر upsert مشروط — فحص-ثم-ضبط غير الذرّي كان يتسرب عبر عمال uvicorn
+        from pymongo.errors import DuplicateKeyError as _DKE
+
+        try:
+            await tdb["_qr_throttle"].find_one_and_update(
+                {"_id": table_id,
+                 "$or": [{"last": {"$lt": now_ts - 10}}, {"last": {"$exists": False}}]},
+                {"$set": {"last": now_ts}}, upsert=True)
+        except _DKE:
+            raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
         items = []
         for it in data.items:
             if not (0 < float(it.quantity or 0) <= 20):
@@ -8847,7 +8851,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "table_id": table["id"],
             "table_name": table.get("name"),
             "items": items,
-            "notes": data.notes,
+            "notes": (data.notes or "").strip()[:500] or None,  # p519: قصّ المدخلات العامة
             "customer_phone": _clean_phone(data.customer_phone),  # p315
             "status": "pending_payment" if _mode == "prepaid" else "pending",  # p336
             "payment_status": "unpaid" if _mode == "prepaid" else None,  # p336
@@ -8944,13 +8948,16 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
                 status_code=400, detail="رقم الهاتف مطلوب للطلب من الكشك"
             )
         now_ts = _time.time()
-        # نفس درع QR: طلب واحد كل 10 ثوانٍ (DB — يعمل عبر عمال uvicorn الأربعة)
-        _last = await tdb["_qr_throttle"].find_one({"_id": "kiosk"})
-        if _last and now_ts - float(_last.get("last") or 0) < 10:
+        # نفس درع QR: طلب واحد كل 10 ثوانٍ — p519: ذرّي عبر upsert مشروط
+        from pymongo.errors import DuplicateKeyError as _DKE
+
+        try:
+            await tdb["_qr_throttle"].find_one_and_update(
+                {"_id": "kiosk",
+                 "$or": [{"last": {"$lt": now_ts - 10}}, {"last": {"$exists": False}}]},
+                {"$set": {"last": now_ts}}, upsert=True)
+        except _DKE:
             raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
-        await tdb["_qr_throttle"].update_one(
-            {"_id": "kiosk"}, {"$set": {"last": now_ts}}, upsert=True
-        )
         items = []
         for it in data.items:
             if not (0 < float(it.quantity or 0) <= 20):
@@ -9019,7 +9026,7 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "table_id": None,  # كشك — بلا طاولة
             "table_name": ks.get("counter_name") or "كشك",
             "items": items,
-            "notes": data.notes,
+            "notes": (data.notes or "").strip()[:500] or None,  # p519
             "customer_name": (data.customer_name or "").strip()[:60] or None,
             "customer_phone": phone,
             "status": "pending_payment" if _mode == "prepaid" else "pending",  # p336
@@ -9101,14 +9108,17 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         t, tdb, n = await _qr_neighbor(tenant_id, token)
         if not data.items or len(data.items) > 30:
             raise HTTPException(status_code=400, detail="طلب غير صالح")
-        # خانق معدل لكل جار
+        # خانق معدل لكل جار — p519: ذرّي عبر upsert مشروط
         now_ts = _time.time()
-        _last = await tdb["_nbr_throttle"].find_one({"_id": n["id"]})
-        if _last and now_ts - float(_last.get("last") or 0) < 10:
+        from pymongo.errors import DuplicateKeyError as _DKE
+
+        try:
+            await tdb["_nbr_throttle"].find_one_and_update(
+                {"_id": n["id"],
+                 "$or": [{"last": {"$lt": now_ts - 10}}, {"last": {"$exists": False}}]},
+                {"$set": {"last": now_ts}}, upsert=True)
+        except _DKE:
             raise HTTPException(status_code=429, detail="انتظر قليلاً قبل إرسال طلب آخر")
-        await tdb["_nbr_throttle"].update_one(
-            {"_id": n["id"]}, {"$set": {"last": now_ts}}, upsert=True
-        )
         items = []
         total = 0.0
         for it in data.items:
@@ -9150,13 +9160,13 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
             "table_id": None,
             "table_name": n.get("name"),  # يظهر اسم الجار في شاشة المطبخ
             "items": items,
-            "notes": data.notes,
+            "notes": (data.notes or "").strip()[:500] or None,  # p519
             "status": "pending",
             "payment_status": "debt" if n.get("payment") == "debt" else "unpaid",
             "sale_id": None,
             "source": "neighbor",  # p335+p338
             "neighbor_id": n["id"],
-            "ordered_by": (data.ordered_by or "").strip() or None,
+            "ordered_by": (data.ordered_by or "").strip()[:60] or None,  # p519
             "created_by": f"جار: {n.get('name')}",
             "created_at": _now(),
             "updated_at": _now(),

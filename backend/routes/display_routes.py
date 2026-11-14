@@ -12,11 +12,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
+import logging
 import secrets
 import uuid
 
+from pymongo.errors import PyMongoError
+
+logger = logging.getLogger(__name__)
+
 PAIR_TTL_SECONDS = 15 * 60
 ONLINE_SECONDS = 45
+PAIR_MAX_PER_MINUTE = 20  # p519: حد إغراق طلبات الإقران العامة
 MODES = ("catalog", "slider", "orders", "menu")  # p329: catalog/slider لكل الأنشطة — orders/menu للمطاعم
 
 
@@ -56,9 +62,41 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
         product_ids: Optional[List[str]] = None   # p333: تحديد منتجات الشاشة (فارغ = الكل)
         grid_layout: Optional[int] = None         # p333: 1/4/6/8 خانات — 0/None = تلقائي
 
+    _pair_idx_ready = False  # p519: فهارس display_pairings تُنشأ كسولًا مرة واحدة
+
+    async def _ensure_pairing_indexes():
+        """p519: TTL على expires_at (تنظيف آلي للأكواد المنتهية) + فهرس screen_token
+        (حلّ التوكن O(1) بدل مسح كل قواعد المستأجرين). كسول ومتماثل."""
+        nonlocal _pair_idx_ready
+        if _pair_idx_ready:
+            return
+        try:
+            await main_db.display_pairings.create_index(
+                "expires_at", expireAfterSeconds=0, name="p519_pairings_ttl")
+            await main_db.display_pairings.create_index(
+                "screen_token", name="p519_screen_token", sparse=True)
+        except PyMongoError as exc:  # إنشاء الفهارس محاولة متماثلة — لا تُسقط الطلب
+            logger.warning("display pairings indexes: %s", exc)
+        _pair_idx_ready = True
+
     async def _find_screen_by_token(token: str):
-        """-> (tenant, screen). التوكن سرّي فترتيب المسح لا يهم. يقتصر المسح
-        على مستأجري وضع المطعم النشطين."""
+        """-> (tenant, screen). التوكن سرّي فترتيب المسح لا يهم."""
+        # p519: الادعاء يخزّن screen_token→tenant_id في display_pairings — جرّب
+        # الخريطة المفهرسة أولًا، ثم اسقط للمسح الكامل للتوكنات القديمة
+        try:
+            mapping = await main_db.display_pairings.find_one(
+                {"screen_token": token}, {"_id": 0, "tenant_id": 1})
+        except PyMongoError as exc:
+            logger.warning("screen token map lookup: %s", exc)
+            mapping = None
+        if mapping and mapping.get("tenant_id"):
+            t = await main_db.saas_tenants.find_one(
+                {"id": mapping["tenant_id"], "is_active": {"$ne": False}},
+                {"_id": 0, "id": 1, "name": 1, "company_name": 1, "features_override": 1})
+            if t:
+                s = await get_tenant_db(t["id"]).display_screens.find_one({"token": token})
+                if s:
+                    return t, s
         # p329: كل المستأجرين النشطين — الشاشات صارت لكل الأنشطة
         tenants = await main_db.saas_tenants.find(
             {"is_active": {"$ne": False}},
@@ -104,7 +142,8 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
         # ينجحان معًا (201/201) وتُنشأ شاشتان لكود واحد
         claimed = await main_db.display_pairings.update_one(
             {"code": code, "claimed": {"$ne": True}},
-            {"$set": {"claimed": True, "screen_token": doc["token"], "tenant_id": tenant_id}},
+            {"$set": {"claimed": True, "screen_token": doc["token"], "tenant_id": tenant_id},
+             "$unset": {"expires_at": ""}},  # p519: لا TTL على خريطة شاشة حيّة
         )
         if not claimed.matched_count:
             raise HTTPException(status_code=404, detail="كود غير صالح أو مستعمل")
@@ -144,14 +183,24 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
 
     @router.delete("/screens/{screen_id}")
     async def delete_screen(screen_id: str, admin: dict = Depends(get_tenant_admin)):
+        s = await _screens().find_one({"id": screen_id}, {"_id": 0, "token": 1})
         res = await _screens().delete_one({"id": screen_id})
         if not res.deleted_count:
             raise HTTPException(status_code=404, detail="الشاشة غير موجودة")
+        if s and s.get("token"):  # p519: أزل خريطة التوكن من قاعدة المنصة
+            await main_db.display_pairings.delete_many({"screen_token": s["token"]})
         return {"ok": True}
 
     # ---------- جانب التلفاز (عمومي، بلا حساب) ----------
     @router.post("/public/screens/pair", status_code=201)
     async def public_pair_request():
+        await _ensure_pairing_indexes()
+        # p519: حد معدل — النقطة عمومية بلا مصادقة وكانت تزرع مستندات بلا سقف
+        minute_ago = _now() - timedelta(seconds=60)
+        recent = await main_db.display_pairings.count_documents(
+            {"created_at": {"$gte": minute_ago}})
+        if recent >= PAIR_MAX_PER_MINUTE:
+            raise HTTPException(status_code=429, detail="طلبات إقران كثيرة — انتظر قليلاً")
         # كود فريد من 6 أرقام، صالح 15 دقيقة
         for _ in range(10):
             code = f"{secrets.randbelow(1000000):06d}"
@@ -168,6 +217,8 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
 
     @router.get("/public/screens/pair/{code}")
     async def public_pair_poll(code: str):
+        if not ((code or "").isdigit() and len(code) == 6):
+            raise HTTPException(status_code=400, detail="الكود 6 أرقام")  # p519
         pending = await main_db.display_pairings.find_one(
             {"code": code}, {"_id": 0, "claimed": 1, "expires_at": 1, "screen_token": 1}
         )
