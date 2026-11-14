@@ -164,9 +164,11 @@ class TestPlatformStats:
 
     def test_max_tenants_code_path_in_source(self):
         """Verify the registration/tenants routes enforce MAX_TENANTS with the correct Arabic message."""
+        import pathlib
+        _root = pathlib.Path(__file__).resolve().parent.parent  # repo backend/ or container /app
         for path in [
-            "/app/backend/routes/saas/registration_routes.py",
-            "/app/backend/routes/saas/tenants_routes.py",
+            str(_root / "routes/saas/registration_routes.py"),
+            str(_root / "routes/saas/tenants_routes.py"),
         ]:
             with open(path, "r", encoding="utf-8") as f:
                 src = f.read()

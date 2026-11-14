@@ -31,6 +31,10 @@ async def read_signed_body(request) -> bytes:
     raw = b"".join(chunks)
     if not raw:
         raise HTTPException(status_code=400, detail="Empty webhook body")
+    # Cache into the request so downstream request.body()/request.json() reuse
+    # these exact bytes — stream() is already consumed here, and Starlette
+    # raises RuntimeError("Stream consumed") on a second read (400 regression).
+    request._body = raw
     return raw
 
 

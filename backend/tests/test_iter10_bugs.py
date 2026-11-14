@@ -6,7 +6,17 @@ import requests
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://nt-v16-staging.preview.emergentagent.com').rstrip('/')
 ADMIN_EMAIL = "admin@ntcommerce.com"
 ADMIN_PASS = "Admin@2024"
-TENANT_ID = "b4fde9b7-d1f2-46ec-b62a-f0971ca3deba"
+TENANT_ID = None  # resolved at runtime from /api/wallet/all — old hard-coded dev tenant is absent on staging
+
+
+def _pick_tenant_wallet_id(admin_headers):
+    """First tenant wallet present; prefer a pristine one (balance==0 and no debt)."""
+    r = requests.get(f"{BASE_URL}/api/wallet/all", headers=admin_headers, timeout=30)
+    assert r.status_code == 200
+    wallets = [w for w in r.json() if w.get("entity_type") == "tenant"]
+    assert wallets, "no tenant wallets on this environment"
+    pristine = [w for w in wallets if not w.get("balance") and not w.get("credit_debt")]
+    return (pristine or wallets)[0]["entity_id"]
 
 
 @pytest.fixture(scope="module")
@@ -69,18 +79,19 @@ class TestAIAssistant:
 class TestWalletCredit:
     def test_credit_topup_and_settle_flow(self, admin_headers):
         # Read initial wallet state
+        tenant_id = _pick_tenant_wallet_id(admin_headers)
         r = requests.get(f"{BASE_URL}/api/wallet/all", headers=admin_headers, timeout=30)
         assert r.status_code == 200
         wallets = r.json()
-        tenant_wallet = next((w for w in wallets if w.get("entity_id") == TENANT_ID), None)
-        assert tenant_wallet, f"Tenant wallet not found for {TENANT_ID}"
+        tenant_wallet = next((w for w in wallets if w.get("entity_id") == tenant_id), None)
+        assert tenant_wallet, f"Tenant wallet not found for {tenant_id}"
         bal0 = float(tenant_wallet.get("balance", 0))
         debt0 = float(tenant_wallet.get("credit_debt") or 0)
 
         # ── add 500 credit
         r = requests.post(f"{BASE_URL}/api/wallet/add-funds",
                           headers=admin_headers,
-                          json={"entity_id": TENANT_ID, "amount": 500, "payment_method": "credit"},
+                          json={"entity_id": tenant_id, "amount": 500, "payment_method": "credit"},
                           timeout=30)
         assert r.status_code == 200, r.text
         assert r.json().get("payment_method") == "credit"
@@ -88,14 +99,14 @@ class TestWalletCredit:
 
         # ── verify credit_debt incremented
         r = requests.get(f"{BASE_URL}/api/wallet/all", headers=admin_headers, timeout=30)
-        tw = next(w for w in r.json() if w.get("entity_id") == TENANT_ID)
+        tw = next(w for w in r.json() if w.get("entity_id") == tenant_id)
         assert float(tw.get("credit_debt") or 0) == debt0 + 500
         assert float(tw.get("balance")) == bal0 + 500
 
         # ── settle 200
         r = requests.post(f"{BASE_URL}/api/wallet/settle-credit",
                           headers=admin_headers,
-                          json={"entity_id": TENANT_ID, "amount": 200},
+                          json={"entity_id": tenant_id, "amount": 200},
                           timeout=30)
         assert r.status_code == 200, r.text
         assert float(r.json().get("credit_debt_remaining")) == debt0 + 300
@@ -104,7 +115,7 @@ class TestWalletCredit:
         excessive = debt0 + 500
         r = requests.post(f"{BASE_URL}/api/wallet/settle-credit",
                           headers=admin_headers,
-                          json={"entity_id": TENANT_ID, "amount": excessive},
+                          json={"entity_id": tenant_id, "amount": excessive},
                           timeout=30)
         assert r.status_code == 400, f"expected 400, got {r.status_code}"
 
@@ -113,18 +124,18 @@ class TestWalletCredit:
         if remaining > debt0:
             requests.post(f"{BASE_URL}/api/wallet/settle-credit",
                           headers=admin_headers,
-                          json={"entity_id": TENANT_ID, "amount": remaining - debt0}, timeout=30)
+                          json={"entity_id": tenant_id, "amount": remaining - debt0}, timeout=30)
 
     def test_add_funds_invalid_payment_method(self, admin_headers):
         r = requests.post(f"{BASE_URL}/api/wallet/add-funds",
                           headers=admin_headers,
-                          json={"entity_id": TENANT_ID, "amount": 10, "payment_method": "bogus"},
+                          json={"entity_id": "00000000-0000-0000-0000-000000000000", "amount": 10, "payment_method": "bogus"},
                           timeout=30)
         assert r.status_code == 400
 
     def test_settle_credit_unauthorized(self):
         r = requests.post(f"{BASE_URL}/api/wallet/settle-credit",
-                          json={"entity_id": TENANT_ID, "amount": 10}, timeout=30)
+                          json={"entity_id": "00000000-0000-0000-0000-000000000000", "amount": 10}, timeout=30)
         assert r.status_code in (401, 403)
 
 

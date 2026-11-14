@@ -203,7 +203,7 @@ async def test_yalidine_mock_fallback_when_no_creds():
         # Wipe any prior Yalidine integration so we exercise the no-creds path
         ints = (await c.get(f"{BASE_URL}/ecom/integrations", headers=th)).json()["items"]
         for i in ints:
-            if i["channel"] == "yalidine":
+            if i.get("channel") == "yalidine":  # .get: fixture docs may lack the field
                 await c.delete(f"{BASE_URL}/ecom/integrations/{i['id']}", headers=th)
 
         order = (await c.post(

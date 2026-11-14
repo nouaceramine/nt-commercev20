@@ -18,7 +18,14 @@ import httpx
 BASE_URL = "http://localhost:8001/api"
 SUPER_EMAIL = "admin@ntcommerce.com"
 SUPER_PASS = "Admin@2024"
-FOAD_TENANT_ID = "f2e36d2d-2a58-47c1-bdf5-c87f4bd7ae54"
+FOAD_TENANT_ID = None  # resolved at runtime — hard-coded dev tenant absent on staging
+
+
+async def _first_tenant_id(super_h):
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{BASE_URL}/saas/tenants", headers=super_h)
+        assert r.status_code == 200 and r.json(), "need at least one tenant"
+        return r.json()[0]["id"]
 
 
 async def _login(email, password):
@@ -32,12 +39,13 @@ async def _impersonate_foad():
     super_token = await _login(SUPER_EMAIL, SUPER_PASS)
     super_h = {"Authorization": f"Bearer {super_token}"}
     async with httpx.AsyncClient(timeout=20) as client:
+        tenant_id = await _first_tenant_id(super_h)
         await client.put(
-            f"{BASE_URL}/saas/tenants/{FOAD_TENANT_ID}/features",
+            f"{BASE_URL}/saas/tenants/{tenant_id}/features",
             headers=super_h,
             json={"ecommerce_hub": True},
         )
-        r = await client.post(f"{BASE_URL}/saas/impersonate/{FOAD_TENANT_ID}", headers=super_h)
+        r = await client.post(f"{BASE_URL}/saas/impersonate/{tenant_id}", headers=super_h)
         assert r.status_code == 200, r.text
         return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -89,6 +97,10 @@ async def test_inventory_deduct_on_confirm_and_restore_on_cancel():
         assert po.status_code == 200, po.text
         order_id = po.json()["id"]
 
+        # p59: stock is RESERVED at creation — verify immediate deduction
+        r0 = await client.get(f"{BASE_URL}/products/{prod_id}", headers=tenant_h)
+        assert r0.json()["quantity"] == seed_qty - order_qty, "reservation at creation missing"
+
         # ── Transition new → confirmed: stock must drop by order_qty ──
         rt = await client.put(
             f"{BASE_URL}/ecom/orders/{order_id}/status",
@@ -98,10 +110,9 @@ async def test_inventory_deduct_on_confirm_and_restore_on_cancel():
         assert rt.status_code == 200, rt.text
         body = rt.json()
         assert body["status"] == "confirmed"
+        # p59: reservation happened at creation — confirm must NOT deduct again
         inv = body.get("inventory") or {}
-        assert len(inv.get("deducted", [])) == 1
-        assert inv["deducted"][0]["qty"] == order_qty
-        assert inv["deducted"][0]["stock_after"] == seed_qty - order_qty
+        assert inv.get("deducted", []) == [], "confirm deducted twice — reservation idempotency broken"
 
         # Verify on the product directly
         rp = await client.get(f"{BASE_URL}/products/{prod_id}", headers=tenant_h)

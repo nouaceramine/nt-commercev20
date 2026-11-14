@@ -279,9 +279,20 @@ async def handle_ecom_order_confirmed(event: Event) -> None:
     elif (_ord_flags or {}).get("inventory_deducted"):
         log.info("order %s pre-deducted at creation — fulfillment saga skipped", order_id)
     else:
-        saga_doc = await run_saga(tdb, "ecom_fulfillment", _fulfillment_steps(),
-                                  {"order_id": order_id, "items": items})
-        log.info("fulfillment saga %s for order %s", saga_doc["status"], order_id)
+        # Atomic idempotency claim (D5+ fix): under concurrent consumers the
+        # read-then-check above races and BOTH duplicate events ran the saga,
+        # double-deducting stock. Only the winner of this atomic flag-claim
+        # proceeds; compensation (unmark) releases the flag again.
+        claimed = await tdb.ecom_orders.find_one_and_update(
+            {"id": order_id, "_eda_stock_deducted": {"$ne": True}},
+            {"$set": {"_eda_stock_deducted": True, "_eda_claimed_at": _utc_now_iso()}},
+        )
+        if not claimed:
+            log.info("order %s already EDA-claimed — duplicate event skipped", order_id)
+        else:
+            saga_doc = await run_saga(tdb, "ecom_fulfillment", _fulfillment_steps(),
+                                      {"order_id": order_id, "items": items})
+            log.info("fulfillment saga %s for order %s", saga_doc["status"], order_id)
 
     # Always write the audit row (idempotent via event_id PK)
     try:

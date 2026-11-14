@@ -6,7 +6,17 @@ import pytest
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://nt-v16-staging.preview.emergentagent.com").rstrip("/")
 SUPER_EMAIL = "admin@ntcommerce.com"
 SUPER_PASS = "Admin@2024"
-TENANT_ID = "b4fde9b7-d1f2-46ec-b62a-f0971ca3deba"
+TENANT_ID = None  # resolved at runtime — hard-coded dev tenant absent on staging
+
+
+def _first_tenant_id(headers):
+    global TENANT_ID
+    if TENANT_ID:
+        return TENANT_ID
+    r = requests.get(f"{BASE_URL}/api/saas/tenants", headers=headers, timeout=30)
+    assert r.status_code == 200 and r.json(), "need at least one tenant"
+    TENANT_ID = r.json()[0]["id"]
+    return TENANT_ID
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +36,7 @@ def session_data(super_token):
     """Create a fresh impersonation session for the rest of the tests."""
     h = {"Authorization": f"Bearer {super_token}",
          "X-Forwarded-For": "203.0.113.42, 10.0.0.1"}
-    r = requests.post(f"{BASE_URL}/api/saas/impersonate/{TENANT_ID}",
+    r = requests.post(f"{BASE_URL}/api/saas/impersonate/{_first_tenant_id(h)}",
                       headers=h, timeout=20)
     assert r.status_code == 200, f"impersonate failed: {r.status_code} {r.text[:200]}"
     return r.json()

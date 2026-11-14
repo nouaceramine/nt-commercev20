@@ -130,7 +130,7 @@ async def test_trace_returns_sale_and_profit_when_sold():
         os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
         from motor.motor_asyncio import AsyncIOMotorClient
         mc = AsyncIOMotorClient(os.environ["MONGO_URL"])
-        mdb = mc["nt_commerce"]
+        mdb = mc[os.environ.get("DB_NAME", "nt_commerce")]
         stock_doc = await mdb.platform_sim_stock.find_one({"code": iccid}, {"_id": 0})
         assert stock_doc, "uploaded ICCID should be in stock"
 

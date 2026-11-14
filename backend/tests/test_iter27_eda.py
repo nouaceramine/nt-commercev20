@@ -118,7 +118,9 @@ async def test_publish_and_consume_basic(bus):
         received.append(event)
 
     b.register("test.ping", capture)
-    eid = await b.publish("test.ping", {"hello": "world"}, tenant_id="tA", source="pytest")
+    # tenant_id="platform": unknown tenant ids are (correctly) skipped by the
+    # cascade-deletion guard in _handle_message — handlers never run for them.
+    eid = await b.publish("test.ping", {"hello": "world"}, tenant_id="platform", source="pytest")
     assert eid
 
     # Run a single iteration of the consumer for ~2s
@@ -135,7 +137,7 @@ async def test_publish_and_consume_basic(bus):
     ev = received[0]
     assert ev.event_type == "test.ping"
     assert ev.payload.get("hello") == "world"
-    assert ev.tenant_id == "tA"
+    assert ev.tenant_id == "platform"
 
     # Check processed_events audit row
     doc = await main_db[PROCESSED_COLLECTION].find_one({"event_id": eid}, {"_id": 0})
@@ -169,7 +171,7 @@ async def test_retry_on_handler_failure(bus):
         raise RuntimeError("intentional failure")
 
     b.register("test.ping", failing)
-    eid = await b.publish("test.ping", {"x": 1}, tenant_id="retryTest")
+    eid = await b.publish("test.ping", {"x": 1}, tenant_id="platform")  # see guard note above
 
     task = asyncio.create_task(b.consume_loop())
     await asyncio.sleep(4.0)  # Allow 3 retries
@@ -244,9 +246,15 @@ async def test_sale_completed_consumer_writes_movement():
     mongo, main_db, r = _fresh_clients()
     try:
         sale_id = f"test-sale-{uuid.uuid4().hex[:8]}"
+        # The live consumer skips events whose tenant is unknown (cascade-deletion
+        # guard) — register a minimal throwaway tenant so the handler really runs.
+        _tid = "tenantTest"
+        _tdb = "tenant_iter27_saletest"
+        # email included: TenantResponse requires it — a bare doc 422s /saas/tenants for everyone
+        await main_db.saas_tenants.insert_one({"id": _tid, "is_active": True, "db_name": _tdb, "name": "TEST-iter27", "email": "test-iter27@example.com"})
         eid = await _publish_raw(r, "sale.completed", {
             "sale_id": sale_id, "total": 250.5, "items": [{"product_id": "p1", "quantity": 2}],
-        }, tenant_id="tenantTest")
+        }, tenant_id=_tid)
         row = None
         for _ in range(20):
             await asyncio.sleep(0.5)
@@ -258,6 +266,11 @@ async def test_sale_completed_consumer_writes_movement():
         await main_db.inventory_movements.delete_one({"id": eid})
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": eid})
     finally:
+        try:
+            await main_db.saas_tenants.delete_one({"id": "tenantTest"})
+            await mongo.drop_database("tenant_iter27_saletest")
+        except Exception:
+            pass
         try:
             await r.aclose()
         except AttributeError:
@@ -273,10 +286,12 @@ async def test_ecom_order_confirmed_deducts_stock_idempotent():
         tenant_id = "ecomtest_" + uuid.uuid4().hex[:6]
         # Tenant DB lives on same Mongo cluster; use fresh client's database lookup
         tdb_name = f"tenant_{tenant_id.replace('-', '_')}"
+        # register the throwaway tenant so the cascade-deletion guard lets handlers run
+        await main_db.saas_tenants.insert_one({"id": tenant_id, "is_active": True, "db_name": tdb_name, "name": "TEST-iter27", "email": "test-iter27@example.com"})
         tdb = mongo[tdb_name]
         pid = "prod-" + uuid.uuid4().hex[:6]
         oid = "ord-" + uuid.uuid4().hex[:6]
-        await tdb.products.insert_one({"id": pid, "name": "T", "stock": 50})
+        await tdb.products.insert_one({"id": pid, "name": "T", "quantity": 50})  # POS schema field is quantity
         await tdb.ecom_orders.insert_one({"id": oid, "status": "confirmed"})
 
         eid1 = await _publish_raw(r, "ecom_order.confirmed", {
@@ -291,15 +306,20 @@ async def test_ecom_order_confirmed_deducts_stock_idempotent():
             await asyncio.sleep(0.5)
             flag = await tdb.ecom_orders.find_one({"id": oid}, {"_id": 0, "_eda_stock_deducted": 1})
             if flag and flag.get("_eda_stock_deducted"):
-                prod = await tdb.products.find_one({"id": pid}, {"_id": 0, "stock": 1})
+                prod = await tdb.products.find_one({"id": pid}, {"_id": 0, "quantity": 1})
                 break
         assert prod is not None, "deduction flag never set"
-        assert prod["stock"] == 47, f"Expected 47, got {prod['stock']}"
+        assert prod["quantity"] == 47, f"Expected 47, got {prod['quantity']}"
         # Cleanup
         await mongo.drop_database(tdb_name)
         await main_db.inventory_movements.delete_many({"id": {"$in": [eid1, eid2]}})
         await main_db[PROCESSED_COLLECTION].delete_many({"event_id": {"$in": [eid1, eid2]}})
     finally:
+        try:
+            await main_db.saas_tenants.delete_one({"id": tenant_id})
+            await mongo.drop_database(tdb_name)
+        except Exception:
+            pass
         try:
             await r.aclose()
         except AttributeError:

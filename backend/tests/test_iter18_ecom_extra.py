@@ -50,7 +50,13 @@ async def test_403_arabic_message_and_default_off():
             assert r.status_code == 403, f"expected 403 on {path}, got {r.status_code}"
             body = r.json()
             msg = body.get("detail") or body.get("message") or ""
-            assert "مركز التجارة الإلكترونية غير مُفعّل" in msg, f"Arabic msg missing: {msg}"
+            # p341: global feature-gate middleware returns a structured payload
+            # (detail="feature_disabled" + Arabic module_name_ar); the legacy
+            # route-level dependency returned a full Arabic sentence instead.
+            if msg == "feature_disabled":
+                assert body.get("module_name_ar"), f"module_name_ar missing on {path}: {body}"
+            else:
+                assert "مركز التجارة الإلكترونية غير مُفعّل" in msg, f"Arabic msg missing: {msg}"
 
 
 @pytest.mark.asyncio
@@ -79,8 +85,10 @@ async def test_credential_redaction_and_test_endpoint():
             t = await c.post(f"{BASE_URL}/ecom/integrations/{data['id']}/test", headers=TH)
             body = t.json()
             assert t.status_code == 200 and "ok" in body
-            if ch != "shopify":
-                assert body["ok"] is True
+            # P518-008: provider errors are now sanitized and fake creds may
+            # legitimately report ok=False on any channel; the hard requirement
+            # is that the raw secret never leaks into the response.
+            assert secret not in str(body), f"secret leaked in {ch} test endpoint: {body}"
         # cleanup
         for iid in created_ids:
             await c.delete(f"{BASE_URL}/ecom/integrations/{iid}", headers=TH)

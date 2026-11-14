@@ -8,7 +8,15 @@ import requests
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://nt-v16-staging.preview.emergentagent.com').rstrip('/')
 SUPER_ADMIN = {"email": "admin@ntcommerce.com", "password": "Admin@2024"}
-SAMPLE_TENANT_ID = "b4fde9b7-d1f2-46ec-b62a-f0971ca3deba"
+SAMPLE_TENANT_ID = None  # resolved at runtime — the old hard-coded dev tenant does not exist on staging
+
+
+def _first_tenant_id(super_headers):
+    r = requests.get(f"{BASE_URL}/api/saas/tenants", headers=super_headers, timeout=30)
+    assert r.status_code == 200, f"tenants list failed: {r.status_code}"
+    ts = r.json()
+    assert ts, "need at least one tenant"
+    return ts[0]["id"]
 
 STATS_NEW = {"customer_balance_total", "customer_balance_count", "customer_debt_total", "customers_with_debt"}
 STATS_EXISTING = {"total_products", "total_customers", "total_suppliers", "low_stock_count",
@@ -32,7 +40,7 @@ def super_headers(super_token):
 
 @pytest.fixture(scope="module")
 def tenant_headers(super_headers):
-    r = requests.post(f"{BASE_URL}/api/saas/impersonate/{SAMPLE_TENANT_ID}",
+    r = requests.post(f"{BASE_URL}/api/saas/impersonate/{_first_tenant_id(super_headers)}",
                       headers=super_headers, timeout=30)
     assert r.status_code == 200, f"impersonate failed: {r.status_code} {r.text[:200]}"
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -105,7 +113,7 @@ class TestWalletPlatformPurchaseFields:
 # ── Impersonation token regression ──
 class TestImpersonationContext:
     def test_impersonate_returns_token_and_user(self, super_headers):
-        r = requests.post(f"{BASE_URL}/api/saas/impersonate/{SAMPLE_TENANT_ID}",
+        r = requests.post(f"{BASE_URL}/api/saas/impersonate/{_first_tenant_id(super_headers)}",
                           headers=super_headers, timeout=30)
         assert r.status_code == 200
         body = r.json()

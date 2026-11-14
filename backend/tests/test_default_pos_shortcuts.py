@@ -7,7 +7,13 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://nt-v16-staging.previ
 
 SUPER_ADMIN_EMAIL = "admin@ntcommerce.com"
 SUPER_ADMIN_PASSWORD = "Admin@2024"
-TENANT_ID = "b4fde9b7-d1f2-46ec-b62a-f0971ca3deba"
+TENANT_ID = None  # resolved at runtime — hard-coded dev tenant absent on staging
+
+
+def _first_tenant_id(headers):
+    r = requests.get(f"{BASE_URL}/api/saas/tenants", headers=headers, timeout=30)
+    assert r.status_code == 200 and r.json(), "need at least one tenant"
+    return r.json()[0]["id"]
 
 
 # ── fixtures ──
@@ -26,7 +32,7 @@ def super_admin_token():
 def tenant_token(super_admin_token):
     """Impersonate the sample tenant — gives a tenant_admin token tied to TENANT_ID."""
     r = requests.post(
-        f"{BASE_URL}/api/saas/impersonate/{TENANT_ID}",
+        f"{BASE_URL}/api/saas/impersonate/{_first_tenant_id({'Authorization': f'Bearer {super_admin_token}'})}",
         headers={"Authorization": f"Bearer {super_admin_token}"},
         timeout=20,
     )

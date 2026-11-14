@@ -111,7 +111,7 @@ async def test_product_profitability_calculates_margin_for_seeded_data():
         os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
         from motor.motor_asyncio import AsyncIOMotorClient
         mc = AsyncIOMotorClient(os.environ["MONGO_URL"])
-        mdb = mc["nt_commerce"]
+        mdb = mc[os.environ.get("DB_NAME", "nt_commerce")]
         sold_stocks = []
         async for s in mdb.platform_sim_stock.find(
             {"catalog_id": sim_id, "source_purchase_id": pid, "status": "available"},
