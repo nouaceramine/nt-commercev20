@@ -46,7 +46,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     class EmailNotificationRequest(BaseModel):
         notification_type: str
-        recipient_email: str
+        recipient_email: EmailStr  # p518: was plain str — invalid addresses accepted
         subject: str = ""
         data: dict = {}
 
@@ -160,6 +160,11 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.post("/notifications/send")
     async def send_notification(request: EmailNotificationRequest, user: dict = Depends(require_tenant)):
+        # p518: outbound mail through the tenant's SendGrid is admin/manager-only —
+        # the UI page is adminOnly; previously any role (incl. cashier) could send
+        # arbitrary HTML to any address through the business account
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إرسال البريد متاح للإدارة فقط")
         settings = await db.system_settings.find_one({"type": "sendgrid_settings"})
         if not settings or not settings.get("enabled"):
             raise HTTPException(status_code=400, detail="إشعارات البريد غير مفعلة")
@@ -204,6 +209,9 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.post("/notifications/send-daily-report")
     async def send_daily_report(user: dict = Depends(require_tenant)):
+        # p518: daily financial report — admin/manager only (UI page is adminOnly)
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إرسال التقارير متاح للإدارة فقط")
         settings = await db.system_settings.find_one({"type": "sendgrid_settings"})
         if not settings or not settings.get("enabled"):
             raise HTTPException(status_code=400, detail="إشعارات البريد غير مفعلة")
@@ -289,6 +297,11 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.post("/email/send-session-report")
     async def send_session_report_email(report_email: SessionReportEmail, user: dict = Depends(require_tenant)):
+        # p518: session closing report is financial data — admin/manager only
+        # (UI DailySessionsPage is adminOnly); previously any role could email it
+        # to an arbitrary address
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إرسال التقارير متاح للإدارة فقط")
         if not RESEND_AVAILABLE:
             raise HTTPException(status_code=500, detail="خدمة البريد الإلكتروني غير متوفرة")
         # p299: DB is the source of truth; .env is a startup fallback
@@ -361,6 +374,9 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.post("/smart-reports/send-now")
     async def send_smart_report_now(user: dict = Depends(require_tenant)):
+        # p518: smart daily report carries sales summaries — admin/manager only
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إرسال التقارير متاح للإدارة فقط")
         if not RESEND_AVAILABLE:
             raise HTTPException(status_code=500, detail="مكتبة Resend غير متوفرة")
         email_settings = await db.system_settings.find_one({"type": "email_settings"})

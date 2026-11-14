@@ -10,6 +10,7 @@ import os
 import uuid
 import logging
 import httpx
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,10 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
                 "business_name": "NT Commerce",
                 "enabled": bool(os.environ.get("WHATSAPP_API_TOKEN")),
             }
+        if config.get("api_token"):
+            from services.crypto_fields import decrypt_field as _df  # p518
+            # decrypt_field passes legacy plaintext through unchanged
+            config["api_token"] = _df(config["api_token"]) or ""
         return config
 
     async def _send_whatsapp(config, to_number, message_body) -> dict:
@@ -72,7 +77,8 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
                 resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code in (200, 201):
                     return {"success": True, "message": "تم إرسال الرسالة", "data": resp.json()}
-                return {"success": False, "message": f"خطأ WhatsApp: {resp.text}"}
+                logger.error(f"WhatsApp provider error: {resp.status_code} {resp.text[:300]}")
+                return {"success": False, "message": f"خطأ WhatsApp (HTTP {resp.status_code})"}
         except Exception as e:
             logger.error(f"WhatsApp error: {e}")
             return {"success": False, "message": f"خطأ في الاتصال: {str(e)}"}
@@ -98,7 +104,8 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         if settings.api_token:
-            update["api_token"] = settings.api_token
+            from services.crypto_fields import encrypt_field as _ef  # p518
+            update["api_token"] = _ef(settings.api_token)
         if settings.phone_number_id:
             update["phone_number_id"] = settings.phone_number_id
         await db.whatsapp_integration_settings.update_one(
@@ -108,6 +115,8 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
 
     @router.post("/send")
     async def send_whatsapp_message(request: WhatsAppMessageRequest, admin: dict = Depends(get_tenant_admin)):
+        if not (request.to or "").strip() or not (request.message or "").strip():
+            raise HTTPException(status_code=400, detail="الرقم والرسالة مطلوبان")
         config = await _get_wa_config(admin.get("tenant_id"))
         if not config.get("enabled"):
             raise HTTPException(status_code=400, detail="WhatsApp غير مفعل")
@@ -127,6 +136,14 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
 
     @router.post("/send-bulk")
     async def send_bulk_whatsapp(request: WhatsAppBulkRequest, admin: dict = Depends(get_tenant_admin)):
+        numbers = [n.strip() for n in request.numbers if n and n.strip()]
+        if not numbers:
+            raise HTTPException(status_code=400, detail="قائمة الأرقام فارغة")
+        if len(numbers) > 500:
+            raise HTTPException(status_code=400, detail="الحد الأقصى 500 رقم في الدفعة")
+        if not (request.message or "").strip():
+            raise HTTPException(status_code=400, detail="الرسالة فارغة")
+        request.numbers = numbers
         config = await _get_wa_config(admin.get("tenant_id"))
         if not config.get("enabled"):
             raise HTTPException(status_code=400, detail="WhatsApp غير مفعل")
@@ -142,7 +159,11 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
 
     @router.post("/send-template")
     async def send_template_message(request: WhatsAppTemplateRequest, admin: dict = Depends(get_tenant_admin)):
+        if not (request.to or "").strip() or not (request.template_name or "").strip():
+            raise HTTPException(status_code=400, detail="الرقم واسم القالب مطلوبان")
         config = await _get_wa_config(admin.get("tenant_id"))
+        if not config.get("enabled"):
+            raise HTTPException(status_code=400, detail="WhatsApp غير مفعل")
         if not config.get("api_token") or not config.get("phone_number_id"):
             raise HTTPException(status_code=400, detail="إعدادات WhatsApp غير مكتملة")
         phone_id = config["phone_number_id"]
@@ -164,7 +185,8 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
                 })
                 if resp.status_code in (200, 201):
                     return {"success": True, "message": "تم إرسال القالب"}
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+                logger.error(f"WhatsApp template provider error: {resp.status_code} {resp.text[:300]}")
+                raise HTTPException(status_code=502, detail="فشل الإرسال عبر مزود WhatsApp")
         except HTTPException:
             raise
         except Exception:
@@ -182,18 +204,32 @@ def create_whatsapp_integration_routes(db, get_current_user, get_tenant_admin, r
             raise HTTPException(status_code=401, detail="Webhook signature verification failed")
         body = decode_json_body(raw_body)
         if body.get("object") == "whatsapp_business_account":
+            from routes.whatsapp_routes import resolve_tenant_by_phone_id  # p518
             for entry in body.get("entry", []):
                 for change in entry.get("changes", []):
-                    messages = change.get("value", {}).get("messages", [])
+                    value = change.get("value", {})
+                    phone_id = (value.get("metadata") or {}).get("phone_number_id", "")
+                    tenant_id, tdb = await resolve_tenant_by_phone_id(phone_id)
+                    if tdb is None:
+                        logger.warning(f"WhatsApp integration webhook: unattributed phone_number_id={phone_id}")
+                        continue
+                    messages = value.get("messages", [])
                     for msg in messages:
-                        await db.whatsapp_incoming.insert_one({
-                            "id": str(uuid.uuid4()),
+                        dedupe_id = f"wa-in:{msg['id']}" if msg.get("id") else str(uuid.uuid4())
+                        doc = {
+                            "_id": dedupe_id,  # deterministic _id → Meta retries dedupe
+                            "id": dedupe_id,
+                            "tenant_id": tenant_id,
                             "from": msg.get("from"),
                             "type": msg.get("type"),
                             "text": msg.get("text", {}).get("body", ""),
                             "timestamp": msg.get("timestamp"),
                             "received_at": datetime.now(timezone.utc).isoformat()
-                        })
+                        }
+                        try:
+                            await tdb.whatsapp_incoming.insert_one(doc)
+                        except DuplicateKeyError:
+                            pass  # Meta retry of an already-stored message
         return {"status": "ok"}
 
     @router.get("/webhook")

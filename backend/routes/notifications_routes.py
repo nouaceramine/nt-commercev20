@@ -11,6 +11,7 @@ import uuid
 import io
 import logging
 from openpyxl import Workbook, load_workbook
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,20 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         user: dict = Depends(require_tenant)
     ):
         """Create a notification"""
+        # p518: validate inputs; broadcasting (user_id=None) is admin/manager-only,
+        # a non-admin may only target himself. insert_one mutates the dict with an
+        # ObjectId — return a pristine copy so serialization cannot 500.
+        title = (title or "").strip()
+        message = (message or "").strip()
+        if not title or not message:
+            raise HTTPException(status_code=400, detail="العنوان والرسالة مطلوبان")
+        if notification_type not in ("info", "warning", "error", "debt", "success"):
+            raise HTTPException(status_code=400, detail="نوع إشعار غير معروف")
+        is_admin = user.get("role") in ("admin", "manager", "tenant_admin", "super_admin")
+        if user_id is None and not is_admin:
+            raise HTTPException(status_code=403, detail="البث العام متاح للإدارة فقط")
+        if user_id is not None and user_id != user["id"] and not is_admin:
+            raise HTTPException(status_code=403, detail="لا يمكنك إرسال إشعار لمستخدم آخر")
         notification_doc = {
             "id": str(uuid.uuid4()),
             "title": title,
@@ -79,7 +94,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             "created_by": user["id"],
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        await db.notifications.insert_one(notification_doc)
+        await db.notifications.insert_one(notification_doc.copy())
         return notification_doc
 
     @router.put("/notifications/{notification_id}/read")
@@ -143,6 +158,42 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         """Generate automatic notifications for low stock and due debts"""
         notifications_created = []
 
+        # p518: race-safe idempotency — the frontend Layout calls this before every
+        # notification fetch, so concurrent calls (tabs/users/workers) must not
+        # duplicate. A partial unique index enforces one UNREAD notification per
+        # (type, reference_id); read notifications may be regenerated as before.
+        async def _ensure_unread_index():
+            spec = {"unique": True, "partialFilterExpression": {"read": False},
+                    "name": "uniq_unread_type_ref"}
+            try:
+                await db.notifications.create_index([("type", 1), ("reference_id", 1)], **spec)
+            except PyMongoError:
+                # pre-existing duplicates block the unique index — keep the first
+                # unread per (type, ref) and drop the newer unread copies, then retry
+                pipeline = [
+                    {"$match": {"read": False, "reference_id": {"$exists": True}}},
+                    {"$group": {"_id": {"t": "$type", "r": "$reference_id"},
+                                "ids": {"$push": "$id"}, "n": {"$sum": 1}}},
+                    {"$match": {"n": {"$gt": 1}}},
+                ]
+                for grp in await db.notifications.aggregate(pipeline).to_list(1000):
+                    dup_ids = grp["ids"][1:]
+                    if dup_ids:
+                        await db.notifications.delete_many({"id": {"$in": dup_ids}, "read": False})
+                try:
+                    await db.notifications.create_index([("type", 1), ("reference_id", 1)], **spec)
+                except PyMongoError as exc:
+                    logger.warning(f"notifications unread index unavailable: {exc}")
+
+        async def _insert_once(notif):
+            try:
+                await db.notifications.insert_one(notif)
+                notifications_created.append(notif["id"])
+            except DuplicateKeyError:
+                pass  # a concurrent caller already created this unread notification
+
+        await _ensure_unread_index()
+
         # 1. Low stock notifications
         low_stock_products = await db.products.find(low_stock_filter()).to_list(100)
 
@@ -167,8 +218,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                     "read": False,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
-                await db.notifications.insert_one(notif)
-                notifications_created.append(notif["id"])
+                await _insert_once(notif)
 
         # 2. Customer debt notifications (debts > 7 days)
         week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
@@ -195,8 +245,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                     "read": False,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
-                await db.notifications.insert_one(notif)
-                notifications_created.append(notif["id"])
+                await _insert_once(notif)
 
         # 3. Supplier debt notifications (debts > 7 days)
         overdue_purchases = await db.purchases.find({
@@ -220,8 +269,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                     "read": False,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
-                await db.notifications.insert_one(notif)
-                notifications_created.append(notif["id"])
+                await _insert_once(notif)
 
         # 4. Expiry notifications (product lots) — p70
         from datetime import date as _date_cls
@@ -261,8 +309,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                     "read": False,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
-                await db.notifications.insert_one(notif)
-                notifications_created.append(notif["id"])
+                await _insert_once(notif)
 
         return {
             "message": f"Generated {len(notifications_created)} notifications",

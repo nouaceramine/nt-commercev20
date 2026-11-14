@@ -71,6 +71,13 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
 
     @router.post("/marketing/sms/campaigns")
     async def create_sms_campaign(campaign: SMSCampaign, admin: dict = Depends(get_tenant_admin)):
+        # p518: validate before resolving targets or touching the gateway
+        name = (campaign.name or "").strip()
+        message = (campaign.message or "").strip()
+        if not name or not message:
+            raise HTTPException(status_code=400, detail="اسم الحملة ورسالتها مطلوبان")
+        if campaign.target not in ("all", "customers_with_debt", "inactive", "custom"):
+            raise HTTPException(status_code=400, detail="فئة الاستهداف غير معروفة")
         now = datetime.now(timezone.utc).isoformat()
         if campaign.target == "all":
             customers = await db.customers.find({"phone": {"$ne": ""}}, {"_id": 0, "id": 1, "phone": 1, "name": 1}).to_list(1000)
@@ -82,7 +89,7 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
             customers = await db.customers.find({"id": {"$nin": active_customer_ids}, "phone": {"$ne": ""}}, {"_id": 0, "id": 1, "phone": 1, "name": 1}).to_list(1000)
         else:
             customers = await db.customers.find({"id": {"$in": campaign.customer_ids}, "phone": {"$ne": ""}}, {"_id": 0, "id": 1, "phone": 1, "name": 1}).to_list(1000)
-        campaign_doc = {"id": str(uuid.uuid4()), "name": campaign.name, "message": campaign.message, "target": campaign.target, "recipients_count": len(customers), "status": "pending", "scheduled_at": campaign.scheduled_at, "sent_at": None, "created_at": now, "created_by": admin.get("name", "")}
+        campaign_doc = {"id": str(uuid.uuid4()), "name": name, "message": message, "target": campaign.target, "recipients_count": len(customers), "status": "pending", "scheduled_at": campaign.scheduled_at, "sent_at": None, "created_at": now, "created_by": admin.get("name", "")}
         if campaign.scheduled_at:
             await db.sms_campaigns.insert_one(campaign_doc)
             return {"success": True, "message": "تم حفظ الحملة المجدولة دون إرسال", "campaign_id": campaign_doc["id"], "recipients_count": len(customers), "sent_count": 0, "failed_count": 0}
@@ -134,6 +141,10 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
 
     @router.post("/sms/send-reminder")
     async def send_debt_reminder(request: SMSReminderRequest, user: dict = Depends(require_tenant)):
+        if not request.customer_ids:
+            raise HTTPException(status_code=400, detail="قائمة الزبائن فارغة")
+        if len(request.customer_ids) > 500:
+            raise HTTPException(status_code=400, detail="الحد الأقصى 500 زبون في الدفعة")
         settings = await db.sms_settings.find_one({"id": "global"}, {"_id": 0})
         if not settings:
             settings = DEFAULT_SMS_SETTINGS
@@ -153,7 +164,10 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
             if total_debt <= 0:
                 results.append({"customer_id": customer_id, "success": False, "error": "No debt"})
                 continue
-            message = template.format(customer_name=customer.get("name", ""), debt_amount=f"{total_debt:,.0f}", phone=customer.get("phone", ""))
+            try:
+                message = template.format(customer_name=customer.get("name", ""), debt_amount=f"{total_debt:,.0f}", phone=customer.get("phone", ""))
+            except (KeyError, IndexError, ValueError):
+                raise HTTPException(status_code=400, detail="قالب الرسالة يحتوي متغيرات غير معروفة")
             sms_result = await send_sms_real(customer["phone"], message)
             sms_log = {"id": str(uuid.uuid4()), "customer_id": customer_id, "customer_name": customer.get("name", ""), "phone": customer.get("phone", ""), "message": message, "debt_amount": total_debt, "status": "sent" if sms_result["success"] else "failed", "provider_response": sms_result, "sent_by": user.get("name", ""), "created_at": datetime.now(timezone.utc).isoformat()}
             await db.sms_logs.insert_one(sms_log)

@@ -3,7 +3,7 @@ SendGrid Email Integration Routes
 Real SendGrid integration with fallback messaging when API key not configured.
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, List
 from datetime import datetime, timezone
 import os
@@ -17,7 +17,7 @@ def create_sendgrid_integration_routes(db, get_current_user, get_tenant_admin, r
     router = APIRouter(prefix="/integrations/email", tags=["email-integration"])
 
     class EmailRequest(BaseModel):
-        to: List[str]
+        to: List[EmailStr] = Field(..., min_length=1, max_length=100)  # p518
         subject: str
         html_content: str
         from_email: Optional[str] = None
@@ -71,7 +71,7 @@ def create_sendgrid_integration_routes(db, get_current_user, get_tenant_admin, r
             return {"success": False, "message": "مكتبة SendGrid غير مثبتة"}
         except Exception as e:
             logger.error(f"SendGrid error: {e}")
-            return {"success": False, "message": f"خطأ في الإرسال: {str(e)}"}
+            return {"success": False, "message": "فشل إرسال البريد عبر المزود"}
 
     @router.get("/status")
     async def get_email_status(admin: dict = Depends(get_tenant_admin)):
@@ -134,6 +134,8 @@ def create_sendgrid_integration_routes(db, get_current_user, get_tenant_admin, r
         if not template:
             raise HTTPException(status_code=400, detail=f"القالب غير موجود. المتوفر: {list(templates.keys())}")
         config = await _get_sendgrid_config(admin.get("tenant_id"))
+        if not config.get("enabled"):
+            raise HTTPException(status_code=400, detail="خدمة البريد غير مفعلة")
         html = template["body"]
         for key, val in request.variables.items():
             html = html.replace(f"{{{{{key}}}}}", str(val))

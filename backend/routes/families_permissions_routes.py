@@ -911,6 +911,10 @@ async def update_whatsapp_settings(settings: WhatsAppSettings, user: dict = Depe
 @router.post("/whatsapp/send", operation_id="send_whatsapp_message_v2")
 async def send_whatsapp_message_v2(message: WhatsAppMessage, user: dict = Depends(require_tenant)):
     """Send a WhatsApp message"""
+    if not (message.phone or "").strip():
+        raise HTTPException(status_code=400, detail="رقم الهاتف مطلوب")
+    if not (message.message or "").strip():
+        raise HTTPException(status_code=400, detail="الرسالة فارغة")
     settings = await db.whatsapp_settings.find_one({}, {"_id": 0})
     if not settings or not settings.get("enabled"):
         raise HTTPException(status_code=400, detail="WhatsApp غير مفعل")

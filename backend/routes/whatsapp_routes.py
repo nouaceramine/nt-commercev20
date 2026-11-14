@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import uuid
 import logging
 import os
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,29 @@ def parse_whatsapp_command(text: str) -> dict:
         return {"command": "unknown", "args": text, "raw": text}
 
     return {"command": command, "args": args, "raw": text}
+
+
+async def resolve_tenant_by_phone_id(phone_number_id: str):
+    """Map a Meta phone_number_id to its tenant (p518 webhook attribution).
+
+    Webhook calls carry no auth, so the injected db proxy falls back to main_db;
+    without resolving, incoming messages were orphaned where no tenant reader
+    could ever see them. Returns (tenant_id, tenant_db) or (None, None).
+    """
+    from config.database import client, main_db
+    if not phone_number_id:
+        return None, None
+    tenants = await main_db.saas_tenants.find(
+        {"is_active": {"$ne": False}}, {"_id": 0, "id": 1, "db_name": 1}).to_list(500)
+    for t in tenants:
+        dbn = t.get("db_name") or "tenant_" + t["id"].replace("-", "_")
+        tdb = client[dbn]
+        for coll in ("whatsapp_config", "whatsapp_integration_settings"):
+            cfg = await tdb[coll].find_one(
+                {"phone_number_id": phone_number_id}, {"_id": 0, "tenant_id": 1})
+            if cfg:
+                return t["id"], tdb
+    return None, None
 
 
 def create_whatsapp_routes(db, get_current_user) -> dict:
@@ -157,31 +181,45 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         body = decode_json_body(raw_body)
         
         try:
-            entry = body.get("entry", [{}])[0]
-            changes = entry.get("changes", [{}])[0]
-            value = changes.get("value", {})
-            messages = value.get("messages", [])
+            # p518: iterate ALL entries/changes (was [0] only), attribute the
+            # message to its tenant via metadata.phone_number_id, and dedupe on
+            # Meta retries via a deterministic id
+            for entry in body.get("entry", []):
+                for change in entry.get("changes", []):
+                    value = change.get("value", {})
+                    phone_id = (value.get("metadata") or {}).get("phone_number_id", "")
+                    tenant_id, tdb = await resolve_tenant_by_phone_id(phone_id)
+                    if tdb is None:
+                        # p518: no tenant claims this phone_number_id — the message
+                        # has no possible reader; log and skip instead of orphaning
+                        logger.warning(f"WhatsApp webhook: unattributed phone_number_id={phone_id}")
+                        continue
+                    for msg in value.get("messages", []):
+                        sender = msg.get("from", "")
+                        text = msg.get("text", {}).get("body", "")
+                        msg_type = msg.get("type", "text")
 
-            for msg in messages:
-                sender = msg.get("from", "")
-                text = msg.get("text", {}).get("body", "")
-                msg_type = msg.get("type", "text")
+                        # Parse command
+                        parsed = parse_whatsapp_command(text)
 
-                # Parse command
-                parsed = parse_whatsapp_command(text)
-
-                # Log incoming message
-                message_log = {
-                    "id": str(uuid.uuid4()),
-                    "direction": "incoming",
-                    "from": sender,
-                    "message": text,
-                    "message_type": msg_type,
-                    "parsed_command": parsed,
-                    "status": "received",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-                await db.whatsapp_messages.insert_one(message_log)
+                        # Log incoming message
+                        dedupe_id = f"wa:{msg['id']}" if msg.get("id") else str(uuid.uuid4())
+                        message_log = {
+                            "_id": dedupe_id,  # deterministic _id → Meta retries dedupe
+                            "id": dedupe_id,
+                            "tenant_id": tenant_id,
+                            "direction": "incoming",
+                            "from": sender,
+                            "message": text,
+                            "message_type": msg_type,
+                            "parsed_command": parsed,
+                            "status": "received",
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        try:
+                            await tdb.whatsapp_messages.insert_one(message_log)
+                        except DuplicateKeyError:
+                            pass  # Meta retry of an already-stored message
 
         except Exception as e:
             logger.error(f"WhatsApp webhook error: {e}")
@@ -245,18 +283,32 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
     async def list_templates(current_user: dict = Depends(get_current_user)):
         return await db.whatsapp_templates.find({}, {"_id": 0}).to_list(200)
 
+    def _require_template_admin(user: dict):
+        # p518: templates shape business messaging — admin/manager only
+        if user.get("role") not in ("admin", "manager", "tenant_admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="إدارة القوالب متاحة للإدارة فقط")
+
     @router.post("/templates", status_code=201)
     async def create_template(tpl: TemplateBody, current_user: dict = Depends(get_current_user)):
-        if await db.whatsapp_templates.find_one({"name": tpl.name}):
+        _require_template_admin(current_user)
+        name = (tpl.name or "").strip()
+        body = (tpl.body or "").strip()
+        if not name or not body:
+            raise HTTPException(status_code=400, detail="اسم القالب ونصه مطلوبان")
+        if await db.whatsapp_templates.find_one({"name": name}):
             raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
         doc = {"id": str(uuid.uuid4()), **tpl.model_dump(),
                "created_at": datetime.now(timezone.utc).isoformat()}
+        doc["name"], doc["body"] = name, body
         await db.whatsapp_templates.insert_one(dict(doc))
         doc.pop("_id", None)
         return doc
 
     @router.put("/templates/{template_id}")
     async def update_template(template_id: str, tpl: TemplateBody, current_user: dict = Depends(get_current_user)):
+        _require_template_admin(current_user)
+        if not (tpl.name or "").strip() or not (tpl.body or "").strip():
+            raise HTTPException(status_code=400, detail="اسم القالب ونصه مطلوبان")
         res = await db.whatsapp_templates.update_one({"id": template_id}, {"$set": tpl.model_dump()})
         if res.matched_count == 0:
             raise HTTPException(status_code=404, detail="القالب غير موجود")
@@ -264,6 +316,7 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
 
     @router.delete("/templates/{template_id}")
     async def delete_template(template_id: str, current_user: dict = Depends(get_current_user)):
+        _require_template_admin(current_user)
         await db.whatsapp_templates.delete_one({"id": template_id})
         return {"message": "تم حذف القالب"}
 
