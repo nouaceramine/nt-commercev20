@@ -31,6 +31,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from pymongo.errors import PyMongoError
 
 from config.database import db, main_db, get_tenant_db
 from utils.auth import require_tenant
@@ -39,7 +40,46 @@ from routes.ecom.constants import require_ecom_feature
 logger = logging.getLogger(__name__)
 
 OPEN_STATUSES = ("packed", "shipped", "out_for_delivery")
-MAX_TENANTS_SCAN = 50
+# p520: أُزيل سقف المسح MAX_TENANTS_SCAN=50 — راجع _find_driver
+
+_tok_idx_ready = False  # p520: فهرس خريطة توكن السائق يُنشأ كسولًا مرة واحدة
+
+
+async def _ensure_token_index():
+    """p520: فهرس فريد على driver_token_map.token — حلّ التوكن O(1) بدل مسح
+    قواعد المستأجرين (سقف MAX_TENANTS_SCAN كان يُسقط روابط السائقين 404 بعد
+    خمسين مستأجرًا نشطًا). كسول ومتماثل — لا يُسقط الطلب عند فشله."""
+    global _tok_idx_ready
+    if _tok_idx_ready:
+        return
+    try:
+        await main_db.driver_token_map.create_index(
+            "token", unique=True, name="p520_driver_token")
+    except PyMongoError as exc:
+        logger.warning("driver token map index: %s", exc)
+    _tok_idx_ready = True
+
+
+async def _map_token(token: str, tenant_id: str, driver_id: str) -> None:
+    """p520: upsert token→tenant mapping (called on create/rotate/backfill)."""
+    try:
+        await _ensure_token_index()
+        await main_db.driver_token_map.update_one(
+            {"token": token},
+            {"$set": {"token": token, "tenant_id": tenant_id, "driver_id": driver_id,
+                      "updated_at": _now()}},
+            upsert=True)
+    except PyMongoError as exc:  # الخريطة تسريع فقط؛ المسح الاحتياطي يكفي
+        logger.warning("driver token map upsert: %s", exc)
+
+
+async def _unmap_token(token: str = "", driver_id: str = "") -> None:
+    """p520: drop mapping on token rotate / driver deactivate / delete."""
+    try:
+        flt = {"token": token} if token else {"driver_id": driver_id}
+        await main_db.driver_token_map.delete_many(flt)
+    except PyMongoError as exc:
+        logger.warning("driver token map delete: %s", exc)
 
 
 class DriverIn(BaseModel):
@@ -96,18 +136,43 @@ def _brief(o: dict) -> dict:
 
 
 async def _find_driver(token: str):
-    """-> (tenant, driver) scanning active tenants; token is a secret so the
-    scan order is irrelevant. Test tenants excluded."""
-    tenants = await main_db.saas_tenants.find(
+    """-> (tenant, driver). p520: جرّب خريطة token→tenant المفهرسة أولًا (O(1)،
+    بلا سقف لعدد المستأجرين)؛ عند الغياب اسقط لمسح كامل غير محدود (للتوكنات
+    السابقة لـp520 — سقف MAX_TENANTS_SCAN=50 كان يُسقط روابط السائقين 404 بعد
+    خمسين مستأجرًا نشطًا) مع ملء الخريطة عند النجاح. التوكن سرّي فترتيب المسح
+    لا يهم. المستأجرون الاختباريون مستثنون من المسح."""
+    try:
+        m = await main_db.driver_token_map.find_one(
+            {"token": token}, {"_id": 0, "tenant_id": 1})
+    except PyMongoError:
+        m = None
+    if m:
+        try:
+            d = await get_tenant_db(m["tenant_id"]).ecom_drivers.find_one(
+                {"token": token, "active": {"$ne": False}}, {"_id": 0})
+        except Exception:  # noqa: BLE001
+            d = None
+        if d:
+            t = await main_db.saas_tenants.find_one(
+                {"id": m["tenant_id"], "is_active": {"$ne": False}},
+                {"_id": 0, "id": 1, "name": 1})
+            if t:
+                return t, d
+        # خريطة قديمة (سائق حُذف/عُطّل/دوّر توكنه) — نظّفها واسقط للمسح
+        await _unmap_token(token=token)
+    # p520: مسح كامل بلا سقف — مسار احتياطي للتوكنات القديمة فقط، يُملأ
+    # منه map فلا يتكرر لنفس التوكن
+    cursor = main_db.saas_tenants.find(
         {"is_active": {"$ne": False}, "is_permanent_test": {"$ne": True}},
-        {"_id": 0, "id": 1, "name": 1}).to_list(MAX_TENANTS_SCAN)
-    for t in tenants:
+        {"_id": 0, "id": 1, "name": 1})
+    async for t in cursor:
         try:
             d = await get_tenant_db(t["id"]).ecom_drivers.find_one(
                 {"token": token, "active": {"$ne": False}}, {"_id": 0})
         except Exception:  # noqa: BLE001
             continue
         if d:
+            await _map_token(token, t["id"], d["id"])  # p520: backfill
             return t, d
     return None, None
 
@@ -135,6 +200,8 @@ def create_driver_routes() -> dict:
             "updated_at": now,
         }
         await db.ecom_drivers.insert_one(doc)
+        if user.get("tenant_id"):
+            await _map_token(doc["token"], user["tenant_id"], doc["id"])  # p520
         doc.pop("_id", None)
         return {"ok": True, "driver": doc}
 
@@ -167,6 +234,13 @@ def create_driver_routes() -> dict:
         if body.rotate_token:
             updates["token"] = _new_token()
         await db.ecom_drivers.update_one({"id": driver_id}, {"$set": updates})
+        # p520: حافظ على خريطة التوكن — القديم يموت عند التدوير/التعطيل
+        if body.rotate_token:
+            await _unmap_token(token=d.get("token", ""))
+            if user.get("tenant_id") and updates.get("active", d.get("active")) is not False:
+                await _map_token(updates["token"], user["tenant_id"], driver_id)
+        elif updates.get("active") is False:
+            await _unmap_token(token=d.get("token", ""))
         out = await db.ecom_drivers.find_one({"id": driver_id}, {"_id": 0})
         return {"ok": True, "driver": out}
 
@@ -179,6 +253,7 @@ def create_driver_routes() -> dict:
         res = await db.ecom_drivers.delete_one({"id": driver_id})
         if not res.deleted_count:
             raise HTTPException(status_code=404, detail="السائق غير موجود")
+        await _unmap_token(driver_id=driver_id)  # p520
         return {"ok": True}
 
     @tenant_router.put("/ecom/orders/{order_id}/driver")
