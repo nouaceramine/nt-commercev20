@@ -85,7 +85,7 @@ def record_request_time(duration: float, path: str) -> dict:
         _request_times.pop(0)
 
 
-def create_performance_routes(db, get_current_user) -> dict:
+def create_performance_routes(db, get_current_user, get_tenant_admin) -> dict:  # p524
     """Create performance monitoring routes"""
 
     @router.get("/stats")
@@ -111,7 +111,7 @@ def create_performance_routes(db, get_current_user) -> dict:
         }
 
     @router.post("/clear-cache")
-    async def api_clear_cache(current_user: dict = Depends(get_current_user)):
+    async def api_clear_cache(current_user: dict = Depends(get_tenant_admin)):  # p524: diagnostic tool, no UI consumer — admin only
         """Clear all caches"""
         clear_cache()
         return {"success": True, "message": "تم مسح الكاش بنجاح"}

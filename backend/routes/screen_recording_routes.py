@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from config.database import main_db
-from utils.auth import require_tenant
+from utils.auth import get_current_user, require_tenant
+from utils.permissions import create_cashier_block
+
+# p524: the /screen-recording page is hidden from cashiers — device mutations match the UI
+block_cashier = create_cashier_block(get_current_user)
 
 log = logging.getLogger("screen_recording")
 
@@ -75,7 +79,7 @@ async def list_devices(user: dict = Depends(require_tenant)):
 
 
 @router.post("/devices")
-async def create_device(body: DeviceIn, user: dict = Depends(require_tenant)):
+async def create_device(body: DeviceIn, user: dict = Depends(block_cashier)):  # p524
     name = (body.device_name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="اسم الجهاز مطلوب")
@@ -102,7 +106,7 @@ async def create_device(body: DeviceIn, user: dict = Depends(require_tenant)):
 
 
 @router.put("/devices/{device_id}")
-async def update_device(device_id: str, body: DeviceUpdate, user: dict = Depends(require_tenant)):
+async def update_device(device_id: str, body: DeviceUpdate, user: dict = Depends(block_cashier)):  # p524
     tenant_id = user.get("tenant_id") or user.get("id")
     raw = body.dict(exclude_unset=True)
     updates = {"updated_at": _now()}
@@ -128,7 +132,7 @@ async def update_device(device_id: str, body: DeviceUpdate, user: dict = Depends
 
 
 @router.delete("/devices/{device_id}")
-async def delete_device(device_id: str, user: dict = Depends(require_tenant)):
+async def delete_device(device_id: str, user: dict = Depends(block_cashier)):  # p524
     tenant_id = user.get("tenant_id") or user.get("id")
     res = await main_db.screen_recording_devices.delete_one({"id": device_id, "tenant_id": tenant_id})
     if res.deleted_count == 0:

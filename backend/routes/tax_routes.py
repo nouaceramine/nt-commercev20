@@ -40,7 +40,7 @@ class TaxReportResponse(BaseModel):
     summary: dict
 
 
-def create_tax_routes(db, get_current_user) -> dict:
+def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cashier block
     """Create tax routes with dependencies"""
 
     @router.get("/rates")
@@ -65,7 +65,7 @@ def create_tax_routes(db, get_current_user) -> dict:
     @router.post("/rates")
     async def create_tax_rate(
         rate: TaxRate,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier),  # p524: UI hides /tax-reports from cashiers
     ):
         rate_doc = rate.model_dump()
         rate_doc["id"] = str(uuid.uuid4())
@@ -223,7 +223,7 @@ def create_tax_routes(db, get_current_user) -> dict:
     @router.post("/declarations")
     async def create_tax_declaration(
         period: TaxPeriod,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier),  # p524
     ):
         """Create/file a tax declaration"""
         # Generate the report first

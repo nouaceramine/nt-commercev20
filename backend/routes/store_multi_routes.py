@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from config.database import db, main_db
-from utils.auth import require_tenant
+from utils.auth import require_tenant, get_tenant_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["multi-store"])
@@ -66,7 +66,7 @@ async def _get_store(store_id: str) -> dict:
 
 
 @router.post("/store/multi")
-async def create_store(body: StoreIn, user: dict = Depends(require_tenant)):
+async def create_store(body: StoreIn, user: dict = Depends(get_tenant_admin)):  # p524: UI route is adminOnly; writes global store_slugs registry
     name = (body.name or "").strip()
     slug = (body.slug or "").strip().lower()
     if not name:
@@ -118,7 +118,7 @@ async def list_stores(user: dict = Depends(require_tenant)):
 
 
 @router.put("/store/multi/{store_id}")
-async def update_store(store_id: str, body: StoreUpdate, user: dict = Depends(require_tenant)):
+async def update_store(store_id: str, body: StoreUpdate, user: dict = Depends(get_tenant_admin)):  # p524
     _store = await _get_store(store_id)
     updates = {"updated_at": _now()}
     if body.name is not None:
@@ -148,7 +148,7 @@ async def update_store(store_id: str, body: StoreUpdate, user: dict = Depends(re
 
 
 @router.delete("/store/multi/{store_id}")
-async def delete_store(store_id: str, user: dict = Depends(require_tenant)):
+async def delete_store(store_id: str, user: dict = Depends(get_tenant_admin)):  # p524
     _store = await _get_store(store_id)
     # detach (not delete) catalog entries — products themselves are untouched
     await db.store_products.delete_many({"store_id": store_id})
@@ -158,7 +158,7 @@ async def delete_store(store_id: str, user: dict = Depends(require_tenant)):
 
 
 @router.post("/store/multi/{store_id}/products")
-async def attach_products(store_id: str, body: ProductsIn, user: dict = Depends(require_tenant)):
+async def attach_products(store_id: str, body: ProductsIn, user: dict = Depends(get_tenant_admin)):  # p524
     await _get_store(store_id)
     if not body.product_ids:
         raise HTTPException(status_code=400, detail="لا منتجات")
@@ -182,7 +182,7 @@ async def attach_products(store_id: str, body: ProductsIn, user: dict = Depends(
 
 
 @router.delete("/store/multi/{store_id}/products/{product_id}")
-async def detach_product(store_id: str, product_id: str, user: dict = Depends(require_tenant)):
+async def detach_product(store_id: str, product_id: str, user: dict = Depends(get_tenant_admin)):  # p524
     res = await db.store_products.delete_one({"product_id": product_id, "store_id": store_id})
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="المنتج غير مرتبط بهذا المتجر")

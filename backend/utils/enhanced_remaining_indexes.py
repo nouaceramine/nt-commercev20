@@ -143,7 +143,16 @@ async def create_enhanced_remaining_indexes(db):
     await db.webhooks.create_index([("tenant_id", 1), ("url", 1)])
     await db.webhook_deliveries.create_index([("tenant_id", 1), ("webhook_id", 1), ("created_at", -1)])
     await db.api_keys.create_index("id", unique=True)
-    await db.api_keys.create_index([("tenant_id", 1), ("key", 1)], unique=True)
+    # p524: legacy (tenant_id, key) unique index predates the current schema which
+    # stores `api_key` (no `key` field) — every new doc indexed key=null and the 2nd
+    # insert per tenant_id raised DuplicateKeyError (500). Sparse excludes docs
+    # without `key`; drop-and-recreate reconciles already-built non-sparse indexes.
+    _ak_idx = await db.api_keys.index_information()
+    if "tenant_id_1_key_1" in _ak_idx and not _ak_idx["tenant_id_1_key_1"].get("partialFilterExpression"):
+        await db.api_keys.drop_index("tenant_id_1_key_1")
+    await db.api_keys.create_index(
+        [("tenant_id", 1), ("key", 1)], unique=True,
+        partialFilterExpression={"key": {"$type": "string"}})
     indexes_created.append("developer: webhooks, webhook_deliveries, api_keys")
 
     return indexes_created
