@@ -1,3 +1,16 @@
+## 2026-11-15 — P524: «المبيعات والزبائن» — الترحيل والمزامنة والإعدادات والتكاملات المتبقية (34 صفًا × خلية الصلاحيات/العزل — إغلاق النطاق)
+
+- **النطاق:** آخر 34 صفًا معلقة بالنطاق (ترحيل ×4: legacy/jobs وrollback وlive/tokens وlive/push؛ إعدادات ومزامنة ×6: features وreceipt وsync/configs وlock-settings وreset-datetime وsidebar-order GET/PUT؛ رفع ×1؛ عملات ×1؛ ضرائب ×2؛ أداء ×1؛ مركز تكاملات ×3؛ init-default-data؛ OCR ومفاتيح ×2؛ طباعة ×3؛ security/api-keys؛ blacklist؛ Yalidine؛ Idoom؛ SIM؛ event-bus replay/ack؛ screen-recording devices؛ store/multi) — 162 فحصًا حيًا داخل حاوية staging بمستأجرين A/B وخمسة أدوار.
+- **العيوب الخمسة (كلها مغلقة):** P524-001 (متوسطة RBAC) tax/rates + tax/declarations يقبلان الكاشير رغم إخفاء /tax-reports عنه ⇒ block_cashier؛ P524-002 (منخفضة) performance/clear-cache بأي دور وبلا مستهلك واجهة ⇒ get_tenant_admin؛ P524-003 (متوسطة RBAC) سجل أجهزة مراقبة الشاشات يقبل الكاشير ⇒ block_cashier على POST/PUT/DELETE؛ P524-004 (عالية RBAC/عزل) store/multi بأي دور رغم adminOnly في الواجهة مع كتابة سجل store_slugs العالمي (احتلال روابط عابر للمستأجرين) ⇒ get_tenant_admin على المسارات الخمسة؛ P524-005 (متوسطة سلامة) فهرس api_keys(tenant_id,key) الفريد القديم يكسر إنشاء ثاني مفتاح (key=null دائمًا ⇒ DuplicateKeyError 500؛ sparse لا يكفي في المركب) ⇒ partialFilterExpression key:string مع مصالحة إسقاط/إعادة عند الإقلاع.
+- **النتيجة:** خط الأساس 148/162 ⇒ بعد الإصلاح **162/162 × ثلاث جولات متتالية**؛ residue=0 في كل جولة.
+- **تأكيدات:** دفع وكيل المزامنة يهبط في قاعدة مستأجره فقط ومتماثل (uid5) وسقف 3 وكلاء؛ الرفع محكم (نوع+بايتات+5MB)؛ القائمة السوداء لا تتجاوز القاعدة (زبون B بنفس الهاتف غير معلّم)؛ قوالب الطباعة ومتاجر A معزولة عن B (404 عابر)؛ مسارات المنصة (sync/configs وlock-settings وsecurity/api-keys وevent-bus) للسوبر أدمن حصرًا.
+- **الانحدار:** نواة 83/83؛ green ‏154/154 staging (بلا test_kyc — انحراف موروث)؛ live ‏243/243 (28 ملفًا)؛ Ruff على خط الأساس لكل ملف؛ git diff --check نظيف.
+- **النشر:** e9362ee مدفوع لـ origin/main؛ restart للإنتاج وstaging؛ health ‏200 محليًا وCloudflare؛ md5 repo≡staging للملفات الخمسة؛ حراسات مجهول 401 ×16 على الإنتاج عبر Cloudflare؛ OpenAPI ‏1270 بلا تغيير؛ الفهرس الجزئي مطبق إنتاجيًا؛ بلا تغيير واجهة (لا بناء).
+- **النسخ الاحتياطية قبل الرقعة:** /opt/ntcommerce/backups/p524/ (الملفات الخمسة الأصلية).
+- **بقايا:** صفر TEST-P524 على staging والإنتاج.
+- **إغلاق النطاق:** «المبيعات والزبائن» بلا صفوف معلقة في خلية الصلاحيات/العزل (كانت 52 ← 34 ← 0).
+
+
 ## 2026-11-15 — P523: «المبيعات والزبائن» — أدوات الذكاء والروبوتات والأحداث المجدولة (18 صفًا × خلية الصلاحيات/العزل)
 
 - **النطاق:** 18 صفًا (ذكاء Gemini ×4؛ محاسب ذكي ×5: chat وinsights/dismiss وagents/run وclassify-expense وextract-invoice؛ مساعد ذكي ×2؛ روبوتات ×5: restart/run/stop-all/start-all/interval؛ أحداث مجدولة ×2: reservation.reminder وscheduled_order.reminder) — 100 فحص حي داخل حاوية staging بمستأجرين A/B وخمسة أدوار وثلاثة مستمعي SSE موسومين TEST-P523.
