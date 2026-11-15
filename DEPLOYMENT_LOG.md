@@ -1,3 +1,15 @@
+## 2026-11-15 — P523: «المبيعات والزبائن» — أدوات الذكاء والروبوتات والأحداث المجدولة (18 صفًا × خلية الصلاحيات/العزل)
+
+- **النطاق:** 18 صفًا (ذكاء Gemini ×4؛ محاسب ذكي ×5: chat وinsights/dismiss وagents/run وclassify-expense وextract-invoice؛ مساعد ذكي ×2؛ روبوتات ×5: restart/run/stop-all/start-all/interval؛ أحداث مجدولة ×2: reservation.reminder وscheduled_order.reminder) — 100 فحص حي داخل حاوية staging بمستأجرين A/B وخمسة أدوار وثلاثة مستمعي SSE موسومين TEST-P523.
+- **العيوب الثلاثة (كلها مغلقة):** P523-001 (عالية) مسارات الروبوتات الخمسة تقبل seller (block_cashier يحجب الكاشير فقط) رغم أنها بنية منصّية على main_db تعبر كل المستأجرين ⇒ get_tenant_admin؛ P523-002 (متوسطة) 7 مسارات ذكاء تقبل الكاشير رغم إخفاء الواجهة لها عنه ⇒ create_cashier_block في مصنعي chat_routes وai_assistant_routes؛ P523-003 (متوسطة) /ai/chat يقبل session_id مستخدم آخر (حقن 2⇒4 رسائل) ⇒ فحص ملكية 403 قبل LLM وبقاء إعادة استخدام المالك سليمة.
+- **النتيجة:** خط الأساس 86/100 ⇒ بعد الإصلاح 100/100 × ثلاث جولات متتالية؛ residue=0 في كل جولة.
+- **تأكيدات:** مسارات Gemini الأربعة مؤمّنة أصلًا بـget_tenant_admin؛ جلسات المحادثة والرؤى وسجلات الوكلاء لا تغادر قاعدة المستأجر (عابر ⇒ 404)؛ بث SSE مُصفّى بالمستأجر (حدث A لـA فقط؛ platform للسوبر أدمن حصرًا)؛ outbox يخزن tenant_id الصحيح؛ فترة الروبوت تُثبت في robot_config وتُستعاد.
+- **الانحدار:** نواة 83/83؛ green ‏154/154 staging (بلا test_kyc — انحراف موروث)؛ live ‏243/243 (28 ملفًا)؛ Ruff نظيف بإعداد المشروع على الملفات الثلاثة؛ git diff --check نظيف.
+- **النشر:** 626f65c مدفوع لـ origin/main؛ restart للإنتاج وstaging؛ health ‏200 محليًا وCloudflare؛ md5 repo≡staging للملفات الثلاثة؛ حراسات مجهول 401 ×16 على الإنتاج عبر Cloudflare؛ OpenAPI ‏1270 بلا تغيير؛ بلا تغيير واجهة (لا بناء).
+- **النسخ الاحتياطية قبل الرقعة:** /opt/ntcommerce/backups/p523/ (الملفات الثلاثة الأصلية).
+- **ملاحظة موثقة:** تحكم إداري المستأجر بالروبوتات أثره منصّي (ميزة ai_bots مباعة — قرار منتج لاحق)؛ مسارات GET الذكية تقبل الكاشير — خارج النطاق وتُرحَّل.
+
+
 ## 2026-11-15 — P522: «المبيعات والزبائن» — النسخ الاحتياطي وأدوات النظام (15 صفًا × 5 خلايا)
 
 - **النطاق:** 15 صفًا (نسخ احتياطي ×7: schema-version/sync وauto-settings وrun-auto وsave-to-server وglobal وrestore-upload وschedules؛ سجلات ×2: system-logs وanalyze؛ تحديثات ×2: announcements وpush-settings؛ أدوات مدمرة ×2: factory-reset وselective-delete؛ تشخيص ×2: clear-error وreset-circuit) — 149 فحصًا حيًا داخل حاوية staging بمستأجرين A/B + C بقاعدة باسم نشاط (nt_rs_9522) موسومين TEST-P522.
