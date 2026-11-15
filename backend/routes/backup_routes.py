@@ -22,6 +22,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pathlib import Path
+from pydantic import BaseModel, Field
+from typing import Literal
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,30 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 SCHEMA_VERSION = "2.0.0"
 MAX_BACKUP_UPLOAD_BYTES = int(os.environ.get("BACKUP_MAX_UPLOAD_BYTES", 100 * 1024 * 1024))
 MAX_BACKUP_JSON_BYTES = int(os.environ.get("BACKUP_MAX_JSON_BYTES", 512 * 1024 * 1024))
+
+# p522: bounded per-tenant resource use (anti disk-fill)
+MAX_TENANT_BACKUPS = 30
+MAX_TENANT_SCHEDULES = 10
+_TIME_RE = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class AutoBackupSettingsIn(BaseModel):
+    # p522-002: validated tenant auto-backup settings (UI sends exactly these)
+    enabled: bool = False
+    frequency: Literal["daily", "weekly", "monthly"] = "daily"
+    time: str = Field(default="03:00", pattern=_TIME_RE)
+    keep_count: int = Field(default=7, ge=1, le=365)
+    include_uploads: bool = True
+
+
+class BackupScheduleIn(BaseModel):
+    # p522-004: validated backup schedule
+    frequency: Literal["daily", "weekly", "monthly"] = "daily"
+    time: str = Field(default="02:00", pattern=_TIME_RE)
+    format: Literal["json.gz", "json"] = "json.gz"
+    auto_email: bool = False
+    email_to: str = Field(default="", max_length=320)
+    keep_last: int = Field(default=7, ge=1, le=365)
 
 
 def _read_limited(stream, limit: int) -> bytes:
@@ -195,6 +223,46 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
             raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
         return backup
 
+    # ── p522: race-safe per-tenant slot caps (backup_counters doc per tenant) ──
+    async def _slot_actual(entity_id: str, kind: str) -> int:
+        if kind == "sched":
+            return await main_db.backup_schedules.count_documents(
+                {"entity_type": "tenant", "entity_id": entity_id})
+        return await main_db.backups.count_documents(
+            {"entity_type": "tenant", "entity_id": entity_id,
+             "backup_type": {"$nin": ["pre_restore_snapshot", "restore"]}})
+
+    async def _claim_slot(entity_id: str, kind: str, cap: int) -> bool:
+        counters = main_db.backup_counters
+        doc = await counters.find_one({"_id": entity_id})
+        if doc is None:
+            try:
+                await counters.insert_one({"_id": entity_id,
+                                           "manual": await _slot_actual(entity_id, "manual"),
+                                           "sched": await _slot_actual(entity_id, "sched")})
+            except DuplicateKeyError:
+                pass
+        elif kind not in doc:
+            # counter created by the other kind — initialise this kind once
+            await counters.update_one({"_id": entity_id},
+                                      {"$set": {kind: await _slot_actual(entity_id, kind)}})
+        claimed = await counters.find_one_and_update(
+            {"_id": entity_id, kind: {"$lt": cap}}, {"$inc": {kind: 1}},
+            return_document=ReturnDocument.AFTER)
+        return claimed is not None
+
+    async def _release_slot(entity_id: str, kind: str) -> None:
+        if entity_id:
+            await main_db.backup_counters.update_one(
+                {"_id": entity_id, kind: {"$gt": 0}}, {"$inc": {kind: -1}})
+
+    def _require_tenant_scope(admin: dict) -> None:
+        # p522-001: without a tenant context the `db` proxy targets main_db —
+        # dumping it leaks platform data, restoring/wiping it is catastrophic.
+        if not admin.get("tenant_id"):
+            raise HTTPException(status_code=400,
+                                detail="هذه العملية متاحة ضمن سياق مستأجر فقط")
+
     def _file_exists(filename: str) -> bool:
         try:
             return _backup_path(filename).is_file()
@@ -288,9 +356,10 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         return doc
 
     @router.post("/auto-settings")
-    async def save_auto_settings(data: dict, user: dict = Depends(get_current_user)):
+    async def save_auto_settings(data: AutoBackupSettingsIn, user: dict = Depends(get_tenant_admin)):
+        # p522-002: backup policy is an admin decision (the settings tab is adminOnly)
         entity_id = user.get("tenant_id", user.get("id", ""))
-        doc = dict(data)
+        doc = data.model_dump()
         doc["entity_id"] = entity_id
         doc["updated_at"] = datetime.now(timezone.utc).isoformat()
         await main_db.backup_auto_settings.update_one(
@@ -330,6 +399,11 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
         total_records = _count_records(db_data)
         entity_id = admin.get("tenant_id", admin.get("id", ""))
+        _require_tenant_scope(admin)  # p522-001
+        # p522-003: bounded per-tenant storage (race-safe slot claim)
+        if not await _claim_slot(entity_id, "manual", MAX_TENANT_BACKUPS):
+            raise HTTPException(status_code=400,
+                                detail=f"بلغت الحد الأقصى من النسخ المحفوظة ({MAX_TENANT_BACKUPS}) — احذف النسخ القديمة أولاً")
         ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         count = await main_db.backups.count_documents({}) + 1
         backup_num = f"BKP-{count:05d}-{uuid.uuid4().hex[:6]}"
@@ -346,7 +420,11 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
             "records_count": total_records,
             "data": db_data,
         }
-        file_size = await _write_to_disk(filename, envelope)
+        try:
+            file_size = await _write_to_disk(filename, envelope)
+        except Exception:
+            await _release_slot(entity_id, "manual")  # p522-003
+            raise
 
         record = {
             "id": str(uuid.uuid4()),
@@ -365,7 +443,15 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
             "is_encrypted": False,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        await main_db.backups.insert_one(record)
+        try:
+            await main_db.backups.insert_one(record)
+        except Exception:
+            await _release_slot(entity_id, "manual")  # p522-003
+            try:
+                _backup_path(filename).unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         record.pop("_id", None)
         return record
 
@@ -476,6 +562,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
 
     @router.post("/{backup_id}/restore")
     async def restore_backup(backup_id: str, admin: dict = Depends(get_tenant_admin)):
+        _require_tenant_scope(admin)  # p522-001
         backup = await _owned_backup(backup_id, admin)
         fname = backup.get("file_name", "")
         envelope = await _read_from_disk(fname)
@@ -550,7 +637,9 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         file: UploadFile = File(...)
     ):
         """Upload a .json or .json.gz backup file and restore from it."""
-        if not (file.filename.endswith('.json') or file.filename.endswith('.json.gz') or file.filename.endswith('.gz')):
+        _require_tenant_scope(admin)  # p522-001
+        _upname = file.filename or ""
+        if not (_upname.endswith('.json') or _upname.endswith('.json.gz') or _upname.endswith('.gz')):
             raise HTTPException(status_code=400, detail="الملف يجب أن يكون بصيغة .json أو .json.gz")
 
         chunks = []
@@ -565,7 +654,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
             chunks.append(chunk)
         content = b"".join(chunks)
         try:
-            if file.filename.endswith('.gz'):
+            if _upname.endswith('.gz'):
                 with gzip.GzipFile(fileobj=io.BytesIO(content), mode="rb") as gz:
                     raw = _read_limited(gz, MAX_BACKUP_JSON_BYTES)
             else:
@@ -618,6 +707,9 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
                 logger.warning("Could not delete owned backup file: %s", type(e).__name__)
                 raise HTTPException(status_code=500, detail="تعذر حذف ملف النسخة الاحتياطية")
         await main_db.backups.delete_one(_owner_query(admin, id=backup_id))
+        # p522-003: deleting a manual backup frees the tenant's slot
+        if b.get("backup_type") not in ("pre_restore_snapshot", "restore"):
+            await _release_slot(b.get("entity_id", ""), "manual")
         return {"message": "تم حذف النسخة الاحتياطية من القاعدة والقرص"}
 
     # ────────────────────────────────────────────────
@@ -625,21 +717,25 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
     # ────────────────────────────────────────────────
 
     @router.post("/schedules")
-    async def create_schedule(data: dict, admin: dict = Depends(get_tenant_admin)):
+    async def create_schedule(data: BackupScheduleIn, admin: dict = Depends(get_tenant_admin)):
+        entity_id = admin.get("tenant_id", admin.get("id", ""))
+        # p522-004: bounded schedule count per tenant (race-safe slot claim)
+        if not await _claim_slot(entity_id, "sched", MAX_TENANT_SCHEDULES):
+            raise HTTPException(status_code=400,
+                                detail=f"بلغت الحد الأقصى من جداول النسخ ({MAX_TENANT_SCHEDULES}) — احذف جدولاً قديماً أولاً")
         schedule = {
             "id": str(uuid.uuid4()),
             "entity_type": "tenant",
-            "entity_id": admin.get("tenant_id", admin.get("id", "")),
-            "frequency": data.get("frequency", "daily"),
-            "time": data.get("time", "02:00"),
-            "format": data.get("format", "json.gz"),
-            "auto_email": data.get("auto_email", False),
-            "email_to": data.get("email_to", ""),
-            "keep_last": data.get("keep_last", 7),
+            "entity_id": entity_id,
+            **data.model_dump(),
             "is_active": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        await main_db.backup_schedules.insert_one(schedule)
+        try:
+            await main_db.backup_schedules.insert_one(schedule)
+        except Exception:
+            await _release_slot(entity_id, "sched")
+            raise
         schedule.pop("_id", None)
         return schedule
 
@@ -660,6 +756,7 @@ def create_backup_routes(db, main_db, get_current_user, get_tenant_admin, get_su
         result = await main_db.backup_schedules.delete_one(_owner_query(admin, id=schedule_id))
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="جدول النسخ الاحتياطي غير موجود")
+        await _release_slot(admin.get("tenant_id", admin.get("id", "")), "sched")  # p522-004
         return {"message": "تم حذف الجدول"}
 
     return router

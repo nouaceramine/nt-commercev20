@@ -4,8 +4,8 @@ System Sync Routes
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, Field
+from typing import Optional, List, Literal
 from datetime import datetime, timezone
 import uuid
 import io
@@ -530,13 +530,14 @@ async def get_product_sales_tracking(
 
 
 class AnnouncementCreate(BaseModel):
-    title_ar: str
-    title_fr: str = ""
-    message_ar: str
-    message_fr: str = ""
-    type: str = "info"  # info, feature, maintenance, warning, promotion
-    priority: str = "normal"  # low, normal, high, urgent
-    target: str = "all"  # all, active
+    # p522-009: bounded, validated announcement fields (fanout amplifies size)
+    title_ar: str = Field(min_length=1, max_length=200)
+    title_fr: str = Field(default="", max_length=200)
+    message_ar: str = Field(min_length=1, max_length=4000)
+    message_fr: str = Field(default="", max_length=4000)
+    type: Literal["info", "feature", "maintenance", "warning", "promotion"] = "info"
+    priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    target: Literal["all", "active"] = "all"
 
 
 class SettingsPush(BaseModel):
@@ -676,14 +677,23 @@ async def push_settings(data: SettingsPush, admin: dict = Depends(get_super_admi
                 admin_settings["pos"] = settings
 
     # Get all active tenants
+    # p522-007: the old projection carried only `database_name` — a field tenant
+    # documents never have — so tenant["id"] raised KeyError for every tenant,
+    # the blanket except swallowed it, and NOTHING was ever pushed. Worse, the
+    # resolve_db_name fallback targeted legacy phantom DBs for p347-named tenants.
     tenants = await db.saas_tenants.find(
-        {"status": "active"}, {"database_name": 1}
+        {"status": "active"}, {"id": 1, "db_name": 1, "database_name": 1}
     ).to_list(1000)
 
     updated_count = 0
     for tenant in tenants:
         try:
-            tenant_db = client[tenant.get("database_name") or resolve_db_name(tenant["id"])]
+            db_name = (tenant.get("db_name") or tenant.get("database_name")
+                       or resolve_db_name(tenant.get("id", "")))
+            if not db_name:
+                continue
+            tenant_db = client[db_name]
+            applied = False  # p522-008: count only tenants actually updated
             for key, value in admin_settings.items():
                 if key == "receipt":
                     await tenant_db.settings.update_one(
@@ -701,9 +711,11 @@ async def push_settings(data: SettingsPush, admin: dict = Depends(get_super_admi
                     await tenant_db.settings.update_one(
                         {"type": "pos"}, {"$set": value}, upsert=True
                     )
-            updated_count += 1
+                applied = True
+            if applied:
+                updated_count += 1
         except Exception as e:
-            print(f"Error updating tenant {tenant.get('database_name')}: {e}")
+            logger.error("push_settings: tenant %s failed: %s", tenant.get("id"), e)
 
     # Log the action
     await db.system_logs.insert_one(

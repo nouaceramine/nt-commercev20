@@ -14,6 +14,15 @@ from openpyxl import Workbook, load_workbook
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 
+def _is_transient_tx(exc) -> bool:
+    # p522-006: retryable multi-document transaction errors
+    try:
+        return bool(exc.has_error_label("TransientTransactionError")) or \
+            bool(exc.has_error_label("UnknownTransactionCommitResult"))
+    except Exception:
+        return False
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -427,6 +436,10 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         if not user_permissions.get("factory_reset", False):
             raise HTTPException(status_code=403, detail="No permission for data deletion")
 
+        # p522-001: without a tenant context the db proxy would wipe main_db
+        if not admin.get("tenant_id"):
+            raise HTTPException(status_code=400, detail="الحذف الانتقائي متاح ضمن سياق مستأجر فقط")
+
         # Valid data types
         valid_types = {
             "sales": "sales",
@@ -443,32 +456,48 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             "notifications": "notifications"
         }
 
+        # p522-006: reject unknown types instead of silently ignoring them
+        unknown = [t for t in request.data_types if t not in valid_types]
+        if unknown:
+            raise HTTPException(status_code=400,
+                                detail="أنواع بيانات غير معروفة: " + ", ".join(unknown))
+
+        from config.database import client as mongo_client
         deleted_counts = {}
-        for data_type in request.data_types:
-            if data_type in valid_types:
-                collection_name = valid_types[data_type]
-                result = await db[collection_name].delete_many({})
-                deleted_counts[data_type] = result.deleted_count
+        # p522-006: one atomic transaction for the whole deletion set
+        for _attempt in range(3):
+            try:
+                deleted_counts = {}
+                async with await mongo_client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        for data_type in request.data_types:
+                            collection_name = valid_types[data_type]
+                            result = await db[collection_name].delete_many({}, session=_tx)
+                            deleted_counts[data_type] = result.deleted_count
 
-                # Also delete related data
-                if data_type == "sales":
-                    await db.debt_payments.delete_many({"type": "sale"})
-                elif data_type == "customers":
-                    await db.customer_families.delete_many({})
-                elif data_type == "suppliers":
-                    await db.supplier_families.delete_many({})
-                elif data_type == "products":
-                    await db.product_families.delete_many({})
+                            # Also delete related data
+                            if data_type == "sales":
+                                await db.debt_payments.delete_many({"type": "sale"}, session=_tx)
+                            elif data_type == "customers":
+                                await db.customer_families.delete_many({}, session=_tx)
+                            elif data_type == "suppliers":
+                                await db.supplier_families.delete_many({}, session=_tx)
+                            elif data_type == "products":
+                                await db.product_families.delete_many({}, session=_tx)
 
-        # Log deletion
-        await db.system_logs.insert_one({
-            "id": str(uuid.uuid4()),
-            "action": "selective_delete",
-            "performed_by": admin.get("name", ""),
-            "deleted_types": request.data_types,
-            "deleted_counts": deleted_counts,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
+                        # Log deletion
+                        await db.system_logs.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "action": "selective_delete",
+                            "performed_by": admin.get("name", ""),
+                            "deleted_types": request.data_types,
+                            "deleted_counts": deleted_counts,
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        }, session=_tx)
+                break
+            except Exception as exc:
+                if _attempt == 2 or not _is_transient_tx(exc):
+                    raise
 
         return {"success": True, "deleted_counts": deleted_counts}
 

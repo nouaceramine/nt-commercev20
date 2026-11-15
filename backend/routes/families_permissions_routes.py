@@ -12,7 +12,7 @@ import logging
 import asyncio
 import requests as http_requests
 
-from config.database import db
+from config.database import db, main_db
 from utils.auth import get_current_user as require_tenant, get_tenant_admin
 from utils.permissions import create_permission_checker
 from models.schemas import (
@@ -26,6 +26,16 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter()
+
+
+def _is_transient_tx(exc) -> bool:
+    # p522-005: retryable multi-document transaction errors
+    try:
+        return bool(exc.has_error_label("TransientTransactionError")) or \
+            bool(exc.has_error_label("UnknownTransactionCommitResult"))
+    except Exception:
+        return False
+
 
 # p492: real permission checker for the legacy /spare-parts* surface
 # (main.py imports a no-op require_permission — factories/modules must build
@@ -166,6 +176,15 @@ async def factory_reset(confirm_code: str, admin: dict = Depends(get_tenant_admi
     if not user_permissions.get("factory_reset", False):
         raise HTTPException(status_code=403, detail="No permission for factory reset")
 
+    # p522-001: without a tenant context the db proxy would wipe main_db
+    if not admin.get("tenant_id"):
+        raise HTTPException(status_code=400, detail="إعادة الضبط متاحة ضمن سياق مستأجر فقط")
+
+    # p522-005: capture doomed accounts first so their global identities and
+    # directory rows are released inside the same atomic wipe
+    doomed_users = await db.users.find(
+        {"role": {"$ne": "admin"}}, {"_id": 0, "id": 1}).to_list(10000)
+
     # Collections to clear
     collections_to_clear = [
         "products", "customers", "suppliers", "employees", 
@@ -174,25 +193,45 @@ async def factory_reset(confirm_code: str, admin: dict = Depends(get_tenant_admi
         "product_families", "api_keys", "recharges"
     ]
 
+    from config.database import client as mongo_client
     deleted_counts = {}
-    for collection in collections_to_clear:
-        result = await db[collection].delete_many({})
-        deleted_counts[collection] = result.deleted_count
+    # p522-005: one cross-DB transaction — the tenant wipe, the audit entry and
+    # the identity/directory release commit together or not at all
+    for _attempt in range(3):
+        try:
+            deleted_counts = {}
+            async with await mongo_client.start_session() as _tx:
+                async with _tx.start_transaction():
+                    for collection in collections_to_clear:
+                        result = await db[collection].delete_many({}, session=_tx)
+                        deleted_counts[collection] = result.deleted_count
 
-    # Reset cash boxes to zero
-    await db.cash_boxes.update_many({}, {"$set": {"balance": 0}})
+                    # Reset cash boxes to zero
+                    await db.cash_boxes.update_many({}, {"$set": {"balance": 0}}, session=_tx)
 
-    # Keep admin user, delete others
-    await db.users.delete_many({"role": {"$ne": "admin"}})
+                    # Keep admin user, delete others
+                    await db.users.delete_many({"role": {"$ne": "admin"}}, session=_tx)
 
-    # Log the reset
-    await db.system_logs.insert_one({
-        "id": str(uuid.uuid4()),
-        "action": "factory_reset",
-        "performed_by": admin.get("name", ""),
-        "deleted_counts": deleted_counts,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+                    # Release global identities + directory rows of removed accounts
+                    for _du in doomed_users:
+                        if _du.get("id"):
+                            await main_db.identity_registry.delete_many(
+                                {"user_id": _du["id"]}, session=_tx)
+                            await main_db.tenant_user_directory.delete_many(
+                                {"user_id": _du["id"]}, session=_tx)
+
+                    # Log the reset
+                    await db.system_logs.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "action": "factory_reset",
+                        "performed_by": admin.get("name", ""),
+                        "deleted_counts": deleted_counts,
+                        "created_at": datetime.now(timezone.utc).isoformat()
+                    }, session=_tx)
+            break
+        except Exception as exc:
+            if _attempt == 2 or not _is_transient_tx(exc):
+                raise
 
     return {
         "success": True,
