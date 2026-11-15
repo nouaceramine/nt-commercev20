@@ -44,6 +44,10 @@ class InsightsDashboardResponse(BaseModel):
 
 
 def create_ai_routes(db, get_current_user) -> dict:
+    # p523: cashier is a POS-only role — the AI accountant exposes financial
+    # data, and the UI hides /ai-chat & /ai-agents from cashiers.
+    from utils.permissions import create_cashier_block
+    block_cashier = create_cashier_block(get_current_user)
     """Create AI routes with database dependency"""
     from services.ai.llm_service import get_llm_service
     from services.ai.agents import AIAgentsManager
@@ -183,8 +187,15 @@ def create_ai_routes(db, get_current_user) -> dict:
         return ""
 
     @router.post("/chat", response_model=ChatResponse)
-    async def chat_with_accountant(request: ChatRequest, user=Depends(get_current_user)):
+    async def chat_with_accountant(request: ChatRequest, user=Depends(block_cashier)):  # p523
         """Chat with AI accountant"""
+        # p523: a provided session_id must belong to the caller — otherwise any
+        # user could append messages into another user's chat session.
+        if request.session_id:
+            _owner = await db.chat_sessions.find_one(
+                {"id": request.session_id}, {"_id": 0, "user_id": 1})
+            if _owner and _owner.get("user_id") != user["id"]:
+                raise HTTPException(status_code=403, detail="الجلسة تخص مستخدماً آخر")
         try:
             llm = get_llm_service(request.session_id if request.session_id else f"chat_{user['id']}")
             
@@ -335,7 +346,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         }
     
     @router.post("/insights/{insight_id}/dismiss")
-    async def dismiss_insight(insight_id: str, user=Depends(get_current_user)):
+    async def dismiss_insight(insight_id: str, user=Depends(block_cashier)):  # p523
         """Dismiss an insight"""
         result = await db.ai_insights.update_one(
             {"id": insight_id},
@@ -346,7 +357,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return {"success": True}
     
     @router.post("/agents/run")
-    async def run_agent_task(request: AgentTaskRequest, user=Depends(get_current_user)):
+    async def run_agent_task(request: AgentTaskRequest, user=Depends(block_cashier)):  # p523
         """Run an AI agent task"""
         manager = AIAgentsManager(db)
         result = await manager.run_agent_task(request.agent_type, request.task_data)
@@ -390,7 +401,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return agents
     
     @router.post("/classify-expense")
-    async def classify_expense(description: str, amount: float, vendor: str = "", user=Depends(get_current_user)):
+    async def classify_expense(description: str, amount: float, vendor: str = "", user=Depends(block_cashier)):  # p523
         """Classify an expense using AI"""
         manager = AIAgentsManager(db)
         agent = manager.get_agent("expense_classifier")
@@ -398,7 +409,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return result
     
     @router.post("/extract-invoice")
-    async def extract_invoice_data(ocr_text: str, user=Depends(get_current_user)):
+    async def extract_invoice_data(ocr_text: str, user=Depends(block_cashier)):  # p523
         """Extract invoice data from OCR text"""
         llm = get_llm_service()
         result = await llm.extract_invoice_data(ocr_text)

@@ -1423,26 +1423,26 @@ async def get_robot_status(user: dict = Depends(block_cashier)) -> dict:
     return st
 
 @robot_router.post("/restart/{robot_name}")
-async def restart_robot(robot_name: str, user: dict = Depends(block_cashier)) -> dict:
+async def restart_robot(robot_name: str, user: dict = Depends(get_tenant_admin)) -> dict:  # p523: platform infra — admin roles only
     success = await robot_manager.restart_robot(robot_name)
     if success:
         return {"message": f"تم اعادة تشغيل روبوت {robot_name}"}
     raise HTTPException(status_code=404, detail="الروبوت غير موجود")
 
 @robot_router.post("/run/{robot_name}")
-async def run_robot_once(robot_name: str, user: dict = Depends(block_cashier)) -> dict:
+async def run_robot_once(robot_name: str, user: dict = Depends(get_tenant_admin)) -> dict:  # p523
     result = await robot_manager.run_robot_once(robot_name)
     if result is not None:
         return {"message": f"تم تشغيل {robot_name} بنجاح", "stats": result}
     raise HTTPException(status_code=404, detail="الروبوت غير موجود")
 
 @robot_router.post("/stop-all")
-async def stop_all_robots(user: dict = Depends(block_cashier)) -> dict:
+async def stop_all_robots(user: dict = Depends(get_tenant_admin)) -> dict:  # p523
     await robot_manager.stop_all()
     return {"message": "تم ايقاف جميع الروبوتات"}
 
 @robot_router.post("/start-all")
-async def start_all_robots(user: dict = Depends(block_cashier)) -> dict:
+async def start_all_robots(user: dict = Depends(get_tenant_admin)) -> dict:  # p523
     asyncio.create_task(robot_manager.start_all())
     return {"message": "تم بدء تشغيل جميع الروبوتات"}
 
@@ -1452,7 +1452,7 @@ async def get_robot_history(robot: str = None, limit: int = 20, user: dict = Dep
     return {"runs": runs, "total": len(runs)}
 
 @robot_router.post("/interval/{robot_name}")
-async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(block_cashier)) -> dict:
+async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(get_tenant_admin)) -> dict:  # p523
     interval = body.get("interval_seconds")
     if not isinstance(interval, (int, float)) or interval < 60:
         raise HTTPException(status_code=400, detail="interval_seconds يجب أن يكون >= 60")

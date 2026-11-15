@@ -15,6 +15,10 @@ logger = logging.getLogger("nt-commerce.ai")
 
 def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
     router = APIRouter(prefix="/ai-assistant", tags=["ai-assistant"])
+    # p523: the assistant console is not part of the cashier UI — keep the
+    # POS-only role out of financial Q&A.
+    from utils.permissions import create_cashier_block
+    block_cashier = create_cashier_block(get_current_user)
 
     class AIChatRequest(BaseModel):
         message: str
@@ -153,7 +157,7 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
         )
 
     @router.post("/chat", response_model=AIChatResponse)
-    async def ai_chat(request: AIChatRequest, user: dict = Depends(get_current_user)):
+    async def ai_chat(request: AIChatRequest, user: dict = Depends(block_cashier)):  # p523
         session_id = f"{user['id']}_{request.session_id}" if request.session_id else f"{user['id']}_default"
         answer = ""
         try:
@@ -190,7 +194,8 @@ def create_ai_assistant_routes(db, get_current_user, get_tenant_admin, require_t
         return {"success": True}
 
     @router.post("/analyze")
-    async def ai_analyze(request: AIAnalysisRequest, user: dict = Depends(require_tenant)):
+    async def ai_analyze(request: AIAnalysisRequest, user: dict = Depends(require_tenant),
+                         _cb: dict = Depends(block_cashier)):  # p523
         if request.analysis_type == "sales_forecast":
             try:
                 sales = await db.sales.find({}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
