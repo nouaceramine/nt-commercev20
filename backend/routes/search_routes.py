@@ -24,7 +24,10 @@ def _bounded_limit(value, default: int, maximum: int = 100) -> int:
 # Large collections (sales/purchases) use prefix matching for name fields too,
 # so a full-collection substring scan never happens on tens of thousands of rows.
 _SEARCH_SPECS = [
-    ("product",           "products",           ["article_code", "barcode", "sku"],        ["name"],                    ["name"],                    ["article_code", "barcode"], "/products?id={id}"),
+    # p530-C1: name fields cover name_ar/name_en too — Arabic-catalog tenants
+    # (owner's 7,415 products incl.) keep names in name_ar only and were
+    # invisible to global search.
+    ("product",           "products",           ["article_code", "barcode", "sku"],        ["name", "name_ar", "name_en"], ["name", "name_ar", "name_en"], ["article_code", "barcode"], "/products?id={id}"),
     ("customer",          "customers",          ["code", "phone"],                          ["name"],                    ["name"],                    ["code", "phone"],           "/customers?id={id}"),
     ("supplier",          "suppliers",          ["code", "phone"],                          ["name"],                    ["name"],                    ["code", "phone"],           "/suppliers?id={id}"),
     ("sale",              "sales",              ["code", "invoice_number"],                 ["customer_name|prefix"],    ["customer_name", "code"],   ["code", "invoice_number"],  "/sales?invoice={invoice_number}"),
@@ -114,8 +117,70 @@ def create_search_routes(db, get_current_user) -> dict:
             return group, items
 
         pairs = await asyncio.gather(*[_scan(s) for s in _SEARCH_SPECS])
+
+        # p530-C1: IMEI / serial-number search — a sold phone traces to its
+        # product, sale invoice, warranty window and dates in one hit.
+        # Joins are batched ($in), never N+1.
+        serial_items = []
+        try:
+            serial_docs = await db.product_serials.find(
+                {"$or": [{"serial": pre}, {"serial": sub}]}, {"_id": 0},
+            ).limit(_PER_GROUP).to_list(_PER_GROUP)
+        except Exception:  # noqa: BLE001 — missing collection must not break search
+            serial_docs = []
+        if serial_docs:
+            from routes.serials_routes import warranty_info
+            prod_ids = [d.get("product_id") for d in serial_docs if d.get("product_id")]
+            sale_ids = [d.get("sale_id") for d in serial_docs if d.get("sale_id")]
+            prods = {}
+            if prod_ids:
+                async for p in db.products.find(
+                    {"id": {"$in": prod_ids}},
+                    {"_id": 0, "id": 1, "name": 1, "name_ar": 1, "name_en": 1},
+                ):
+                    prods[p["id"]] = p
+            sales_map = {}
+            if sale_ids:
+                async for s in db.sales.find(
+                    {"id": {"$in": sale_ids}},
+                    {"_id": 0, "id": 1, "code": 1, "invoice_number": 1, "created_at": 1, "customer_name": 1},
+                ):
+                    sales_map[s["id"]] = s
+            for d in serial_docs:
+                p = prods.get(d.get("product_id")) or {}
+                s = sales_map.get(d.get("sale_id")) or {}
+                pname = p.get("name") or p.get("name_ar") or p.get("name_en") or ""
+                w = warranty_info(d)
+                parts = [pname] if pname else []
+                if s:
+                    parts.append(("فاتورة " + (s.get("code") or s.get("invoice_number") or "")).strip())
+                if w.get("warranty_expires_at"):
+                    lbl = "ضمان ساري حتى" if w.get("warranty_status") == "active" else "ضمان منتهي منذ"
+                    parts.append(f"{lbl} {str(w['warranty_expires_at'])[:10]}")
+                if d.get("sold_at"):
+                    parts.append("بِيع: " + str(d["sold_at"])[:10])
+                serial_items.append({
+                    "type": "serial",
+                    "id": d.get("id", ""),
+                    "title": d.get("serial", ""),
+                    "subtitle": " · ".join(parts),
+                    "code": d.get("serial", ""),
+                    "link": "/products?id=" + str(d.get("product_id") or ""),
+                    # structured extras for the UI
+                    "product_name": pname,
+                    "sale_code": s.get("code") or "",
+                    "sale_link": ("/sales?invoice=" + s["invoice_number"]) if s.get("invoice_number") else "",
+                    "sold_at": str(d.get("sold_at") or ""),
+                    "warranty_status": w.get("warranty_status"),
+                    "warranty_expires_at": w.get("warranty_expires_at"),
+                    "status": d.get("status", ""),
+                })
+
         groups = {g: items for g, items in pairs if items}
         results = [it for _, items in pairs for it in items]
+        if serial_items:
+            groups = {"serial": serial_items, **groups}
+            results = serial_items + results
         elapsed = time.time() - start
 
         # Save search history

@@ -158,12 +158,13 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
     })
 
     plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
-    features = {**(plan.get("features") or {}), **(tenant.get("features_override") or {})} if plan else {}
+    # p530-C1: override applies even without a plan (p513 canon) — was dropped
+    features = {**((plan or {}).get("features") or {}), **(tenant.get("features_override") or {})}
     # ── Opt-in features default OFF when neither plan nor tenant set them ──
     for opt_key in ("ecommerce_hub",):
         if opt_key not in features:
             features[opt_key] = False
-    limits = {**(plan.get("limits") or {}), **(tenant.get("limits_override") or {})} if plan else {}
+    limits = {**((plan or {}).get("limits") or {}), **(tenant.get("limits_override") or {})}
 
     # ── Impersonation Audit Log ──
     # Record who, when, where (IP), and on which tenant. The "stopped_at" + "duration_seconds"

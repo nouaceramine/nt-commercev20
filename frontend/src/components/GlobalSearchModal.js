@@ -4,7 +4,7 @@ import apiClient from '../lib/apiClient';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Input } from './ui/input';
 import {
-  Search, Package, Users, Receipt, ArrowLeft, ArrowRight,
+  Search, Package, Users, Receipt, ArrowLeft, ArrowRight, Barcode,
   X, Loader2, TrendingUp, Truck, ShoppingCart, Banknote,
   Contact, UserSquare, Wrench, Globe, Store, Clock,
   ClipboardList, Tag, Handshake, Warehouse, CalendarClock,
@@ -42,6 +42,7 @@ const GROUP_META = {
   installment:          { icon: CalendarClock, color: 'emerald', ar: 'الأقساط',             en: 'Échéances' },
   recharge:             { icon: Smartphone,    color: 'blue',    ar: 'شحن الرصيد',          en: 'Recharges' },
   digital_subscription: { icon: Tv,            color: 'blue',    ar: 'الاشتراكات الرقمية',  en: 'Abonnements' },
+  serial:               { icon: Barcode,       color: 'amber',  ar: 'الأرقام التسلسلية',   en: 'Numéros de série' },
 };
 
 export function GlobalSearchModal({ open, onClose, language }) {
