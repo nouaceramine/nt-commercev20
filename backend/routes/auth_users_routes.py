@@ -327,7 +327,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         return await _2fa_gate(emp_user, {
                             "access_token": access_token,
                             "user_type": "tenant",
-                            "redirect_to": "/tenant/dashboard",
+                            # p530-B2: POS-facing roles land directly on /pos
+                            "redirect_to": ("/pos" if emp_user.get("role") in ("seller", "cashier")
+                                            else "/tenant/dashboard"),
                             "user": {
                                 "id": emp_user["id"],
                                 "email": emp_user["email"],

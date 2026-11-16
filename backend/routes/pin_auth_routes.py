@@ -128,7 +128,7 @@ def create_pin_auth_routes(main_db, get_tenant_db, get_current_user, get_tenant_
         return {
             "access_token": access_token,
             "user_type": "tenant",
-            "redirect_to": "/",
+            "redirect_to": "/pos" if user.get("role") in ("seller", "cashier") else "/",  # p530-B2
             "user": {
                 "id": user["id"],
                 "email": user.get("email", ""),

@@ -148,7 +148,16 @@ export default function UnifiedLoginPage() {
   });
   const [loginSuccess, setLoginSuccess] = useState(null);
   // p53: login package — 2FA step, forgot/reset password, inline lockout error
-  const [view, setView] = useState('login'); // login | twofa | forgot | reset | pin
+  const [view, setView] = useState(function() {
+    // p530-B2: /worker/login redirects here with ?worker=1
+    try {
+      if (new URLSearchParams(window.location.search).get('worker') === '1') return 'worker';
+    } catch (e) { /* noop */ }
+    return 'login';
+  }); // login | twofa | forgot | reset | pin | worker
+  // p530-B2: ecom-worker login (phone + PIN) — absorbed from WorkerLoginPage
+  const [workerPhone, setWorkerPhone] = useState('');
+  const [workerPin, setWorkerPin] = useState('');
   // p219: PIN quick-login (POS-style staff picker)
   const [pinStep, setPinStep] = useState('code'); // code | users | pin
   const [shopCode, setShopCode] = useState(function() { return localStorage.getItem('posShopCode') || ''; });
@@ -386,6 +395,36 @@ export default function UnifiedLoginPage() {
   ) : null;
 
 
+  // ── p530-B2: ecom-worker login handler (phone + PIN → /worker) ──
+  const handleWorkerLogin = async function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!workerPhone.trim() || !workerPin.trim()) {
+      setInlineError(language === 'ar' ? 'أدخل رقم الهاتف ورمز PIN' : 'Entrez le téléphone et le PIN');
+      return;
+    }
+    setLoading(true); setInlineError('');
+    try {
+      const res = await fetch('/api/ecom-workers/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: workerPhone.trim(), pin: workerPin.trim() })
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setInlineError(errText(body) || (language === 'ar' ? 'بيانات الدخول غير صحيحة' : 'Identifiants invalides'));
+        setLoading(false);
+        return;
+      }
+      localStorage.setItem('ecom_worker_token', body.token);
+      localStorage.setItem('ecom_worker', JSON.stringify(body.worker));
+      toast.success(language === 'ar' ? 'تم تسجيل الدخول' : 'Connexion réussie');
+      window.location.href = '/worker';
+    } catch (e2) {
+      setInlineError(T.connErr + e2.message);
+      setLoading(false);
+    }
+  };
+
   // ── p219: PIN quick-login handlers ──
   var PIN_ROLES = { admin: ['مدير', 'Gérant'], manager: ['مدير', 'Gérant'], seller: ['بائع', 'Vendeur'], cashier: ['أمين صندوق', 'Caissier'] };
   const pinRoleLabel = function(role) {
@@ -492,6 +531,44 @@ export default function UnifiedLoginPage() {
                   {T.redirecting}
                 </div>
               </div>
+            ) : view === 'worker' ? (
+              <form onSubmit={handleWorkerLogin} className="space-y-4" data-testid="worker-login-view">
+                {inlineErrorBox}
+                <p className="text-xs text-muted-foreground text-center">
+                  {language === 'ar' ? 'مساحة تأكيد الطلبات — للعاملين فقط' : 'Espace confirmation des commandes'}
+                </p>
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'رقم الهاتف' : 'Téléphone'}</Label>
+                  <Input
+                    dir="ltr" inputMode="tel"
+                    value={workerPhone}
+                    onChange={function(e) { setWorkerPhone(e.target.value); }}
+                    placeholder="0550 00 00 00"
+                    className="h-11 text-black bg-white"
+                    data-testid="worker-phone"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{language === 'ar' ? 'رمز الدخول PIN' : 'Code PIN'}</Label>
+                  <Input
+                    dir="ltr" inputMode="numeric" type="password"
+                    value={workerPin}
+                    onChange={function(e) { setWorkerPin(e.target.value); }}
+                    placeholder="••••"
+                    className="h-11 text-center tracking-widest text-black bg-white"
+                    data-testid="worker-pin"
+                  />
+                </div>
+                <Button type="submit" className="w-full h-11 gap-2" disabled={loading} data-testid="worker-login-btn">
+                  {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
+                  {language === 'ar' ? 'دخول' : 'Connexion'}
+                </Button>
+                <div className="text-center">
+                  <button type="button" onClick={function() { setView('login'); setInlineError(''); }} className="text-xs text-primary hover:underline" data-testid="worker-back-to-login">
+                    {language === 'ar' ? 'العودة لتسجيل الدخول الكامل' : 'Retour à la connexion complète'}
+                  </button>
+                </div>
+              </form>
             ) : view === 'pin' ? (
               <div className="space-y-4" data-testid="pin-login-view">
                 {inlineErrorBox}
@@ -888,7 +965,7 @@ export default function UnifiedLoginPage() {
         <p className="text-center mt-2">
           <button
             type="button"
-            onClick={function() { navigate('/worker/login'); }}
+            onClick={function() { setView('worker'); setInlineError(''); }}
             className="text-xs text-emerald-200/90 hover:text-white inline-flex items-center gap-1"
             data-testid="worker-login-link"
           >

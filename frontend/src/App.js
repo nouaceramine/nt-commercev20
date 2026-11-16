@@ -131,7 +131,7 @@ const EcomChannelsPage = lazy(() => import("./pages/ecom/EcomChannelsPage"));  /
 const EcomGuidePage = lazy(() => import("./pages/ecom/EcomGuidePage"));  // p273
 const EcomAnalyticsPage = lazy(() => import("./pages/ecom/EcomAnalyticsPage"));
 const EcomWorkersPage = lazy(() => import("./pages/ecom/EcomWorkersPage"));  // p293
-const WorkerLoginPage = lazy(() => import("./pages/worker/WorkerLoginPage"));  // p293
+// p530-B2: WorkerLoginPage removed — /worker/login redirects to /portal?worker=1
 const WorkerWorkspacePage = lazy(() => import("./pages/worker/WorkerWorkspacePage"));  // p293  // p273
 const _EcomStoreTab = lazy(() => import("./pages/ecom/EcomStoreTab"));  // p273
 const DigitalServicesPage = lazy(() => import("./pages/digital/DigitalServicesPage"));  // p273
@@ -386,7 +386,7 @@ function AppRoutes() {
       
       {/* Unified Login - Single Entry Point for ALL users */}
       {/* p293: worker workspace (public PIN area) */}
-      <Route path="/worker/login" element={<WorkerLoginPage />} />
+      <Route path="/worker/login" element={<Navigate to="/portal?worker=1" replace />} />
       <Route path="/worker" element={<WorkerWorkspacePage />} />
       <Route path="/portal" element={<UnifiedLoginPage />} />
       {/* K1: public self-service kiosk (token-gated, no login) */}
