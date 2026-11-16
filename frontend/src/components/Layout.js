@@ -85,7 +85,7 @@ import {
   ArrowRight,
   KeyRound, Factory, Percent, LifeBuoy, Cctv, ChefHat, UtensilsCrossed, Bike, Cpu, Network,
   PackagePlus,
-  CalendarCheck, ShieldCheck } from 'lucide-react';
+  CalendarCheck, ShieldCheck, Fingerprint } from 'lucide-react';
 import { UnifiedSearch } from './UnifiedSearch';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { defaultMenuSections } from '../config/sidebarMenu';
@@ -407,6 +407,7 @@ export const Layout = ({ children }) => {
       items: [
         { path: '/saas-admin/finance',             icon: DollarSign,    label: language === 'ar' ? 'التقارير المالية' : 'Rapports financiers' },
         { path: '/saas-admin/audit-timeline',      icon: Clock,         label: language === 'ar' ? 'سجل التدقيق' : 'Journal audit' },
+        { path: '/saas-admin/id-audit',            icon: Fingerprint,   label: language === 'ar' ? 'تدقيق الهويات' : 'Audit ID' },
         { path: '/saas-admin/impersonation-logs',  icon: Shield,        label: language === 'ar' ? 'سجل الانتحال' : 'Journal impersonation' },
         { path: '/saas-admin/alerts',              icon: Bell,          label: language === 'ar' ? 'سجل الأخطاء' : 'Alertes' },
         { path: '/saas-admin/autoheal',            icon: Activity,      label: language === 'ar' ? 'الإصلاح الذاتي' : 'AutoHeal' },

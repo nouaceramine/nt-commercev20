@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '../../../lib/apiClient';
 import { Card, CardContent } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
-import {
+import { Fingerprint,
   Users, Building as _Building, CreditCard, TrendingUp, Package,
   Clock, AlertTriangle, DollarSign, Truck, Bot, BarChart3,
   Database, Activity, Bell as _Bell, ShieldCheck, Banknote, Boxes, HeartPulse,
@@ -30,6 +30,7 @@ const QUICK_LINKS = [
   { to: '/saas-admin/default-pos-shortcuts', Icon: LayoutDashboard, labelAr: 'اختصارات POS' },
   { to: '/saas-admin/tenant-debts',      Icon: Receipt,       labelAr: 'ديون التجار' },
   { to: '/saas-admin/audit-timeline',    Icon: Activity,      labelAr: 'سجل التدقيق' },
+  { to: '/saas-admin/id-audit',          Icon: Fingerprint,   labelAr: 'تدقيق الهويات' },
   { to: '/saas-admin/autoheal',         Icon: HeartPulse,    labelAr: 'الإصلاح الذاتي' },
 ];
 
