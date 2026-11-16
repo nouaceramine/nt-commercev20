@@ -185,12 +185,29 @@ async def factory_reset(confirm_code: str, admin: dict = Depends(get_tenant_admi
     doomed_users = await db.users.find(
         {"role": {"$ne": "admin"}}, {"_id": 0, "id": 1}).to_list(10000)
 
-    # Collections to clear
+    # p530-A2: dynamic FULL wipe — the old hardcoded 14-collection list left
+    # journal_entries, accounts (chart of accounts!), stock_movements,
+    # _code_counters/counters (numbering never restarted), daily_sessions,
+    # warehouses, settings, serials/warranties, loyalty, ecom/store data and
+    # every collection added by later features behind — the owner's reset kept
+    # "deleting" but the books and counters survived. Now every tenant
+    # collection is cleared except users (non-admins removed below with their
+    # global identities) and system_logs (audit trail, incl. this entry).
+    KEEP_COLLECTIONS = {"users", "system_logs"}
+    from services.tenant_template import seed_data as _fr_seed_data
+
+    _fr_seeds = _fr_seed_data()
+    # p530: create seed namespaces OUTSIDE the transaction. Implicitly creating
+    # a collection inside a multi-doc transaction that also writes it raises
+    # WriteConflict (112) at commit, and the creation rolls back on abort, so
+    # retries deterministically fail. Pre-creating avoids the conflict.
+    _fr_existing = set(await db.list_collection_names())
+    for _fr_coll, _fr_docs in _fr_seeds.items():
+        if _fr_docs and _fr_coll not in _fr_existing:
+            await db.create_collection(_fr_coll)
     collections_to_clear = [
-        "products", "customers", "suppliers", "employees", 
-        "sales", "purchases", "debts", "debt_payments",
-        "transactions", "notifications", "sms_logs",
-        "product_families", "api_keys", "recharges"
+        c for c in await db.list_collection_names()
+        if c not in KEEP_COLLECTIONS and not c.startswith("system.")
     ]
 
     from config.database import client as mongo_client
@@ -206,8 +223,15 @@ async def factory_reset(confirm_code: str, admin: dict = Depends(get_tenant_admi
                         result = await db[collection].delete_many({}, session=_tx)
                         deleted_counts[collection] = result.deleted_count
 
-                    # Reset cash boxes to zero
-                    await db.cash_boxes.update_many({}, {"$set": {"balance": 0}}, session=_tx)
+                    # p530-A2: re-seed canonical fresh-tenant defaults in the
+                    # same transaction (cash boxes at 0, main warehouse,
+                    # general settings, default families/customer/supplier,
+                    # currencies) so the tenant is operational immediately —
+                    # exactly the state a new registration would have.
+                    for _fr_coll, _fr_docs in _fr_seeds.items():
+                        if _fr_docs:
+                            await db[_fr_coll].insert_many(_fr_docs, session=_tx)
+                            deleted_counts[f"reseed:{_fr_coll}"] = len(_fr_docs)
 
                     # Keep admin user, delete others
                     await db.users.delete_many({"role": {"$ne": "admin"}}, session=_tx)
