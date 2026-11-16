@@ -511,10 +511,14 @@ async def get_product_families(user: dict = Depends(require_tenant)):
     # Skip malformed docs (e.g. bad CSV import artifacts with no id) instead of 500
     families = [fam for fam in families if fam.get("id")]
 
-    # Update product counts
+    # p530-E1: one $group aggregation instead of N count_documents round-trips
+    _counts = await db.products.aggregate([
+        {"$match": {"family_id": {"$ne": None}}},
+        {"$group": {"_id": "$family_id", "n": {"$sum": 1}}},
+    ]).to_list(None)
+    _counts_map = {c["_id"]: c["n"] for c in _counts}
     for family in families:
-        count = await db.products.count_documents({"family_id": family["id"]})
-        family["product_count"] = count
+        family["product_count"] = _counts_map.get(family["id"], 0)
 
     return [ProductFamilyResponse(**f) for f in families]
 
@@ -530,8 +534,14 @@ async def get_product_brands(user: dict = Depends(require_tenant)):
     """p217: list brands with live product counts."""
     brands = await db.product_brands.find({}, {"_id": 0}).sort("name_ar", 1).to_list(1000)
     brands = [b for b in brands if b.get("id")]
+    # p530-E1: one $group aggregation instead of N count_documents round-trips
+    _bcounts = await db.products.aggregate([
+        {"$match": {"brand_id": {"$ne": None}}},
+        {"$group": {"_id": "$brand_id", "n": {"$sum": 1}}},
+    ]).to_list(None)
+    _bcounts_map = {c["_id"]: c["n"] for c in _bcounts}
     for b in brands:
-        b["product_count"] = await db.products.count_documents({"brand_id": b["id"]})
+        b["product_count"] = _bcounts_map.get(b["id"], 0)
     return brands
 
 
@@ -805,10 +815,14 @@ async def create_customer_family(family: CustomerFamilyCreate, admin: dict = Dep
 async def get_customer_families(user: dict = Depends(require_tenant)):
     families = await db.customer_families.find({}, {"_id": 0}).to_list(100)
 
-    # Update customer counts
+    # p530-E1: one $group aggregation instead of N count_documents round-trips
+    _ccounts = await db.customers.aggregate([
+        {"$match": {"family_id": {"$ne": None}}},
+        {"$group": {"_id": "$family_id", "n": {"$sum": 1}}},
+    ]).to_list(None)
+    _ccounts_map = {c["_id"]: c["n"] for c in _ccounts}
     for family in families:
-        count = await db.customers.count_documents({"family_id": family["id"]})
-        family["customer_count"] = count
+        family["customer_count"] = _ccounts_map.get(family["id"], 0)
 
     return [CustomerFamilyResponse(**f) for f in families]
 
