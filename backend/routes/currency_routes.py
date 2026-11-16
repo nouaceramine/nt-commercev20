@@ -56,13 +56,28 @@ def create_currency_routes(db, get_current_user) -> dict:
         """Get all currencies with exchange rates"""
         currencies = await db.currencies.find({}, {"_id": 0}).to_list(50)
         if not currencies:
-            # Initialize defaults
+            # p526-003: race-safe seed. The old code mutated the module-level
+            # DEFAULT_CURRENCIES in place (insert_many stamps _id on the shared
+            # dicts) and concurrent first calls duplicated the whole set (8
+            # parallel GETs -> 20-30 rows + 500s on duplicate _id). Fresh
+            # per-call dicts + unique code index + per-row upsert collapse
+            # simultaneous seeds to exactly one row per currency.
+            try:
+                await db.currencies.create_index("code", unique=True, name="p526_currencies_code")
+            except Exception:
+                pass
+            now = datetime.now(timezone.utc).isoformat()
             for c in DEFAULT_CURRENCIES:
-                c["id"] = str(uuid.uuid4())
-                c["is_active"] = True
-                c["updated_at"] = datetime.now(timezone.utc).isoformat()
-            await db.currencies.insert_many(DEFAULT_CURRENCIES)
-            currencies = [{k: v for k, v in c.items() if k != "_id"} for c in DEFAULT_CURRENCIES]
+                doc = {k: v for k, v in c.items() if k != "_id"}
+                doc["id"] = str(uuid.uuid4())
+                doc["is_active"] = True
+                doc["updated_at"] = now
+                try:
+                    await db.currencies.update_one(
+                        {"code": doc["code"]}, {"$setOnInsert": doc}, upsert=True)
+                except Exception:
+                    pass  # concurrent seed lost the race — winner's row stands
+            currencies = await db.currencies.find({}, {"_id": 0}).to_list(50)
         return currencies
 
     @router.put("/rates")

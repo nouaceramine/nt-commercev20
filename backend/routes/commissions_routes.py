@@ -193,6 +193,13 @@ def create_commissions_routes(db, get_current_user) -> dict:
                 transient = (exc.code == 112
                              or exc.has_error_label("TransientTransactionError"))
                 if not transient or _attempt == 2:
+                    # p526-002: a concurrent winner can make a loser exhaust all
+                    # three retries on WriteConflict; re-read and answer the
+                    # deterministic 400 the endpoint promises instead of a 500.
+                    cur = await db.commissions.find_one(
+                        {"id": commission_id}, {"_id": 0, "status": 1})
+                    if not cur or cur.get("status") != "pending":
+                        raise HTTPException(status_code=400, detail="العمولة ليست معلقة")
                     raise
         from services.accounting_auto import post_commission_payout
         await post_commission_payout(

@@ -48,7 +48,13 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
         """Get all tax rates for the tenant"""
         rates = await db.tax_rates.find({}, {"_id": 0}).to_list(100)
         if not rates:
-            # Initialize default Algerian tax rates
+            # p526-003: race-safe seed — unique name index + per-row upsert so
+            # concurrent first reads collapse to one row per rate instead of
+            # duplicating the whole default set.
+            try:
+                await db.tax_rates.create_index("name", unique=True, name="p526_tax_rates_name")
+            except Exception:
+                pass
             default_rates = [
                 {"id": str(uuid.uuid4()), "name": "VAT Standard", "name_ar": "ضريبة القيمة المضافة", "rate": 19, "type": "vat", "is_active": True},
                 {"id": str(uuid.uuid4()), "name": "VAT Reduced", "name_ar": "ضريبة مخفضة", "rate": 9, "type": "vat", "is_active": True},
@@ -57,9 +63,14 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
                 {"id": str(uuid.uuid4()), "name": "TAP", "name_ar": "الرسم على النشاط المهني", "rate": 2, "type": "professional", "is_active": True},
             ]
             for r in default_rates:
-                r["created_at"] = datetime.now(timezone.utc).isoformat()
-            await db.tax_rates.insert_many([dict(r) for r in default_rates])
-            rates = default_rates
+                doc = dict(r)
+                doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                try:
+                    await db.tax_rates.update_one(
+                        {"name": doc["name"]}, {"$setOnInsert": doc}, upsert=True)
+                except Exception:
+                    pass  # concurrent seed lost the race — the winner's row stands
+            rates = await db.tax_rates.find({}, {"_id": 0}).to_list(100)
         return rates
 
     @router.post("/rates")
@@ -78,7 +89,7 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
     async def update_tax_rate(
         rate_id: str,
         rate: TaxRate,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier),  # p526-001: UI hides /tax-reports from cashiers (P524-001 covered POST only)
     ):
         update_data = rate.model_dump()
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -92,7 +103,7 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
     @router.delete("/rates/{rate_id}")
     async def delete_tax_rate(
         rate_id: str,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier),  # p526-001
     ):
         result = await db.tax_rates.delete_one({"id": rate_id})
         if result.deleted_count == 0:
@@ -256,7 +267,7 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
     async def update_declaration_status(
         declaration_id: str,
         status: str,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier),  # p526-001
     ):
         """Update declaration status (draft, filed, paid, overdue)"""
         valid_statuses = ["draft", "filed", "paid", "overdue"]
