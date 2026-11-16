@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import math
 import re
 import uuid
+import secrets
 import bcrypt
 
 from pymongo import ReturnDocument
@@ -24,6 +25,69 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         email: str
         password: str
         role: str = "seller"
+
+    async def _create_account_for_employee(emp: dict, email: str, password: str,
+                                           role: str, tenant_id) -> dict:
+        """B1/p530: shared account provisioning for employees.
+
+        Validates role + password + email availability (tenant-local and
+        platform-wide), reserves the global identity atomically, inserts the
+        user and claims the employee. Fully rolls back on any failure.
+        """
+        from config.database import main_db
+        from utils.auth import email_ci
+        from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
+        email_lower = (email or "").strip().lower()
+        # p521-003: platform roles must never be handed to a tenant employee
+        # account; unknown roles get zero permissions, so reject anything
+        # outside the known tenant role catalogue.
+        _forbidden = {"super_admin", "saas_admin", "superadmin", "tenant_admin", "owner"}
+        role = (role or "seller").strip().lower()
+        if role in _forbidden or role not in DEFAULT_PERMISSIONS:
+            raise HTTPException(status_code=400, detail="الدور غير مسموح لحسابات الموظفين")
+        if len(password or "") < 4:
+            raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 4 أحرف على الأقل")
+        if await db.users.find_one({"email": email_ci(email)}):
+            raise HTTPException(status_code=400, detail="Email already registered")
+        # Email must also be globally unique across the platform (owners,
+        # agents, other tenants' staff)
+        await assert_email_globally_free(email_lower)
+        if (await main_db.tenant_user_directory.find_one({"email": email_lower})
+                or await main_db.saas_tenants.find_one({"email": email_ci(email)})
+                or await main_db.users.find_one({"email": email_ci(email)})
+                or await main_db.saas_agents.find_one({"email": email_ci(email)})):
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم مسبقاً في المنصة")
+        if emp.get("user_id"):
+            raise HTTPException(status_code=400, detail="Employee already has an account")
+        user_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        user_doc = {"id": user_id, "email": email_lower, "password": hashed,
+                    "name": emp["name"], "role": role, "employee_id": emp["id"],
+                    "permissions": DEFAULT_PERMISSIONS.get(role, {}), "created_at": now}
+        # p521-004: the registry entry is the global login route for this
+        # email — claim it ATOMICALLY before inserting so a concurrent create
+        # with the same email loses with 400 instead of orphaning users.
+        if tenant_id:
+            await reserve_identity(email_lower, "employee", user_id,
+                                   tenant_id=tenant_id, name=emp["name"])
+        try:
+            await db.users.insert_one(user_doc)
+            # Atomic employee claim: a second concurrent request for the SAME
+            # employee loses here and its user/identity are rolled back.
+            claimed = await db.employees.find_one_and_update(
+                {"id": emp["id"],
+                 "$or": [{"user_id": {"$exists": False}}, {"user_id": None}, {"user_id": ""}]},
+                {"$set": {"user_id": user_id, "user_email": email_lower}})
+        except Exception:
+            await db.users.delete_one({"id": user_id})
+            await remove_identity(user_id=user_id)
+            raise
+        if not claimed:
+            await db.users.delete_one({"id": user_id})
+            await remove_identity(user_id=user_id)
+            raise HTTPException(status_code=400, detail="Employee already has an account")
+        return {"user_id": user_id, "email": email_lower, "role": role}
 
     # ── CRUD ──
     @router.post("")
@@ -52,8 +116,30 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
             "hire_date": e.hire_date or now[:10], "commission_rate": e.commission_rate,
             "total_advances": 0, "total_commission": 0, "created_at": now
         }
+        # B1/p530: an employee created WITH an email gets a system-user account
+        # automatically — the owner's #1 expectation ("عند إضافة موظف يجب أن
+        # يُضاف تلقائياً في مستخدمي النظام"). The generated password is
+        # returned exactly once in this response; it is never stored readable.
+        account_info = None
+        email_lower = (e.email or "").strip().lower()
+        if email_lower and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_lower):
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني غير صالح")
         await db.employees.insert_one(doc)
+        if email_lower:
+            temp_password = secrets.token_urlsafe(9)
+            try:
+                account_info = await _create_account_for_employee(
+                    doc, email_lower, temp_password,
+                    e.account_role or "seller", admin.get("tenant_id"))
+                account_info["password"] = temp_password
+                doc["user_id"] = account_info["user_id"]
+                doc["user_email"] = email_lower
+            except Exception:
+                # invariant: no employee-with-email without its account
+                await db.employees.delete_one({"id": eid})
+                raise
         doc.pop("_id", None)
+        doc["account"] = account_info
         return doc
 
     @router.get("")
@@ -155,62 +241,14 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Account Management ──
     @router.post("/{employee_id}/create-account")
     async def create_employee_account(employee_id: str, account: EmployeeAccountCreate, admin: dict = Depends(require_permission("employees.edit"))):
-        from config.database import main_db
-        from utils.auth import email_ci
-        email_lower = account.email.strip().lower()
-        # p521-003: platform roles must never be handed to a tenant employee
-        # account (same forbidden list as auth_users_routes user creation);
-        # unknown roles get zero permissions, so reject anything outside the
-        # known tenant role catalogue. Passwords follow the platform minimum.
-        _forbidden = {"super_admin", "saas_admin", "superadmin", "tenant_admin", "owner"}
-        role = (account.role or "seller").strip().lower()
-        if role in _forbidden or role not in DEFAULT_PERMISSIONS:
-            raise HTTPException(status_code=400, detail="الدور غير مسموح لحسابات الموظفين")
-        if len(account.password or "") < 4:
-            raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 4 أحرف على الأقل")
+        # B1/p530: manual fallback (employee created without email, or account
+        # deleted) — same provisioning path as the automatic one.
         emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
-        if await db.users.find_one({"email": email_ci(account.email)}):
-            raise HTTPException(status_code=400, detail="Email already registered")
-        # Email must also be globally unique across the platform (owners, agents, other tenants' staff)
-        from utils.identity import assert_email_globally_free, reserve_identity, remove_identity
-        await assert_email_globally_free(email_lower)
-        if (await main_db.tenant_user_directory.find_one({"email": email_lower})
-                or await main_db.saas_tenants.find_one({"email": email_ci(account.email)})
-                or await main_db.users.find_one({"email": email_ci(account.email)})
-                or await main_db.saas_agents.find_one({"email": email_ci(account.email)})):
-            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم مسبقاً في المنصة")
-        if emp.get("user_id"):
-            raise HTTPException(status_code=400, detail="Employee already has an account")
-        user_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
-        hashed = bcrypt.hashpw(account.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        user_doc = {"id": user_id, "email": email_lower, "password": hashed, "name": emp["name"], "role": role, "employee_id": employee_id, "permissions": DEFAULT_PERMISSIONS.get(role, {}), "created_at": now}
-        # p521-004: the registry entry is the global login route for this email —
-        # claim it ATOMICALLY before inserting so a concurrent create with the
-        # same email loses with 400 instead of leaving duplicate orphan users.
-        tenant_id = admin.get("tenant_id")
-        if tenant_id:
-            await reserve_identity(email_lower, "employee", user_id,
-                                   tenant_id=tenant_id, name=emp["name"])
-        try:
-            await db.users.insert_one(user_doc)
-            # Atomic employee claim: a second concurrent request for the SAME
-            # employee loses here and its user/identity are rolled back.
-            claimed = await db.employees.find_one_and_update(
-                {"id": employee_id,
-                 "$or": [{"user_id": {"$exists": False}}, {"user_id": None}, {"user_id": ""}]},
-                {"$set": {"user_id": user_id, "user_email": email_lower}})
-        except Exception:
-            await db.users.delete_one({"id": user_id})
-            await remove_identity(user_id=user_id)
-            raise
-        if not claimed:
-            await db.users.delete_one({"id": user_id})
-            await remove_identity(user_id=user_id)
-            raise HTTPException(status_code=400, detail="Employee already has an account")
-        return {"success": True, "user_id": user_id, "email": email_lower, "role": role}
+        res = await _create_account_for_employee(emp, account.email, account.password,
+                                                 account.role, admin.get("tenant_id"))
+        return {"success": True, **res}
 
     @router.delete("/{employee_id}/delete-account")
     async def delete_employee_account(employee_id: str, admin: dict = Depends(require_permission("employees.edit"))):

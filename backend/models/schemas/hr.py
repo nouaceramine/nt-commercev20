@@ -12,6 +12,8 @@ class EmployeeCreate(BaseModel):
     commission_rate: float = 0  # نسبة العمولة على المبيعات
     max_discount_percent: float = 0  # حد الخصم المسموح
     max_debt_amount: float = 0  # حد الدين المسموح
+    # B1/p530: system role for the auto-created login account (email required)
+    account_role: Optional[str] = None
 
 class EmployeeAlertSettings(BaseModel):
     employee_id: str

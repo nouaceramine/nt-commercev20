@@ -30,7 +30,10 @@ export default function EmployeesPage() {
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
   const [salaryDialogOpen, setSalaryDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
-  const [formData, setFormData] = useState({ name: '', phone: '', email: '', position: '', salary: '', commission_rate: '', hire_date: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', email: '', position: '', salary: '', commission_rate: '', hire_date: '', account_role: 'seller' });
+  // B1/p530: one-time credentials dialog after auto account creation
+  const [credDialogOpen, setCredDialogOpen] = useState(false);
+  const [credData, setCredData] = useState(null);
   const [attendanceData, setAttendanceData] = useState({ date: new Date().toISOString().split('T')[0], status: 'present', notes: '' });
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [accountData, setAccountData] = useState({ email: '', password: '', role: 'seller' });
@@ -68,13 +71,19 @@ export default function EmployeesPage() {
         await apiClient.put(`/employees/${selectedEmployee.id}`, payload);
         toast.success(t.employeeUpdated);
       } else {
-        await apiClient.post(`/employees`, payload);
+        const res = await apiClient.post(`/employees`, payload);
         toast.success(t.employeeAdded);
+        // B1/p530: employee with email => account auto-created; show the
+        // generated password exactly once.
+        if (res.data?.account) {
+          setCredData(res.data.account);
+          setCredDialogOpen(true);
+        }
       }
       setDialogOpen(false);
       resetForm();
       fetchEmployees();
-    } catch (_e) { toast.error(t.somethingWentWrong); }
+    } catch (_e) { toast.error(errText(_e) || t.somethingWentWrong); }
   };
 
   const handleDelete = async () => {
@@ -139,7 +148,7 @@ export default function EmployeesPage() {
 
   const resetForm = () => {
     setSelectedEmployee(null);
-    setFormData({ name: '', phone: '', email: '', position: '', salary: '', commission_rate: '', hire_date: '' });
+    setFormData({ name: '', phone: '', email: '', position: '', salary: '', commission_rate: '', hire_date: '', account_role: 'seller' });
   };
 
   const openEdit = (emp) => {
@@ -351,6 +360,24 @@ export default function EmployeesPage() {
                 <div><Label>{t.salary}</Label><Input type="number" value={formData.salary} onChange={e => setFormData({...formData, salary: e.target.value})} /></div>
                 <div><Label>{t.commissionRate} (%)</Label><Input type="number" step="0.1" value={formData.commission_rate} onChange={e => setFormData({...formData, commission_rate: e.target.value})} /></div>
                 <div className="col-span-2"><Label>{t.hireDate}</Label><Input type="date" value={formData.hire_date} onChange={e => setFormData({...formData, hire_date: e.target.value})} /></div>
+                {!selectedEmployee && (
+                  <div className="col-span-2">
+                    <Label>{language === 'ar' ? 'دور حساب الدخول' : 'Rôle du compte'}</Label>
+                    <Select value={formData.account_role} onValueChange={v => setFormData({...formData, account_role: v})}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="seller">{language === 'ar' ? 'بائع' : 'Vendeur'}</SelectItem>
+                        <SelectItem value="manager">{language === 'ar' ? 'مشرف' : 'Manager'}</SelectItem>
+                        <SelectItem value="accountant">{language === 'ar' ? 'محاسب' : 'Comptable'}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {language === 'ar'
+                        ? 'عند إدخال بريد إلكتروني يُنشأ حساب دخول تلقائياً ويظهر لك كلمة المرور مرة واحدة'
+                        : 'Avec un email, un compte est créé automatiquement — le mot de passe s’affiche une seule fois'}
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>{t.cancel}</Button><Button type="submit">{t.save}</Button></div>
             </form>
@@ -395,6 +422,46 @@ export default function EmployeesPage() {
             <AlertDialogFooter><AlertDialogCancel>{t.cancel}</AlertDialogCancel><AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">{t.delete}</AlertDialogAction></AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* B1/p530: One-time Credentials Dialog */}
+        <Dialog open={credDialogOpen} onOpenChange={setCredDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-primary" />
+                {language === 'ar' ? 'تم إنشاء حساب الدخول' : 'Compte créé'}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {language === 'ar'
+                  ? 'انسخ هذه المعلومات وسلّمها للموظف — لن تظهر كلمة المرور مرة أخرى.'
+                  : 'Copiez ces informations — le mot de passe ne s’affichera plus.'}
+              </p>
+              <div className="rounded-lg border bg-muted/50 p-3 space-y-2" dir="ltr">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-mono select-all">{credData?.email}</span>
+                  <Button type="button" size="sm" variant="outline"
+                    onClick={() => { navigator.clipboard?.writeText(credData?.email || ''); toast.success(language === 'ar' ? 'تم النسخ' : 'Copié'); }}>
+                    {language === 'ar' ? 'نسخ' : 'Copier'}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-mono select-all">{credData?.password}</span>
+                  <Button type="button" size="sm" variant="outline"
+                    onClick={() => { navigator.clipboard?.writeText(credData?.password || ''); toast.success(language === 'ar' ? 'تم النسخ' : 'Copié'); }}>
+                    {language === 'ar' ? 'نسخ' : 'Copier'}
+                  </Button>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button type="button" onClick={() => setCredDialogOpen(false)}>
+                  {language === 'ar' ? 'فهمت، أغلق' : 'Compris'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Create Account Dialog */}
         <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
