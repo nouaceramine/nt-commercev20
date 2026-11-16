@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Layout as _Layout } from '../components/Layout';
+import { Layout } from '../components/Layout';  // p530-D1: standalone /loyalty route
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -165,16 +165,16 @@ export default function LoyaltyPage() {
 
   if (loading) {
     return (
-      <>
+      <Layout>
         <div className="flex items-center justify-center min-h-[60vh]">
           <div className="spinner" />
         </div>
-      </>
+      </Layout>
     );
   }
 
   return (
-    <>
+    <Layout>
       <div className="space-y-6 animate-fade-in" data-testid="loyalty-page">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -585,6 +585,6 @@ export default function LoyaltyPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </>
+    </Layout>
   );
 }

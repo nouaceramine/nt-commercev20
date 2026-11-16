@@ -439,7 +439,7 @@ function AppRoutes() {
       >
         <Route index element={<EcomHubPage />} />
         <Route path="store" element={<ProtectedRoute adminOnly><StoreManagementPage /></ProtectedRoute>} />
-        <Route path="store/loyalty" element={<ProtectedRoute adminOnly featureKey="loyalty_points"><LoyaltyPage /></ProtectedRoute>} />
+        <Route path="store/loyalty" element={<Navigate to="/loyalty" replace />} />  {/* p530-D1: back-compat */}
         <Route path="store/referrals" element={<ProtectedRoute adminOnly><EcomReferralsPage /></ProtectedRoute>} />
         <Route path="store/multi" element={<ProtectedRoute adminOnly><EcomMultiStorePage /></ProtectedRoute>} />
         <Route path="channels" element={<EcomChannelsPage />} />
@@ -1126,7 +1126,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-            <Route path="/loyalty" element={<Navigate to="/ecom-hub/store/loyalty" replace />} />
+            <Route path="/loyalty" element={<ProtectedRoute adminOnly featureKey="loyalty_points"><LoyaltyPage /></ProtectedRoute>} />
       <Route
         path="/services"
         element={
