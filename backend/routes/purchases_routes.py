@@ -121,6 +121,11 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
                 if old_pp > 0 and abs(new_pp - old_pp) > 1e-9:
                     price_changes.append({"product_id": pid, "name": product.get("name_ar") or product.get("name_en") or pid,
                                           "old_price": old_pp, "new_price": new_pp})
+            if sign > 0:
+                # p530: stamp last_purchase_date at write time — the products
+                # list previously recomputed it via a per-read $unwind
+                # aggregation over purchases (O(purchases) every list call).
+                updates.setdefault("$set", {})["last_purchase_date"] = now
             await db.products.update_one({"id": pid}, updates, session=session)
             if warehouse_id:
                 from services.warehouse_stock import adjust_warehouse_stock

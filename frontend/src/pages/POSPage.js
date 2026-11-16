@@ -278,7 +278,7 @@ export default function POSPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await apiClient.get('/products');
+      const res = await apiClient.get('/products?limit=50000');  // p530: default was 1000 — POS silently saw only 1000 of a large catalog; payload is light now (list projection)
       setProducts(res.data);
       setProductsCacheAt(null);
       writeCache(POS_CACHE_PRODUCTS, res.data);  // M10
@@ -388,7 +388,7 @@ export default function POSPage() {
       const seq = ++searchSeqRef.current;
       const timer = setTimeout(async () => {
         try {
-          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=50000`);  // p175: ALL matches, no cap
+          const res = await apiClient.get(`/products/quick-search?q=${encodeURIComponent(searchQuery)}&limit=200`);  // p530: top matches suffice (server clamps to 500)
           if (seq === searchSeqRef.current && Array.isArray(res.data?.results)) {
             setSearchResults(res.data.results);
             setShowSearchResults(true);

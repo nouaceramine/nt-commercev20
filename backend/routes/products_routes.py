@@ -9,6 +9,45 @@ from datetime import datetime, timezone
 from utils.inventory_queries import low_stock_filter
 from services.warehouse_stock import adjust_warehouse_stock
 import uuid
+import re
+
+
+# p530: light projection for list/search payloads — descriptions, image arrays
+# and internal notes stay out of list responses (the detail endpoint serves
+# them on demand). On a 7k-product catalog this shrinks /products ~10x.
+PRODUCT_LIST_PROJECTION = {
+    "_id": 0, "internal_notes": 0, "images": 0,
+}
+# Descriptions stay in list payloads (product cards show a 2-line clamp) but
+# truncated — an e-commerce tenant with long HTML descriptions would otherwise
+# push megabytes through the list endpoints.
+DESCRIPTION_LIST_MAX = 300
+
+
+def truncate_list_descriptions(products):
+    for p in products:
+        for f in ("description_ar", "description_en"):
+            v = p.get(f)
+            if v and len(v) > DESCRIPTION_LIST_MAX:
+                p[f] = v[:DESCRIPTION_LIST_MAX]
+
+
+
+def product_search_or(search: str):
+    """p530: tightened product search — exact barcode hits and index-anchored
+    prefix clauses first (barcode/article_code are indexed); free text scans
+    only the two name fields instead of eight unanchored regexes that also
+    covered long description/compatible_models strings. Input is re.escape'd
+    (raw regex chars like "[" used to be able to 500 the endpoint)."""
+    s = re.escape(search)
+    return [
+        {"barcode": search},
+        {"additional_barcodes": search},
+        {"article_code": {"$regex": f"^{s}", "$options": "i"}},
+        {"barcode": {"$regex": f"^{s}", "$options": "i"}},
+        {"name_ar": {"$regex": s, "$options": "i"}},
+        {"name_en": {"$regex": s, "$options": "i"}},
+    ]
 
 
 def product_supplier_link_mongo_id(product_id: str, supplier_id: str) -> str:
@@ -230,16 +269,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         if barcode:
             query["$or"] = [{"barcode": barcode}, {"additional_barcodes": barcode}]
         elif search:
-            query["$or"] = [
-                {"name_en": {"$regex": search, "$options": "i"}},
-                {"name_ar": {"$regex": search, "$options": "i"}},
-                {"description_en": {"$regex": search, "$options": "i"}},
-                {"description_ar": {"$regex": search, "$options": "i"}},
-                {"compatible_models": {"$regex": search, "$options": "i"}},
-                {"barcode": {"$regex": search, "$options": "i"}},
-                {"additional_barcodes": {"$regex": search, "$options": "i"}},
-                {"article_code": {"$regex": search, "$options": "i"}}
-            ]
+            query["$or"] = product_search_or(search)  # p530
         if model:
             if "$or" in query:
                 query = {"$and": [{"$or": query["$or"]}, {"compatible_models": {"$regex": model, "$options": "i"}}]}
@@ -253,7 +283,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             else:
                 query["family_id"] = family_id
 
-        products = await db.products.find(query, {"_id": 0}).to_list(max(1, min(limit, 50000)))  # p175: was 10000  # p174: honor limit (GlobalSearchModal passes 5)
+        products = await db.products.find(query, PRODUCT_LIST_PROJECTION).to_list(max(1, min(limit, 50000)))  # p175/p174 limits; p530 light projection
 
         family_ids = list(set(p.get("family_id") for p in products if p.get("family_id") and not p.get("family_name")))
         families_map = {}
@@ -261,19 +291,10 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             families = await db.product_families.find({"id": {"$in": family_ids}}, {"_id": 0, "id": 1, "name_ar": 1, "name": 1}).to_list(len(family_ids))
             families_map = {f["id"]: (f.get("name_ar") or f.get("name") or "") for f in families}  # p501: legacy name-only docs
 
-        product_ids = [p["id"] for p in products if p.get("id") and not p.get("last_purchase_date")]
-        last_purchases_map = {}
-        if product_ids:
-            pipeline = [
-                {"$match": {"items.product_id": {"$in": product_ids}}},
-                {"$sort": {"created_at": -1}},
-                {"$unwind": "$items"},
-                {"$match": {"items.product_id": {"$in": product_ids}}},
-                {"$group": {"_id": "$items.product_id", "last_date": {"$first": "$created_at"}}}
-            ]
-            last_purchases = await db.purchases.aggregate(pipeline).to_list(len(product_ids))
-            last_purchases_map = {lp["_id"]: lp["last_date"] for lp in last_purchases}
-
+        # p530: last_purchase_date is now stamped on the product at purchase
+        # time (purchases_routes._apply_purchase_stock) and backfilled once per
+        # tenant — the per-read $unwind aggregation over purchases scaled with
+        # BOTH collections and ran on every list call. Removed.
         for product in products:
             if product.get("family_id") and not product.get("family_name"):
                 product["family_name"] = families_map.get(product["family_id"], "")
@@ -281,8 +302,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 product["family_name"] = ""
             if not product.get("article_code"):
                 product["article_code"] = ""
-            if not product.get("last_purchase_date") and product.get("id") in last_purchases_map:
-                product["last_purchase_date"] = last_purchases_map[product["id"]]
+        truncate_list_descriptions(products)
         return products
 
     # ── Paginated Products ──
@@ -297,16 +317,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         if barcode:
             query["$or"] = [{"barcode": barcode}, {"additional_barcodes": barcode}]
         elif search:
-            query["$or"] = [
-                {"name_en": {"$regex": search, "$options": "i"}},
-                {"name_ar": {"$regex": search, "$options": "i"}},
-                {"description_en": {"$regex": search, "$options": "i"}},
-                {"description_ar": {"$regex": search, "$options": "i"}},
-                {"compatible_models": {"$regex": search, "$options": "i"}},
-                {"barcode": {"$regex": search, "$options": "i"}},
-                {"additional_barcodes": {"$regex": search, "$options": "i"}},
-                {"article_code": {"$regex": search, "$options": "i"}}
-            ]
+            query["$or"] = product_search_or(search)  # p530
         if model:
             if "$or" in query:
                 query = {"$and": [{"$or": query["$or"]}, {"compatible_models": {"$regex": model, "$options": "i"}}]}
@@ -325,16 +336,22 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         total = await db.products.count_documents(query)
         total_pages = (total + page_size - 1) // page_size
         skip = (page - 1) * page_size
-        products = await db.products.find(query, {"_id": 0}).skip(skip).limit(page_size).to_list(page_size)
+        products = await db.products.find(query, PRODUCT_LIST_PROJECTION).skip(skip).limit(page_size).to_list(page_size)
 
+        # p530: batch the family lookup — one query per page, not per product
+        _pg_fam_ids = list({p.get("family_id") for p in products if p.get("family_id") and not p.get("family_name")})
+        _pg_fam_map = {}
+        if _pg_fam_ids:
+            async for _fam in db.product_families.find({"id": {"$in": _pg_fam_ids}}, {"_id": 0, "id": 1, "name_ar": 1, "name": 1}):
+                _pg_fam_map[_fam["id"]] = _fam.get("name_ar") or _fam.get("name") or ""
         for product in products:
             if product.get("family_id") and not product.get("family_name"):
-                family = await db.product_families.find_one({"id": product["family_id"]}, {"_id": 0, "name_ar": 1, "name": 1})
-                product["family_name"] = (family.get("name_ar") or family.get("name") or "") if family else ""
+                product["family_name"] = _pg_fam_map.get(product["family_id"], "")
             elif not product.get("family_name"):
                 product["family_name"] = ""
             if not product.get("article_code"):
                 product["article_code"] = ""
+        truncate_list_descriptions(products)
 
         return {"items": products, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
 
@@ -348,16 +365,16 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     ):
         conditions = []
         if q and len(q) >= 1:
+            _qe = re.escape(q)  # p530: raw regex chars (e.g. "[") could 500
             conditions.append({
                 "$or": [
                     {"barcode": q},
                     {"additional_barcodes": q},
                     {"scale_plu": q},
-                    {"article_code": {"$regex": f"^{q}", "$options": "i"}},
-                    {"name_ar": {"$regex": q, "$options": "i"}},
-                    {"name_en": {"$regex": q, "$options": "i"}},
-                    {"barcode": {"$regex": q, "$options": "i"}},
-                    {"additional_barcodes": {"$regex": q, "$options": "i"}},
+                    {"article_code": {"$regex": f"^{_qe}", "$options": "i"}},
+                    {"barcode": {"$regex": f"^{_qe}", "$options": "i"}},
+                    {"name_ar": {"$regex": _qe, "$options": "i"}},
+                    {"name_en": {"$regex": _qe, "$options": "i"}},
                 ]
             })
         if family_id:
@@ -388,16 +405,18 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "modifier_groups": 1,  # p308: POS يحتاج مجموعات الإضافات عند اختيار الطبق
         }
 
-        limit = max(1, min(limit, 50000))  # p175: no practical cap — return every match
+        limit = max(1, min(limit, 500))  # p530: POS asked 50000/keystroke; top matches suffice
         total = await db.products.count_documents(search_query)
         products = await db.products.find(search_query, projection).limit(limit).to_list(limit)
 
+        # p530: batch family names — was one find_one per product (N+1)
+        _qs_fam_ids = list({p.get("family_id") for p in products if p.get("family_id")})
+        _qs_fam_map = {}
+        if _qs_fam_ids:
+            async for _fam in db.product_families.find({"id": {"$in": _qs_fam_ids}}, {"_id": 0, "id": 1, "name_ar": 1}):
+                _qs_fam_map[_fam["id"]] = _fam.get("name_ar", "")
         for product in products:
-            if product.get("family_id"):
-                family = await db.product_families.find_one({"id": product["family_id"]}, {"_id": 0, "name_ar": 1})
-                product["family_name"] = family.get("name_ar", "") if family else ""
-            else:
-                product["family_name"] = ""
+            product["family_name"] = _qs_fam_map.get(product.get("family_id"), "") if product.get("family_id") else ""
             if "min_quantity" not in product:
                 product["min_quantity"] = 0
 
