@@ -12,8 +12,12 @@ only order code, status timeline, courier, totals and the store name.
 """
 import logging
 import re
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +55,9 @@ def create_public_track_routes(main_db) -> dict:
 
     public = APIRouter(tags=["public-tracking"])
 
-    @public.get("/track/{code}")
-    async def track_order(code: str):
-        code = (code or "").strip()
-        if not _CODE_RE.match(code):
-            raise HTTPException(status_code=400, detail="رمز غير صالح")
-
+    async def _resolve_order(code: str):
+        """(order, tenant) for an order code: stamped fast path → marketplace
+        fast path → bounded tenant scan. (None, None) when not found."""
         order, tenant = None, None
 
         # p258 fast path: stamped codes (PREFIX-NTx-...) name their tenant —
@@ -107,6 +108,14 @@ def create_public_track_routes(main_db) -> dict:
                     best_key = str(cand.get("created_at") or "")
                     order, tenant = cand, t
 
+        return order, tenant
+
+    @public.get("/track/{code}")
+    async def track_order(code: str):
+        code = (code or "").strip()
+        if not _CODE_RE.match(code):
+            raise HTTPException(status_code=400, detail="رمز غير صالح")
+        order, tenant = await _resolve_order(code)
         if not order:
             return {"ok": True, "found": False}
 
@@ -137,5 +146,79 @@ def create_public_track_routes(main_db) -> dict:
                 "created_at": order.get("created_at"),
             },
         }
+
+    # ── p530-D2: customer-side "report a problem with my order" ──
+    REPORT_CATEGORIES = {
+        "late": "تأخر التوصيل",
+        "wrong_item": "منتج خاطئ أو ناقص",
+        "damaged": "منتج تالف",
+        "no_answer": "المتجر لا يرد",
+        "other": "أخرى",
+    }
+    MAX_OPEN_REPORTS_PER_ORDER = 3
+
+    class ReportIn(BaseModel):
+        category: str
+        message: str
+        contact: Optional[str] = ""
+
+    @public.post("/track/{code}/report")
+    async def report_order_issue(code: str, body: ReportIn):
+        """Public, no auth — the order code itself is the capability.
+        Abuse control: valid code required, 3 open reports per order max,
+        message length-bounded. Returns no order data."""
+        code = (code or "").strip()
+        if not _CODE_RE.match(code):
+            raise HTTPException(status_code=400, detail="رمز غير صالح")
+        category = (body.category or "").strip()
+        if category not in REPORT_CATEGORIES:
+            raise HTTPException(status_code=400, detail="نوع البلاغ غير صالح")
+        message = (body.message or "").strip()
+        if not 10 <= len(message) <= 500:
+            raise HTTPException(status_code=400, detail="نص البلاغ يجب أن يكون بين 10 و 500 حرف")
+        contact = (body.contact or "").strip()[:100]
+
+        order, tenant = await _resolve_order(code)
+        if not order or not tenant:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+
+        tdb = get_tenant_db(tenant["id"])
+        open_reports = await tdb.order_reports.count_documents(
+            {"order_code": code, "status": "new"})
+        if open_reports >= MAX_OPEN_REPORTS_PER_ORDER:
+            raise HTTPException(
+                status_code=429,
+                detail="تم استلام بلاغات كافية لهذا الطلب — سيتواصل معك المتجر")
+
+        now = datetime.now(timezone.utc).isoformat()
+        doc = {
+            "id": str(uuid.uuid4()),
+            "order_id": order.get("id", ""),
+            "order_code": code,
+            "category": category,
+            "category_ar": REPORT_CATEGORIES[category],
+            "message": message,
+            "contact": contact,
+            "status": "new",
+            "created_at": now,
+        }
+        await tdb.order_reports.insert_one(doc)
+        await tdb.ecom_orders.update_one(
+            {"order_code": code},
+            {"$inc": {"report_count": 1}, "$set": {"has_open_report": True}})
+        # merchant notification (best-effort — the bell shows it immediately)
+        try:
+            await tdb.notifications.insert_one({
+                "id": str(uuid.uuid4()),
+                "title": "بلاغ عن طلب",
+                "message": f"بلاغ جديد على الطلب {code} ({REPORT_CATEGORIES[category]}): {message[:80]}",
+                "type": "order_report",
+                "link": "/ecom-hub",
+                "is_read": False,
+                "created_at": now,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        return {"ok": True}
 
     return {"public_track": public}

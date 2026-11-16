@@ -32,6 +32,14 @@ export default function GlobalTrackingPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [searched, setSearched] = useState(false);
+  // p530-D2: report a problem with this order
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportCategory, setReportCategory] = useState('late');
+  const [reportMessage, setReportMessage] = useState('');
+  const [reportContact, setReportContact] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportDone, setReportDone] = useState(false);
+  const [reportError, setReportError] = useState('');
 
   const track = async (e) => {
     if (e) e.preventDefault();
@@ -45,6 +53,29 @@ export default function GlobalTrackingPage() {
       setResult({ ok: false, found: false });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const submitReport = async () => {
+    if (!order || reportBusy) return;
+    if (reportMessage.trim().length < 10) {
+      setReportError('نص البلاغ يجب أن يكون 10 أحرف على الأقل');
+      return;
+    }
+    setReportBusy(true);
+    setReportError('');
+    try {
+      await apiClient.post(`/track/${encodeURIComponent(order.order_code)}/report`, {
+        category: reportCategory,
+        message: reportMessage.trim(),
+        contact: reportContact.trim(),
+      });
+      setReportDone(true);
+      setReportOpen(false);
+    } catch (err) {
+      setReportError(err?.response?.data?.detail || 'تعذر إرسال البلاغ — حاول لاحقاً');
+    } finally {
+      setReportBusy(false);
     }
   };
 
@@ -155,6 +186,86 @@ export default function GlobalTrackingPage() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* p530-D2: report a problem with this order */}
+        {order && (
+          <div style={{ maxWidth: 640, margin: '16px auto 0' }}>
+            {reportDone ? (
+              <div data-testid="report-success" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: 16, textAlign: 'center', color: '#15803d', fontWeight: 600 }}>
+                ✅ تم استلام بلاغك — سيتواصل معك المتجر قريباً
+              </div>
+            ) : !reportOpen ? (
+              <button
+                onClick={() => { setReportOpen(true); setReportError(''); }}
+                data-testid="report-open-btn"
+                style={{ width: '100%', padding: 14, borderRadius: 12, border: '1px solid #fecaca', background: '#fff5f5', color: '#b91c1c', fontWeight: 700, cursor: 'pointer' }}
+              >
+                ⚠️ الإبلاغ عن مشكلة بهذا الطلب
+              </button>
+            ) : (
+              <div data-testid="report-form" style={{ background: '#fff', borderRadius: 16, padding: 20, border: '1px solid #fecaca' }}>
+                <div style={{ fontWeight: 800, marginBottom: 12, color: '#1a1a2e' }}>الإبلاغ عن مشكلة — {order.order_code}</div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: 'block', fontSize: 13, marginBottom: 4, color: '#374151' }}>نوع المشكلة</label>
+                  <select
+                    value={reportCategory}
+                    onChange={e => setReportCategory(e.target.value)}
+                    data-testid="report-category"
+                    style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid #ddd' }}
+                  >
+                    <option value="late">تأخر التوصيل</option>
+                    <option value="wrong_item">منتج خاطئ أو ناقص</option>
+                    <option value="damaged">منتج تالف</option>
+                    <option value="no_answer">المتجر لا يرد</option>
+                    <option value="other">أخرى</option>
+                  </select>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: 'block', fontSize: 13, marginBottom: 4, color: '#374151' }}>وصف المشكلة *</label>
+                  <textarea
+                    value={reportMessage}
+                    onChange={e => setReportMessage(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                    placeholder="اشرح المشكلة باختصار..."
+                    data-testid="report-message"
+                    style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid #ddd', resize: 'vertical' }}
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontSize: 13, marginBottom: 4, color: '#374151' }}>رقم هاتف للتواصل (اختياري)</label>
+                  <input
+                    value={reportContact}
+                    onChange={e => setReportContact(e.target.value)}
+                    dir="ltr"
+                    placeholder="0550 00 00 00"
+                    data-testid="report-contact"
+                    style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid #ddd' }}
+                  />
+                </div>
+                {reportError && (
+                  <div style={{ color: '#b91c1c', fontSize: 13, marginBottom: 10 }}>{reportError}</div>
+                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={submitReport}
+                    disabled={reportBusy}
+                    data-testid="report-submit-btn"
+                    style={{ flex: 1, padding: 12, borderRadius: 10, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    {reportBusy ? '...' : 'إرسال البلاغ'}
+                  </button>
+                  <button
+                    onClick={() => setReportOpen(false)}
+                    style={{ padding: '12px 20px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer' }}
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

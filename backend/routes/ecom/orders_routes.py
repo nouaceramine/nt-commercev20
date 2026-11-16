@@ -206,6 +206,38 @@ async def list_orders(
     }
 
 
+@router.get("/ecom/order-reports")
+async def list_order_reports(status: Optional[str] = None, limit: int = 50,
+                             user: dict = Depends(require_tenant)):
+    """p530-D2: customer reports filed from the public tracking page."""
+    q = {}
+    if status in ("new", "resolved"):
+        q["status"] = status
+    docs = await db.order_reports.find(q, {"_id": 0}).sort("created_at", -1).to_list(min(max(1, limit), 200))
+    open_count = await db.order_reports.count_documents({"status": "new"})
+    return {"reports": docs, "open_count": open_count}
+
+
+@router.post("/ecom/order-reports/{report_id}/resolve")
+async def resolve_order_report(report_id: str, user: dict = Depends(require_tenant)):
+    rep = await db.order_reports.find_one({"id": report_id})
+    if not rep:
+        raise HTTPException(status_code=404, detail="البلاغ غير موجود")
+    await db.order_reports.update_one(
+        {"id": report_id},
+        {"$set": {"status": "resolved",
+                  "resolved_at": datetime.now(timezone.utc).isoformat(),
+                  "resolved_by": user.get("id", "")}})
+    # clear the order flag when no open reports remain
+    remaining = await db.order_reports.count_documents(
+        {"order_code": rep.get("order_code"), "status": "new"})
+    if remaining == 0:
+        await db.ecom_orders.update_one(
+            {"order_code": rep.get("order_code")},
+            {"$set": {"has_open_report": False}})
+    return {"ok": True, "remaining_open": remaining}
+
+
 @router.get("/ecom/orders/summary")
 async def orders_summary(user: dict = Depends(require_tenant)):
     """Per-channel + per-status order counts for the Inbox dashboard cards.
