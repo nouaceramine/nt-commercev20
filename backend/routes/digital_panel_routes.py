@@ -26,6 +26,8 @@ import logging
 from pymongo import ReturnDocument
 from pymongo.errors import PyMongoError
 
+from utils.permissions import create_cashier_block
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,18 +79,22 @@ def _to_float(v, default=0.0) -> float:
 def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -> APIRouter:
     router = APIRouter(prefix="/digital-panel", tags=["digital-panel"])
 
+    # p529: UI hides every /digital-panel page from the cashier — the
+    # backing tenant APIs enforce the same boundary (defense in depth).
+    block_cashier = create_cashier_block(require_tenant)
+
     # ============================================================
     # Services catalog
     # ============================================================
     @router.get("/services")
-    async def list_services(category: Optional[str] = None, user: dict = Depends(require_tenant)):
+    async def list_services(category: Optional[str] = None, user: dict = Depends(block_cashier)):
         query = {}
         if category:
             query["category"] = category
         return await db.digital_services.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
     @router.post("/services", status_code=201)
-    async def create_service(payload: dict, user: dict = Depends(require_tenant)):
+    async def create_service(payload: dict, user: dict = Depends(block_cashier)):
         name = (payload.get("name") or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="اسم الخدمة مطلوب")
@@ -112,7 +118,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return doc
 
     @router.put("/services/{service_id}")
-    async def update_service(service_id: str, payload: dict, user: dict = Depends(require_tenant)):
+    async def update_service(service_id: str, payload: dict, user: dict = Depends(block_cashier)):
         update = {k: v for k, v in payload.items() if k not in ("id", "_id", "created_at", "created_by")}
         for fld in ("default_cost", "default_price"):
             if fld in update:
@@ -134,11 +140,11 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
     # Resellers (موزّعين) + balance ledger
     # ============================================================
     @router.get("/resellers")
-    async def list_resellers(user: dict = Depends(require_tenant)):
+    async def list_resellers(user: dict = Depends(block_cashier)):
         return await db.resellers.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
     @router.post("/resellers", status_code=201)
-    async def create_reseller(payload: dict, user: dict = Depends(require_tenant)):
+    async def create_reseller(payload: dict, user: dict = Depends(block_cashier)):
         name = (payload.get("name") or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="اسم الموزّع مطلوب")
@@ -159,7 +165,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return doc
 
     @router.put("/resellers/{reseller_id}")
-    async def update_reseller(reseller_id: str, payload: dict, user: dict = Depends(require_tenant)):
+    async def update_reseller(reseller_id: str, payload: dict, user: dict = Depends(block_cashier)):
         # balance is only mutated via the dedicated balance endpoint
         update = {k: v for k, v in payload.items()
                   if k not in ("id", "_id", "balance", "created_at", "created_by")}
@@ -177,13 +183,13 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return {"success": True}
 
     @router.get("/resellers/{reseller_id}/transactions")
-    async def reseller_transactions(reseller_id: str, user: dict = Depends(require_tenant)):
+    async def reseller_transactions(reseller_id: str, user: dict = Depends(block_cashier)):
         return await db.reseller_transactions.find(
             {"reseller_id": reseller_id}, {"_id": 0}
         ).sort("created_at", -1).to_list(1000)
 
     @router.post("/resellers/{reseller_id}/balance")
-    async def adjust_reseller_balance(reseller_id: str, payload: dict, user: dict = Depends(require_tenant)):
+    async def adjust_reseller_balance(reseller_id: str, payload: dict, user: dict = Depends(block_cashier)):
         """Credit (شحن) or debit (سحب) a reseller balance. type: credit | debit."""
         txn_type = payload.get("type")
         amount = _to_float(payload.get("amount"))
@@ -294,7 +300,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         category: Optional[str] = None,
         reseller_id: Optional[str] = None,
         customer_id: Optional[str] = None,
-        user: dict = Depends(require_tenant),
+        user: dict = Depends(block_cashier),
     ):
         query = {}
         if category:
@@ -311,7 +317,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return subs
 
     @router.get("/subscriptions/expiring")
-    async def expiring_subscriptions(days: int = 7, user: dict = Depends(require_tenant)):
+    async def expiring_subscriptions(days: int = 7, user: dict = Depends(block_cashier)):
         now = datetime.now(timezone.utc)
         horizon = now + timedelta(days=max(0, days))
         subs = await db.digital_subscriptions.find({}, {"_id": 0}).to_list(2000)
@@ -325,7 +331,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return out
 
     @router.get("/subscriptions/{sub_id}")
-    async def get_subscription(sub_id: str, user: dict = Depends(require_tenant)):
+    async def get_subscription(sub_id: str, user: dict = Depends(block_cashier)):
         sub = await db.digital_subscriptions.find_one({"id": sub_id}, {"_id": 0})
         if not sub:
             raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
@@ -333,7 +339,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return sub
 
     @router.post("/subscriptions", status_code=201)
-    async def create_subscription(payload: dict, user: dict = Depends(require_tenant)):
+    async def create_subscription(payload: dict, user: dict = Depends(block_cashier)):
         sub_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         doc = _build_sub_doc(payload, user)
@@ -528,7 +534,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return doc
 
     @router.put("/subscriptions/{sub_id}")
-    async def update_subscription(sub_id: str, payload: dict, user: dict = Depends(require_tenant)):
+    async def update_subscription(sub_id: str, payload: dict, user: dict = Depends(block_cashier)):
         existing = await db.digital_subscriptions.find_one({"id": sub_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
@@ -555,7 +561,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
     # (cost_source="panel") instead of the platform wallet.
     # ============================================================
     @router.get("/panel-balance")
-    async def get_panel_balance(user: dict = Depends(require_tenant)):
+    async def get_panel_balance(user: dict = Depends(block_cashier)):
         doc = await db.digital_panel_balance.find_one({"id": "default"}, {"_id": 0})
         return {"balance": round(_to_float((doc or {}).get("balance")), 2),
                 "updated_at": (doc or {}).get("updated_at", "")}
@@ -626,7 +632,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
     # Platform catalog (read-only for tenants + purchase)
     # ============================================================
     @router.get("/platform-catalog")
-    async def list_platform_catalog_for_tenant(user: dict = Depends(require_tenant)):
+    async def list_platform_catalog_for_tenant(user: dict = Depends(block_cashier)):
         """Tenant: browse active platform-level packages available for purchase."""
         items = await main_db.platform_digital_catalog.find(
             {"active": True}, {"_id": 0}
@@ -634,7 +640,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         return items
 
     @router.post("/platform-catalog/{item_id}/purchase", status_code=201)
-    async def purchase_platform_item(item_id: str, user: dict = Depends(require_tenant)):
+    async def purchase_platform_item(item_id: str, user: dict = Depends(block_cashier)):
         """Tenant: buy a platform catalog item — debit wallet by cost_price, add to tenant's digital_services."""
         from services.wallet_service import debit_wallet
 
@@ -682,7 +688,7 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
     # Dashboard stats
     # ============================================================
     @router.get("/stats")
-    async def stats(user: dict = Depends(require_tenant)):
+    async def stats(user: dict = Depends(block_cashier)):
         subs = await db.digital_subscriptions.find({}, {"_id": 0}).to_list(5000)
         total = len(subs)
         active = expiring = expired = 0

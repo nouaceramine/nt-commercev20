@@ -12,6 +12,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from pymongo import ReturnDocument
 
+from utils.permissions import create_cashier_block
+
 logger = logging.getLogger(__name__)
 
 DIGITAL_TYPES = ["MOBILE_TOPUP", "INTERNET_BUNDLE", "GIFT_CARD", "SUBSCRIPTION"]
@@ -21,6 +23,10 @@ PAYMENT_METHODS = ["wallet", "ccp", "d17"]
 
 def create_digital_services_routes(db, main_db, get_current_user, get_tenant_admin) -> APIRouter:
     router = APIRouter(prefix="/digital", tags=["digital-services"])
+
+    # p529: /digital-services and /digital-admin are hidden from the cashier
+    # (sidebar minRole) — the backing APIs enforce the same boundary.
+    block_cashier = create_cashier_block(get_current_user)
 
     # ── Models ──
     class DigitalProductCreate(BaseModel):
@@ -100,7 +106,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
     # ── Products ──
     @router.get("/products")
     async def list_products(type: Optional[str] = None, provider: Optional[str] = None,
-                            user: dict = Depends(get_current_user)):
+                            user: dict = Depends(block_cashier)):
         query = {"is_active": True}
         if type:
             query["type"] = type
@@ -276,7 +282,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return [d["id"] for d in docs]
 
     @router.post("/orders", status_code=201)
-    async def create_order(data: OrderCreate, user: dict = Depends(get_current_user)):
+    async def create_order(data: OrderCreate, user: dict = Depends(block_cashier)):
         if data.payment_method not in PAYMENT_METHODS:
             raise HTTPException(status_code=400, detail="طريقة الدفع غير صالحة")
         # p506-002: quantity=-2 used to make amount negative; the conditional
@@ -354,7 +360,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return order
 
     @router.get("/orders")
-    async def list_orders(status: Optional[str] = None, user: dict = Depends(get_current_user)):
+    async def list_orders(status: Optional[str] = None, user: dict = Depends(block_cashier)):
         query = {}
         if user.get("role") not in ("admin", "super_admin") and user.get("user_type") != "super_admin":
             query["user_id"] = user.get("id")
@@ -363,7 +369,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return await db.digital_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
 
     @router.get("/orders/{order_id}/codes")
-    async def get_order_codes(order_id: str, user: dict = Depends(get_current_user)):
+    async def get_order_codes(order_id: str, user: dict = Depends(block_cashier)):
         from utils.code_crypto import decrypt_code
         order = await db.digital_orders.find_one({"id": order_id}, {"_id": 0})
         if not order:
@@ -432,7 +438,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
 
     # ── Wallet ──
     @router.get("/wallet")
-    async def get_wallet(user: dict = Depends(get_current_user)):
+    async def get_wallet(user: dict = Depends(block_cashier)):
         wallet = await _get_wallet(user.get("id"))
         txns = await db.wallet_transactions.find(
             {"user_id": user.get("id")}, {"_id": 0}
@@ -441,7 +447,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return {"wallet": wallet, "transactions": txns}
 
     @router.post("/wallet/deposit")
-    async def wallet_deposit(data: DepositBody, user: dict = Depends(get_current_user)):
+    async def wallet_deposit(data: DepositBody, user: dict = Depends(block_cashier)):
         if not math.isfinite(data.amount) or data.amount <= 0:
             raise HTTPException(status_code=400, detail="المبلغ غير صالح")
         wallet = await _get_wallet(user.get("id"))
@@ -455,7 +461,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return {"balance": before + data.amount, "message": "تم شحن الرصيد"}
 
     @router.post("/wallet/pay")
-    async def wallet_pay(body: dict, user: dict = Depends(get_current_user)):
+    async def wallet_pay(body: dict, user: dict = Depends(block_cashier)):
         """Pay a PENDING order from wallet (e.g. after choosing CCP then switching)."""
         order_id = body.get("order_id")
         order = await db.digital_orders.find_one({"id": order_id}, {"_id": 0})
@@ -541,7 +547,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return "REF-" + user_id.replace("-", "")[:8].upper()
 
     @router.get("/affiliate")
-    async def get_affiliate(user: dict = Depends(get_current_user)):
+    async def get_affiliate(user: dict = Depends(block_cashier)):
         aff = await db.affiliates.find_one({"referrer_id": user.get("id")}, {"_id": 0})
         if not aff:
             return {"active": False, "message": "فعّل رابط الإحالة للبدء"}
@@ -549,7 +555,7 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         return aff
 
     @router.post("/affiliate")
-    async def activate_affiliate(user: dict = Depends(get_current_user)):
+    async def activate_affiliate(user: dict = Depends(block_cashier)):
         existing = await db.affiliates.find_one({"referrer_id": user.get("id")}, {"_id": 0})
         if existing:
             await db.affiliates.update_one({"id": existing["id"]}, {"$set": {"is_active": True}})
