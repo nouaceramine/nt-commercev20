@@ -37,6 +37,13 @@ from fastapi.responses import StreamingResponse
 from config.database import db
 from services.code_generator import public_hex_code
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 from services.application.ecom_order_service import normalize_phone
 
@@ -101,7 +108,7 @@ def _rows_from_upload(filename: str, raw: bytes):
 
 
 @router.get("/ecom/import/template")
-async def bulk_template(user: dict = Depends(require_tenant)):
+async def bulk_template(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     from openpyxl import Workbook
     wb = Workbook()
@@ -119,7 +126,7 @@ async def bulk_template(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/import/orders")
-async def bulk_upload(file: UploadFile = File(...), user: dict = Depends(require_tenant)):
+async def bulk_upload(file: UploadFile = File(...), user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     raw = await file.read()
     if len(raw) > 5 * 1024 * 1024:
@@ -251,14 +258,14 @@ async def bulk_upload(file: UploadFile = File(...), user: dict = Depends(require
 
 
 @router.get("/ecom/import-batches")
-async def list_batches(limit: int = Query(20, ge=1, le=100), user: dict = Depends(require_tenant)):
+async def list_batches(limit: int = Query(20, ge=1, le=100), user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     rows = await db.ecom_import_batches.find({}, {"_id": 0, "errors": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     return {"items": rows}
 
 
 @router.get("/ecom/import-batches/{batch_id}")
-async def get_batch(batch_id: str, user: dict = Depends(require_tenant)):
+async def get_batch(batch_id: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     doc = await db.ecom_import_batches.find_one({"id": batch_id}, {"_id": 0})
     if not doc:

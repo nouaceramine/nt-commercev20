@@ -24,6 +24,13 @@ from pydantic import BaseModel
 
 from config.database import db, main_db, get_tenant_db, set_tenant_context
 from utils.auth import require_tenant, ensure_active_account
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from utils.jwt_config import SECRET_KEY, ALGORITHM
 from .constants import require_ecom_feature
 
@@ -275,7 +282,7 @@ def _valid_commission(v) -> bool:
 
 
 @router.get("/ecom-workers")
-async def list_workers(user: dict = Depends(require_tenant)):
+async def list_workers(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     workers = await db.ecom_workers.find({}, {"_id": 0, "pin_hash": 0}).sort("created_at", -1).to_list(length=500)
     out = []
@@ -285,7 +292,7 @@ async def list_workers(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom-workers")
-async def create_worker(body: WorkerCreate, user: dict = Depends(require_tenant)):
+async def create_worker(body: WorkerCreate, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     name = (body.name or "").strip()
     phone = _norm_phone(body.phone)
@@ -318,7 +325,7 @@ async def create_worker(body: WorkerCreate, user: dict = Depends(require_tenant)
 
 
 @router.put("/ecom-workers/{worker_id}")
-async def update_worker(worker_id: str, body: WorkerUpdate, user: dict = Depends(require_tenant)):
+async def update_worker(worker_id: str, body: WorkerUpdate, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     worker = await db.ecom_workers.find_one({"id": worker_id})
     if not worker:
@@ -355,7 +362,7 @@ async def update_worker(worker_id: str, body: WorkerUpdate, user: dict = Depends
 
 
 @router.delete("/ecom-workers/{worker_id}")
-async def delete_worker(worker_id: str, user: dict = Depends(require_tenant)):
+async def delete_worker(worker_id: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     res = await db.ecom_workers.delete_one({"id": worker_id})
     await main_db.ecom_worker_index.delete_many({"worker_id": worker_id})
@@ -367,7 +374,7 @@ async def delete_worker(worker_id: str, user: dict = Depends(require_tenant)):
 # ═══════════════ العمولات ═══════════════
 
 @router.get("/ecom-workers/{worker_id}/commissions")
-async def worker_commissions(worker_id: str, user: dict = Depends(require_tenant)):
+async def worker_commissions(worker_id: str, user: dict = Depends(block_cashier)):
     """تقرير عمولة عامل: الطلبات المُسلَّمة غير المصفّاة + الإجماليات + سجل التصفيات."""
     await require_ecom_feature(user)
     worker = await db.ecom_workers.find_one({"id": worker_id}, {"_id": 0, "pin_hash": 0})
@@ -407,7 +414,7 @@ async def worker_commissions(worker_id: str, user: dict = Depends(require_tenant
 
 
 @router.post("/ecom-workers/{worker_id}/commissions/settle")
-async def settle_worker_commissions(worker_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def settle_worker_commissions(worker_id: str, body: dict, user: dict = Depends(block_cashier)):
     """تصفية العمولات المستحقة: قيد مصروف + خصم من الصندوق المختار + ختم الطلبات."""
     await require_ecom_feature(user)
     worker = await db.ecom_workers.find_one({"id": worker_id}, {"_id": 0, "pin_hash": 0})

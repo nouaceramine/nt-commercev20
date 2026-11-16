@@ -34,8 +34,10 @@ def _extract_fields(field_data: list) -> dict:
     return out
 
 
-def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None) -> APIRouter:
+def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None,
+                            block_cashier=None) -> APIRouter:
     router = APIRouter(prefix="/webhooks", tags=["ad-lead-webhooks"])
+    _read_guard = block_cashier or get_current_user  # p528: cashier blocked (UI hides the page)
 
     async def _handle_lead(source: str, request: Request, secret_env: str, sig_header: str, prefix: str = "sha256=", target_db=None):
         tdb = target_db if target_db is not None else db  # p95b: tenant-scoped writes
@@ -200,12 +202,12 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None)
 
     # ── Admin: leads list + webhook config status ──
     @router.get("/leads")
-    async def list_leads(source: str = None, limit: int = 50, user: dict = Depends(get_current_user)):
+    async def list_leads(source: str = None, limit: int = 50, user: dict = Depends(_read_guard)):
         query = {"source": source} if source else {}
         return await db.leads.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 200))
 
     @router.get("/config")
-    async def webhook_config(user: dict = Depends(get_current_user)):
+    async def webhook_config(user: dict = Depends(_read_guard)):
         return {
             "facebook_verify_token": os.environ.get("FB_VERIFY_TOKEN", ""),
             "facebook_app_secret_set": bool(os.environ.get("FB_APP_SECRET")),

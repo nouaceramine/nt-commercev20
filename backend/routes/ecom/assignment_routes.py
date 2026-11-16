@@ -21,6 +21,13 @@ from pydantic import BaseModel
 
 from config.database import db
 from utils.auth import require_tenant, get_tenant_admin
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
@@ -93,7 +100,7 @@ async def unassign_work(body: UnassignIn, user: dict = Depends(get_tenant_admin)
 
 
 @router.get("/ecom/my-queue")
-async def my_queue(user: dict = Depends(require_tenant)):
+async def my_queue(user: dict = Depends(block_cashier)):
     """Open orders + leads assigned to the current user."""
     await require_ecom_feature(user)
     uid = user.get("id")

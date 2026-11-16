@@ -16,6 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config.database import db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from .constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
@@ -25,7 +32,7 @@ router = APIRouter(tags=["E-Commerce Analytics"])
 @router.get("/ecom/analytics/revenue")
 async def revenue_by_channel(
     days: int = Query(30, ge=1, le=365),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     """Aggregate revenue and order count per channel + day for the last N days."""
     await require_ecom_feature(user)
@@ -48,8 +55,9 @@ async def revenue_by_channel(
     series: dict = {}
     days_set: set = set()
     for r in rows:
-        ch = r["_id"]["channel"]
-        day = r["_id"]["day"]
+        _rid = r.get("_id") or {}  # p528: legacy orders may lack channel/day
+        ch = _rid.get("channel") or "unknown"
+        day = _rid.get("day") or ""
         days_set.add(day)
         series.setdefault(ch, {})[day] = {"revenue": round(r["revenue"], 2), "count": r["count"]}
 
@@ -81,7 +89,7 @@ async def revenue_by_channel(
 @router.get("/ecom/analytics/funnel")
 async def conversion_funnel(
     days: int = Query(30, ge=1, le=365),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     """Lead → Order → Shipped → Delivered conversion funnel for the period."""
     await require_ecom_feature(user)
@@ -135,7 +143,7 @@ async def conversion_funnel(
 async def top_products(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(10, ge=1, le=100),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     """Top selling items by revenue across all channels."""
     await require_ecom_feature(user)
@@ -181,7 +189,7 @@ _LEAD_SYS_PROMPT = (
 
 
 @router.get("/ecom/analytics/profitability")
-async def ecom_profitability(days: int = 30, user: dict = Depends(require_tenant)):
+async def ecom_profitability(days: int = 30, user: dict = Depends(block_cashier)):
     """p71: true COD profitability — funnel rates + realized profit − return losses − ad spend.
 
     Answers the merchant's real question: after funded ads, confirmation,
@@ -284,7 +292,7 @@ async def ecom_profitability(days: int = 30, user: dict = Depends(require_tenant
 
 
 @router.get("/ecom/analytics/wilaya-risk")
-async def wilaya_risk(days: int = 90, user: dict = Depends(require_tenant)):
+async def wilaya_risk(days: int = 90, user: dict = Depends(block_cashier)):
     """p92: return-rate risk per wilaya — know where parcels come back before you ship."""
     await require_ecom_feature(user)
     from datetime import datetime, timezone, timedelta
@@ -323,7 +331,7 @@ async def wilaya_risk(days: int = 90, user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/leads/{lead_id}/ai-categorize")
-async def categorize_lead(lead_id: str, user: dict = Depends(require_tenant)):
+async def categorize_lead(lead_id: str, user: dict = Depends(block_cashier)):
     """LLM classifies the lead message and stores the result on the lead doc.
 
     Iter 18.4: uses the RAG-lite categorizer which feeds channel conversion
@@ -362,7 +370,7 @@ async def categorize_lead(lead_id: str, user: dict = Depends(require_tenant)):
 
 # ─── AI Co-pilot conversational endpoint (iter 18.4) ────────────────────────
 @router.post("/ecom/analytics/copilot")
-async def analytics_copilot(body: dict, user: dict = Depends(require_tenant)):
+async def analytics_copilot(body: dict, user: dict = Depends(block_cashier)):
     """Conversational analytics. Body: {question: str, session_id?: str, days?: int}"""
     await require_ecom_feature(user)
     from services.ecom.copilot_service import answer_copilot_question
@@ -393,7 +401,7 @@ def _detect_ad_source(text: str) -> str:
 
 
 @router.get("/ecom/analytics/campaign-roas")
-async def campaign_roas(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
+async def campaign_roas(days: int = Query(90, ge=1, le=365), user: dict = Depends(block_cashier)):
     """TRUE ROAS per traffic source: revenue/profit from DELIVERED orders only
     (never from merely-placed ones), ad spend from expenses tagged to the source."""
     await require_ecom_feature(user)
@@ -458,7 +466,7 @@ async def campaign_roas(days: int = Query(90, ge=1, le=365), user: dict = Depend
 # ============ p105: P&L الحقيقي لكل منتج ============
 
 @router.get("/ecom/analytics/product-pnl")
-async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
+async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(block_cashier)):
     """p105+p290: ربح وخسارة حقيقي لكل منتج — الإيراد من المُسلَّم فقط، ناقص تكلفة الشراء
     والتغليف والشحن وكلفة الإرجاع (رسوم الإرجاع لدى الناقل + تغليف المرتجع) والإعلانات.
 
@@ -582,7 +590,7 @@ async def product_pnl(days: int = Query(90, ge=1, le=365), user: dict = Depends(
 
 @router.get("/ecom/analytics/product-history")
 async def product_history(key: str, days: int = Query(90, ge=1, le=365),
-                          user: dict = Depends(require_tenant)):
+                          user: dict = Depends(block_cashier)):
     """سجل منتج واحد: كل طلب ظهر فيه مع حصته من الإيراد/التكلفة/التغليف/الشحن/الإرجاع."""
     await require_ecom_feature(user)
     if not key:
@@ -687,7 +695,7 @@ def _round50(x: float) -> int:
 
 
 @router.get("/ecom/analytics/pricing-suggestions")
-async def pricing_suggestions(days: int = Query(90, ge=1, le=365), user: dict = Depends(require_tenant)):
+async def pricing_suggestions(days: int = Query(90, ge=1, le=365), user: dict = Depends(block_cashier)):
     """p106: سعر مقترح لكل منتج بناءً على الكلفة الحقيقية للقطعة المُسلَّمة:
     سعر الشراء + (متوسط الشحن ÷ معدل التسليم)  ← كل قطعة مُسلَّمة تحمل شحن المرتجعات
     + حصة الإعلان لكل قطعة. السعر المقترح = الكلفة الحقيقية × 1.30 (هامش 30%) مقرَّباً لأقرب 50."""

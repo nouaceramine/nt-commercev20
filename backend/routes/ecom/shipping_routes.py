@@ -14,6 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from config.database import db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from services.ecom.yalidine_service import (
     create_parcel as yalidine_create_parcel,
     YalidineCredentialsMissing,
@@ -34,7 +41,7 @@ def _mock_tracking_number(provider: str) -> str:
 
 
 @router.get("/ecom/shipping/providers")
-async def list_providers(user: dict = Depends(require_tenant)):
+async def list_providers(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     return {
         "providers": [
@@ -44,14 +51,14 @@ async def list_providers(user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/shipping/labels")
-async def list_labels(user: dict = Depends(require_tenant)):
+async def list_labels(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     rows = await db.ecom_shipping_labels.find({}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
     return {"items": rows}
 
 
 @router.post("/ecom/shipping/labels")
-async def create_label(body: dict, user: dict = Depends(require_tenant)):
+async def create_label(body: dict, user: dict = Depends(block_cashier)):
     """Create a shipping label for an order.
 
     Real Yalidine call when:
@@ -224,7 +231,7 @@ async def create_label(body: dict, user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/shipping/yalidine/pull-rates")
-async def pull_yalidine_rates(body: dict, user: dict = Depends(require_tenant)):
+async def pull_yalidine_rates(body: dict, user: dict = Depends(block_cashier)):
     """p76: pull real delivery fees (home + desk + return) for all 58 wilayas
     from the tenant's Yalidine account and overwrite delivery_rates with them."""
     await require_ecom_feature(user)
@@ -302,7 +309,7 @@ async def pull_yalidine_rates(body: dict, user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/shipping/sync-yalidine")
-async def sync_yalidine_statuses(user: dict = Depends(require_tenant)):
+async def sync_yalidine_statuses(user: dict = Depends(block_cashier)):
     """p74: pull real parcel statuses from Yalidine for shipped orders and
     advance them automatically (delivered → profit realized / returned →
     losses + stock restored, via the standard status state machine)."""
@@ -346,7 +353,7 @@ for _c in _EXTRA_COURIERS:
 
 
 @router.get("/ecom/shipping/courier-adapters")
-async def courier_adapters(user: dict = Depends(require_tenant)):
+async def courier_adapters(user: dict = Depends(block_cashier)):
     """p248: registered couriers + whether each is sync-ready (credentials or mock)."""
     await require_ecom_feature(user)
     from services.ecom.courier_sync import COURIER_ADAPTERS
@@ -364,7 +371,7 @@ async def courier_adapters(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/shipping/sync/{courier}")
-async def sync_courier(courier: str, user: dict = Depends(require_tenant)):
+async def sync_courier(courier: str, user: dict = Depends(block_cashier)):
     """p248: generic auto status sync for any registered courier (mock or
     credentials-configured). Advances shipped orders through the real state
     machine — delivered collects COD, refunded books the return."""
@@ -378,7 +385,7 @@ async def sync_courier(courier: str, user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/shipping/cheapest")
-async def cheapest_courier(wilaya: str = "", desk: bool = False, user: dict = Depends(require_tenant)):
+async def cheapest_courier(wilaya: str = "", desk: bool = False, user: dict = Depends(block_cashier)):
     """p99: for each ACTIVE courier integration, the price for a given wilaya + the cheapest pick.
     Yalidine prices come from the pulled delivery_rates; other couriers from ecom_courier_prices
     (manual rate sheets entered via PUT /courier-prices/{courier})."""
@@ -421,7 +428,7 @@ async def cheapest_courier(wilaya: str = "", desk: bool = False, user: dict = De
 
 
 @router.put("/ecom/shipping/courier-prices/{courier}")
-async def set_courier_prices(courier: str, body: dict, user: dict = Depends(require_tenant)):
+async def set_courier_prices(courier: str, body: dict, user: dict = Depends(block_cashier)):
     """p99: bulk upsert a manual rate sheet for a courier (zr/maystro/...).
     body: {rates: [{wilaya_id, wilaya_name, home_price, office_price}]}"""
     await require_ecom_feature(user)
@@ -454,7 +461,7 @@ async def set_courier_prices(courier: str, body: dict, user: dict = Depends(requ
 
 
 @router.get("/ecom/shipping/labels-bulk")
-async def bulk_labels(date: Optional[str] = None, user: dict = Depends(require_tenant)):
+async def bulk_labels(date: Optional[str] = None, user: dict = Depends(block_cashier)):
     """p85: كل بوليصات يوم معيّن (افتراضياً اليوم) للطباعة الجماعية."""
     await require_ecom_feature(user)
     if not date:
@@ -478,7 +485,7 @@ async def bulk_labels(date: Optional[str] = None, user: dict = Depends(require_t
 
 
 @router.get("/ecom/shipping/settlements")
-async def shipping_settlements(user: dict = Depends(require_tenant)):
+async def shipping_settlements(user: dict = Depends(block_cashier)):
     """p90: per-courier payout reconciliation.
     Wallet balance = what that courier owes us right now (COD collected, not paid out)."""
     await require_ecom_feature(user)
@@ -509,7 +516,7 @@ async def shipping_settlements(user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/shipping/labels/{label_id}")
-async def get_label(label_id: str, user: dict = Depends(require_tenant)):
+async def get_label(label_id: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     label = await db.ecom_shipping_labels.find_one({"id": label_id}, {"_id": 0})
     if not label:
@@ -520,7 +527,7 @@ async def get_label(label_id: str, user: dict = Depends(require_tenant)):
 # ============ p103: التسوية الذكية + توقع التدفق النقدي ============
 
 @router.get("/ecom/shipping/cash-forecast")
-async def cash_forecast(user: dict = Depends(require_tenant)):
+async def cash_forecast(user: dict = Depends(block_cashier)):
     """p103: لكل شركة شحن — المستحق الآن (الرصيد) + قيد التحصيل في الطريق
     + المتوقع تحصيله فعلاً حسب معدل التسليم التاريخي لهذه الشركة."""
     await require_ecom_feature(user)
@@ -554,7 +561,7 @@ async def cash_forecast(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/shipping/reconcile")
-async def reconcile_statement(body: dict, user: dict = Depends(require_tenant)):
+async def reconcile_statement(body: dict, user: dict = Depends(block_cashier)):
     """p103: مطابقة كشف دفع شركة الشحن — الصق أرقام التتبع من الكشف،
     فيكشف النظام الطرود المسلَّمة التي لم تُدفع لك (الفجوة) وأرقاماً مجهولة."""
     await require_ecom_feature(user)

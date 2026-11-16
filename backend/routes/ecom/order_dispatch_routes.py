@@ -20,6 +20,13 @@ from pymongo import ReturnDocument
 
 from config.database import db, main_db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import (
     CHANNELS, SHIPPING_PROVIDERS, SHIPPING_PROVIDER_KEYS, require_ecom_feature,
 )
@@ -58,7 +65,7 @@ async def _linked_courier_docs() -> list:
 
 
 @router.get("/ecom/dispatch/couriers")
-async def linked_couriers(user: dict = Depends(require_tenant)):
+async def linked_couriers(user: dict = Depends(block_cashier)):
     """قائمة شركات الشحن المربوطة والمفعّلة فقط — لحوار الإرسال التلقائي/اليدوي."""
     await require_ecom_feature(user)
     docs = await _linked_courier_docs()
@@ -79,7 +86,7 @@ async def linked_couriers(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/orders/{order_id}/dispatch")
-async def dispatch_order(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def dispatch_order(order_id: str, body: dict, user: dict = Depends(block_cashier)):
     """إرسال تلقائي: إنشاء الطرد لدى الناقل المحدد + بوليصة الشحن + رقم التتبع."""
     await require_ecom_feature(user)
     courier = (body.get("courier") or "").strip()
@@ -135,7 +142,7 @@ async def dispatch_order(order_id: str, body: dict, user: dict = Depends(require
 
 
 @router.post("/ecom/orders/{order_id}/manual-registration")
-async def manual_registration(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def manual_registration(order_id: str, body: dict, user: dict = Depends(block_cashier)):
     """تسجيل يدوي: نسخ الموظف بيانات الزبون إلى تطبيق الناقل بنفسه، ثم يعلّم
     «مسجَّل في الشركة» أو «غير مسجَّل»."""
     await require_ecom_feature(user)
@@ -161,7 +168,7 @@ async def manual_registration(order_id: str, body: dict, user: dict = Depends(re
 
 
 @router.post("/ecom/orders/{order_id}/remind")
-async def remind_customer(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def remind_customer(order_id: str, body: dict, user: dict = Depends(block_cashier)):
     """تذكير الزبون بالطلب عبر SMS (من رصيد المشترك) أو WhatsApp (التكامل المفعّل)."""
     await require_ecom_feature(user)
     channel = (body.get("channel") or "").strip()

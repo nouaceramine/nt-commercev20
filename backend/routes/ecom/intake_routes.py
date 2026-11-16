@@ -36,6 +36,13 @@ from pydantic import BaseModel
 from config.database import db, main_db, get_tenant_db
 from services.code_generator import public_hex_code
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
@@ -222,7 +229,7 @@ def create_intake_routes() -> dict:
 
     # ── tenant side ──────────────────────────────────────────────────
     @tenant_router.post("/ecom/intake-sources")
-    async def create_source(body: SourceIn, user: dict = Depends(require_tenant)):
+    async def create_source(body: SourceIn, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         name = (body.name or "").strip()
         if not name:
@@ -253,16 +260,16 @@ def create_intake_routes() -> dict:
                 "webhook_url": f"/api/ecom/intake/{tenant_id}/{doc['token']}"}
 
     @tenant_router.get("/ecom/intake-sources")
-    async def list_sources(user: dict = Depends(require_tenant)):
+    async def list_sources(user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         rows = await db.ecom_intake_sources.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
         tenant_id = user.get("tenant_id") or user.get("id")
         for r in rows:
-            r["webhook_url"] = f"/api/ecom/intake/{tenant_id}/{r['token']}"
+            r["webhook_url"] = f"/api/ecom/intake/{tenant_id}/{r.get('token') or ''}"  # p528: legacy docs may lack token
         return {"items": rows}
 
     @tenant_router.put("/ecom/intake-sources/{source_id}")
-    async def update_source(source_id: str, body: SourceUpdate, user: dict = Depends(require_tenant)):
+    async def update_source(source_id: str, body: SourceUpdate, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         s = await db.ecom_intake_sources.find_one({"id": source_id})
         if not s:
@@ -280,7 +287,7 @@ def create_intake_routes() -> dict:
         return {"ok": True}
 
     @tenant_router.delete("/ecom/intake-sources/{source_id}")
-    async def delete_source(source_id: str, user: dict = Depends(require_tenant)):
+    async def delete_source(source_id: str, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         res = await db.ecom_intake_sources.delete_one({"id": source_id})
         if not res.deleted_count:

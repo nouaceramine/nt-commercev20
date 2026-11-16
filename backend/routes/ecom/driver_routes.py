@@ -35,6 +35,13 @@ from pymongo.errors import PyMongoError
 
 from config.database import db, main_db, get_tenant_db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
@@ -183,7 +190,7 @@ def create_driver_routes() -> dict:
 
     # ── tenant side ──────────────────────────────────────────────────
     @tenant_router.post("/ecom/drivers")
-    async def create_driver(body: DriverIn, user: dict = Depends(require_tenant)):
+    async def create_driver(body: DriverIn, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         name = (body.name or "").strip()
         if not name:
@@ -206,7 +213,7 @@ def create_driver_routes() -> dict:
         return {"ok": True, "driver": doc}
 
     @tenant_router.get("/ecom/drivers")
-    async def list_drivers(user: dict = Depends(require_tenant)):
+    async def list_drivers(user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         rows = await db.ecom_drivers.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
         for d in rows:
@@ -217,7 +224,7 @@ def create_driver_routes() -> dict:
         return {"items": rows}
 
     @tenant_router.put("/ecom/drivers/{driver_id}")
-    async def update_driver(driver_id: str, body: DriverUpdate, user: dict = Depends(require_tenant)):
+    async def update_driver(driver_id: str, body: DriverUpdate, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         d = await db.ecom_drivers.find_one({"id": driver_id})
         if not d:
@@ -245,7 +252,7 @@ def create_driver_routes() -> dict:
         return {"ok": True, "driver": out}
 
     @tenant_router.delete("/ecom/drivers/{driver_id}")
-    async def delete_driver(driver_id: str, user: dict = Depends(require_tenant)):
+    async def delete_driver(driver_id: str, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         if await db.ecom_orders.count_documents(
                 {"driver_id": driver_id, "status": {"$in": list(OPEN_STATUSES)}}):
@@ -257,7 +264,7 @@ def create_driver_routes() -> dict:
         return {"ok": True}
 
     @tenant_router.put("/ecom/orders/{order_id}/driver")
-    async def assign_driver(order_id: str, body: AssignIn, user: dict = Depends(require_tenant)):
+    async def assign_driver(order_id: str, body: AssignIn, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         order = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
         if not order:

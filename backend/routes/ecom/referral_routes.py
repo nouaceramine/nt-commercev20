@@ -24,6 +24,13 @@ from pydantic import BaseModel
 
 from config.database import db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
@@ -73,7 +80,7 @@ def _validate_reward(reward_type: str, reward_value: float):
 
 
 @router.post("/ecom/referrals")
-async def create_referral(body: ReferralIn, user: dict = Depends(require_tenant)):
+async def create_referral(body: ReferralIn, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     name = (body.name or "").strip()
     if not name:
@@ -104,7 +111,7 @@ async def create_referral(body: ReferralIn, user: dict = Depends(require_tenant)
 
 
 @router.get("/ecom/referrals")
-async def list_referrals(user: dict = Depends(require_tenant)):
+async def list_referrals(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     refs = await db.ecom_referrals.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     for r in refs:
@@ -124,7 +131,7 @@ async def list_referrals(user: dict = Depends(require_tenant)):
 
 
 @router.put("/ecom/referrals/{rid}")
-async def update_referral(rid: str, body: ReferralUpdate, user: dict = Depends(require_tenant)):
+async def update_referral(rid: str, body: ReferralUpdate, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     ref = await db.ecom_referrals.find_one({"id": rid})
     if not ref:
@@ -151,7 +158,7 @@ async def update_referral(rid: str, body: ReferralUpdate, user: dict = Depends(r
 
 
 @router.delete("/ecom/referrals/{rid}")
-async def delete_referral(rid: str, user: dict = Depends(require_tenant)):
+async def delete_referral(rid: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     if await db.ecom_orders.count_documents({"referral_id": rid}):
         raise HTTPException(status_code=409, detail="الإحالة مرتبطة بطلبات — عطّلوها بدل الحذف")
@@ -162,7 +169,7 @@ async def delete_referral(rid: str, user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/referrals/{rid}/rewards")
-async def referral_rewards(rid: str, user: dict = Depends(require_tenant)):
+async def referral_rewards(rid: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     if not await db.ecom_referrals.find_one({"id": rid}):
         raise HTTPException(status_code=404, detail="الإحالة غير موجودة")
@@ -174,7 +181,7 @@ async def referral_rewards(rid: str, user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/referrals/{rid}/payout")
-async def payout_referral(rid: str, user: dict = Depends(require_tenant)):
+async def payout_referral(rid: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     ref = await db.ecom_referrals.find_one({"id": rid}, {"_id": 0})
     if not ref:

@@ -14,6 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from config.database import db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from .constants import CHANNELS, CHANNEL_KEYS, require_ecom_feature
 from services.crypto_fields import (
     encrypt_credentials as _encrypt_creds,
@@ -39,7 +46,7 @@ def _redact(integration: dict) -> dict:
 
 
 @router.get("/ecom/channels")
-async def list_supported_channels(user: dict = Depends(require_tenant)):
+async def list_supported_channels(user: dict = Depends(block_cashier)):
     """Return the catalogue of supported channels (static reference).
 
     Filters out POS / manual (not connectable). Includes shipping carriers
@@ -54,7 +61,7 @@ async def list_supported_channels(user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/integrations")
-async def list_integrations(user: dict = Depends(require_tenant)):
+async def list_integrations(user: dict = Depends(block_cashier)):
     """List all channel integrations configured by the current tenant."""
     await require_ecom_feature(user)
     rows = await db.ecom_integrations.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
@@ -111,7 +118,7 @@ async def _ping_meta_channel(integration: dict) -> dict:
 
 
 @router.get("/ecom/social-setup-info")
-async def social_setup_info(user: dict = Depends(require_tenant)):
+async def social_setup_info(user: dict = Depends(block_cashier)):
     """p274: guided-connection data for the social-channels wizard (static guidance)."""
     await require_ecom_feature(user)
     wa_hook = f"{PLATFORM_BASE_URL}/api/integrations/whatsapp/webhook"
@@ -168,7 +175,7 @@ async def social_setup_info(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/integrations")
-async def create_integration(body: dict, user: dict = Depends(require_tenant)):
+async def create_integration(body: dict, user: dict = Depends(block_cashier)):
     """Create a new channel integration for the current tenant.
 
     Body: {channel: 'shopify'|'facebook'|'yalidine'|..., name: str, credentials: dict, is_active?: bool}
@@ -212,7 +219,7 @@ async def create_integration(body: dict, user: dict = Depends(require_tenant)):
 
 
 @router.put("/ecom/integrations/{integration_id}")
-async def update_integration(integration_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def update_integration(integration_id: str, body: dict, user: dict = Depends(block_cashier)):
     """Update an integration. Only mutable fields are name, credentials, is_active."""
     await require_ecom_feature(user)
     existing = await db.ecom_integrations.find_one({"id": integration_id})
@@ -240,7 +247,7 @@ async def update_integration(integration_id: str, body: dict, user: dict = Depen
 
 
 @router.post("/ecom/integrations/{integration_id}/test")
-async def test_integration(integration_id: str, user: dict = Depends(require_tenant)):
+async def test_integration(integration_id: str, user: dict = Depends(block_cashier)):
     """Live ping of the integration's real API.
 
     Dispatches by channel:
@@ -306,7 +313,7 @@ async def test_integration(integration_id: str, user: dict = Depends(require_ten
 
 
 @router.delete("/ecom/integrations/{integration_id}")
-async def delete_integration(integration_id: str, user: dict = Depends(require_tenant)):
+async def delete_integration(integration_id: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     result = await db.ecom_integrations.delete_one({"id": integration_id})
     if result.deleted_count == 0:

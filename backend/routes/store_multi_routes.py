@@ -31,6 +31,13 @@ from pydantic import BaseModel
 from config.database import db, main_db
 from utils.auth import require_tenant, get_tenant_admin
 
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["multi-store"])
 
@@ -109,11 +116,11 @@ async def create_store(body: StoreIn, user: dict = Depends(get_tenant_admin)):  
 
 
 @router.get("/store/multi")
-async def list_stores(user: dict = Depends(require_tenant)):
+async def list_stores(user: dict = Depends(block_cashier)):
     rows = await db.stores.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
     for r in rows:
         r["products_count"] = await db.store_products.count_documents({"store_id": r["id"]})
-        r["url"] = f"/shop/{r['slug']}"
+        r["url"] = f"/shop/{r.get('slug') or ''}"  # p528: legacy docs may lack slug
     return {"items": rows}
 
 
@@ -190,7 +197,7 @@ async def detach_product(store_id: str, product_id: str, user: dict = Depends(ge
 
 
 @router.get("/store/multi/{store_id}/products")
-async def store_catalog(store_id: str, user: dict = Depends(require_tenant)):
+async def store_catalog(store_id: str, user: dict = Depends(block_cashier)):
     await _get_store(store_id)
     entries = await db.store_products.find({"store_id": store_id}, {"_id": 0}).to_list(10000)
     pids = [e["product_id"] for e in entries]

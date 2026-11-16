@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 from config.database import db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from .constants import (
     CHANNEL_KEYS, ORDER_STATUS_KEYS, require_ecom_feature,
 )
@@ -149,7 +156,7 @@ async def list_orders(
     assigned_to: Optional[str] = None,  # p242: agent id, or "none" for unassigned
     limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     """List orders with filters. Supports channel/status/search/date range + pagination."""
     await require_ecom_feature(user)
@@ -208,7 +215,7 @@ async def list_orders(
 
 @router.get("/ecom/order-reports")
 async def list_order_reports(status: Optional[str] = None, limit: int = 50,
-                             user: dict = Depends(require_tenant)):
+                             user: dict = Depends(block_cashier)):
     """p530-D2: customer reports filed from the public tracking page."""
     q = {}
     if status in ("new", "resolved"):
@@ -219,7 +226,7 @@ async def list_order_reports(status: Optional[str] = None, limit: int = 50,
 
 
 @router.post("/ecom/order-reports/{report_id}/resolve")
-async def resolve_order_report(report_id: str, user: dict = Depends(require_tenant)):
+async def resolve_order_report(report_id: str, user: dict = Depends(block_cashier)):
     rep = await db.order_reports.find_one({"id": report_id})
     if not rep:
         raise HTTPException(status_code=404, detail="البلاغ غير موجود")
@@ -239,7 +246,7 @@ async def resolve_order_report(report_id: str, user: dict = Depends(require_tena
 
 
 @router.get("/ecom/orders/summary")
-async def orders_summary(user: dict = Depends(require_tenant)):
+async def orders_summary(user: dict = Depends(block_cashier)):
     """Per-channel + per-status order counts for the Inbox dashboard cards.
 
     Also returns 'today' / '7d' totals (revenue + count).
@@ -284,7 +291,7 @@ async def orders_summary(user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/blacklist")
-async def get_blacklist(user: dict = Depends(require_tenant)):
+async def get_blacklist(user: dict = Depends(block_cashier)):
     """p77: القائمة السوداء — تلقائي (هاتف لديه مرتجعان أو أكثر) + يدوي."""
     await require_ecom_feature(user)
     flagged = await _flagged_phones()
@@ -297,7 +304,7 @@ async def get_blacklist(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/blacklist")
-async def add_blacklist_entry(body: dict, user: dict = Depends(require_tenant)):
+async def add_blacklist_entry(body: dict, user: dict = Depends(block_cashier)):
     """p77: إضافة رقم يدوياً للقائمة السوداء."""
     await require_ecom_feature(user)
     phone = _norm_phone(body.get("phone"))
@@ -315,7 +322,7 @@ async def add_blacklist_entry(body: dict, user: dict = Depends(require_tenant)):
 
 
 @router.delete("/ecom/blacklist/{phone}")
-async def remove_blacklist_entry(phone: str, user: dict = Depends(require_tenant)):
+async def remove_blacklist_entry(phone: str, user: dict = Depends(block_cashier)):
     """p77: إزالة رقم من القائمة اليدوية (العلم التلقائي يبقى ما دامت المرتجعات موجودة)."""
     await require_ecom_feature(user)
     res = await db.ecom_blacklist.delete_one({"phone": _norm_phone(phone)})
@@ -325,7 +332,7 @@ async def remove_blacklist_entry(phone: str, user: dict = Depends(require_tenant
 
 
 @router.get("/ecom/orders/{order_id}")
-async def get_order(order_id: str, user: dict = Depends(require_tenant)):
+async def get_order(order_id: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     order = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
@@ -368,7 +375,7 @@ async def _resync_inventory_on_edit(order: dict, new_items: list, now_iso: str) 
 
 
 @router.post("/ecom/orders")
-async def create_order(body: dict, user: dict = Depends(require_tenant)):
+async def create_order(body: dict, user: dict = Depends(block_cashier)):
     """Create a new order. Supports manual entry AND mock-channel webhook simulation.
 
     Body shape:
@@ -565,7 +572,7 @@ async def create_order(body: dict, user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/orders/{order_id}/risk")
-async def get_order_risk(order_id: str, user: dict = Depends(require_tenant)):
+async def get_order_risk(order_id: str, user: dict = Depends(block_cashier)):
     # (Re)compute and return the COD risk score for an order.
     await require_ecom_feature(user)
     order = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
@@ -587,7 +594,7 @@ async def get_order_risk(order_id: str, user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/orders/{order_id}/financials")
-async def get_order_financials(order_id: str, user: dict = Depends(require_tenant)):
+async def get_order_financials(order_id: str, user: dict = Depends(block_cashier)):
     """p59: per-order accounting breakdown (revenue / COGS / shipping / profit / losses)."""
     await require_ecom_feature(user)
     fin = await db.ecom_order_financials.find_one({"id": order_id}, {"_id": 0})
@@ -597,7 +604,7 @@ async def get_order_financials(order_id: str, user: dict = Depends(require_tenan
 
 
 @router.get("/ecom/financials/summary")
-async def financials_summary(user: dict = Depends(require_tenant)):
+async def financials_summary(user: dict = Depends(block_cashier)):
     """p59: profit/loss rollup across all e-commerce orders."""
     await require_ecom_feature(user)
     rows = await db.ecom_order_financials.find({}, {"_id": 0}).to_list(5000)
@@ -620,7 +627,7 @@ async def financials_summary(user: dict = Depends(require_tenant)):
 
 
 @router.post("/ecom/orders/{order_id}/call-attempt")
-async def log_call_attempt(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def log_call_attempt(order_id: str, body: dict, user: dict = Depends(block_cashier)):
     """p79: سجل محاولة اتصال لتأكيد الطلب. النتيجة confirmed تؤكد الطلب تلقائياً
     و cancelled_by_phone تلغيه (عبر آلة الحالات — القيود والمخزون تلقائياً)."""
     await require_ecom_feature(user)
@@ -672,7 +679,7 @@ async def log_call_attempt(order_id: str, body: dict, user: dict = Depends(requi
 
 
 @router.put("/ecom/orders/{order_id}/status")
-async def update_order_status(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def update_order_status(order_id: str, body: dict, user: dict = Depends(block_cashier)):
     """Transition an order to a new status — delegates to the application service."""
     await require_ecom_feature(user)
     from services.application.ecom_order_service import change_order_status
@@ -680,7 +687,7 @@ async def update_order_status(order_id: str, body: dict, user: dict = Depends(re
                                      return_fee_override=body.get("return_fee"))
 
 @router.put("/ecom/orders/{order_id}")
-async def update_order(order_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def update_order(order_id: str, body: dict, user: dict = Depends(block_cashier)):
     """Update order metadata (customer / items / shipping_fee / notes / tags).
 
     Status changes go through /status endpoint to enforce the state machine.
@@ -760,7 +767,7 @@ async def update_order(order_id: str, body: dict, user: dict = Depends(require_t
 
 
 @router.delete("/ecom/orders/{order_id}")
-async def delete_order(order_id: str, user: dict = Depends(require_tenant)):
+async def delete_order(order_id: str, user: dict = Depends(block_cashier)):
     """Delete an order (only allowed for cancelled/refunded — guards against losing
     real revenue history)."""
     await require_ecom_feature(user)
@@ -778,7 +785,7 @@ async def delete_order(order_id: str, user: dict = Depends(require_tenant)):
 
 
 @router.get("/ecom/customer-lookup")
-async def customer_lookup(phone: str = "", user: dict = Depends(require_tenant)):
+async def customer_lookup(phone: str = "", user: dict = Depends(block_cashier)):
     """p100: cross-tenant trust score for a phone number (aggregate network counters only)."""
     from services.application.ecom_order_service import get_network_trust
     return await get_network_trust(phone)
@@ -787,7 +794,7 @@ async def customer_lookup(phone: str = "", user: dict = Depends(require_tenant))
 # ============ p108: مركز الاتصال — قائمة أولويات التأكيد ============
 
 @router.get("/ecom/call-queue")
-async def call_queue(user: dict = Depends(require_tenant)):
+async def call_queue(user: dict = Depends(block_cashier)):
     """p108: طلبات بانتظار تأكيد هاتفي، مرتَّبة حسب الأولوية:
     الأقدم + الأعلى قيمة + بلا محاولات + عوامل الخطر (شبكة المُرجِعين، مراجعة)."""
     await require_ecom_feature(user)
@@ -852,7 +859,7 @@ async def call_queue(user: dict = Depends(require_tenant)):
 @router.get("/ecom/duplicates")
 async def list_duplicates(
     days: int = Query(7, ge=1, le=90),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     """p240: recent orders/leads flagged as duplicates (same phone within 48h)."""
     await require_ecom_feature(user)

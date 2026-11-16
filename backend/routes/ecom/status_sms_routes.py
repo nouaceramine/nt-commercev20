@@ -21,6 +21,13 @@ from pydantic import BaseModel
 
 from config.database import db, main_db
 from utils.auth import require_tenant, get_tenant_admin, get_super_admin
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 from services.ecom.status_sms_service import get_settings, DEFAULT_TEMPLATES
 from services.ecom.sms_gateway import get_sms_provider
@@ -57,7 +64,7 @@ def _tenant_id_of(user: dict) -> str:
 
 
 @router.get("/ecom/sms/settings")
-async def get_sms_settings(user: dict = Depends(require_tenant)):
+async def get_sms_settings(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     return await get_settings(db)
 
@@ -107,7 +114,7 @@ async def update_sms_settings(body: StatusSmsSettingsIn, user: dict = Depends(ge
 
 
 @router.get("/ecom/sms/status")
-async def sms_overview(user: dict = Depends(require_tenant)):
+async def sms_overview(user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     settings = await get_settings(db)
     tenant_id = _tenant_id_of(user)
@@ -132,7 +139,7 @@ async def sms_logs(
     order_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     await require_ecom_feature(user)
     q = {}

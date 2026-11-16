@@ -34,6 +34,13 @@ from pydantic import BaseModel
 from config.database import db, main_db, get_tenant_db
 from services.code_generator import public_hex_code
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from routes.ecom.constants import require_ecom_feature
 
 logger = logging.getLogger(__name__)
@@ -73,7 +80,7 @@ def create_social_inbox_routes() -> dict:
 
     # ── sources ──────────────────────────────────────────────────────
     @tenant_router.post("/ecom/social/sources")
-    async def create_source(body: SourceIn, user: dict = Depends(require_tenant)):
+    async def create_source(body: SourceIn, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         if body.channel not in SOCIAL_CHANNELS:
             raise HTTPException(status_code=400, detail="قناة غير مدعومة — messenger/instagram/whatsapp")
@@ -97,7 +104,7 @@ def create_social_inbox_routes() -> dict:
                 "webhook_url": f"/api/ecom/social/webhook/{tenant_id}/{doc['token']}"}
 
     @tenant_router.get("/ecom/social/sources")
-    async def list_sources(user: dict = Depends(require_tenant)):
+    async def list_sources(user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         rows = await db.ecom_social_sources.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
         tenant_id = user.get("tenant_id") or user.get("id")
@@ -106,7 +113,7 @@ def create_social_inbox_routes() -> dict:
         return {"items": rows}
 
     @tenant_router.delete("/ecom/social/sources/{source_id}")
-    async def delete_source(source_id: str, user: dict = Depends(require_tenant)):
+    async def delete_source(source_id: str, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         res = await db.ecom_social_sources.delete_one({"id": source_id})
         if not res.deleted_count:
@@ -117,7 +124,7 @@ def create_social_inbox_routes() -> dict:
     @tenant_router.get("/ecom/social/conversations")
     async def list_conversations(status: Optional[str] = None, channel: Optional[str] = None,
                                  limit: int = Query(50, ge=1, le=200),
-                                 user: dict = Depends(require_tenant)):
+                                 user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         q = {}
         if status:
@@ -130,7 +137,7 @@ def create_social_inbox_routes() -> dict:
         return {"items": rows, "unread_conversations": unread}
 
     @tenant_router.get("/ecom/social/conversations/{conv_id}")
-    async def read_conversation(conv_id: str, user: dict = Depends(require_tenant)):
+    async def read_conversation(conv_id: str, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         conv = await db.ecom_social_conversations.find_one({"id": conv_id}, {"_id": 0})
         if not conv:
@@ -144,7 +151,7 @@ def create_social_inbox_routes() -> dict:
         return {"conversation": conv, "messages": msgs}
 
     @tenant_router.post("/ecom/social/conversations/{conv_id}/reply")
-    async def reply(conv_id: str, body: ReplyIn, user: dict = Depends(require_tenant)):
+    async def reply(conv_id: str, body: ReplyIn, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         conv = await db.ecom_social_conversations.find_one({"id": conv_id})
         if not conv:
@@ -169,7 +176,7 @@ def create_social_inbox_routes() -> dict:
         return {"ok": True, "message": msg}
 
     @tenant_router.post("/ecom/social/conversations/{conv_id}/convert")
-    async def convert(conv_id: str, body: ConvertIn, user: dict = Depends(require_tenant)):
+    async def convert(conv_id: str, body: ConvertIn, user: dict = Depends(block_cashier)):
         """Convert a conversation into an ecom order — same pipeline as manual entry."""
         await require_ecom_feature(user)
         conv = await db.ecom_social_conversations.find_one({"id": conv_id}, {"_id": 0})
@@ -261,7 +268,7 @@ def create_social_inbox_routes() -> dict:
                 "duplicate_warning": bool(doc.get("duplicate_warning"))}
 
     @tenant_router.post("/ecom/social/conversations/{conv_id}/close")
-    async def close_conversation(conv_id: str, user: dict = Depends(require_tenant)):
+    async def close_conversation(conv_id: str, user: dict = Depends(block_cashier)):
         await require_ecom_feature(user)
         res = await db.ecom_social_conversations.update_one(
             {"id": conv_id}, {"$set": {"status": "closed", "updated_at": _now()}})

@@ -12,6 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config.database import db
 from utils.auth import require_tenant
+
+from utils.permissions import create_cashier_block
+
+
+# p528: UI shows AccessDenied to cashier for every ecom-hub page — the
+# backing tenant APIs must enforce the same boundary (defense in depth).
+block_cashier = create_cashier_block(require_tenant)
 from .constants import CHANNEL_KEYS, LEAD_STATUS_KEYS, require_ecom_feature
 
 router = APIRouter(tags=["E-Commerce Leads"])
@@ -25,7 +32,7 @@ async def list_leads(
     assigned_to: Optional[str] = None,  # p242: agent id, or "none" for unassigned
     limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0),
-    user: dict = Depends(require_tenant),
+    user: dict = Depends(block_cashier),
 ):
     await require_ecom_feature(user)
     query: dict = {}
@@ -61,7 +68,7 @@ async def list_leads(
 
 
 @router.post("/ecom/leads")
-async def create_lead(body: dict, user: dict = Depends(require_tenant)):
+async def create_lead(body: dict, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     channel = (body.get("channel") or "manual").strip().lower()
     if channel not in CHANNEL_KEYS:
@@ -103,7 +110,7 @@ async def create_lead(body: dict, user: dict = Depends(require_tenant)):
 
 
 @router.put("/ecom/leads/{lead_id}")
-async def update_lead(lead_id: str, body: dict, user: dict = Depends(require_tenant)):
+async def update_lead(lead_id: str, body: dict, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     existing = await db.ecom_leads.find_one({"id": lead_id})
     if not existing:
@@ -123,7 +130,7 @@ async def update_lead(lead_id: str, body: dict, user: dict = Depends(require_ten
 
 
 @router.delete("/ecom/leads/{lead_id}")
-async def delete_lead(lead_id: str, user: dict = Depends(require_tenant)):
+async def delete_lead(lead_id: str, user: dict = Depends(block_cashier)):
     await require_ecom_feature(user)
     result = await db.ecom_leads.delete_one({"id": lead_id})
     if result.deleted_count == 0:
