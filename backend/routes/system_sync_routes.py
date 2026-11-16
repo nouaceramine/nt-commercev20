@@ -16,11 +16,13 @@ from config.database import db, main_db, client
 from core.db_naming import resolve_db_name  # p347
 from utils.auth import get_current_user, get_tenant_admin, get_super_admin
 from utils.auth import get_current_user as require_tenant
+from utils.permissions import create_cashier_block
 
 logger = logging.getLogger(__name__)
 app_logger = logger
 
 router = APIRouter()
+block_cashier = create_cashier_block(get_current_user)  # p527-002/003 pattern
 
 # ============ HEALTH CHECK ============
 
@@ -1197,7 +1199,7 @@ async def export_tenant_data(current_user: dict = Depends(require_tenant)):
 # ============ AUTO REPORTS API ============
 @router.get("/auto-reports")
 async def get_auto_reports(
-    report_type: str = None, limit: int = 50, user: dict = Depends(get_current_user)
+    report_type: str = None, limit: int = 50, user: dict = Depends(block_cashier)  # p527-002
 ):
     query = {}
     if report_type:
@@ -1215,10 +1217,15 @@ async def get_auto_reports(
 
 @router.get("/auto-reports/{report_id}")
 async def get_auto_report_detail(
-    report_id: str, user: dict = Depends(get_current_user)
+    report_id: str, user: dict = Depends(block_cashier)  # p527-002
 ):
     report = await main_db.auto_reports.find_one({"id": report_id}, {"_id": 0})
     if not report:
+        raise HTTPException(status_code=404, detail="التقرير غير موجود")
+    # p527-001: mirror the list route's tenant filter — a tenant must never
+    # resolve another tenant's (or a platform) report by id.
+    if user.get("tenant_id") and user.get("user_type") != "super_admin" \
+            and report.get("tenant_id") != user["tenant_id"]:
         raise HTTPException(status_code=404, detail="التقرير غير موجود")
     return report
 

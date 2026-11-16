@@ -117,7 +117,7 @@ def create_performance_routes(db, get_current_user, get_tenant_admin) -> dict:  
         return {"success": True, "message": "تم مسح الكاش بنجاح"}
 
     @router.get("/db-stats")
-    async def get_db_stats(current_user: dict = Depends(get_current_user)):
+    async def get_db_stats(current_user: dict = Depends(get_tenant_admin)):  # p527-004: DB topology is admin/manager diagnostics
         """Get database statistics"""
         try:
             collections = await db.list_collection_names()

@@ -29,7 +29,9 @@ except ImportError:
 
 
 def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin, require_tenant, get_super_admin) -> dict:
+    from utils.permissions import create_cashier_block
     router = APIRouter(tags=["email-notifications"])
+    block_cashier = create_cashier_block(get_current_user)  # p527-003
 
     # ── Models ──
 
@@ -325,7 +327,7 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
     # ── Smart Reports ──
 
     @router.get("/smart-reports/settings")
-    async def get_smart_report_settings(user: dict = Depends(require_tenant)):
+    async def get_smart_report_settings(user: dict = Depends(block_cashier)):  # p527-003
         settings = await db.system_settings.find_one({"type": "smart_reports"}, {"_id": 0})
         if not settings:
             return SmartReportSettings().model_dump()
@@ -343,12 +345,12 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         return {"success": True}
 
     @router.get("/smart-reports/last")
-    async def get_last_smart_report(user: dict = Depends(require_tenant)):
+    async def get_last_smart_report(user: dict = Depends(block_cashier)):  # p527-003
         report = await db.smart_reports_log.find_one({}, {"_id": 0}, sort=[("sent_at", -1)])
         return report
 
     @router.get("/smart-reports/preview")
-    async def preview_smart_report(user: dict = Depends(require_tenant)):
+    async def preview_smart_report(user: dict = Depends(block_cashier)):  # p527-003
         today = datetime.now(timezone.utc).date()
         yesterday = today - timedelta(days=1)
         today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
