@@ -10,8 +10,10 @@ import math
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from pymongo.errors import DuplicateKeyError
 
 from utils.ids import new_id
+from utils.permissions import create_cashier_block
 from .crm_routes import normalize_phone
 
 CAMPAIGN_PLATFORMS = ["meta", "tiktok", "google", "snapchat", "other"]
@@ -116,16 +118,29 @@ class EvalIn(BaseModel):
 
 def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_tenant):
     router = APIRouter(prefix="/crm", tags=["crm-growth"])
+    # p532: /crm is hidden from cashier in the UI — enforce the same on the API
+    # (inbox conversations carry client phones and internal team notes).
+    block_cashier = create_cashier_block(get_current_user)
 
     # ── Campaigns ───────────────────────────────────────────────────────────
     @router.get("/campaigns")
-    async def list_campaigns(user: dict = Depends(require_tenant)):
+    async def list_campaigns(user: dict = Depends(require_tenant),
+                             _cb: dict = Depends(block_cashier)):
+        campaigns = [_clean(c) async for c in db.crm_campaigns.find({}).sort("created_at", -1).limit(200)]
+        # p532: single $group aggregation for conversation stats (was 2 queries per campaign)
+        stats = {}
+        async for row in db.crm_conversations.aggregate([
+            {"$match": {"campaign_id": {"$ne": None}}},
+            {"$group": {"_id": "$campaign_id", "total": {"$sum": 1},
+                        "converted": {"$sum": {"$cond": [{"$eq": ["$status", "converted"]}, 1, 0]}}}}
+        ]):
+            stats[row["_id"]] = row
         items = []
-        async for c in db.crm_campaigns.find({}).sort("created_at", -1).limit(200):
-            conv_count = await db.crm_conversations.count_documents({"campaign_id": c["id"]})
-            converted = await db.crm_conversations.count_documents({"campaign_id": c["id"], "status": "converted"})
-            m = campaign_metrics(c.get("spend"), c.get("leads_count"), converted)
-            items.append(_clean(c) | {"conversations_count": conv_count, "conversions": converted, "metrics": m})
+        for c in campaigns:
+            s = stats.get(c["id"]) or {}
+            m = campaign_metrics(c.get("spend"), c.get("leads_count"), s.get("converted", 0))
+            items.append(c | {"conversations_count": s.get("total", 0),
+                              "conversions": s.get("converted", 0), "metrics": m})
         return {"items": items}
 
     @router.post("/campaigns", status_code=201)
@@ -164,7 +179,8 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
 
     @router.get("/inbox")
     async def inbox(status: Optional[str] = None, channel: Optional[str] = None,
-                    assigned_to: Optional[str] = None, user: dict = Depends(require_tenant)):
+                    assigned_to: Optional[str] = None, user: dict = Depends(require_tenant),
+                    _cb: dict = Depends(block_cashier)):
         q = {}
         if status in CONV_STATUSES:
             q["status"] = status
@@ -208,7 +224,6 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
                 "dedupe_key", unique=True,
                 partialFilterExpression={"dedupe_key": {"$type": "string"}},
             )
-            from pymongo.errors import DuplicateKeyError
             try:
                 res = await db.crm_conversations.update_one(
                     {"dedupe_key": doc["dedupe_key"]}, {"$setOnInsert": doc}, upsert=True)
@@ -223,14 +238,16 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
         return _clean(doc)
 
     @router.get("/inbox/conversations/{cid}")
-    async def get_conversation(cid: str, user: dict = Depends(require_tenant)):
+    async def get_conversation(cid: str, user: dict = Depends(require_tenant),
+                               _cb: dict = Depends(block_cashier)):
         doc = await db.crm_conversations.find_one({"id": cid})
         if not doc:
             raise HTTPException(status_code=404, detail="not_found")
         return _clean(doc)
 
     @router.post("/inbox/conversations/{cid}/messages", status_code=201)
-    async def add_message(cid: str, payload: MessageIn, user: dict = Depends(require_tenant)):
+    async def add_message(cid: str, payload: MessageIn, user: dict = Depends(require_tenant),
+                          _cb: dict = Depends(block_cashier)):
         if payload.direction not in ("in", "out"):
             raise HTTPException(status_code=422, detail="bad_direction")
         if not payload.text.strip():
@@ -245,7 +262,8 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
         return msg
 
     @router.post("/inbox/conversations/{cid}/notes", status_code=201)
-    async def add_note(cid: str, payload: NoteIn, user: dict = Depends(require_tenant)):
+    async def add_note(cid: str, payload: NoteIn, user: dict = Depends(require_tenant),
+                       _cb: dict = Depends(block_cashier)):
         if not payload.text.strip():
             raise HTTPException(status_code=422, detail="text_required")
         note = {"id": new_id(), "text": payload.text.strip(), "at": _now(), "by": user.get("id")}
@@ -273,7 +291,13 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             existing = await db.crm_conversations.find_one({"id": cid}, {"_id": 0, "channel": 1, "external_user_id": 1})
             if existing and existing.get("external_user_id"):
                 update["$set"]["dedupe_key"] = f"{existing['channel']}:{existing['external_user_id']}"
-        r = await db.crm_conversations.update_one({"id": cid}, update)
+        r = None
+        try:
+            r = await db.crm_conversations.update_one({"id": cid}, update)
+        except DuplicateKeyError:
+            # p532: reopening a conversation whose external key was re-claimed by
+            # a newer conversation must be a clean conflict, not a 500
+            raise HTTPException(status_code=409, detail="conversation_external_id_conflict")
         if not r.matched_count:
             raise HTTPException(status_code=404, detail="not_found")
         return {"message": "updated"}
@@ -302,7 +326,8 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
 
     # ── Marketer performance ────────────────────────────────────────────────
     @router.get("/performance")
-    async def performance(user: dict = Depends(require_tenant)):
+    async def performance(user: dict = Depends(require_tenant),
+                          _cb: dict = Depends(block_cashier)):
         """Per-employee marketing scoreboard over all time (conversations,
         conversions, tasks done, viewings, tracked activity minutes)."""
         employees = [e async for e in db.employees.find({}, {"id": 1, "name": 1, "full_name": 1, "role": 1})]
@@ -332,7 +357,8 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
 
     # ── Matching-report snapshots (M13c) ────────────────────────────────────
     @router.get("/reports")
-    async def list_reports(period: Optional[str] = None, user: dict = Depends(require_tenant)):
+    async def list_reports(period: Optional[str] = None, user: dict = Depends(require_tenant),
+                           _cb: dict = Depends(block_cashier)):
         q = {"period": period} if period in ("weekly", "monthly") else {}
         cursor = db.crm_reports.find(q).sort("generated_at", -1).limit(60)
         return {"items": [_clean(d) async for d in cursor]}
@@ -360,6 +386,13 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             raise HTTPException(status_code=422, detail="month_required_YYYY-MM")
         if rate <= 0:
             raise HTTPException(status_code=422, detail="rate_required")
+        # p532: unique (employee_id, month) makes concurrent applies collapse to
+        # one commission doc instead of a duplicate pair double-paid by payroll
+        try:
+            await db.crm_commissions.create_index(
+                [("employee_id", 1), ("month", 1)], unique=True)
+        except Exception:  # noqa: BLE001 — pre-existing duplicates degrade gracefully
+            pass
         start, end = f"{month}-01", f"{month}-32"
         applied = []
         # group converted conversations by assignee for the month
@@ -372,13 +405,15 @@ def create_crm_growth_routes(db, get_current_user, get_tenant_admin, require_ten
             if not eid:
                 continue
             amount = round(row["conversions"] * rate, 2)
-            await db.crm_commissions.update_one(
-                {"employee_id": eid, "month": month},
-                {"$set": {"employee_id": eid, "month": month, "conversions": row["conversions"],
-                          "rate": rate, "amount": amount, "source": "crm_performance",
-                          "applied_by": user.get("id"), "applied_at": _now()}},
-                upsert=True,
-            )
+            filt = {"employee_id": eid, "month": month}
+            set_doc = {"employee_id": eid, "month": month, "conversions": row["conversions"],
+                       "rate": rate, "amount": amount, "source": "crm_performance",
+                       "applied_by": user.get("id"), "applied_at": _now()}
+            try:
+                await db.crm_commissions.update_one(filt, {"$set": set_doc}, upsert=True)
+            except DuplicateKeyError:
+                # lost the upsert race — merge into the winner's document instead
+                await db.crm_commissions.update_one(filt, {"$set": set_doc})
             emp = await db.employees.find_one({"id": eid}, {"_id": 0, "name": 1, "full_name": 1})
             applied.append({"employee_id": eid, "name": (emp or {}).get("name") or (emp or {}).get("full_name"),
                             "conversions": row["conversions"], "amount": amount})

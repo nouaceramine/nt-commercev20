@@ -6,11 +6,13 @@ Tenant-scoped (tenant db). Codes: CLT_YYYY / PRJ_YYYY / UNT_YYYY counters.
 from datetime import datetime, timezone
 from typing import Optional, List
 import math
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from utils.ids import new_id
+from utils.permissions import create_cashier_block
 
 CLIENT_STATUSES = ["new", "contacted", "interested", "viewing", "negotiation", "won", "lost"]
 UNIT_TYPES = ["apartment", "villa", "land", "office", "shop", "studio", "other"]
@@ -167,17 +169,23 @@ class UnitIn(BaseModel):
 
 def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
     router = APIRouter(prefix="/crm", tags=["crm"])
+    # p532: /crm is hidden from cashier in the UI — the API must enforce the
+    # same boundary (client phones/budgets and pipeline data are not POS data).
+    block_cashier = create_cashier_block(get_current_user)
 
     # ── Clients ─────────────────────────────────────────────────────────────
     @router.get("/clients")
     async def list_clients(status: Optional[str] = None, q: Optional[str] = None,
-                           user: dict = Depends(require_tenant)):
+                           user: dict = Depends(require_tenant),
+                           _cb: dict = Depends(block_cashier)):
         query = {}
         if status in CLIENT_STATUSES:
             query["status"] = status
         if q:
-            query["$or"] = [{"name": {"$regex": q, "$options": "i"}},
-                            {"phones": {"$regex": normalize_phone(q) or q}}]
+            # p532: escape user input — raw regex allowed ReDoS / pattern injection
+            safe_q = re.escape(q)
+            query["$or"] = [{"name": {"$regex": safe_q, "$options": "i"}},
+                            {"phones": {"$regex": re.escape(normalize_phone(q) or q)}}]
         cursor = db.crm_clients.find(query).sort("created_at", -1).limit(500)
         return {"items": [_clean(d) async for d in cursor]}
 
@@ -191,6 +199,9 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
             _finite_or_422(payload.budget_min, "budget_min")
         if payload.budget_max is not None:
             _finite_or_422(payload.budget_max, "budget_max")
+        if (payload.budget_min is not None and payload.budget_max is not None
+                and payload.budget_min > payload.budget_max):
+            raise HTTPException(status_code=422, detail="budget_min_above_max")
         doc = payload.model_dump()
         doc["phones"] = [normalize_phone(p) for p in doc["phones"] if normalize_phone(p)]
         doc.update({
@@ -202,7 +213,8 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         return _clean(doc)
 
     @router.get("/clients/{cid}")
-    async def get_client(cid: str, user: dict = Depends(require_tenant)):
+    async def get_client(cid: str, user: dict = Depends(require_tenant),
+                         _cb: dict = Depends(block_cashier)):
         doc = await db.crm_clients.find_one({"id": cid})
         if not doc:
             raise HTTPException(status_code=404, detail="not_found")
@@ -229,6 +241,10 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         for _field in ("budget_min", "budget_max"):
             if _field in data:
                 _finite_or_422(data[_field], _field)
+        _new_min = data.get("budget_min", doc.get("budget_min"))
+        _new_max = data.get("budget_max", doc.get("budget_max"))
+        if _new_min is not None and _new_max is not None and _new_min > _new_max:
+            raise HTTPException(status_code=422, detail="budget_min_above_max")
         data["updated_at"] = _now()
         await db.crm_clients.update_one({"id": cid}, {"$set": data})
         return {"message": "updated"}
@@ -246,23 +262,30 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         return _clean(doc)
 
     @router.put("/followups/{fid}/done")
-    async def followup_done(fid: str, user: dict = Depends(require_tenant)):
+    async def followup_done(fid: str, user: dict = Depends(require_tenant),
+                            _cb: dict = Depends(block_cashier)):
         r = await db.crm_followups.update_one({"id": fid}, {"$set": {"done": True, "done_at": _now()}})
         if not r.matched_count:
             raise HTTPException(status_code=404, detail="not_found")
         return {"message": "done"}
 
     @router.get("/followups/upcoming")
-    async def upcoming_followups(days: int = 7, user: dict = Depends(require_tenant)):
+    async def upcoming_followups(days: int = 7, user: dict = Depends(require_tenant),
+                                 _cb: dict = Depends(block_cashier)):
         """Reminders due within `days` (or overdue), not yet done."""
         horizon = datetime.fromtimestamp(
             datetime.now(timezone.utc).timestamp() + days * 86400, timezone.utc
         ).isoformat()
         cursor = db.crm_followups.find({"done": False, "date": {"$lte": horizon}}).sort("date", 1).limit(200)
-        items = []
-        async for f in cursor:
-            c = await db.crm_clients.find_one({"id": f["client_id"]}, {"name": 1})
-            items.append(_clean(f) | {"client_name": (c or {}).get("name")})
+        items = [_clean(f) async for f in cursor]
+        # p532: batch the client-name lookup (was one query per follow-up)
+        client_ids = list({f["client_id"] for f in items})
+        names = {}
+        if client_ids:
+            async for c in db.crm_clients.find({"id": {"$in": client_ids}}, {"id": 1, "name": 1}):
+                names[c["id"]] = c.get("name")
+        for f in items:
+            f["client_name"] = names.get(f["client_id"])
         return {"items": items}
 
     # ── Viewings (معاينات) ──────────────────────────────────────────────────
@@ -282,13 +305,20 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
 
     # ── Projects ────────────────────────────────────────────────────────────
     @router.get("/projects")
-    async def list_projects(user: dict = Depends(require_tenant)):
-        cursor = db.crm_projects.find({}).sort("created_at", -1)
+    async def list_projects(user: dict = Depends(require_tenant),
+                            _cb: dict = Depends(block_cashier)):
+        projects = [_clean(p) async for p in db.crm_projects.find({}).sort("created_at", -1)]
+        # p532: single $group aggregation for unit counts (was 2 queries per project)
+        counts = {}
+        async for row in db.crm_units.aggregate([
+            {"$group": {"_id": "$project_id", "total": {"$sum": 1},
+                        "available": {"$sum": {"$cond": [{"$eq": ["$status", "available"]}, 1, 0]}}}}
+        ]):
+            counts[row["_id"]] = row
         items = []
-        async for p in cursor:
-            units = await db.crm_units.count_documents({"project_id": p["id"]})
-            avail = await db.crm_units.count_documents({"project_id": p["id"], "status": "available"})
-            items.append(_clean(p) | {"units_count": units, "available_count": avail})
+        for p in projects:
+            c = counts.get(p["id"]) or {}
+            items.append(p | {"units_count": c.get("total", 0), "available_count": c.get("available", 0)})
         return {"items": items}
 
     @router.post("/projects", status_code=201)
@@ -303,7 +333,8 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
     # ── Units ───────────────────────────────────────────────────────────────
     @router.get("/units")
     async def list_units(status: Optional[str] = None, project_id: Optional[str] = None,
-                         user: dict = Depends(require_tenant)):
+                         user: dict = Depends(require_tenant),
+                         _cb: dict = Depends(block_cashier)):
         query = {}
         if status in UNIT_STATUSES:
             query["status"] = status
@@ -322,6 +353,10 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
             _finite_or_422(payload.area_m2, "area_m2")
         if payload.project_id and not await db.crm_projects.find_one({"id": payload.project_id}):
             raise HTTPException(status_code=404, detail="project_not_found")
+        if len(payload.photos or []) > 20:
+            # p532: base64 photos are unbounded — cap the list so a single unit
+            # document can never approach the 16MB BSON limit (500 on insert)
+            raise HTTPException(status_code=422, detail="too_many_photos")
         doc = payload.model_dump()
         doc.update({"id": new_id(), "code": await _next(db, "UNT"), "status": "available",
                     "created_at": _now(), "created_by": user.get("id")})
@@ -330,7 +365,8 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         return {k: v for k, v in doc.items() if k != "photos"} | {"photos_count": len(doc.get("photos") or [])}
 
     @router.get("/units/{uid}")
-    async def get_unit(uid: str, user: dict = Depends(require_tenant)):
+    async def get_unit(uid: str, user: dict = Depends(require_tenant),
+                       _cb: dict = Depends(block_cashier)):
         doc = await db.crm_units.find_one({"id": uid})
         if not doc:
             raise HTTPException(status_code=404, detail="not_found")
@@ -348,7 +384,8 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
 
     # ── Matching ────────────────────────────────────────────────────────────
     @router.get("/units/{uid}/matches")
-    async def clients_for_unit(uid: str, limit: int = 10, user: dict = Depends(require_tenant)):
+    async def clients_for_unit(uid: str, limit: int = 10, user: dict = Depends(require_tenant),
+                               _cb: dict = Depends(block_cashier)):
         unit = await db.crm_units.find_one({"id": uid})
         if not unit:
             raise HTTPException(status_code=404, detail="not_found")
@@ -361,7 +398,8 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         return {"unit": _clean(unit) | {"photos": len(unit.get("photos") or [])}, "matches": scored[:limit]}
 
     @router.get("/clients/{cid}/matches")
-    async def units_for_client(cid: str, limit: int = 10, user: dict = Depends(require_tenant)):
+    async def units_for_client(cid: str, limit: int = 10, user: dict = Depends(require_tenant),
+                               _cb: dict = Depends(block_cashier)):
         client = await db.crm_clients.find_one({"id": cid})
         if not client:
             raise HTTPException(status_code=404, detail="not_found")
@@ -374,7 +412,8 @@ def create_crm_routes(db, get_current_user, get_tenant_admin, require_tenant):
         return {"client": _clean(client), "matches": scored[:limit]}
 
     @router.get("/matching-report")
-    async def matching_report(user: dict = Depends(require_tenant)):
+    async def matching_report(user: dict = Depends(require_tenant),
+                              _cb: dict = Depends(block_cashier)):
         """Cross matching snapshot: best client per available unit + best unit per active client."""
         units = [_clean(u) async for u in db.crm_units.find({"status": "available"}, {"photos": 0})]
         clients = [_clean(c) async for c in db.crm_clients.find({"status": {"$nin": ["won", "lost"]}})]
