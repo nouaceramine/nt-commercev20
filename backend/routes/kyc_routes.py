@@ -13,6 +13,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from pymongo.errors import DuplicateKeyError
 
 from config.database import main_db
 from utils.ids import new_id
@@ -102,8 +103,10 @@ def create_kyc_routes(db, get_current_user, get_tenant_admin, require_tenant):
     router = APIRouter(prefix="/kyc", tags=["kyc"])
 
     # ── Tenant side ─────────────────────────────────────────────────────────
+    # p533: /kyc is admin-only in the UI (Layout isAdmin gate) — the API must
+    # enforce the same; registry data (RC/NIF) is not cashier/seller material.
     @router.get("/status")
-    async def kyc_status(user: dict = Depends(require_tenant)):
+    async def kyc_status(user: dict = Depends(get_tenant_admin)):
         tid = user.get("tenant_id") or user.get("id")
         doc = await main_db.kyc_submissions.find_one(
             {"tenant_id": tid}, sort=[("submitted_at", -1)]
@@ -118,7 +121,7 @@ def create_kyc_routes(db, get_current_user, get_tenant_admin, require_tenant):
         }
 
     @router.get("/history")
-    async def kyc_history(user: dict = Depends(require_tenant)):
+    async def kyc_history(user: dict = Depends(get_tenant_admin)):
         tid = user.get("tenant_id") or user.get("id")
         cursor = main_db.kyc_submissions.find({"tenant_id": tid}).sort("submitted_at", -1)
         return {"items": [_summary(d) async for d in cursor]}
@@ -130,6 +133,15 @@ def create_kyc_routes(db, get_current_user, get_tenant_admin, require_tenant):
         errors = validate_submission(data)
         if errors:
             raise HTTPException(status_code=422, detail={"errors": errors})
+        # p533: at most ONE pending submission per tenant, enforced atomically —
+        # the read-check below alone loses the race (two concurrent submits both
+        # passed it and split the review queue)
+        try:
+            await main_db.kyc_submissions.create_index(
+                [("tenant_id", 1)], unique=True, name="kyc_one_pending_per_tenant",
+                partialFilterExpression={"status": "pending"})
+        except Exception:  # noqa: BLE001 — pre-existing duplicates degrade gracefully
+            pass
         pending = await main_db.kyc_submissions.find_one({"tenant_id": tid, "status": "pending"})
         if pending:
             raise HTTPException(status_code=409, detail="pending_submission_exists")
@@ -155,7 +167,11 @@ def create_kyc_routes(db, get_current_user, get_tenant_admin, require_tenant):
             "reviewed_at": None,
             "reviewed_by": None,
         }
-        await main_db.kyc_submissions.insert_one(doc)
+        try:
+            await main_db.kyc_submissions.insert_one(doc)
+        except DuplicateKeyError:
+            # lost the concurrent-submit race — the winner's pending submission stands
+            raise HTTPException(status_code=409, detail="pending_submission_exists")
         await main_db.saas_tenants.update_one({"id": tid}, {"$set": {"kyc_status": "pending"}})
         return {"message": "submitted", "code": doc["code"], "status": "pending"}
 
@@ -185,7 +201,10 @@ def create_kyc_routes(db, get_current_user, get_tenant_admin, require_tenant):
         except ValueError:
             raise HTTPException(status_code=422, detail="bad_action")
         now = datetime.now(timezone.utc).isoformat()
-        await main_db.kyc_submissions.update_one(
+        # p533: claim the review atomically — two concurrent reviews (approve +
+        # reject) previously BOTH wrote the tenant record, leaving submission
+        # and tenant kyc_status disagreeing. Only the claim winner may proceed.
+        r = await main_db.kyc_submissions.update_one(
             {"id": sid, "status": "pending"},
             {"$set": {
                 "status": status,
@@ -194,6 +213,8 @@ def create_kyc_routes(db, get_current_user, get_tenant_admin, require_tenant):
                 "reviewed_by": admin.get("id"),
             }},
         )
+        if not r.matched_count:
+            raise HTTPException(status_code=409, detail="already_reviewed")
         await main_db.saas_tenants.update_one(
             {"id": doc["tenant_id"]},
             {"$set": {"kyc_status": "verified" if status == "approved" else "rejected",
