@@ -127,6 +127,22 @@ def seed_data() -> dict:
     }
 
 
+async def _material_collections(tpl) -> list:
+    """Template collections carrying substance: docs or non-_id indexes.
+
+    Empty, index-less collections are created lazily by MongoDB on first
+    write; provisioning intentionally does not materialize them, so the
+    doctor must not flag them as missing (P534-001).
+    """
+    out = []
+    for col_name in await tpl.list_collection_names():
+        has_docs = await tpl[col_name].estimated_document_count() > 0
+        idx_names = [i["name"] async for i in tpl[col_name].list_indexes()]
+        if has_docs or any(n != "_id_" for n in idx_names):
+            out.append(col_name)
+    return out
+
+
 async def _index_specs(source_db) -> dict:
     """Harvest tenant-relevant index definitions from the (working) main DB."""
     specs = {}
@@ -137,13 +153,19 @@ async def _index_specs(source_db) -> dict:
         async for i in source_db[col].list_indexes():
             if i["name"] == "_id_":
                 continue
-            idxs.append({
+            spec = {
                 "key": list(i["key"].items()),
                 "name": i["name"],
                 "unique": bool(i.get("unique", False)),
                 "sparse": bool(i.get("sparse", False)),
                 "partial": i.get("partialFilterExpression"),
-            })
+            }
+            # P534-002: text indexes need their weights (and language) to
+            # be creatable at all — carry them through the chain.
+            for opt in ("weights", "default_language", "textIndexVersion"):
+                if opt in i:
+                    spec[opt] = i[opt]
+            idxs.append(spec)
         if idxs:
             specs[col] = idxs
     return specs
@@ -160,6 +182,9 @@ async def _apply_indexes(target_db, specs: dict) -> int:
                 kwargs = {"name": spec["name"], "unique": spec["unique"], "sparse": spec["sparse"]}
                 if spec["partial"]:
                     kwargs["partialFilterExpression"] = spec["partial"]
+                for opt in ("weights", "default_language", "textIndexVersion"):  # P534-002
+                    if spec.get(opt) is not None:
+                        kwargs[opt] = spec[opt]
                 await target_db[col].create_index(spec["key"], **kwargs)
                 created += 1
             except Exception as e:  # index conflicts must never block provisioning
@@ -223,6 +248,9 @@ async def copy_template_to_tenant(tenant_id: str) -> dict:
             kwargs = {"name": i["name"], "unique": bool(i.get("unique", False)), "sparse": bool(i.get("sparse", False))}
             if i.get("partialFilterExpression"):
                 kwargs["partialFilterExpression"] = i["partialFilterExpression"]
+            for opt in ("weights", "default_language", "textIndexVersion"):  # P534-002
+                if i.get(opt) is not None:
+                    kwargs[opt] = i[opt]
             try:
                 await tenant_db[col_name].create_index(list(i["key"].items()), **kwargs)
                 stats["indexes"] += 1
@@ -261,7 +289,7 @@ async def doctor_tenant(tenant_id: str, fix: bool = False) -> dict:
     missing_collections, missing_docs, missing_indexes = [], [], []
     tenant_cols = set(await tenant_db.list_collection_names())
 
-    for col_name in await tpl.list_collection_names():
+    for col_name in await _material_collections(tpl):
         if col_name not in tenant_cols:
             missing_collections.append(col_name)
         tpl_count = await tpl[col_name].count_documents({})
@@ -294,7 +322,14 @@ async def doctor_tenant(tenant_id: str, fix: bool = False) -> dict:
     if fix and not report["healthy"]:
         stats = await copy_template_to_tenant(tenant_id)
         report["fixed"] = stats
-        report["healthy"] = True
+        # P534-001: never trust the copy blindly — recompute the diff and
+        # report the genuine post-fix state, surfacing any remainder.
+        recheck = await doctor_tenant(tenant_id, fix=False)
+        report["healthy"] = recheck["healthy"]
+        if not recheck["healthy"]:
+            report["post_fix_missing_collections"] = recheck["missing_collections"]
+            report["post_fix_missing_seed_docs_total"] = recheck["missing_seed_docs_total"]
+            report["post_fix_missing_indexes"] = recheck["missing_indexes"]
     return report
 
 
