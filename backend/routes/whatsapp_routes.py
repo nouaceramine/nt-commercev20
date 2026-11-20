@@ -91,10 +91,12 @@ async def resolve_tenant_by_phone_id(phone_number_id: str):
 
 
 def create_whatsapp_routes(db, get_current_user) -> dict:
+    from utils.permissions import create_cashier_block
+    block_cashier = create_cashier_block(get_current_user)  # p531: /whatsapp hidden from cashier in UI
     """Create WhatsApp routes with dependencies"""
 
     @router.get("/config")
-    async def get_whatsapp_config(current_user: dict = Depends(get_current_user)):
+    async def get_whatsapp_config(current_user: dict = Depends(block_cashier)):  # p531
         tenant_id = current_user.get("tenant_id")
         if not tenant_id:
             raise HTTPException(status_code=403, detail="Tenant access required")
@@ -127,7 +129,7 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
     @router.put("/config")
     async def update_whatsapp_config(
         config_data: WhatsAppConfig,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier)  # p531,
     ):
         tenant_id = current_user.get("tenant_id")
         if not tenant_id:
@@ -230,7 +232,7 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
     async def get_messages(
         limit: int = 50,
         direction: Optional[str] = None,
-        current_user: dict = Depends(get_current_user),
+        current_user: dict = Depends(block_cashier)  # p531,
     ):
         tenant_id = current_user.get("tenant_id")
         if not tenant_id:
@@ -246,7 +248,7 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         return messages
 
     @router.get("/stats")
-    async def get_whatsapp_stats(current_user: dict = Depends(get_current_user)):
+    async def get_whatsapp_stats(current_user: dict = Depends(block_cashier)):  # p531
         tenant_id = current_user.get("tenant_id")
         if not tenant_id:
             raise HTTPException(status_code=403, detail="Tenant access required")
@@ -280,7 +282,7 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         is_active: bool = True
 
     @router.get("/templates")
-    async def list_templates(current_user: dict = Depends(get_current_user)):
+    async def list_templates(current_user: dict = Depends(block_cashier)):  # p531
         return await db.whatsapp_templates.find({}, {"_id": 0}).to_list(200)
 
     def _require_template_admin(user: dict):

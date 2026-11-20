@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 
 def create_smart_notifications_routes(db, main_db, get_current_user) -> dict:
+    from utils.permissions import create_cashier_block
+    block_cashier = create_cashier_block(get_current_user)  # p531: /smart-notifications hidden from cashier in UI
     router = APIRouter(prefix="/smart-notifications", tags=["smart-notifications"])
 
     @router.get("")
@@ -14,7 +16,7 @@ def create_smart_notifications_routes(db, main_db, get_current_user) -> dict:
         severity: Optional[str] = None,
         read: Optional[bool] = None,
         limit: int = 50,
-        user: dict = Depends(get_current_user)
+        user: dict = Depends(block_cashier)  # p531
     ):
         query = {"channel": "smart"}
         if severity:
@@ -24,7 +26,7 @@ def create_smart_notifications_routes(db, main_db, get_current_user) -> dict:
         return await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
 
     @router.get("/unread-count")
-    async def get_unread_count(user: dict = Depends(get_current_user)):
+    async def get_unread_count(user: dict = Depends(block_cashier)):  # p531
         count = await db.notifications.count_documents({"channel": "smart", "read": {"$ne": True}})
         by_severity = {}
         for sev in ["high", "medium", "low", "warning", "info"]:
@@ -34,26 +36,26 @@ def create_smart_notifications_routes(db, main_db, get_current_user) -> dict:
         return {"unread": count, "by_severity": by_severity}
 
     @router.put("/{notification_id}/read")
-    async def mark_as_read(notification_id: str, user: dict = Depends(get_current_user)):
+    async def mark_as_read(notification_id: str, user: dict = Depends(block_cashier)):  # p531
         await db.notifications.update_one(
             {"id": notification_id, "channel": "smart"}, {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
         )
         return {"message": "ok"}
 
     @router.put("/mark-all-read")
-    async def mark_all_read(user: dict = Depends(get_current_user)):
+    async def mark_all_read(user: dict = Depends(block_cashier)):  # p531
         await db.notifications.update_many(
             {"channel": "smart", "read": {"$ne": True}}, {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
         )
         return {"message": "ok"}
 
     @router.delete("/clear")
-    async def clear_notifications(user: dict = Depends(get_current_user)):
+    async def clear_notifications(user: dict = Depends(block_cashier)):  # p531
         await db.notifications.delete_many({"channel": "smart", "read": True})
         return {"message": "تم مسح الإشعارات المقروءة"}
 
     @router.get("/stats")
-    async def get_notification_stats(user: dict = Depends(get_current_user)):
+    async def get_notification_stats(user: dict = Depends(block_cashier)):  # p531
         total = await db.notifications.count_documents({"channel": "smart"})
         unread = await db.notifications.count_documents({"channel": "smart", "read": {"$ne": True}})
         by_type = await db.notifications.aggregate([

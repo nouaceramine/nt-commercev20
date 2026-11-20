@@ -115,6 +115,12 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         )
         return {"message": "تم تحديد الإشعار كمقروء"}
 
+    @router.delete("/notifications/clear-all")
+    async def clear_all_notifications(admin: dict = Depends(get_tenant_admin)):
+        """Clear all notifications"""
+        result = await db.notifications.delete_many({"channel": {"$ne": "smart"}})
+        return {"success": True, "deleted_count": result.deleted_count}
+
     @router.delete("/notifications/{notification_id}")
     async def delete_notification(notification_id: str, user: dict = Depends(require_tenant)):
         """Delete a notification"""
@@ -605,11 +611,6 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         )
         return {"success": True}
 
-    @router.delete("/notifications/clear-all")
-    async def clear_all_notifications(admin: dict = Depends(get_tenant_admin)):
-        """Clear all notifications"""
-        result = await db.notifications.delete_many({"channel": {"$ne": "smart"}})
-        return {"success": True, "deleted_count": result.deleted_count}
 
 
     return router

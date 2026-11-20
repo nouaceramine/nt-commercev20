@@ -380,7 +380,7 @@ def test_enabled_low_stock_email_uses_canonical_fields_without_external_send(mon
     )
     route = next(item for item in router.routes
                  if item.path == "/notifications/check-low-stock")
-    response = asyncio.run(route.endpoint(user={"tenant_id": "TEST-P492-tenant"}))
+    response = asyncio.run(route.endpoint(user={"tenant_id": "TEST-P492-tenant", "role": "admin"}))  # p531: route is admin/manager-gated
 
     assert response["success"] is True
     assert db.products.last_matches == ["low", "default"]

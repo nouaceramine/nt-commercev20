@@ -10,6 +10,8 @@ import uuid
 
 
 def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
+    from utils.permissions import create_cashier_block
+    block_cashier = create_cashier_block(get_current_user)  # p531: /task-management hidden from cashier in UI
     router = APIRouter(prefix="/tasks", tags=["tasks"])
 
     class TaskCreate(BaseModel):
@@ -23,7 +25,7 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         assigned_to: Optional[str] = None
 
     @router.post("")
-    async def create_task(data: TaskCreate, user: dict = Depends(get_current_user)):
+    async def create_task(data: TaskCreate, user: dict = Depends(block_cashier)):  # p531
         if not (data.title_ar or "").strip():
             raise HTTPException(status_code=400, detail="عنوان المهمة مطلوب")
         from services.code_generator import next_code
@@ -46,7 +48,7 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         status: Optional[str] = None,
         priority: Optional[str] = None,
         assigned_to: Optional[str] = None,
-        user: dict = Depends(get_current_user)
+        user: dict = Depends(block_cashier)  # p531
     ):
         query = {}
         if status:
@@ -58,7 +60,7 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         return await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
     @router.get("/{task_id}")
-    async def get_task(task_id: str, user: dict = Depends(get_current_user)):
+    async def get_task(task_id: str, user: dict = Depends(block_cashier)):  # p531
         task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
         if not task:
             raise HTTPException(status_code=404, detail="المهمة غير موجودة")
@@ -67,20 +69,24 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         return task
 
     @router.put("/{task_id}")
-    async def update_task(task_id: str, data: dict, user: dict = Depends(get_current_user)):
+    async def update_task(task_id: str, data: dict, user: dict = Depends(block_cashier)):  # p531
         data.pop("id", None)
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        await db.tasks.update_one({"id": task_id}, {"$set": data})
+        res = await db.tasks.update_one({"id": task_id}, {"$set": data})
+        if res.matched_count == 0:  # p531: no phantom-200 on unknown task id
+            raise HTTPException(status_code=404, detail="المهمة غير موجودة")
         return await db.tasks.find_one({"id": task_id}, {"_id": 0})
 
     @router.delete("/{task_id}")
     async def delete_task(task_id: str, admin: dict = Depends(get_tenant_admin)):
-        await db.tasks.delete_one({"id": task_id})
+        res = await db.tasks.delete_one({"id": task_id})
+        if res.deleted_count == 0:  # p531
+            raise HTTPException(status_code=404, detail="المهمة غير موجودة")
         await db.task_comments.delete_many({"task_id": task_id})
         return {"message": "تم حذف المهمة"}
 
     @router.post("/{task_id}/comments")
-    async def add_comment(task_id: str, data: dict, user: dict = Depends(get_current_user)):
+    async def add_comment(task_id: str, data: dict, user: dict = Depends(block_cashier)):  # p531
         task = await db.tasks.find_one({"id": task_id}, {"_id": 0, "id": 1})
         if not task:
             raise HTTPException(status_code=404, detail="المهمة غير موجودة")
@@ -100,7 +106,7 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         return comment
 
     @router.get("/stats/summary")
-    async def get_task_stats(user: dict = Depends(get_current_user)):
+    async def get_task_stats(user: dict = Depends(block_cashier)):  # p531
         total = await db.tasks.count_documents({})
         pending = await db.tasks.count_documents({"status": "pending"})
         in_progress = await db.tasks.count_documents({"status": "in_progress"})
@@ -111,6 +117,8 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
 
 
 def create_chat_routes(db, get_current_user) -> dict:
+    from utils.permissions import create_cashier_block
+    block_cashier = create_cashier_block(get_current_user)  # p531: /internal-chat hidden from cashier in UI
     router = APIRouter(prefix="/chat", tags=["chat"])
 
     async def _member_room(room_id: str, uid: str) -> dict:
@@ -122,7 +130,7 @@ def create_chat_routes(db, get_current_user) -> dict:
         return room
 
     @router.post("/rooms")
-    async def create_room(data: dict, user: dict = Depends(get_current_user)):
+    async def create_room(data: dict, user: dict = Depends(block_cashier)):  # p531
         raw_members = data.get("members")
         room = {
             "id": str(uuid.uuid4()),
@@ -137,7 +145,7 @@ def create_chat_routes(db, get_current_user) -> dict:
         return room
 
     @router.get("/rooms")
-    async def get_rooms(user: dict = Depends(get_current_user)):
+    async def get_rooms(user: dict = Depends(block_cashier)):  # p531
         uid = user.get("id", "")
         rooms = await db.chat_rooms.find(
             {"$or": [{"members": uid}, {"created_by": uid}]}, {"_id": 0}
@@ -152,14 +160,14 @@ def create_chat_routes(db, get_current_user) -> dict:
         return rooms
 
     @router.get("/rooms/{room_id}/messages")
-    async def get_messages(room_id: str, limit: int = 50, user: dict = Depends(get_current_user)):
+    async def get_messages(room_id: str, limit: int = 50, user: dict = Depends(block_cashier)):  # p531
         await _member_room(room_id, user.get("id", ""))
         return await db.chat_messages.find(
             {"room_id": room_id}, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)
 
     @router.post("/rooms/{room_id}/messages")
-    async def send_message(room_id: str, data: dict, user: dict = Depends(get_current_user)):
+    async def send_message(room_id: str, data: dict, user: dict = Depends(block_cashier)):  # p531
         await _member_room(room_id, user.get("id", ""))
         content = (data.get("content") or "").strip()
         if not content:

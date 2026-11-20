@@ -117,6 +117,11 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.get("/notifications/sendgrid/settings")
     async def get_sendgrid_settings(user: dict = Depends(require_tenant)):
+        # p531: adminOnly page (/email-notifications) — align with the PUT/send
+        # guards from p518; previously any role (incl. cashier) could read the
+        # tenant mail config and fire operational mail triggers
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إعدادات البريد متاحة للإدارة فقط")
         settings = await db.system_settings.find_one({"type": "sendgrid_settings"}, {"_id": 0})
         if not settings:
             return SendGridSettings().model_dump()
@@ -147,6 +152,11 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.post("/notifications/sendgrid/test")
     async def test_sendgrid(user: dict = Depends(require_tenant)):
+        # p531: adminOnly page (/email-notifications) — align with the PUT/send
+        # guards from p518; previously any role (incl. cashier) could read the
+        # tenant mail config and fire operational mail triggers
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إعدادات البريد متاحة للإدارة فقط")
         settings = await db.system_settings.find_one({"type": "sendgrid_settings"})
         if not settings or not settings.get("api_key"):
             raise HTTPException(status_code=400, detail="يرجى إعداد مفتاح SendGrid أولاً")
@@ -192,6 +202,11 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
 
     @router.post("/notifications/check-low-stock")
     async def check_and_notify_low_stock(user: dict = Depends(require_tenant)):
+        # p531: adminOnly page (/email-notifications) — align with the PUT/send
+        # guards from p518; previously any role (incl. cashier) could read the
+        # tenant mail config and fire operational mail triggers
+        if user.get("role") not in ["admin", "manager", "tenant_admin"]:
+            raise HTTPException(status_code=403, detail="إعدادات البريد متاحة للإدارة فقط")
         settings = await db.system_settings.find_one({"type": "sendgrid_settings"})
         if not settings or not settings.get("enabled") or not settings.get("low_stock_notification"):
             return {"success": False, "message": "إشعارات انخفاض المخزون غير مفعلة"}

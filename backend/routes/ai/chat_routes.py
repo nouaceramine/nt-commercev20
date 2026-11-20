@@ -274,7 +274,7 @@ def create_ai_routes(db, get_current_user) -> dict:
             raise HTTPException(status_code=500, detail="Internal server error")
     
     @router.get("/chat/sessions")
-    async def get_chat_sessions(user=Depends(get_current_user)):
+    async def get_chat_sessions(user=Depends(block_cashier)):  # p531
         """Get user's chat sessions"""
         sessions = await db.chat_sessions.find(
             {"user_id": user["id"]},
@@ -283,7 +283,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return sessions
     
     @router.get("/chat/sessions/{session_id}")
-    async def get_chat_session(session_id: str, user=Depends(get_current_user)):
+    async def get_chat_session(session_id: str, user=Depends(block_cashier)):  # p531
         """Get a specific chat session"""
         session = await db.chat_sessions.find_one(
             {"id": session_id, "user_id": user["id"]},
@@ -294,7 +294,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return session
     
     @router.get("/insights")
-    async def get_ai_insights(user=Depends(get_current_user)):
+    async def get_ai_insights(user=Depends(block_cashier)):  # p531
         """Get AI-generated insights"""
         # Get recent insights
         insights = await db.ai_insights.find(
@@ -375,7 +375,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return result
     
     @router.get("/agents/status")
-    async def get_agents_status(user=Depends(get_current_user)):
+    async def get_agents_status(user=Depends(block_cashier)):  # p531
         """Get status of all AI agents"""
         agents = [
             {"id": "invoice_processor", "name": "معالج الفواتير", "name_en": "Invoice Processor", "is_enabled": True},
@@ -490,7 +490,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return out
 
     @router.get("/forecast/{forecast_type}")
-    async def get_forecast(forecast_type: str, periods: int = 3, user=Depends(get_current_user)):
+    async def get_forecast(forecast_type: str, periods: int = 3, user=Depends(block_cashier)):  # p531
         """Get financial forecast"""
         if forecast_type not in ["revenue", "cash_flow"]:
             raise HTTPException(status_code=400, detail="Invalid forecast type")
@@ -533,7 +533,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return result
     
     @router.get("/daily-summary")
-    async def get_daily_summary(date: str = None, user=Depends(get_current_user)):
+    async def get_daily_summary(date: str = None, user=Depends(block_cashier)):  # p531
         """Get daily financial summary"""
         if not date:
             date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -551,7 +551,7 @@ def create_ai_routes(db, get_current_user) -> dict:
         return result.get("summary", {})
     
     @router.get("/financial-health")
-    async def get_financial_health(user=Depends(get_current_user)):
+    async def get_financial_health(user=Depends(block_cashier)):  # p531
         """Get overall financial health score"""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         month_start = today[:7] + "-01"
@@ -620,14 +620,14 @@ def create_ai_routes(db, get_current_user) -> dict:
     
     # p118: delete chat sessions (user-scoped)
     @router.delete("/chat/sessions/{session_id}")
-    async def delete_chat_session(session_id: str, user=Depends(get_current_user)):
+    async def delete_chat_session(session_id: str, user=Depends(block_cashier)):  # p531
         result = await db.chat_sessions.delete_one({"id": session_id, "user_id": user["id"]})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Session not found")
         return {"message": "deleted", "id": session_id}
 
     @router.delete("/chat/sessions")
-    async def delete_all_chat_sessions(user=Depends(get_current_user)):
+    async def delete_all_chat_sessions(user=Depends(block_cashier)):  # p531
         result = await db.chat_sessions.delete_many({"user_id": user["id"]})
         return {"message": "deleted", "count": result.deleted_count}
 

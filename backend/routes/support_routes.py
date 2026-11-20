@@ -26,7 +26,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from config.database import main_db
-from utils.auth import require_tenant, get_super_admin
+from utils.auth import get_current_user, require_tenant, get_super_admin
+from utils.permissions import create_cashier_block
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +74,13 @@ async def _next_code() -> str:
 
 
 def create_support_routes() -> dict:
+    block_cashier = create_cashier_block(get_current_user)  # p531: /support hidden from cashier in UI
     tenant_router = APIRouter(prefix="/support", tags=["support"])
     admin_router = APIRouter(prefix="/admin/support", tags=["support-admin"])
 
     # ── tenant side ──────────────────────────────────────────────────
     @tenant_router.post("/tickets")
-    async def create_ticket(body: TicketIn, user: dict = Depends(require_tenant)):
+    async def create_ticket(body: TicketIn, user: dict = Depends(require_tenant), _cb: dict = Depends(block_cashier)):
         subject = (body.subject or "").strip()
         message = (body.message or "").strip()
         if not subject or not message:
@@ -109,7 +111,7 @@ def create_support_routes() -> dict:
         return {"ok": True, "ticket": _public(doc)}
 
     @tenant_router.get("/tickets")
-    async def my_tickets(status: Optional[str] = None, user: dict = Depends(require_tenant)):
+    async def my_tickets(status: Optional[str] = None, user: dict = Depends(require_tenant), _cb: dict = Depends(block_cashier)):
         tenant_id = user.get("tenant_id") or user.get("id")
         q = {"tenant_id": tenant_id}
         if status:
@@ -126,7 +128,7 @@ def create_support_routes() -> dict:
         return t
 
     @tenant_router.get("/tickets/{ticket_id}")
-    async def read_ticket(ticket_id: str, user: dict = Depends(require_tenant)):
+    async def read_ticket(ticket_id: str, user: dict = Depends(require_tenant), _cb: dict = Depends(block_cashier)):
         t = await _own_ticket(ticket_id, user)
         if t.get("tenant_unread"):
             await main_db.support_tickets.update_one(
@@ -135,7 +137,7 @@ def create_support_routes() -> dict:
         return {"ticket": t}
 
     @tenant_router.post("/tickets/{ticket_id}/reply")
-    async def tenant_reply(ticket_id: str, body: ReplyIn, user: dict = Depends(require_tenant)):
+    async def tenant_reply(ticket_id: str, body: ReplyIn, user: dict = Depends(require_tenant), _cb: dict = Depends(block_cashier)):
         t = await _own_ticket(ticket_id, user)
         if t["status"] == "closed":
             raise HTTPException(status_code=400, detail="التذكرة مغلقة")
@@ -150,7 +152,7 @@ def create_support_routes() -> dict:
         return {"ok": True, "status": new_status}
 
     @tenant_router.post("/tickets/{ticket_id}/close")
-    async def tenant_close(ticket_id: str, user: dict = Depends(require_tenant)):
+    async def tenant_close(ticket_id: str, user: dict = Depends(require_tenant), _cb: dict = Depends(block_cashier)):
         await _own_ticket(ticket_id, user)
         await main_db.support_tickets.update_one(
             {"id": ticket_id}, {"$set": {"status": "closed", "updated_at": _now()}})
