@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
+import { idbClearAll } from '../lib/posOfflineStore';  // P532-001
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -105,6 +106,11 @@ export const AuthProvider = ({ children }) => {
   };
   
   const logout = () => {
+    // P532-001: wipe the offline business cache (IndexedDB catalog/customers)
+    // and the cached open POS session — shared-device confidentiality (E2
+    // design 3.1/6). The unsynced offline sales queue is kept deliberately.
+    idbClearAll();
+    localStorage.removeItem('pos_open_session');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('user_type');

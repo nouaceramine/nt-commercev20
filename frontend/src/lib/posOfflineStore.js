@@ -118,6 +118,25 @@ export async function idbCacheAdjustStock(kind, adjustments) {
   return applied;
 }
 
+/**
+ * P532-001: full cache wipe on logout (E2 design section 3.1/6 — the catalog
+ * and customer lists are business data on a potentially shared cashier
+ * device). Clears every tenant-scoped kv entry. The offline sales QUEUE stays
+ * in localStorage on purpose: unsynced sales are financial records and must
+ * survive logout. Best-effort, never throws.
+ */
+export async function idbClearAll() {
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* best-effort */ }
+}
+
 /** Device tag + monotonic per-device sequence for provisional offline numbers. */
 export function nextOfflineNo() {
   try {
