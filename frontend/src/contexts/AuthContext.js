@@ -55,8 +55,19 @@ export const AuthProvider = ({ children }) => {
         setFeatures(response.data.features || null);
         setLimits(response.data.limits || null);
       } catch (error) {
-        console.error('Token verification failed:', error);
-        logout();
+        if (error && error.response) {
+          // Real server rejection (401/403): the session is invalid → logout.
+          console.error('Token verification failed:', error);
+          logout();
+        } else {
+          // E2: network failure (offline) — /auth/me is unreachable, NOT
+          // rejected. Keep the stored session so POS can sell offline;
+          // without this an offline reload wiped the login.
+          try {
+            const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+            if (storedUser && storedUser.id) setUser(storedUser);
+          } catch { /* keep unauthenticated */ }
+        }
       } finally {
         setLoading(false);
       }

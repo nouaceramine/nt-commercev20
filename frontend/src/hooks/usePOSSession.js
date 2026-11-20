@@ -6,6 +6,8 @@
 import { errText } from '../lib/errorText';
 import { useState, useCallback } from 'react';
 
+const OPEN_SESSION_KEY = 'pos_open_session';
+
 export function usePOSSession({ language, toast, apiClient }) {
   const [hasOpenSession, setHasOpenSession] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -60,11 +62,31 @@ export function usePOSSession({ language, toast, apiClient }) {
         setHasOpenSession(false);
         setCurrentSession(null);
         setSessionStats(null);
+        try { localStorage.removeItem(OPEN_SESSION_KEY); } catch { /* noop */ }
+      }
+      if (session && session.status === 'open') {
+        try { localStorage.setItem(OPEN_SESSION_KEY, JSON.stringify(session)); } catch { /* noop */ }
       }
     } catch (_error) {
-      setHasOpenSession(false);
-      setCurrentSession(null);
-      setSessionStats(null);
+      if (!_error || !_error.response) {
+        // E2: network failure (offline) — restore the last known open session
+        // so the cashier keeps selling after an offline reload. The server
+        // remains the source of truth whenever it is reachable.
+        try {
+          const cached = JSON.parse(localStorage.getItem(OPEN_SESSION_KEY) || 'null');
+          if (cached && cached.status === 'open') {
+            setHasOpenSession(true);
+            setCurrentSession({ ...cached, _offline_restored: true });
+            setSessionStats({ cashSales: 0, creditSales: 0, totalSales: 0, salesCount: 0, todaySales: [] });
+          } else {
+            setHasOpenSession(false); setCurrentSession(null); setSessionStats(null);
+          }
+        } catch { setHasOpenSession(false); setCurrentSession(null); setSessionStats(null); }
+      } else {
+        setHasOpenSession(false);
+        setCurrentSession(null);
+        setSessionStats(null);
+      }
     } finally {
       setCheckingSession(false);
     }
@@ -105,6 +127,7 @@ export function usePOSSession({ language, toast, apiClient }) {
       const response = await apiClient.post('/daily-sessions', session);
       setCurrentSession(response.data);
       setHasOpenSession(true);
+      try { localStorage.setItem(OPEN_SESSION_KEY, JSON.stringify(response.data)); } catch { /* noop */ }
       setShowSessionDialog(false);
       setSessionStats({ cashSales: 0, creditSales: 0, totalSales: 0, salesCount: 0, todaySales: [] });
       toast.success(language === 'ar' ? 'تم فتح الحصة بنجاح' : 'Session ouverte avec succes');
@@ -125,6 +148,7 @@ export function usePOSSession({ language, toast, apiClient }) {
       await apiClient.put(`/daily-sessions/${currentSession.id}/close`, closingData);
       setCurrentSession(null);
       setHasOpenSession(false);
+      try { localStorage.removeItem(OPEN_SESSION_KEY); } catch { /* noop */ }
       setSessionStats(null);
       setShowCloseSessionDialog(false);
       setClosingNotes('');

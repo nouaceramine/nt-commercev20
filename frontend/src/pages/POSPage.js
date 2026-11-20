@@ -5,6 +5,7 @@
  * Following Martin Fowler's Refactoring patterns
  */
 import { errText } from '../lib/errorText';
+import { idbCacheRead, idbCacheWrite, idbCacheAdjustStock, nextOfflineNo } from '../lib/posOfflineStore';
 import { escapeHtml } from '../lib/escape';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { nextTier, tierLabel } from '../lib/priceTiers';
@@ -176,8 +177,21 @@ export default function POSPage() {
   };
   const persistQueue = (q) => { setOfflineQueue(q); try { localStorage.setItem(POS_QUEUE_KEY, JSON.stringify(q)); } catch { /* storage full */ } };
   const enqueueOfflineSale = (saleData) => {
-    const q = [...readOfflineQueue(), { ...saleData, _offline_at: new Date().toISOString() }];
+    // E2: provisional number for the queue UI/receipt (server assigns the real
+    // invoice number on sync) + stock shadow so the same unit can't be sold
+    // twice on this device while offline.
+    const offlineNo = nextOfflineNo();
+    const q = [...readOfflineQueue(), { ...saleData, _offline_at: new Date().toISOString(), _offline_no: offlineNo }];
     persistQueue(q);
+    const sold = (saleData.items || []).filter((i) => i.product_id);
+    if (sold.length) {
+      idbCacheAdjustStock('products', sold);  // persisted cache
+      setProducts((prev) => prev.map((p) => {
+        const hit = sold.find((i) => i.product_id === p.id);
+        return hit && typeof p.quantity === 'number' ? { ...p, quantity: p.quantity - (Number(hit.quantity) || 0) } : p;
+      }));
+    }
+    return offlineNo;
   };
   const syncingRef = useRef(false);  // M10/p504: synchronous re-entry guard — state arrives a render too late (online event + interval can double-fire)
   const syncOfflineSales = useCallback(async (manual = false) => {
@@ -189,7 +203,7 @@ export default function POSPage() {
     let synced = 0, failed = 0;
     const remaining = [];
     for (const item of q) {
-      const { _offline_at, _sync_attempts, _sync_error, _sync_dead, ...saleData } = item;
+      const { _offline_at, _sync_attempts, _sync_error, _sync_dead, _offline_no, ...saleData } = item;
       if (_sync_dead && !manual) { remaining.push(item); continue; }  // dead-letter: manual retry only
       try {
         await apiClient.post('/sales', saleData);
@@ -281,10 +295,10 @@ export default function POSPage() {
       const res = await apiClient.get('/products?limit=50000');  // p530: default was 1000 — POS silently saw only 1000 of a large catalog; payload is light now (list projection)
       setProducts(res.data);
       setProductsCacheAt(null);
-      writeCache(POS_CACHE_PRODUCTS, res.data);  // M10
+      idbCacheWrite('products', res.data);  // E2: IDB — localStorage's 5MB cap silently dropped big catalogs
     } catch (e) {
       console.error(e);
-      const c = readCache(POS_CACHE_PRODUCTS);  // M10: offline → serve last known catalog
+      const c = await idbCacheRead('products');  // E2: offline → serve last known catalog (IDB, LS-migrated)
       if (c && Array.isArray(c.items)) { setProducts(c.items); setProductsCacheAt(c.at); }
     }
   };
@@ -293,10 +307,10 @@ export default function POSPage() {
       const res = await apiClient.get('/customers');
       setCustomers(res.data);
       setCustomersCacheAt(null);
-      writeCache(POS_CACHE_CUSTOMERS, res.data);  // M10
+      idbCacheWrite('customers', res.data);  // E2
     } catch (e) {
       console.error(e);
-      const c = readCache(POS_CACHE_CUSTOMERS);
+      const c = await idbCacheRead('customers');
       if (c && Array.isArray(c.items)) { setCustomers(c.items); setCustomersCacheAt(c.at); }
     }
   };
@@ -846,9 +860,9 @@ export default function POSPage() {
       console.error('Sale error:', error);
       if (!error.response && saleData) {
         // Network failure: keep the sale locally and sync it when connection returns
-        enqueueOfflineSale(saleData);
+        const _offNo = enqueueOfflineSale(saleData);  // E2: provisional OFF-xxxx number
         setIsOffline(true);
-        toast.success(language === 'ar' ? 'انقطع الاتصال — حُفظ البيع محلياً وسيُزامَن تلقائياً' : 'Hors ligne — vente enregistree localement');
+        toast.success(language === 'ar' ? `انقطع الاتصال — حُفظ البيع محلياً (${_offNo}) وسيُزامَن تلقائياً` : 'Hors ligne — vente enregistree localement');
         cart.clear();
       } else {
         toast.error(errText(error) ||  (language === 'ar' ? 'خطأ في البيع' : 'Erreur vente'));
@@ -1438,7 +1452,7 @@ export default function POSPage() {
                   {offlineQueue.map((q, i) => (
                     <div key={i} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
                       <div>
-                        <span className="font-mono">{q.code || '—'}</span>
+                        <span className="font-mono">{q._offline_no || q.code || '—'}</span>
                         <span className="ms-2 font-semibold">{(q.total || 0).toLocaleString()}</span>
                         <div className="text-xs text-muted-foreground">{(q._offline_at || '').slice(0, 16).replace('T', ' ')}</div>
                         {q._sync_error && <div className="text-xs text-red-600" data-testid="pos-sync-error">{language === 'ar' ? 'رفضه الخادم — راجعه أو احذفه: ' : 'Refuse: '}{q._sync_error}</div>}

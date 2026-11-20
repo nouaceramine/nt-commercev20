@@ -25,13 +25,11 @@ window.addEventListener("unhandledrejection", (e) => {
   }
 });
 
-// Service workers caused stale-bundle blank pages after redeploys.
-// Unregister any previously registered worker instead of registering one.
+// E2: register the offline-capable worker (network-first HTML, cache-first
+// hashed statics — the stale-bundle blank-page failure mode is designed out).
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.getRegistrations()
-      .then((regs) => regs.forEach((r) => r.unregister()))
-      .catch(() => {});
+    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
   });
 }
 
