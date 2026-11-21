@@ -124,6 +124,11 @@ def create_fixed_assets_routes(db, get_current_user, get_tenant_admin, require_t
             from services.accounting_auto import ensure_accounts
             await ensure_accounts(db)
             credit_acc = await db.accounts.find_one({"code": "401"})
+            if body.supplier_id:
+                # p544: never book a payable (Cr 401) against a ghost supplier
+                sup = await db.suppliers.find_one({"id": body.supplier_id}, {"_id": 0, "id": 1})
+                if not sup:
+                    raise HTTPException(status_code=404, detail="المورد غير موجود")
         else:
             credit_acc = await _box_account(body.payment_method)
             box = await db.cash_boxes.find_one({"id": body.payment_method})
@@ -209,11 +214,18 @@ def create_fixed_assets_routes(db, get_current_user, get_tenant_admin, require_t
             if dup:
                 skipped += 1
                 continue
-            entry = await _post(f"إهلاك {a['name']} — {body.period}",
-                                f"{a['id']}:{body.period}", "asset_depreciation",
-                                f"قيد إهلاك شهري: {a['name']} ({body.period})",
-                                [_line(accs["615"], debit=amount), _line(accs["345"], credit=amount)],
-                                date=f"{body.period}-28")
+            from pymongo.errors import DuplicateKeyError
+            try:
+                entry = await _post(f"إهلاك {a['name']} — {body.period}",
+                                    f"{a['id']}:{body.period}", "asset_depreciation",
+                                    f"قيد إهلاك شهري: {a['name']} ({body.period})",
+                                    [_line(accs["615"], debit=amount), _line(accs["345"], credit=amount)],
+                                    date=f"{body.period}-28")
+            except DuplicateKeyError:
+                # p544: a concurrent run for the same period won the
+                # auto_entry_unique race — idempotent skip, never a 500.
+                skipped += 1
+                continue
             if entry is None:
                 skipped += 1
                 continue

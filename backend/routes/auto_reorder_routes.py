@@ -215,7 +215,23 @@ def create_auto_reorder_routes(db, get_current_user, get_tenant_admin, require_t
             "auto_reorder": True,
             "created_at": now, "created_by": user.get("name", ""),
         }
-        await db.purchases.insert_one(doc)
+        # p544: one open auto-reorder draft per product at the DATABASE level —
+        # the pending check above is a fast path only; concurrent generates
+        # raced past it (proven: 4 concurrent -> 4 drafts for one product).
+        # Partial multikey unique index covers OPEN drafts only, so confirm /
+        # delete releases the product automatically.
+        try:
+            await db.purchases.create_index(
+                [("items.product_id", 1)], unique=True, name="auto_reorder_draft_unique",
+                partialFilterExpression={"auto_reorder": True, "stock_status": "draft"})
+        except Exception:
+            pass
+        from pymongo.errors import DuplicateKeyError
+        try:
+            await db.purchases.insert_one(doc)
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409,
+                                detail="أحد الأصناف موجود في مسودة طلب تلقائي مفتوحة")
         doc.pop("_id", None)
         return {"purchase": doc, "skipped": skipped}
 

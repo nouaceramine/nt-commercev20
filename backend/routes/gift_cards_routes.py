@@ -181,8 +181,13 @@ def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_ten
     # ── Top up ──
     @router.post("/{card_id}/topup")
     async def topup_card(card_id: str, body: TopupIn, user: dict = Depends(get_tenant_admin)):
+        # p544: expiry must gate topup too — check/redeem compute the fresh
+        # status from expires_at, but the stored status lags, so an expired card
+        # still matched the claim filter and accepted money it can never spend.
         card = await db.gift_cards.find_one_and_update(
-            {"id": card_id, "status": {"$in": ["active", "depleted"]}},
+            {"id": card_id, "status": {"$in": ["active", "depleted"]},
+             "$or": [{"expires_at": None}, {"expires_at": {"$exists": False}},
+                     {"expires_at": {"$gt": _now()}}]},
             {"$inc": {"balance": round(body.amount, 2)}, "$set": {"updated_at": _now(), "status": "active"}},
             return_document=True)
         if not card:
@@ -249,17 +254,29 @@ def create_gift_cards_routes(db, get_current_user, get_tenant_admin, require_ten
         amount = round(body.amount, 2)
         if amount == 0 or abs(amount) > 10_000_000:
             raise HTTPException(status_code=400, detail="مبلغ غير صالح")
-        card = await db.gift_cards.find_one({"id": card_id})
+        # p544: atomic guarded $inc — the old read-compute-SET lost concurrent
+        # adjustments (proven: 4 concurrent +25 left balance 150 with a ledger
+        # showing 200). Bounds live inside the claim filter itself.
+        filt = {"id": card_id}
+        if amount < 0:
+            filt["balance"] = {"$gte": -amount}
+        else:
+            filt["balance"] = {"$lte": 10_000_000 - amount}
+        card = await db.gift_cards.find_one_and_update(
+            filt, {"$inc": {"balance": amount}, "$set": {"updated_at": _now()}},
+            return_document=True)
         if not card:
-            raise HTTPException(status_code=404, detail="البطاقة غير موجودة")
-        new_balance = round((card.get("balance") or 0) + amount, 2)
-        if new_balance < 0:
-            raise HTTPException(status_code=400, detail="التسوية تجعل الرصيد سالباً")
-        await db.gift_cards.update_one({"id": card_id}, {"$set": {
-            "balance": new_balance,
-            "status": "depleted" if new_balance <= 0 else ("disabled" if card.get("status") == "disabled" else "active"),
-            "updated_at": _now(),
-        }})
+            exists = await db.gift_cards.find_one({"id": card_id}, {"_id": 0, "balance": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="البطاقة غير موجودة")
+            raise HTTPException(status_code=400, detail="التسوية تخرج الرصيد عن النطاق المسموح")
+        new_balance = card["balance"]
+        new_status = ("disabled" if card.get("status") == "disabled"
+                      else ("depleted" if new_balance <= 0 else "active"))
+        if new_status != card.get("status"):
+            await db.gift_cards.update_one({"id": card_id},
+                                           {"$set": {"status": new_status, "updated_at": _now()}})
+            card["status"] = new_status
         await _tx(card, "adjust", amount, new_balance, user, notes=body.reason)
         return {"id": card_id, "balance": new_balance}
 

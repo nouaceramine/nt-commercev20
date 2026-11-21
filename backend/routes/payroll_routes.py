@@ -129,6 +129,14 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
         employees = await db.employees.find({}, {"_id": 0}).to_list(500)
         if not employees:
             raise HTTPException(status_code=404, detail="لا يوجد موظفون")
+        # p544: one open payslip per employee+month enforced at the DATABASE
+        # level — the check-then-insert below raced under concurrent generates
+        # (proven: 4 concurrent calls produced 3-4 slips for the same employee).
+        try:
+            await db.payslips.create_index("dedupe_key", unique=True, sparse=True,
+                                           name="payslip_dedupe_unique")
+        except Exception:
+            pass
         existing = await db.payslips.find(
             {"month": body.month, "status": {"$ne": "cancelled"}},
             {"employee_id": 1}).to_list(500)
@@ -145,9 +153,15 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
                 "employee_id": emp["id"], "employee_name": emp.get("name", ""),
                 "position": emp.get("position", ""), "month": body.month,
                 **calc, "status": "draft",
+                "dedupe_key": f"{emp['id']}:{body.month}",  # p544 race guard
                 "created_at": now, "created_by": user.get("name", ""),
             }
-            await db.payslips.insert_one(doc)
+            from pymongo.errors import DuplicateKeyError
+            try:
+                await db.payslips.insert_one(doc)
+            except DuplicateKeyError:
+                skipped.append(emp.get("name", emp["id"]))
+                continue
             doc.pop("_id", None)
             created.append(doc)
         return {"month": body.month, "created": len(created),
@@ -238,7 +252,9 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
         await db.payslips.update_one(
             {"id": payslip_id},
             {"$set": {"status": "cancelled", "cancelled_at": _now(),
-                      "cancelled_by": user.get("name", "")}})
+                      "cancelled_by": user.get("name", "")},
+             # p544: release the employee+month so it can be regenerated
+             "$unset": {"dedupe_key": ""}})
         return {"id": payslip_id, "status": "cancelled"}
 
     return {"router": router}
