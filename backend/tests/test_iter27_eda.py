@@ -269,6 +269,9 @@ async def test_sale_completed_consumer_writes_movement():
         try:
             await main_db.saas_tenants.delete_one({"id": "tenantTest"})
             await mongo.drop_database("tenant_iter27_saletest")
+            # The consumer resolves the write target from tenant_id, not from
+            # the throwaway db_name above — drop the resolved DB too (p542).
+            await mongo.drop_database("tenant_tenantTest")
         except Exception:
             pass
         try:
