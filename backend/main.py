@@ -521,18 +521,41 @@ async def startup_event():
         for _d in _dbs2:
             for _coll, _field in _CODE_INDEXES:
                 try:
-                    # drop any earlier-spec same-name index (spec changed during p257 rollout)
+                    # p536: idempotent ensure. The previous drop-then-create ran
+                    # unconditionally on EVERY boot in EACH of the 4 uvicorn
+                    # workers — the workers raced (one worker's dropIndexes
+                    # aborted another's in-flight build ⇒ "Index build failed"
+                    # warnings on every restart, e.g. nt_rt_2326), and every
+                    # drop opened a uniqueness-enforcement gap between drop and
+                    # recreate. Now: read the current spec; skip entirely when
+                    # it already matches (steady state = zero DDL, zero race);
+                    # drop only on real spec drift, then create.
+                    _name = f"p257_unique_{_field}"
+                    _want_partial = {_field: {"$gt": ""}}
+                    _existing = None
                     try:
-                        await _d[_coll].drop_index(f"p257_unique_{_field}")
+                        async for _ix in _d[_coll].list_indexes():
+                            if _ix.get("name") == _name:
+                                _existing = _ix
+                                break
                     except Exception:
-                        pass
+                        _existing = None
+                    if _existing is not None:
+                        _same_spec = (
+                            bool(_existing.get("unique"))
+                            and list((_existing.get("key") or {}).keys()) == [_field]
+                            and dict(_existing.get("partialFilterExpression") or {}) == _want_partial
+                        )
+                        if _same_spec:
+                            continue  # steady state — no DDL at all
+                        await _d[_coll].drop_index(_name)  # spec drift only
                     await _d[_coll].create_index(
                         [(_field, 1)], unique=True,
-                        partialFilterExpression={_field: {"$gt": ""}},
-                        name=f"p257_unique_{_field}")
+                        partialFilterExpression=_want_partial,
+                        name=_name)
                 except Exception as _ie:
                     logger.warning("p257 index %s.%s on %s: %s",
-                                   _coll, _field, getattr(_d, "name", "?"), str(_ie)[:120])
+                                   _coll, _field, getattr(_d, "name", "?"), str(_ie)[:200])
             # p283: sales.code now unique (in _CODE_INDEXES); keep plain index only
             # if the unique build failed on this DB (e.g. legacy dup) so search stays fast.
             try:

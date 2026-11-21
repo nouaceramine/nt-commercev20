@@ -38,6 +38,34 @@ except ImportError:
 BREVO_AVAILABLE = True
 BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 
+# ── p536: provider rate-limit guard ─────────────────────────────────────────
+# Resend caps at 10 requests/second per API key. Bursty jobs (report_robot
+# daily/weekly/monthly reports iterate every active tenant back-to-back) used
+# to exceed that cap, and the rejected emails were lost permanently — the send
+# returned False with no retry (13 losses observed in prod over 48h).
+# A process-wide pacer keeps bursts under the cap, and rate-limit rejections
+# are retried with backoff instead of being dropped.
+_RATE_LOCK = asyncio.Lock()
+_RATE_LAST = 0.0
+_RATE_MIN_INTERVAL = 0.12          # ≈8 sends/s per worker — below Resend's 10 req/s cap
+_RATE_MAX_RETRIES = 3
+_RATE_BACKOFF = (0.6, 1.5, 3.0)
+
+
+async def _pace_send() -> None:
+    """Serialize sends through a min-interval pacer (per worker process)."""
+    global _RATE_LAST
+    async with _RATE_LOCK:
+        wait = _RATE_MIN_INTERVAL - (time.monotonic() - _RATE_LAST)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _RATE_LAST = time.monotonic()
+
+
+def _is_rate_limited(exc_text: str) -> bool:
+    t = (exc_text or "").lower()
+    return "too many requests" in t or "rate limit" in t or "429" in t
+
 
 # ── DB settings cache (30s TTL) ─────────────────────────────────────────────
 _settings_cache: dict = {"ts": 0.0, "data": None}
@@ -111,29 +139,45 @@ class EmailService:
 
     # ── Send paths ─────────────────────────────────────────────────────────
     async def _send_via_resend(self, to: str, subject: str, html: str, cfg: dict) -> bool:
-        try:
-            import resend as _r
-            _r.api_key = cfg["resend_key"]
-            _sender = cfg["sender"]
-            _from = _sender if "<" in _sender else f"NT Commerce <{_sender}>"  # p157: display name
-            params = {"from": _from, "to": [to], "subject": subject, "html": html}
-            res = await asyncio.to_thread(_r.Emails.send, params)
-            logger.info("Resend email sent to %s (id=%s)", to, (res or {}).get("id"))
-            return True
-        except Exception as exc:
-            logger.error("Resend send failed: %s", exc)
-            return False
+        import resend as _r
+        _r.api_key = cfg["resend_key"]
+        _sender = cfg["sender"]
+        _from = _sender if "<" in _sender else f"NT Commerce <{_sender}>"  # p157: display name
+        params = {"from": _from, "to": [to], "subject": subject, "html": html}
+        for attempt in range(_RATE_MAX_RETRIES + 1):
+            try:
+                await _pace_send()  # p536: stay under the 10 req/s provider cap
+                res = await asyncio.to_thread(_r.Emails.send, params)
+                logger.info("Resend email sent to %s (id=%s)", to, (res or {}).get("id"))
+                return True
+            except Exception as exc:
+                if attempt < _RATE_MAX_RETRIES and _is_rate_limited(str(exc)):
+                    backoff = _RATE_BACKOFF[min(attempt, len(_RATE_BACKOFF) - 1)]
+                    logger.warning("Resend rate-limited for %s — retry %d in %.1fs",
+                                   to, attempt + 1, backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error("Resend send failed: %s", exc)
+                return False
 
     async def _send_via_sendgrid(self, to: str, subject: str, html: str, cfg: dict) -> bool:
-        try:
-            message = Mail(from_email=cfg["sender"], to_emails=to, subject=subject, html_content=html)
-            sg = SendGridAPIClient(cfg["sendgrid_key"])
-            await asyncio.to_thread(sg.send, message)
-            logger.info("SendGrid email sent to %s: %s", to, subject)
-            return True
-        except Exception as exc:
-            logger.error("SendGrid send failed: %s", exc)
-            return False
+        for attempt in range(_RATE_MAX_RETRIES + 1):
+            try:
+                await _pace_send()  # p536
+                message = Mail(from_email=cfg["sender"], to_emails=to, subject=subject, html_content=html)
+                sg = SendGridAPIClient(cfg["sendgrid_key"])
+                await asyncio.to_thread(sg.send, message)
+                logger.info("SendGrid email sent to %s: %s", to, subject)
+                return True
+            except Exception as exc:
+                if attempt < _RATE_MAX_RETRIES and _is_rate_limited(str(exc)):
+                    backoff = _RATE_BACKOFF[min(attempt, len(_RATE_BACKOFF) - 1)]
+                    logger.warning("SendGrid rate-limited for %s — retry %d in %.1fs",
+                                   to, attempt + 1, backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error("SendGrid send failed: %s", exc)
+                return False
 
     async def _send_via_brevo(self, to: str, subject: str, html: str, cfg: dict) -> bool:
         """Brevo (Sendinblue) — direct REST call. Works from Algeria/MENA."""
@@ -150,18 +194,26 @@ class EmailService:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(BREVO_API_URL, headers=headers, json=payload)
-            if resp.status_code in (200, 201, 202):
-                msg_id = (resp.json() or {}).get("messageId", "?")
-                logger.info("Brevo email sent to %s (messageId=%s)", to, msg_id)
-                return True
-            logger.error("Brevo HTTP %s: %s", resp.status_code, resp.text[:300])
-            return False
-        except Exception as exc:
-            logger.error("Brevo send crashed: %s", exc)
-            return False
+        for attempt in range(_RATE_MAX_RETRIES + 1):
+            try:
+                await _pace_send()  # p536
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(BREVO_API_URL, headers=headers, json=payload)
+                if resp.status_code in (200, 201, 202):
+                    msg_id = (resp.json() or {}).get("messageId", "?")
+                    logger.info("Brevo email sent to %s (messageId=%s)", to, msg_id)
+                    return True
+                if resp.status_code == 429 and attempt < _RATE_MAX_RETRIES:
+                    backoff = _RATE_BACKOFF[min(attempt, len(_RATE_BACKOFF) - 1)]
+                    logger.warning("Brevo rate-limited (429) for %s — retry %d in %.1fs",
+                                   to, attempt + 1, backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error("Brevo HTTP %s: %s", resp.status_code, resp.text[:300])
+                return False
+            except Exception as exc:
+                logger.error("Brevo send crashed: %s", exc)
+                return False
 
     async def send_email(self, to: str, subject: str, html: str) -> bool:
         cfg = await self._resolved_config()
