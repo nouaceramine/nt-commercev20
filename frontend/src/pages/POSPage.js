@@ -5,7 +5,7 @@
  * Following Martin Fowler's Refactoring patterns
  */
 import { errText } from '../lib/errorText';
-import { idbCacheRead, idbCacheWrite, idbCacheAdjustStock, nextOfflineNo } from '../lib/posOfflineStore';
+import { idbCacheRead, idbCacheWrite, idbCacheAdjustStock, nextOfflineNo, currentScope } from '../lib/posOfflineStore';
 import { escapeHtml } from '../lib/escape';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { nextTier, tierLabel } from '../lib/priceTiers';
@@ -171,6 +171,10 @@ export default function POSPage() {
   const [productsCacheAt, setProductsCacheAt] = useState(null);   // non-null = showing cached catalog
   const [_customersCacheAt, setCustomersCacheAt] = useState(null);
   const [queueOpen, setQueueOpen] = useState(false);              // M10: offline queue manager dialog
+  // P546-001: badges/dialog expose only THIS tenant's queued sales — foreign
+  // items (shared device) are hidden and unreachable by the delete button.
+  const myQueueScope = currentScope();
+  const ownQueueCount = offlineQueue.filter(qi => !qi._tenant || qi._tenant === myQueueScope).length;
   const removeQueuedSale = (idx) => {
     const q = readOfflineQueue().filter((_, i) => i !== idx);
     persistQueue(q);
@@ -181,7 +185,7 @@ export default function POSPage() {
     // invoice number on sync) + stock shadow so the same unit can't be sold
     // twice on this device while offline.
     const offlineNo = nextOfflineNo();
-    const q = [...readOfflineQueue(), { ...saleData, _offline_at: new Date().toISOString(), _offline_no: offlineNo }];
+    const q = [...readOfflineQueue(), { ...saleData, _tenant: currentScope(), _offline_at: new Date().toISOString(), _offline_no: offlineNo }];  // P546-001: tenant-stamp every queued sale
     persistQueue(q);
     const sold = (saleData.items || []).filter((i) => i.product_id);
     if (sold.length) {
@@ -203,7 +207,12 @@ export default function POSPage() {
     let synced = 0, failed = 0;
     const remaining = [];
     for (const item of q) {
-      const { _offline_at, _sync_attempts, _sync_error, _sync_dead, _offline_no, ...saleData } = item;
+      const { _offline_at, _sync_attempts, _sync_error, _sync_dead, _offline_no, _tenant, ...saleData } = item;
+      // P546-001: never sync another tenant's queued sale on a shared device —
+      // it would land in the WRONG tenant's books (custom lines carry no
+      // product_id, so no server-side stock claim stops them). Foreign items
+      // stay queued, untouched, until their owner logs back in.
+      if (_tenant && _tenant !== currentScope()) { remaining.push(item); continue; }
       if (_sync_dead && !manual) { remaining.push(item); continue; }  // dead-letter: manual retry only
       try {
         await apiClient.post('/sales', saleData);
@@ -1011,7 +1020,7 @@ export default function POSPage() {
             {isOffline && (
               <Badge variant="destructive" className="text-xs cursor-pointer" data-testid="pos-offline-badge"
                 onClick={() => setQueueOpen(true)}>
-                {language === 'ar' ? `بدون اتصال (${offlineQueue.length} بالانتظار)` : `Hors ligne (${offlineQueue.length})`}
+                {language === 'ar' ? `بدون اتصال (${ownQueueCount} بالانتظار)` : `Hors ligne (${ownQueueCount})`}
               </Badge>
             )}
             {productsCacheAt && (
@@ -1020,15 +1029,15 @@ export default function POSPage() {
                 {language === 'ar' ? 'كتالوج مخزّن' : 'Catalogue local'}
               </Badge>
             )}
-            {!isOffline && offlineQueue.length > 0 && (
+            {!isOffline && ownQueueCount > 0 && (
               <Badge variant="secondary" className="text-xs cursor-pointer" data-testid="pos-queue-badge"
                 onClick={() => setQueueOpen(true)}>
-                {language === 'ar' ? `${offlineQueue.length} بيعاً بالانتظار` : `${offlineQueue.length} en attente`}
+                {language === 'ar' ? `${ownQueueCount} بيعاً بالانتظار` : `${ownQueueCount} en attente`}
               </Badge>
             )}
-            {offlineQueue.length > 0 && (
+            {ownQueueCount > 0 && (
               <Badge variant="secondary" className="text-xs cursor-pointer" data-testid="pos-offline-queue-badge" onClick={() => syncOfflineSales(true)}>
-                {language === 'ar' ? `${offlineQueue.length} بيع بانتظار المزامنة` : `${offlineQueue.length} vente(s) en attente`}
+                {language === 'ar' ? `${ownQueueCount} بيع بانتظار المزامنة` : `${ownQueueCount} vente(s) en attente`}
               </Badge>
             )}
           </div>
@@ -1445,11 +1454,11 @@ export default function POSPage() {
               <DialogTitle>{language === 'ar' ? 'طابور البيع الأوفلاين' : 'File hors ligne'}</DialogTitle>
             </DialogHeader>
             <div className="space-y-2">
-              {offlineQueue.length === 0 ? (
+              {ownQueueCount === 0 ? (
                 <p className="text-sm text-muted-foreground">{language === 'ar' ? 'الطابور فارغ — كل المبيعات مزامَنة' : 'File vide'}</p>
               ) : (
                 <>
-                  {offlineQueue.map((q, i) => (
+                  {offlineQueue.map((q, i) => (q._tenant && q._tenant !== myQueueScope) ? null : (
                     <div key={i} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
                       <div>
                         <span className="font-mono">{q._offline_no || q.code || '—'}</span>
