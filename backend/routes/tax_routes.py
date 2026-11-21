@@ -118,11 +118,20 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
         current_user: dict = Depends(get_current_user),
     ):
         """Generate comprehensive tax report for a period"""
+        # p545: a date-only end_date ("2026-10-31") compares lexicographically
+        # against ISO created_at WITH a time suffix, silently excluding the
+        # entire end day from every pipeline below (proven: sales on the 31st
+        # missing from the report). Normalize to the day's last instant.
+        if end_date and len(end_date) == 10:
+            end_date = end_date + "T23:59:59.999999Z"
+        # p545: sales never carry "cancelled" (deletes are hard, returns set
+        # "returned") — returned sales were counted as revenue (proven live).
+        _excluded = ["cancelled", "returned", "deleted"]
         # Get sales data
         sales_pipeline = [
             {"$match": {
                 "created_at": {"$gte": start_date, "$lte": end_date},
-                "status": {"$ne": "cancelled"}
+                "status": {"$nin": _excluded}
             }},
             {"$group": {
                 "_id": None,

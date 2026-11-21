@@ -326,8 +326,15 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
                 status_code=400,
                 detail=f"تعذّر الانتقال — حالة الحجز تغيّرت للتو (أعد المحاولة)")
         if needs_refund:
+            # p545: crash-safe — a refund journal left behind by a crashed
+            # attempt (flag never set) means the money already moved. Without
+            # this guard the retry dies on auto_entry_unique (DuplicateKeyError
+            # → 500) and the booking becomes uncancellable-with-refund forever
+            # (proven live: 500 + stuck "booked").
+            refund_posted = await already_posted(db, b["id"], "booking_refund")
             try:
-                await _deposit_journal(b, b["deposit"], body.refund_box, refund=True)
+                if not refund_posted:
+                    await _deposit_journal(b, b["deposit"], body.refund_box, refund=True)
             except Exception:
                 # rollback the claim — the booking returns to its prior state
                 await db.bookings.update_one(
@@ -356,6 +363,10 @@ def create_bookings_routes(db, get_current_user, get_tenant_admin, require_tenan
         new_end = _parse_iso(body.end) if body.end else b["end"]
         if not new_start or not new_end or new_end <= new_start:
             raise HTTPException(status_code=400, detail="فترة الحجز غير صالحة")
+        # p545: the same future-window rule as create_booking — otherwise an
+        # edit could move a booking wholly into the past (proven: 200).
+        if (new_start != b["start"] or new_end != b["end"]) and new_end <= _now():
+            raise HTTPException(status_code=400, detail="لا يمكن نقل الحجز إلى فترة منتهية")
         if new_start != b["start"] or new_end != b["end"]:
             # p503: the time-change clash check runs under the SAME per-resource
             # lock as create_booking — without it a concurrent create+edit both

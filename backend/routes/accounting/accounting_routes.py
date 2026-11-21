@@ -1365,7 +1365,8 @@ async def get_tax_summary(
     journal detail."""
     if len(period) == 4 and period.isdigit():
         start, end = f"{period}-01-01", f"{period}-12-31"
-    elif len(period) == 7 and period[4] == "-" and period[:4].isdigit() and period[5:].isdigit():
+    elif (len(period) == 7 and period[4] == "-" and period[:4].isdigit() and period[5:].isdigit()
+          and 1 <= int(period[5:]) <= 12):  # p545: "2026-13" used to return a zero report (200)
         start, end = f"{period}-01", f"{period}-31"  # ISO strings compare lexicographically
     else:
         raise HTTPException(status_code=400, detail="period بصيغة YYYY أو YYYY-MM")

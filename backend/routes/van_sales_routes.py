@@ -279,12 +279,24 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
     @router.post("/days/open", status_code=201)
     async def open_day(body: OpenDayIn, user: dict = Depends(get_tenant_admin)):
         van = await _get_van(body.van_id)
+        # p545: consistent with load/unload — an inactive van runs no tours
+        if van.get("active") is False:
+            raise HTTPException(status_code=400, detail="الشاحنة غير مفعّلة")
         await _ensure_day_index()
         existing = await db.van_days.find_one(
             {"van_id": body.van_id, "date": body.date, "status": "open"})
         if existing:
             raise HTTPException(status_code=409,
                                 detail=f"يوم مفتوح مسبقاً لهذه الشاحنة: {existing['code']}")
+        # p545: one day per (van, date) EVER. The partial unique index only
+        # covers status=open, so after a close a second day could be opened —
+        # and its close re-read the whole ^date sales/loads window, booking
+        # the same sales a second time as a phantom variance (proven live).
+        prior = await db.van_days.find_one({"van_id": body.van_id, "date": body.date})
+        if prior:
+            raise HTTPException(
+                status_code=409,
+                detail=f"سُجّل يوم مسبقاً لهذه الشاحنة في هذا التاريخ: {prior['code']} ({prior['status']})")
         doc = {"id": new_id(), "code": await _next_code("VD"), "van_id": van["id"],
                "van_name": van["name"],
                "driver_name": body.driver_name or van.get("driver_name", ""),
@@ -337,9 +349,13 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
         date = day["date"]
         van_id = day["van_id"]
         # booked cash sales from this van on this date
+        # p545: "returned" must be excluded too — a same-day return already
+        # handed the cash back to the customer; counting it in expected_cash
+        # fabricated a shortage against the agent (proven: expected 350 vs
+        # physical 250 → phantom Dr 425 of 100).
         sales = await db.sales.find(
             {"warehouse_id": van_id, "created_at": {"$regex": f"^{date}"},
-             "status": {"$nin": ["cancelled", "deleted"]}},
+             "status": {"$nin": ["cancelled", "deleted", "returned"]}},
             {"total": 1, "payment_method": 1}).to_list(2000)
         sales_total = round(sum(s.get("total", 0) for s in sales), 2)
         expected_cash = round(sum(s.get("total", 0) for s in sales
@@ -352,7 +368,13 @@ def create_van_sales_routes(db, get_current_user, get_tenant_admin, require_tena
                                 expected_cash, body.cash_counted)
         variance = summary["variance"]
         now = _now()
-        if abs(variance) >= 0.01:
+        # p545: crash-safe resume — if a previous attempt posted the close
+        # journal but died before the status update, already_posted skips the
+        # money path instead of dying on auto_entry_unique (DuplicateKeyError
+        # → 500 → the day was unclosable forever; proven live).
+        from services.accounting_auto import already_posted
+        _close_posted = await already_posted(db, day_id, "van_day_close")
+        if abs(variance) >= 0.01 and not _close_posted:
             accs = await _ensure_accounts()
             from services.accounting_auto import ensure_accounts, _insert_entry
             await ensure_accounts(db)
