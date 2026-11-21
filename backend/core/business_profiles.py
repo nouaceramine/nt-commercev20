@@ -183,8 +183,15 @@ BUSINESS_PROFILES = [
         "key": "restaurant",
         "name_ar": "بيتزيريا فاست فود ومطاعم", "name_fr": "Restaurants & Fast-food",
         "icon": "Pizza",
-        "desc_ar": "بيع سريع عبر العداد، منتجات غير مخزنة",
-        "features_off": ["recharge", "iptv", "maintenance", "barcode", "credit_sales"],
+        "desc_ar": "طاولات وطلبات مطبخ ووصفات أطباق — بيع سريع عبر العداد",
+        # p542 (بقرار المالك): تفعيل اللازم فقط — طاولات/مطبخ/وصفات (opt-in) +
+        # الافتراضيات النافعة (مخزون/مشتريات/مصاريف/محاسبة/تقارير/زبائن/موظفون/ولاء/عروض/POS)
+        # وتعطيل كل ما لا يخص نشاط المطاعم والبيتزيريات.
+        "features_off": [
+            "recharge", "iptv", "maintenance", "barcode", "credit_sales",
+            "wallet", "rental", "ecommerce_hub", "digital_services",
+            "screen_recording", "ai_bots", "partners", "sms", "whatsapp",
+        ],
         "features_on": ["restaurant", "production"],  # p186: tables + kitchen orders; p307: +production (وصفات الأطباق + تكلفة الطعام + الهالك)
         "families": ["بيتزا", "ساندويتشات", "مشروبات", "حلويات", "وجبات", "مقبلات"],
     },
