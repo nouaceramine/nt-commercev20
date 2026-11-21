@@ -92,53 +92,74 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         from config.database import client as _client, main_db as _main_db
         from services.outbox import outbox_write
         settlement_id = str(uuid.uuid4())
-        async with await _client.start_session() as _tx:
-            async with _tx.start_transaction():
-                # p493: explicit guards the customer counterpart already had —
-                # positive amount, a REAL destination cash box (p216 parity),
-                # and no overpayment beyond the outstanding debt (the surplus
-                # used to leave the box without settling anything)
-                if float(payment.amount or 0) <= 0:
-                    raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
-                box = await db.cash_boxes.find_one({"id": payment.payment_method}, {"_id": 0, "id": 1}, session=_tx)
-                if not box:
-                    raise HTTPException(status_code=400, detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
-                open_rows = await db.purchases.find(
-                    {"supplier_id": payment.supplier_id, "remaining": {"$gt": 0}},
-                    {"_id": 0, "remaining": 1}, session=_tx).to_list(500)
-                outstanding = round(sum(float(p.get("remaining") or 0) for p in open_rows), 2)
-                if payment.amount > outstanding + 0.01:
-                    raise HTTPException(status_code=400, detail=f"المبلغ يتجاوز الدين المتبقي ({outstanding})")
-                # p64: shared FIFO allocator (same semantics as before)
-                amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method, session=_tx)
-                if amount_applied <= 0:
-                    raise HTTPException(status_code=400, detail="No outstanding debt for this supplier")
-                supplier = await db.suppliers.find_one({"id": payment.supplier_id}, session=_tx)
-                if supplier:
-                    # p62 fix: paying debt reduces what we OWE (balance) — lifetime purchases must not shrink
-                    await adjust_supplier_mirror(db, payment.supplier_id, balance=-payment.amount, session=_tx)
-                now = datetime.now(timezone.utc).isoformat()
-                # p62: personal money lives outside business cash boxes — no box movement
-                if True:  # p68: personal box is a real ledger
-                    # p64: standard transaction shape (cash_box_id) so /cash ledger shows it
-                    await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "expense", "amount": payment.amount, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "reference_type": "debt_payment", "reference_id": payment.supplier_id, "settlement_id": settlement_id, "created_at": now, "created_by": user.get("name", "")}, session=_tx)
-                    await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}, "$set": {"updated_at": now}}, session=_tx)
-                # p195: outbox → auto journal entry (Dr 401 / Cr box)
-                await outbox_write(
-                    _main_db, "supplier.payment_made",
-                    {
-                        "payment_id": settlement_id,
-                        "supplier_id": payment.supplier_id,
-                        "supplier_name": supplier.get("name", "") if supplier else "",
-                        "amount": payment.amount,
-                        "amount_applied": amount_applied,
-                        "payment_method": payment.payment_method,
-                        "purchases_updated": len(updated_purchases),
-                    },
-                    tenant_id=user.get("tenant_id") or "platform",
-                    source="customer_debts_routes",
-                    session=_tx,
-                )
+
+        async def _settle_once():
+            async with await _client.start_session() as _tx:
+                async with _tx.start_transaction():
+                    # p493: explicit guards the customer counterpart already had —
+                    # positive amount, a REAL destination cash box (p216 parity),
+                    # and no overpayment beyond the outstanding debt (the surplus
+                    # used to leave the box without settling anything)
+                    if float(payment.amount or 0) <= 0:
+                        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+                    box = await db.cash_boxes.find_one({"id": payment.payment_method}, {"_id": 0, "id": 1}, session=_tx)
+                    if not box:
+                        raise HTTPException(status_code=400, detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                    open_rows = await db.purchases.find(
+                        {"supplier_id": payment.supplier_id, "remaining": {"$gt": 0}},
+                        {"_id": 0, "remaining": 1}, session=_tx).to_list(500)
+                    outstanding = round(sum(float(p.get("remaining") or 0) for p in open_rows), 2)
+                    if payment.amount > outstanding + 0.01:
+                        raise HTTPException(status_code=400, detail=f"المبلغ يتجاوز الدين المتبقي ({outstanding})")
+                    # p64: shared FIFO allocator (same semantics as before)
+                    amount_applied, updated_purchases = await allocate_supplier_payment(db, payment.supplier_id, payment.amount, method=payment.payment_method, session=_tx)
+                    if amount_applied <= 0:
+                        raise HTTPException(status_code=400, detail="No outstanding debt for this supplier")
+                    supplier = await db.suppliers.find_one({"id": payment.supplier_id}, session=_tx)
+                    if supplier:
+                        # p62 fix: paying debt reduces what we OWE (balance) — lifetime purchases must not shrink
+                        await adjust_supplier_mirror(db, payment.supplier_id, balance=-payment.amount, session=_tx)
+                    now = datetime.now(timezone.utc).isoformat()
+                    # p62: personal money lives outside business cash boxes — no box movement
+                    if True:  # p68: personal box is a real ledger
+                        # p64: standard transaction shape (cash_box_id) so /cash ledger shows it
+                        await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": payment.payment_method, "type": "expense", "amount": payment.amount, "description": f"سداد دين مورد - {supplier['name'] if supplier else payment.supplier_id}", "reference_type": "debt_payment", "reference_id": payment.supplier_id, "settlement_id": settlement_id, "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                        await db.cash_boxes.update_one({"id": payment.payment_method}, {"$inc": {"balance": -payment.amount}, "$set": {"updated_at": now}}, session=_tx)
+                    # p195: outbox → auto journal entry (Dr 401 / Cr box)
+                    await outbox_write(
+                        _main_db, "supplier.payment_made",
+                        {
+                            "payment_id": settlement_id,
+                            "supplier_id": payment.supplier_id,
+                            "supplier_name": supplier.get("name", "") if supplier else "",
+                            "amount": payment.amount,
+                            "amount_applied": amount_applied,
+                            "payment_method": payment.payment_method,
+                            "purchases_updated": len(updated_purchases),
+                        },
+                        tenant_id=user.get("tenant_id") or "platform",
+                        source="customer_debts_routes",
+                        session=_tx,
+                    )
+            return amount_applied, updated_purchases
+
+        # p543: retry on transient write conflict — same proven race class as
+        # the supplier advance path (P543-001); concurrent settlements from the
+        # 4 uvicorn workers must not 500. Guards raise HTTPException, which is
+        # not retried and propagates unchanged.
+        import asyncio as _asyncio
+        from pymongo.errors import DuplicateKeyError as _DKE, PyMongoError as _PME
+        for _attempt in range(5):
+            try:
+                amount_applied, updated_purchases = await _settle_once()
+                break
+            except (_DKE, _PME) as _exc:
+                if _attempt == 4 or (
+                    not isinstance(_exc, _DKE)
+                    and not _exc.has_error_label("TransientTransactionError")
+                ):
+                    raise
+                await _asyncio.sleep(0.02 * (2 ** _attempt))
         return {"message": "Payment recorded successfully", "amount_paid": payment.amount, "updated_purchases": updated_purchases}
 
     @router.get("/debts/summary")

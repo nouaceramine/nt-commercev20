@@ -92,28 +92,46 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
         advance_record = {"id": str(uuid.uuid4()), "supplier_id": supplier_id, "supplier_name": supplier["name"], "amount": amount, "payment_method": method, "notes": payment.notes, "user_id": user["id"], "user_name": user.get("name", ""), "created_at": now}
         # p203: the advance actually leaves the chosen cash box (it never did
         # before), and everything commits or aborts together (pattern p195)
+        # p543: retry the transaction on transient write conflict — with 4
+        # uvicorn workers, concurrent advances raced and the loser took a 500
+        # (WriteConflict) so the advance was lost (proven on staging:
+        # [500, 500, 200] of 3 concurrent writes, balance/box short by 2x).
+        import asyncio as _asyncio
         from config.database import client as _client, main_db as _main_db
+        from pymongo.errors import DuplicateKeyError as _DKE, PyMongoError as _PME
         from services.outbox import outbox_write
-        async with await _client.start_session() as _tx:
-            async with _tx.start_transaction():
-                await db.cash_boxes.update_one({"id": method}, {"$inc": {"balance": -amount}, "$set": {"updated_at": now}}, session=_tx)
-                await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": method, "type": "expense", "amount": amount, "description": f"دفعة مسبقة للمورد - {supplier['name']}", "reference_type": "supplier_advance", "reference_id": advance_record["id"], "created_at": now, "created_by": user.get("name", "")}, session=_tx)
-                await db.suppliers.update_one({"id": supplier_id}, {"$inc": {"advance_balance": amount}, "$set": {"updated_at": now}}, session=_tx)
-                await db.supplier_advance_payments.insert_one(advance_record, session=_tx)
-                # p203: outbox → auto journal entry (Dr 402 / Cr box)
-                await outbox_write(
-                    _main_db, "supplier.advance_paid",
-                    {
-                        "payment_id": advance_record["id"],
-                        "supplier_id": supplier_id,
-                        "supplier_name": supplier["name"],
-                        "amount": amount,
-                        "payment_method": method,
-                    },
-                    tenant_id=user.get("tenant_id") or "platform",
-                    source="suppliers_core_routes",
-                    session=_tx,
-                )
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        await db.cash_boxes.update_one({"id": method}, {"$inc": {"balance": -amount}, "$set": {"updated_at": now}}, session=_tx)
+                        await db.transactions.insert_one({"id": str(uuid.uuid4()), "cash_box_id": method, "type": "expense", "amount": amount, "description": f"دفعة مسبقة للمورد - {supplier['name']}", "reference_type": "supplier_advance", "reference_id": advance_record["id"], "created_at": now, "created_by": user.get("name", "")}, session=_tx)
+                        await db.suppliers.update_one({"id": supplier_id}, {"$inc": {"advance_balance": amount}, "$set": {"updated_at": now}}, session=_tx)
+                        # fresh copy per attempt — insert_one mutates the doc with _id
+                        await db.supplier_advance_payments.insert_one(
+                            {k: v for k, v in advance_record.items() if k != "_id"}, session=_tx)
+                        # p203: outbox → auto journal entry (Dr 402 / Cr box)
+                        await outbox_write(
+                            _main_db, "supplier.advance_paid",
+                            {
+                                "payment_id": advance_record["id"],
+                                "supplier_id": supplier_id,
+                                "supplier_name": supplier["name"],
+                                "amount": amount,
+                                "payment_method": method,
+                            },
+                            tenant_id=user.get("tenant_id") or "platform",
+                            source="suppliers_core_routes",
+                            session=_tx,
+                        )
+                break
+            except (_DKE, _PME) as _exc:
+                if _attempt == 4 or (
+                    not isinstance(_exc, _DKE)
+                    and not _exc.has_error_label("TransientTransactionError")
+                ):
+                    raise
+                await _asyncio.sleep(0.02 * (2 ** _attempt))
         advance_record.pop("_id", None)
         return {"message": "Advance payment recorded", "new_advance_balance": round(float(supplier.get("advance_balance", 0)) + amount, 2)}
 
