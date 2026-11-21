@@ -67,6 +67,26 @@ def _is_rate_limited(exc_text: str) -> bool:
     return "too many requests" in t or "rate limit" in t or "429" in t
 
 
+
+# ── p538: reserved test-domain guard ─────────────────────────────────────────
+# Test/live waves address RFC-2606/6761 reserved recipients (test@example.com,
+# the p486 tenant factory *@example.com, ...). With a real provider key in DB
+# settings those sends reached Resend/Brevo and failed there (prod 2026-11-20
+# 16:47) — burning real quota on undeliverable addresses. Short-circuit them
+# exactly like the mock provider: log at INFO and return True.
+_TEST_DOMAINS = {"example.com", "example.org", "example.net"}
+_TEST_TLDS = (".test", ".invalid", ".localhost")
+
+
+def _is_test_recipient(to: str) -> bool:
+    """True when the recipient domain is an RFC-reserved test domain."""
+    domain = (to or "").rsplit("@", 1)[-1].strip().lower()
+    if not domain:
+        return False
+    if domain in _TEST_DOMAINS or any(domain.endswith(t) for t in _TEST_TLDS):
+        return True
+    return any(domain.endswith("." + d) for d in _TEST_DOMAINS)
+
 # ── DB settings cache (30s TTL) ─────────────────────────────────────────────
 _settings_cache: dict = {"ts": 0.0, "data": None}
 _CACHE_TTL = 30.0
@@ -216,6 +236,9 @@ class EmailService:
                 return False
 
     async def send_email(self, to: str, subject: str, html: str) -> bool:
+        if _is_test_recipient(to):  # p538: never fire a real provider at test domains
+            logger.info("[EMAIL-GUARD] reserved test-domain recipient suppressed: to=%s subject=%s", to, subject)
+            return True
         cfg = await self._resolved_config()
         provider = self._pick_provider(cfg)
         if provider == "resend":
