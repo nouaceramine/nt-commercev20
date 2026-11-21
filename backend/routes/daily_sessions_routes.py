@@ -285,7 +285,14 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
                 admin_users = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
                 recipients = list(set([u["id"] for u in admin_users] + [session_user_id]))
                 for rid in recipients:
-                    await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": rid, "type": ntype, "title": msg_ar, "message": msg_ar, "data": {"session_id": session_id, "difference": difference}, "read": False, "created_at": now})
+                    # p541: reference_id makes the p518 unread-unique index correct per
+                    # event+recipient (was null -> all cash_diff events collided and the
+                    # index could never build on NT-0004); DuplicateKeyError = retry of
+                    # the same close -> skip instead of 500 + session reopen loop.
+                    try:
+                        await db.notifications.insert_one({"id": str(uuid.uuid4()), "user_id": rid, "type": ntype, "title": msg_ar, "message": msg_ar, "reference_id": f"cash_diff:{session_id}:{rid}", "data": {"session_id": session_id, "difference": difference}, "read": False, "created_at": now})
+                    except DuplicateKeyError:
+                        pass
 
         except HTTPException:
             await db.daily_sessions.update_one(
