@@ -38,7 +38,11 @@ import {
 
 export default function DashboardPage() {
   const { t, isRTL, language } = useLanguage();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isFeatureEnabled } = useAuth();
+  // p543: wallet feature gate — skip fetch + cards for tenants with wallet disabled
+  // (e.g. restaurant profile, P542); previously /wallet 403 triggered the global
+  // "ليس لديك صلاحية للوصول" toast on every dashboard visit.
+  const walletEnabled = isFeatureEnabled('wallet');
   const { formatCurrency: _formatCurrency, formatNumber: _formatNumber, formatDate: _formatDate } = useDateFormat();
   const { widgets: _widgets, setWidgets, isWidgetVisible, getWidgetOrder: _getWidgetOrder } = useDashboardWidgets();
   const [showCustomizer, setShowCustomizer] = useState(false);
@@ -75,7 +79,7 @@ export default function DashboardPage() {
           apiClient.get(`/stats`).catch(() => ({ data: {} })),
           apiClient.get(`/dashboard/sales-stats`).catch(() => ({ data: null })),
           apiClient.get(`/dashboard/profit-stats`).catch(() => ({ data: null })),
-          apiClient.get(`/wallet`).catch(() => ({ data: null })),
+          walletEnabled ? apiClient.get(`/wallet`).catch(() => ({ data: null })) : Promise.resolve({ data: null }),  // p543
           apiClient.get(`/reports/daily-full`).catch(() => ({ data: null })),
           apiClient.get(`/expenses/estimated-cost`).catch(() => ({ data: null }))
         ]);
@@ -169,9 +173,12 @@ export default function DashboardPage() {
     { title: language === 'ar' ? 'صافي الفوائد اليوم' : "Bénéfice net du jour", value: `${(todayProfit - recurringCost.daily).toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `بعد خصم التكاليف اليومية المقدرة (${recurringCost.daily.toFixed(0)})` : `Après coûts journaliers estimés (${recurringCost.daily.toFixed(0)})`, icon: DollarSign, color: (todayProfit - recurringCost.daily) > 0 ? 'text-emerald-600' : 'text-slate-600', bgColor: (todayProfit - recurringCost.daily) > 0 ? 'bg-emerald-100' : 'bg-slate-100', link: '/daily-report', testId: 'net-today-profit-card' },
     { title: language === 'ar' ? 'صافي فوائد الشهر' : 'Bénéfice net du mois', value: `${((profitStats.monthly_profit || 0) - recurringCost.monthly).toFixed(2)} ${t.currency}`, subValue: language === 'ar' ? `بعد خصم التكاليف الشهرية المقدرة (${recurringCost.monthly.toFixed(0)})` : `Après coûts mensuels estimés (${recurringCost.monthly.toFixed(0)})`, icon: TrendingUp, color: ((profitStats.monthly_profit || 0) - recurringCost.monthly) > 0 ? 'text-emerald-600' : 'text-slate-600', bgColor: ((profitStats.monthly_profit || 0) - recurringCost.monthly) > 0 ? 'bg-emerald-100' : 'bg-slate-100', link: '/reports', testId: 'net-month-profit-card' },
     { title: language === 'ar' ? 'رأس المال' : 'Capital', value: `${(stats.capital ?? stats.total_cash)?.toFixed(2) || 0} ${t.currency}`, icon: Banknote, color: 'text-blue-600', bgColor: 'bg-blue-100', link: '/cash', testId: 'capital-card' },
-    { title: language === 'ar' ? 'رصيد المحفظة' : 'Solde portefeuille', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'متوفر لشحن الجوال' : 'Disponible recharge', icon: Wallet, color: 'text-teal-600', bgColor: 'bg-teal-100', link: '/recharge' },
-    { title: language === 'ar' ? 'رصيد محفظة المستخدم' : 'Solde portefeuille utilisateur', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'محفظة المنصة' : 'Portefeuille plateforme', icon: Wallet, color: 'text-indigo-600', bgColor: 'bg-indigo-100', link: '/wallet-management' },
-    { title: language === 'ar' ? 'ديون محفظة المستخدم' : 'Dettes portefeuille utilisateur', value: `${totalPlatformDebt.toFixed(2)} ${t.currency}`, subValue: walletOverdue ? (language === 'ar' ? 'اشتراك متأخر + مشتريات' : 'Abonnement échu + achats') : (totalPlatformDebt > 0 ? (language === 'ar' ? 'مشتريات غير مدفوعة' : 'Achats impayés') : (language === 'ar' ? 'لا توجد ديون' : 'Aucune dette')), icon: CreditCard, color: (walletOverdue || totalPlatformDebt > 0) ? 'text-red-600' : 'text-slate-600', bgColor: (walletOverdue || totalPlatformDebt > 0) ? 'bg-red-100' : 'bg-slate-100', link: '/wallet-management' },
+    // p543: wallet cards only when the wallet feature is enabled for this tenant
+    ...(walletEnabled ? [
+      { title: language === 'ar' ? 'رصيد المحفظة' : 'Solde portefeuille', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'متوفر لشحن الجوال' : 'Disponible recharge', icon: Wallet, color: 'text-teal-600', bgColor: 'bg-teal-100', link: '/recharge' },
+      { title: language === 'ar' ? 'رصيد محفظة المستخدم' : 'Solde portefeuille utilisateur', value: `${walletBalance?.toFixed(2) || 0} ${t.currency}`, subValue: language === 'ar' ? 'محفظة المنصة' : 'Portefeuille plateforme', icon: Wallet, color: 'text-indigo-600', bgColor: 'bg-indigo-100', link: '/wallet-management' },
+      { title: language === 'ar' ? 'ديون محفظة المستخدم' : 'Dettes portefeuille utilisateur', value: `${totalPlatformDebt.toFixed(2)} ${t.currency}`, subValue: walletOverdue ? (language === 'ar' ? 'اشتراك متأخر + مشتريات' : 'Abonnement échu + achats') : (totalPlatformDebt > 0 ? (language === 'ar' ? 'مشتريات غير مدفوعة' : 'Achats impayés') : (language === 'ar' ? 'لا توجد ديون' : 'Aucune dette')), icon: CreditCard, color: (walletOverdue || totalPlatformDebt > 0) ? 'text-red-600' : 'text-slate-600', bgColor: (walletOverdue || totalPlatformDebt > 0) ? 'bg-red-100' : 'bg-slate-100', link: '/wallet-management' },
+    ] : []),
     { title: t.totalProducts, value: stats.total_products, icon: Package, color: 'text-primary', bgColor: 'bg-primary/10', link: '/products' },
     { title: t.lowStock, value: stats.low_stock_count, icon: AlertTriangle, color: 'text-amber-600', bgColor: 'bg-amber-100', link: '/products?filter=low-stock' },
     { title: t.totalCustomers, value: stats.total_customers, icon: Users, color: 'text-purple-600', bgColor: 'bg-purple-100', link: '/customers' },

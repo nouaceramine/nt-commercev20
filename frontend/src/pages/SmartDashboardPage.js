@@ -52,7 +52,11 @@ const _COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899
 // p160: content extracted so it can be embedded in the unified DashboardPage (/)
 export function SmartDashboardContent() {
   const { t: _t, isRTL, language } = useLanguage();
-  const { user: _user } = useAuth();
+  const { user: _user, isFeatureEnabled } = useAuth();
+  // p543: AI widgets gated on ai_bots — disabled profiles (e.g. restaurant, P542)
+  // previously fired four /ai/* calls that 403'd and raised the global
+  // "ليس لديك صلاحية للوصول" toast on every dashboard visit.
+  const aiEnabled = isFeatureEnabled('ai_bots');
   const { formatCurrency, formatNumber: _formatNumber, formatDate: _formatDate, formatPercent: _formatPercent } = useDateFormat();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,6 +71,18 @@ export function SmartDashboardContent() {
   const [_expenseData, _setExpenseData] = useState([]);
   
   const fetchDashboardData = useCallback(async () => {
+    // p543: skip AI fetches entirely when the feature is off — render empty state
+    if (!aiEnabled) {
+      setFinancialHealth(null);
+      setInsights([]);
+      setAlerts([]);
+      setDailySummary(null);
+      setForecast(null);
+      setRevenueData([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
       const [healthRes, insightsRes, summaryRes, forecastRes] = await Promise.all([
         apiClient.get(`/ai/financial-health`).catch(() => ({ data: null })),
