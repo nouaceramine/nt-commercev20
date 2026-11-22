@@ -2,7 +2,7 @@
 Stats, Reports & Analytics Routes - Extracted from server.py
 Dashboard stats, sales analytics, profit reports, AI predictions
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter
@@ -235,6 +235,9 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             return _hit
         now = datetime.now(timezone.utc)
         month_start = now.strftime("%Y-%m-01")
+        # p548: bound the month window — a future-dated expense (user typo or
+        # a scheduled recurring row) must not inflate the CURRENT month
+        next_month_start = (now.replace(day=1) + timedelta(days=32)).strftime("%Y-%m-01")
 
         sales_result = await db.sales.aggregate([
             {"$match": {"created_at": {"$gte": month_start}, "status": {"$ne": "returned"}}},
@@ -255,7 +258,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             monthly_purchase_cost = 0
 
         expenses_result = await db.expenses.aggregate([
-            {"$match": {"date": {"$gte": month_start}}},
+            {"$match": {"date": {"$gte": month_start, "$lt": next_month_start}}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(1)
         monthly_expenses = expenses_result[0]["total"] if expenses_result else 0
@@ -460,7 +463,14 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
             for item in sale.get("items", []):
                 product = docs.get(item["product_id"])
                 if product:
-                    total_cost += product.get("purchase_price", 0) * item["quantity"]
+                    # p548: sale-time purchase_price snapshot first (the
+                    # profit-stats doctrine) — the live product price is only
+                    # a fallback for legacy rows; using it alone made this
+                    # report disagree with profit-stats after a price change
+                    pp = item.get("purchase_price")
+                    if pp is None:
+                        pp = product.get("purchase_price", 0)
+                    total_cost += pp * item["quantity"]
         gross_profit = total_revenue - total_cost
         profit_margin = (gross_profit / total_revenue * 100) if total_revenue > 0 else 0
         return {"total_revenue": total_revenue, "total_cost": total_cost, "gross_profit": gross_profit, "profit_margin": round(profit_margin, 2), "period_days": days}
@@ -485,8 +495,13 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
                 if product_id:
                     product = docs.get(product_id)
                     if product:
-                        purchase_price = product.get("purchase_price", 0)
-                        sale_price = item.get("price", 0)
+                        # p548: items carry unit_price (never "price" — p148)
+                        # and a sale-time purchase_price snapshot; reading
+                        # "price" made every line's profit equal to -cost
+                        purchase_price = item.get("purchase_price")
+                        if purchase_price is None:
+                            purchase_price = product.get("purchase_price", 0)
+                        sale_price = item.get("unit_price") or item.get("price") or 0
                         quantity = item.get("quantity", 1)
                         item_cost = purchase_price * quantity
                         item_profit = (sale_price - purchase_price) * quantity
@@ -523,7 +538,11 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     @router.get("/reports/daily-full")
     async def get_daily_full_report(date: Optional[str] = None, admin: dict = Depends(get_tenant_admin)):
         day = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        next_day = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            next_day = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400,
+                                detail="صيغة التاريخ غير صالحة — المطلوب YYYY-MM-DD")
         in_day = {"$gte": day, "$lt": next_day}
         from services.cache_service import cache  # p273
         _ck = f"stats:dailyfull:{admin.get('tenant_id', 'main')}:{day}"

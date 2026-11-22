@@ -568,6 +568,15 @@ async def delete_sale_op(db, sale_id: str, reason: str, user: dict) -> None:
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
                     await _delete_sale_impl(db, sale_id, reason, user, _tx_session)
+            # p548: same bust after a committed delete
+            try:
+                from services.cache_service import cache as _cache
+                _tid = user.get("tenant_id") or "main"
+                for _p in ("dashboard", "sales", "profit"):
+                    _cache.delete(f"stats:{_p}:{_tid}")
+                _cache.delete_pattern(f"stats:dailyfull:{_tid}:*")
+            except Exception:
+                pass
             return
         except PyMongoError as exc:
             if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
@@ -688,6 +697,16 @@ async def return_sale_op(db, sale_id: str, user: dict, reason: str = "") -> None
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
                     await _return_sale_impl(db, sale_id, user, _tx_session, reason)
+            # p548: a return moves every report number (past-day daily-full
+            # caches for 3600s) — bust after commit like the create path does
+            try:
+                from services.cache_service import cache as _cache
+                _tid = user.get("tenant_id") or "main"
+                for _p in ("dashboard", "sales", "profit"):
+                    _cache.delete(f"stats:{_p}:{_tid}")
+                _cache.delete_pattern(f"stats:dailyfull:{_tid}:*")
+            except Exception:
+                pass
             return
         except PyMongoError as exc:
             if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):

@@ -260,6 +260,18 @@ async def change_order_status(db, order_id: str, new_status: str, note: str, use
     except Exception:
         pass
 
+    # p548: a transition moves the daily-full ecom lines and the webstore
+    # mirror sale — bust the cached reports (covers staff clicks AND courier
+    # webhooks, both of which funnel through here)
+    try:
+        from services.cache_service import cache as _cache
+        _tid = (user or {}).get("tenant_id") or "main"
+        for _p in ("dashboard", "sales", "profit"):
+            _cache.delete(f"stats:{_p}:{_tid}")
+        _cache.delete_pattern(f"stats:dailyfull:{_tid}:*")
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "status": new_status,

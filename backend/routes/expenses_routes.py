@@ -14,6 +14,22 @@ import uuid
 from pymongo.errors import PyMongoError
 
 
+def _bust_report_caches(user: dict) -> None:
+    """p548: every money write (sale create/return/delete, expense, ecom
+    transition) moves the report numbers — bust the cached dashboards so a
+    cached report never survives its own data (p273 doctrine, extended past
+    the create path). Past-day daily-full rows cache for 3600s, so a backdated
+    write without a bust is stale for up to an hour."""
+    try:
+        from services.cache_service import cache as _cache
+        _tid = (user or {}).get("tenant_id") or "main"
+        for _p in ("dashboard", "sales", "profit"):
+            _cache.delete(f"stats:{_p}:{_tid}")
+        _cache.delete_pattern(f"stats:dailyfull:{_tid}:*")
+    except Exception:
+        pass
+
+
 def create_expenses_routes(
     db, get_current_user, get_tenant_admin, require_tenant
 ) -> dict:
@@ -362,6 +378,7 @@ def create_expenses_routes(
                     raise
                 await asyncio.sleep(0.2 * (_attempt + 1))
         data.pop("_id", None)
+        _bust_report_caches(user)  # p548
         return data
 
     @router.put("/{expense_id}")
@@ -505,6 +522,7 @@ def create_expenses_routes(
                 if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
                     raise
                 await asyncio.sleep(0.2 * (_attempt + 1))
+        _bust_report_caches(user)  # p548
         return await db.expenses.find_one({"id": expense_id}, {"_id": 0})
 
     @router.delete("/{expense_id}")
@@ -574,6 +592,7 @@ def create_expenses_routes(
                 if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
                     raise
                 await asyncio.sleep(0.2 * (_attempt + 1))
+        _bust_report_caches(user)  # p548
         return {"message": "تم حذف التكلفة بنجاح"}
 
     @router.post("/{expense_id}/mark-paid")
@@ -587,6 +606,7 @@ def create_expenses_routes(
             {"id": expense_id},
             {"$set": {"date": now, "last_paid_at": now, "updated_at": now}},
         )
+        _bust_report_caches(user)  # p548
         return {"message": "تم تسجيل الدفع بنجاح"}
 
     @router.post("/usd-purchase")
@@ -650,6 +670,7 @@ def create_expenses_routes(
                     raise
                 await _asyncio.sleep(0.2 * (_attempt + 1))
         doc.pop("_id", None)
+        _bust_report_caches(user)  # p548
         return doc
 
     @router.get("/usd-wallet")

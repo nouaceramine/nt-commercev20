@@ -30,13 +30,14 @@ def create_analytics_routes(db, get_current_user, require_tenant):
             else:  # month
                 start_date = now - timedelta(days=30)
 
-            # Build query
+            # p548: the db handle is already tenant-scoped — the tenant_id
+            # filter matched NOTHING (docs never carry it) and zeroed every
+            # number; sales exclude returned rows like every other endpoint
             query = {"created_at": {"$gte": start_date.isoformat()}}
-            if tenant_id:
-                query["tenant_id"] = tenant_id
+            sales_query = {**query, "status": {"$ne": "returned"}}
 
             # Sales data
-            sales_cursor = db.sales.find(query, {"_id": 0})
+            sales_cursor = db.sales.find(sales_query, {"_id": 0})
             sales = await sales_cursor.to_list(length=1000)
 
             total_sales = sum(s.get("total", 0) for s in sales)
@@ -139,12 +140,10 @@ def create_analytics_routes(db, get_current_user, require_tenant):
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             month_start = now - timedelta(days=30)
 
-            query_today = {"created_at": {"$gte": today_start.isoformat()}}
-            query_month = {"created_at": {"$gte": month_start.isoformat()}}
-
-            if tenant_id:
-                query_today["tenant_id"] = tenant_id
-                query_month["tenant_id"] = tenant_id
+            # p548: tenant-scoped db (the tenant_id filter zeroed every
+            # number) + returned rows excluded like every other endpoint
+            query_today = {"created_at": {"$gte": today_start.isoformat()}, "status": {"$ne": "returned"}}
+            query_month = {"created_at": {"$gte": month_start.isoformat()}, "status": {"$ne": "returned"}}
 
             # Today
             sales_today = await db.sales.find(query_today, {"_id": 0, "total": 1}).to_list(length=1000)
@@ -155,17 +154,16 @@ def create_analytics_routes(db, get_current_user, require_tenant):
             sales_month_total = sum(s.get("total", 0) for s in sales_month)
 
             # Products count
-            products_query = {"tenant_id": tenant_id} if tenant_id else {}
+            products_query = {}  # p548: tenant-scoped db — the tenant_id filter zeroed the counts
             products_count = await db.products.count_documents(products_query)
 
             # Customers count
             customers_count = await db.customers.count_documents(products_query)
 
-            # Low stock
-            low_stock = await db.products.count_documents({
-                **products_query,
-                "quantity": {"$lt": 5}
-            })
+            # p548: canonical low-stock doctrine (per-product threshold) —
+            # the hardcoded qty<5 contradicted /stats and restock-suggestions
+            from utils.inventory_queries import low_stock_filter
+            low_stock = await db.products.count_documents(low_stock_filter())
 
             return {
                 "success": True,
