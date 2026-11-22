@@ -154,6 +154,9 @@ export const Layout = ({ children }) => {
   const [pendingStoreOrders, setPendingStoreOrders] = useState(0);
   const pendingOrdersRef = useRef(null);
   useEffect(() => {
+    // p544: skip the ecom order poll entirely when the store feature is off —
+    // otherwise /store/orders 403'd every 30s and the global red toast looped
+    if (!isFeatureEnabled('ecommerce_hub')) return;
     const playBeep = () => {
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;

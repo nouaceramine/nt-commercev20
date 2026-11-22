@@ -67,7 +67,10 @@ import {
 
 export default function ProductsPage() {
   const { t, isRTL, language } = useLanguage();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isFeatureEnabled } = useAuth();
+  // p544: ecom column only when the store feature is on — otherwise /store/products
+  // 403'd on every products-page visit (global red toast, P543-class)
+  const ecomEnabled = isFeatureEnabled('ecommerce_hub');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   
@@ -77,7 +80,7 @@ export default function ProductsPage() {
   const [storeProductIds, setStoreProductIds] = useState(new Set());
 
   const fetchStoreProducts = async () => {
-    if (!isAdmin) return;
+    if (!isAdmin || !ecomEnabled) return;  // p544
     try {
       const res = await apiClient.get('/store/products');
       setStoreProductIds(new Set((res.data || []).map(sp => sp.product_id)));
@@ -85,6 +88,7 @@ export default function ProductsPage() {
   };
 
   const toggleStoreProduct = async (product) => {
+    if (!ecomEnabled) return;  // p544
     const inStore = storeProductIds.has(product.id);
     try {
       if (inStore) {
@@ -111,7 +115,8 @@ export default function ProductsPage() {
     }
   };
 
-  const toggleWooProduct = async (product) => {    const published = product.woocommerce_status === 'published';
+  const toggleWooProduct = async (product) => {
+    if (!ecomEnabled) return;  // p544    const published = product.woocommerce_status === 'published';
     try {
       if (published) {
         await apiClient.delete(`/woocommerce/unpublish-product/${product.id}`);
@@ -826,6 +831,7 @@ export default function ProductsPage() {
                     <div className="flex justify-center gap-0.5">
                       {isAdmin && (
                         <>
+                          {ecomEnabled && (<>
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => toggleStoreProduct(product)}
                             title={language === 'ar' ? (storeProductIds.has(product.id) ? 'إزالة من المتجر' : 'تفعيل على المتجر') : 'Boutique'}
                             data-testid={`toggle-store-${product.id}`}>
@@ -836,6 +842,7 @@ export default function ProductsPage() {
                             data-testid={`toggle-woo-${product.id}`}>
                             <Globe className={`h-4 w-4 ${product.woocommerce_status === 'published' ? 'text-green-600' : 'text-slate-400'}`} />
                           </Button>
+                          </>)}  {/* p544 */}
                           <Link to={`/products/${product.id}/edit`} onClick={(e) => e.stopPropagation()} data-testid={`edit-product-${product.id}`}>
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                               <Pencil className="h-4 w-4" />
@@ -926,6 +933,7 @@ export default function ProductsPage() {
                       </div>
                       {isAdmin && (
                         <div className={`absolute top-3 ${isRTL ? 'right-3' : 'left-3'} flex gap-1`}>
+                          {ecomEnabled && (<>
                           <button
                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleStoreProduct(product); }}
                             className="bg-white/90 hover:bg-white rounded-full p-1.5 shadow"
@@ -942,6 +950,7 @@ export default function ProductsPage() {
                           >
                             <Globe className={`h-4 w-4 ${product.woocommerce_status === 'published' ? 'text-green-600' : 'text-slate-400'}`} />
                           </button>
+                          </>)}  {/* p544 */}
                           <Link
                             to={`/products/${product.id}/edit`}
                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = `/products/${product.id}/edit`; }}

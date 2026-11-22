@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -43,6 +44,11 @@ export default function EditProductPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { t, language, isRTL } = useLanguage();
+  // p544: feature gates — restaurant-type profiles (P542) have maintenance and
+  // ecommerce_hub OFF; firing /serials or /ecom/* here raised the global red 403 toast
+  const { isFeatureEnabled } = useAuth();
+  const maintenanceEnabled = isFeatureEnabled('maintenance');
+  const ecomEnabled = isFeatureEnabled('ecommerce_hub');
   const BackArrow = isRTL ? ArrowRight : ArrowLeft;
   const fileInputRef = useRef(null);
   const imageUploadRef = useRef(null);
@@ -184,7 +190,7 @@ export default function EditProductPage() {
     fetchProduct();
     fetchFamilies();
     fetchLots();
-    fetchSerials();  // p187
+    if (maintenanceEnabled) fetchSerials();  // p187, p544 gated
     fetchSupplierLinks();
     fetchHistory();
     fetchAvailableSuppliers();
@@ -196,7 +202,7 @@ export default function EditProductPage() {
       setFamilies(response.data);
       const brandsRes = await apiClient.get(`/product-brands`);  // p217
       setBrands(brandsRes.data);
-      const provRes = await apiClient.get(`/ecom/shipping/providers`).catch(() => ({ data: null }));  // p150
+      const provRes = ecomEnabled ? await apiClient.get(`/ecom/shipping/providers`).catch(() => ({ data: null })) : { data: null };  // p150, p544 gated
       setShippingProviders((provRes.data?.providers || []).filter(pr => pr.key !== 'mock'));
     } catch {}
   };
@@ -213,6 +219,7 @@ export default function EditProductPage() {
   const [bulkSerials, setBulkSerials] = useState('');
 
   const fetchSerials = async () => {
+    if (!maintenanceEnabled) return;  // p544
     try {
       const response = await apiClient.get(`/serials/product/${id}`);
       setSerials(response.data || []);
@@ -619,7 +626,7 @@ export default function EditProductPage() {
                     )}
                   </TabsTrigger>
                   <TabsTrigger value="fournisseurs" className="text-xs gap-1"><Truck className="h-3 w-3" />{isAr ? 'الموردون' : 'Fourn.'}</TabsTrigger>
-                  {formData.serial_number_tracking && (
+                  {formData.serial_number_tracking && maintenanceEnabled && (
                     <TabsTrigger value="serials" className="text-xs gap-1" data-testid="serials-tab"><Barcode className="h-3 w-3" />{isAr ? 'الأرقام التسلسلية' : 'N° serie'}</TabsTrigger>
                   )}
                 </TabsList>
@@ -1045,7 +1052,7 @@ export default function EditProductPage() {
                 </TabsContent>
 
                 {/* p187: serial numbers manager */}
-                {formData.serial_number_tracking && (
+                {formData.serial_number_tracking && maintenanceEnabled && (
                   <TabsContent value="serials" className="space-y-4 mt-0">
                     <p className="text-xs text-muted-foreground">{isAr ? 'سجّل أرقام IMEI/التسلسل عند الاستلام — كل رقم يُباع مرة واحدة فقط ويُتتبع في الضمان' : 'Enregistrez les IMEI/n° de serie a la reception'}</p>
                     <div className="space-y-2">
