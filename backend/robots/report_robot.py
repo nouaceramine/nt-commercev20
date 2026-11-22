@@ -77,34 +77,56 @@ class ReportRobot:
         self.is_running = False
 
     async def _get_tenant_stats(self, tdb, start_iso, end_iso) -> dict:
+        # p554: align with the live-endpoint doctrine —
+        #  * returned sales are excluded everywhere (daily-full/profit-stats);
+        #  * expenses are attributed by their user-facing `date` (a backdated
+        #    expense belongs to ITS day, not the entry day's created_at);
+        #  * net_profit = revenue − COGS(sale-line snapshots) − expenses —
+        #    purchases are a cash→stock conversion, NOT a period cost.
+        sales_window = {"created_at": {"$gte": start_iso, "$lt": end_iso},
+                        "status": {"$ne": "returned"}}
         sales_agg = await tdb.sales.aggregate([
-            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}}},
+            {"$match": sales_window},
             {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
         ]).to_list(1)
         purchases_agg = await tdb.purchases.aggregate([
-            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}}},
+            {"$match": {"created_at": {"$gte": start_iso, "$lt": end_iso}}},
             {"$group": {"_id": None, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
         ]).to_list(1)
         expenses_agg = await tdb.expenses.aggregate([
-            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}}},
+            {"$match": {"date": {"$gte": start_iso[:10], "$lt": end_iso[:10]}}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
         ]).to_list(1)
         sales = sales_agg[0] if sales_agg else {"total": 0, "count": 0}
         purchases = purchases_agg[0] if purchases_agg else {"total": 0, "count": 0}
         expenses = expenses_agg[0] if expenses_agg else {"total": 0, "count": 0}
+        from services.reporting import product_price_map
+        sold_docs = await tdb.sales.find(sales_window, {"_id": 0, "items": 1}).to_list(5000)
+        pmap = await product_price_map(
+            tdb, (it.get("product_id") for s in sold_docs for it in s.get("items", [])))
+        cogs = 0.0
+        for s in sold_docs:
+            for it in s.get("items", []):
+                pp = it.get("purchase_price")
+                if pp is None:
+                    pp = pmap.get(it.get("product_id"), 0)
+                cogs += float(it.get("quantity", 0) or 0) * float(pp or 0)
+        sales_total = round(sales.get("total", 0), 2)
+        expenses_total = round(expenses.get("total", 0), 2)
         return {
-            "sales_total": round(sales.get("total", 0), 2),
+            "sales_total": sales_total,
             "sales_count": sales.get("count", 0),
             "purchases_total": round(purchases.get("total", 0), 2),
             "purchases_count": purchases.get("count", 0),
-            "expenses_total": round(expenses.get("total", 0), 2),
+            "expenses_total": expenses_total,
             "expenses_count": expenses.get("count", 0),
-            "net_profit": round(sales.get("total", 0) - purchases.get("total", 0) - expenses.get("total", 0), 2),
+            "cogs": round(cogs, 2),
+            "net_profit": round(sales_total - cogs - expenses_total, 2),
         }
 
     async def _top_products(self, tdb, start_iso, end_iso, limit=5) -> dict:
         pipeline = [
-            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}}},
+            {"$match": {"created_at": {"$gte": start_iso, "$lt": end_iso}, "status": {"$ne": "returned"}}},
             {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": "$items.product_id", "name": {"$first": "$items.product_name"}, "qty": {"$sum": "$items.quantity"}, "revenue": {"$sum": "$items.total"}}},
             {"$sort": {"revenue": -1}},
@@ -115,7 +137,7 @@ class ReportRobot:
 
     async def _top_customers(self, tdb, start_iso, end_iso, limit=5) -> dict:
         pipeline = [
-            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}, "customer_id": {"$ne": None}}},
+            {"$match": {"created_at": {"$gte": start_iso, "$lt": end_iso}, "status": {"$ne": "returned"}, "customer_id": {"$ne": None}}},
             {"$group": {"_id": "$customer_id", "name": {"$first": "$customer_name"}, "total": {"$sum": "$total"}, "count": {"$sum": 1}}},
             {"$sort": {"total": -1}},
             {"$limit": limit},
@@ -125,7 +147,7 @@ class ReportRobot:
 
     async def _employee_performance(self, tdb, start_iso, end_iso) -> dict:
         pipeline = [
-            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}}},
+            {"$match": {"created_at": {"$gte": start_iso, "$lt": end_iso}, "status": {"$ne": "returned"}}},
             {"$group": {"_id": "$created_by", "employee_name": {"$first": "$created_by"}, "total_sales": {"$sum": "$total"}, "sales_count": {"$sum": 1}}},
             {"$sort": {"total_sales": -1}},
         ]
@@ -147,8 +169,12 @@ class ReportRobot:
         self.stats["checks"] += 1
         tenants = await self.db.saas_tenants.find({"is_active": True}, {"_id": 0}).to_list(500)
         yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-        start = yesterday.replace(hour=0, minute=0, second=0).isoformat()
-        end = yesterday.replace(hour=23, minute=59, second=59).isoformat()
+        start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        # p554: exclusive end at midnight — the old 23:59:59 cap kept now()'s
+        # microsecond fraction, so the cut-off inside the last second was
+        # random per run and sales there were never counted in ANY report.
+        end = (yesterday + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0).isoformat()
         for tenant in tenants:
             try:
                 tid = tenant["id"].replace("-", "_")
@@ -191,7 +217,9 @@ class ReportRobot:
     async def generate_weekly(self) -> dict:
         self.stats["checks"] += 1
         tenants = await self.db.saas_tenants.find({"is_active": True}, {"_id": 0}).to_list(500)
-        end_dt = datetime.now(timezone.utc) - timedelta(days=1)
+        # p554: day-aligned full days — the 7 days ending yesterday (the old
+        # window carried the scheduler's time-of-day and drifted every run).
+        end_dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = end_dt - timedelta(days=7)
         start = start_dt.isoformat()
         end = end_dt.isoformat()
@@ -234,8 +262,10 @@ class ReportRobot:
         self.stats["checks"] += 1
         tenants = await self.db.saas_tenants.find({"is_active": True}, {"_id": 0}).to_list(500)
         now = datetime.now(timezone.utc)
-        end_dt = now.replace(day=1) - timedelta(days=1)
-        start_dt = end_dt.replace(day=1, hour=0, minute=0, second=0)
+        # p554: exclusive end at THIS month's first midnight — the old window
+        # ended at 00:00:00 of the last day, silently dropping that whole day.
+        end_dt = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_dt = (end_dt - timedelta(days=1)).replace(day=1)
         start = start_dt.isoformat()
         end = end_dt.isoformat()
         for tenant in tenants:

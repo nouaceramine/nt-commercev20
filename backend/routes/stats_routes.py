@@ -2,7 +2,7 @@
 Stats, Reports & Analytics Routes - Extracted from server.py
 Dashboard stats, sales analytics, profit reports, AI predictions
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from utils.inventory_queries import low_stock_filter
@@ -312,7 +312,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
     # ── Analytics: Top Products ──
     @router.get("/analytics/top-products")
-    async def get_top_products(limit: int = 10, period: str = "month", admin: dict = Depends(get_tenant_admin)):
+    async def get_top_products(limit: int = Query(10, ge=1, le=100), period: str = "month", admin: dict = Depends(get_tenant_admin)):  # p554
         now = datetime.now(timezone.utc)
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -325,7 +325,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
     # ── Analytics: Top Customers ──
     @router.get("/analytics/top-customers")
-    async def get_top_customers(limit: int = 10, period: str = "month", admin: dict = Depends(get_tenant_admin)):
+    async def get_top_customers(limit: int = Query(10, ge=1, le=100), period: str = "month", admin: dict = Depends(get_tenant_admin)):  # p554
         now = datetime.now(timezone.utc)
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -435,25 +435,25 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
     # ── Reports: Sales Chart (Legacy) ──
     @router.get("/reports/sales-chart")
-    async def get_sales_chart(days: int = 7, admin: dict = Depends(get_tenant_admin)):
+    async def get_sales_chart(days: int = Query(7, ge=1, le=3660), admin: dict = Depends(get_tenant_admin)):  # p554
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         result = await sales_chart_rows(db, start_date)
         return [{"date": r["_id"], "total": r["total"], "count": r["count"]} for r in result]
 
     # ── Reports: Top Products (Legacy) ──
     @router.get("/reports/top-products")
-    async def get_report_top_products(limit: int = 10, admin: dict = Depends(get_tenant_admin)):
+    async def get_report_top_products(limit: int = Query(10, ge=1, le=100), admin: dict = Depends(get_tenant_admin)):  # p554
         return await top_products_rows(db, limit, None, name_field="product_name",
                                        revenue_mode="total", sort_key="total_quantity")
 
     # ── Reports: Top Customers (Legacy) ──
     @router.get("/reports/top-customers")
-    async def get_report_top_customers(limit: int = 10, admin: dict = Depends(get_tenant_admin)):
+    async def get_report_top_customers(limit: int = Query(10, ge=1, le=100), admin: dict = Depends(get_tenant_admin)):  # p554
         return await db.customers.find({}, {"_id": 0}).sort("total_purchases", -1).limit(limit).to_list(limit)
 
     # ── Reports: Profit ──
     @router.get("/reports/profit")
-    async def get_profit_report(days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def get_profit_report(days: int = Query(30, ge=1, le=3660), admin: dict = Depends(get_tenant_admin)):  # p554
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         sales = await db.sales.find({"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}, {"_id": 0, "items": 1, "total": 1}).to_list(10000)
         total_revenue = sum(s["total"] for s in sales)
@@ -477,7 +477,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
     # ── Reports: Profit Detailed ──
     @router.get("/reports/profit-detailed")
-    async def get_detailed_profit_report(days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def get_detailed_profit_report(days: int = Query(30, ge=1, le=3660), admin: dict = Depends(get_tenant_admin)):  # p554
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         sales = await db.sales.find({"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}, {"_id": 0}).to_list(10000)
         docs = await product_docs_map(db, (it.get("product_id") for s in sales for it in s.get("items", [])))

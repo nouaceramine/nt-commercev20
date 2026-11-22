@@ -1557,7 +1557,11 @@ async def dashboard_advanced_stats(user: dict = Depends(get_current_user)):
         ]).to_list(1)
         return agg[0]["total"] if agg else 0
 
-    low_stock = await db.products.count_documents({"$expr": {"$lte": ["$stock", {"$ifNull": ["$min_stock", 5]}]}})
+    # p554: canonical low-stock doctrine (quantity/low_stock_threshold) —
+    # the phantom stock/min_stock pair matched by BSON type order (null <
+    # number), flagging every product that simply lacks the legacy fields.
+    from utils.inventory_queries import low_stock_filter
+    low_stock = await db.products.count_documents(low_stock_filter())
     debts_agg = await db.debts.aggregate([
         {"$match": {"remaining_amount": {"$gt": 0}}},
         {"$group": {"_id": None, "total": {"$sum": "$remaining_amount"}}},

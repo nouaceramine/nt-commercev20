@@ -2,7 +2,7 @@
 System Sync Routes
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
@@ -1199,7 +1199,7 @@ async def export_tenant_data(current_user: dict = Depends(require_tenant)):
 # ============ AUTO REPORTS API ============
 @router.get("/auto-reports")
 async def get_auto_reports(
-    report_type: str = None, limit: int = 50, user: dict = Depends(block_cashier)  # p527-002
+    report_type: str = None, limit: int = Query(50, ge=1, le=200), user: dict = Depends(block_cashier)  # p527-002/p554
 ):
     query = {}
     if report_type:

@@ -374,9 +374,13 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
         y1 = y0 + timedelta(days=1)
         rng = {"created_at": {"$gte": y0.isoformat(), "$lt": y1.isoformat()}}
 
-        sales = await db.sales.find({**rng, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(2000)
-        ecom = await db.ecom_orders.find(rng, {"_id": 0}).to_list(2000)
-        revenue = sum(float(s.get("total") or 0) for s in sales) + sum(float(o.get("total") or 0) for o in ecom if o.get("status") != "cancelled")
+        # p554: web-store orders are mirrored INTO sales (source=webstore,
+        # p87), so the POS half must exclude them and the ecom half must
+        # exclude cancelled AND refunded — otherwise store revenue/orders are
+        # doubled and returns are counted as fresh sales.
+        sales = await db.sales.find({**rng, "status": {"$ne": "returned"}, "source": {"$ne": "webstore"}}, {"_id": 0}).to_list(2000)
+        ecom = await db.ecom_orders.find({**rng, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(2000)
+        revenue = sum(float(s.get("total") or 0) for s in sales) + sum(float(o.get("total") or 0) for o in ecom)
         pending = await db.ecom_orders.count_documents({"status": {"$in": ["new", "awaiting_confirmation"]}})
 
         # best product yesterday

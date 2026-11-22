@@ -370,11 +370,25 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
         yesterday = today - timedelta(days=1)
         today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
         yesterday_start = datetime.combine(yesterday, datetime.min.time()).replace(tzinfo=timezone.utc)
-        today_sales = await db.sales.find({"created_at": {"$gte": today_start.isoformat()}}).to_list(1000)
-        yesterday_sales = await db.sales.find({"created_at": {"$gte": yesterday_start.isoformat(), "$lt": today_start.isoformat()}}).to_list(1000)
+        # p554: exclude returned sales (every other report's doctrine) and
+        # compute profit from sale-line cost snapshots — sale docs carry no
+        # `profit` field, so the old sum was a permanent zero.
+        _not_ret = {"status": {"$ne": "returned"}}
+        today_sales = await db.sales.find({"created_at": {"$gte": today_start.isoformat()}, **_not_ret}).to_list(1000)
+        yesterday_sales = await db.sales.find({"created_at": {"$gte": yesterday_start.isoformat(), "$lt": today_start.isoformat()}, **_not_ret}).to_list(1000)
         today_total = sum(s.get("total", 0) for s in today_sales)
         yesterday_total = sum(s.get("total", 0) for s in yesterday_sales)
-        today_profit = sum(s.get("profit", 0) for s in today_sales)
+        from services.reporting import product_price_map
+        _pmap = await product_price_map(
+            db, (it.get("product_id") for s in today_sales for it in s.get("items", [])))
+        _cogs = 0.0
+        for s in today_sales:
+            for it in s.get("items", []):
+                _pp = it.get("purchase_price")
+                if _pp is None:
+                    _pp = _pmap.get(it.get("product_id"), 0)
+                _cogs += float(it.get("quantity", 0) or 0) * float(_pp or 0)
+        today_profit = round(today_total - _cogs, 2)
         change = ((today_total - yesterday_total) / yesterday_total) * 100 if yesterday_total > 0 else 0
         low_stock = await db.products.find(low_stock_filter(), {"_id": 0, "name_ar": 1, "name_en": 1, "quantity": 1}).to_list(20)
         low_stock_list = [{"name": p.get("name_ar") or p.get("name_en"), "quantity": p.get("quantity", 0)} for p in low_stock]

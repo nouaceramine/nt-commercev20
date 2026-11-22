@@ -53,17 +53,13 @@ class PredictionRobot:
 
     async def run_checks(self) -> dict:
         self.stats["checks"] += 1
-        results = {
-            "next_7_days": await self._predict_sales(7),
-            "next_30_days": await self._predict_sales(30),
-            "trends": await self._analyze_trends(),
-            "seasonal_patterns": await self._detect_seasonal(),
-        }
-        self.stats["predictions_made"] += 1
-
+        # p554: compute PER TENANT and store PER TENANT — the old flow combined
+        # every tenant's sales into one prediction and wrote it into EACH
+        # tenant's auto_reports (cross-tenant figures for everyone).
         # Store predictions — p297: one row per (tenant, report_type, day);
         # repeated cycles within a day OVERWRITE the same row (idempotent), and
         # rows older than 90 days are swept. Stops the unbounded pile-up.
+        last_results = {}
         try:
             dbs = await self.client.list_database_names()
             now = datetime.now(timezone.utc)
@@ -73,6 +69,14 @@ class PredictionRobot:
                 if not await tenant_db_is_active(self.db, db_name):
                     continue
                 tdb = self.client[db_name]
+                results = {
+                    "next_7_days": await self._predict_sales(tdb, 7),
+                    "next_30_days": await self._predict_sales(tdb, 30),
+                    "trends": await self._analyze_trends(tdb),
+                    "seasonal_patterns": await self._detect_seasonal(),
+                }
+                self.stats["predictions_made"] += 1
+                last_results = results
                 await tdb.auto_reports.create_index(
                     [("report_type", 1), ("day", 1)],
                     unique=True,
@@ -96,42 +100,41 @@ class PredictionRobot:
         except Exception:
             pass
 
-        return results
+        return last_results
 
-    async def _predict_sales(self, days) -> dict:
+    async def _predict_sales(self, tdb, days) -> dict:
+        # p554: per-tenant history, returned sales excluded (doctrine), and a
+        # bounded read instead of to_list(None).
         try:
-            dbs = await self.client.list_database_names()
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            sales = await tdb.sales.find(
+                {"created_at": {"$gte": cutoff}, "status": {"$ne": "returned"}},
+                {"_id": 0, "total": 1}).to_list(10000)
             total_predicted = 0
-            for db_name in [d for d in dbs if is_tenant_db(d)]:
-                tdb = self.client[db_name]
-                # Get last 30 days of sales data
-                cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-                sales = await tdb.sales.find({"created_at": {"$gte": cutoff}}, {"_id": 0, "total": 1}).to_list(None)
-                if sales and ML_AVAILABLE:
-                    totals = [s.get("total", 0) for s in sales]
-                    daily_avg = (sum(totals) / len(totals)) if totals else 0
-                    total_predicted += daily_avg * days
-                elif sales:
-                    daily_avg = sum(s.get("total", 0) for s in sales) / max(len(sales), 1)
-                    total_predicted += daily_avg * days
+            if sales and ML_AVAILABLE:
+                totals = [s.get("total", 0) for s in sales]
+                daily_avg = (sum(totals) / len(totals)) if totals else 0
+                total_predicted += daily_avg * days
+            elif sales:
+                daily_avg = sum(s.get("total", 0) for s in sales) / max(len(sales), 1)
+                total_predicted += daily_avg * days
             return {"predicted_revenue": round(total_predicted, 2), "days": days, "confidence": 0.7 if ML_AVAILABLE else 0.5}
         except Exception:
             return {"predicted_revenue": 0, "days": days, "confidence": 0}
 
-    async def _analyze_trends(self) -> dict:
+    async def _analyze_trends(self, tdb) -> dict:
+        # p554: per-tenant trend — the old loop let the LAST tenant overwrite
+        # the shared result stored everywhere.
         try:
             trends = {"direction": "stable", "growth_rate": 0}
-            dbs = await self.client.list_database_names()
-            for db_name in [d for d in dbs if is_tenant_db(d)]:
-                tdb = self.client[db_name]
-                this_month = datetime.now(timezone.utc).replace(day=1).isoformat()
-                last_month = (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()
-                current = await tdb.sales.count_documents({"created_at": {"$gte": this_month}})
-                previous = await tdb.sales.count_documents({"created_at": {"$gte": last_month, "$lt": this_month}})
-                if previous > 0:
-                    growth = ((current - previous) / previous) * 100
-                    trends["growth_rate"] = round(growth, 2)
-                    trends["direction"] = "up" if growth > 5 else ("down" if growth < -5 else "stable")
+            this_month = datetime.now(timezone.utc).replace(day=1).isoformat()
+            last_month = (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()
+            current = await tdb.sales.count_documents({"created_at": {"$gte": this_month}, "status": {"$ne": "returned"}})
+            previous = await tdb.sales.count_documents({"created_at": {"$gte": last_month, "$lt": this_month}, "status": {"$ne": "returned"}})
+            if previous > 0:
+                growth = ((current - previous) / previous) * 100
+                trends["growth_rate"] = round(growth, 2)
+                trends["direction"] = "up" if growth > 5 else ("down" if growth < -5 else "stable")
             return trends
         except Exception:
             return {"direction": "unknown", "growth_rate": 0}
