@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timezone
+import math
 import uuid
 import logging
 
@@ -86,6 +87,19 @@ def create_currency_routes(db, get_current_user) -> dict:
         current_user: dict = Depends(block_cashier),
     ):
         """Update exchange rates"""
+        # p556-002: validate EVERY rate before any write — NaN used to poison
+        # the collection (convert 500s), zero divided every conversion through
+        # that currency, negatives flipped money's sign, and unknown codes
+        # returned success while logging ghost history rows.
+        codes = []
+        for rate in rates:
+            if not math.isfinite(float(rate.rate_to_dzd)) or rate.rate_to_dzd <= 0:
+                raise HTTPException(status_code=400, detail="سعر الصرف يجب أن يكون رقماً موجباً أكبر من صفر")
+            codes.append(rate.code)
+        existing = {d["code"] async for d in db.currencies.find({"code": {"$in": codes}}, {"_id": 0, "code": 1})}
+        missing = [c for c in codes if c not in existing]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"عملة غير موجودة: {', '.join(missing)}")
         for rate in rates:
             await db.currencies.update_one(
                 {"code": rate.code},
@@ -115,6 +129,16 @@ def create_currency_routes(db, get_current_user) -> dict:
 
         if not from_curr or not to_curr:
             raise HTTPException(status_code=400, detail="Currency not found")
+
+        # p556-003: amount must be finite positive (NaN used to 500 the
+        # response; negatives returned negative money), and a legacy poisoned
+        # rate can never divide a conversion again.
+        if not math.isfinite(float(req.amount)) or req.amount <= 0:
+            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون رقماً موجباً")
+        for _c in (from_curr, to_curr):
+            _r = float(_c.get("rate_to_dzd") or 0)
+            if not math.isfinite(_r) or _r <= 0:
+                raise HTTPException(status_code=400, detail="سعر الصرف غير صالح")
 
         # Convert via DZD as base
         amount_in_dzd = req.amount * from_curr["rate_to_dzd"]

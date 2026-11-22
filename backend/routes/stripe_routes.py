@@ -2,7 +2,7 @@
 Stripe Payment Integration Routes
 Extracted from server.py
 """
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -13,6 +13,7 @@ import io
 import logging
 import asyncio
 import html
+import math
 import re
 from urllib.parse import urlparse
 import stripe
@@ -240,7 +241,7 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
 
     # Payment Records Management (manual/offline)
     @router.get("/payments/records")
-    async def get_payment_records(page: int = 1, limit: int = 20, status: Optional[str] = None, admin: dict = Depends(get_super_admin)):
+    async def get_payment_records(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100), status: Optional[str] = None, admin: dict = Depends(get_super_admin)):
         query = {}
         if status:
             query["payment_status"] = status
@@ -251,7 +252,9 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
 
     @router.post("/payments/records")
     async def create_payment_record(payment: PaymentRecord, admin: dict = Depends(get_super_admin)):
-        if not payment.amount or payment.amount <= 0:
+        # p556-004: `not x` and `x <= 0` are BOTH False for NaN — a NaN
+        # record used to be stored (500ing the whole list) and still grant +30d.
+        if not math.isfinite(float(payment.amount)) or payment.amount <= 0:
             raise HTTPException(status_code=400, detail="مبلغ غير صالح")
         if payment.status not in PAYMENT_STATUSES:
             raise HTTPException(status_code=400, detail="حالة دفع غير صالحة")
@@ -259,22 +262,42 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
         record = {"id": record_id, "tenant_id": payment.tenant_id, "amount": payment.amount, "currency": payment.currency, "payment_method": payment.payment_method, "description": payment.description, "invoice_number": payment.invoice_number or f"INV-{datetime.now().strftime('%Y%m%d')}-{record_id[:8].upper()}", "payment_status": payment.status, "metadata": payment.metadata, "created_by": admin.get("id"), "created_at": datetime.now(timezone.utc).isoformat()}
         await main_db.payment_transactions.insert_one(record)
         if payment.tenant_id and payment.status == "paid":
-            tenant = await main_db.saas_tenants.find_one({"id": payment.tenant_id})
-            if tenant:
-                current_end = tenant.get("subscription_end")
-                if current_end:
-                    try:
-                        end_date = datetime.fromisoformat(current_end.replace('Z', '+00:00'))
-                    except Exception:
-                        end_date = datetime.now(timezone.utc)
-                else:
-                    end_date = datetime.now(timezone.utc)
-                new_end = end_date + timedelta(days=30)
-                await main_db.saas_tenants.update_one({"id": payment.tenant_id}, {"$set": {"subscription_end": new_end.isoformat()}})
+            await _shift_subscription(payment.tenant_id, 30)
         return {"id": record_id, "message": "تم إنشاء سجل الدفع"}
+
+    async def _shift_subscription(tenant_id: str, days: int) -> None:
+        """p556-005: the ONLY place that moves subscription time. Every
+        payment-record lifecycle event that grants or revokes the +30d
+        extension goes through here so POST/PUT stay in lockstep."""
+        if not tenant_id:
+            return
+        tenant = await main_db.saas_tenants.find_one({"id": tenant_id})
+        if not tenant:
+            return
+        current_end = tenant.get("subscription_end")
+        if days < 0 and not current_end:
+            return  # nothing was ever granted
+        if current_end:
+            try:
+                end_date = datetime.fromisoformat(current_end.replace('Z', '+00:00'))
+            except Exception:
+                end_date = datetime.now(timezone.utc)
+        else:
+            end_date = datetime.now(timezone.utc)
+        new_end = end_date + timedelta(days=days)
+        await main_db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"subscription_end": new_end.isoformat()}})
 
     @router.put("/payments/records/{record_id}")
     async def update_payment_record(record_id: str, update: PaymentUpdateRequest, admin: dict = Depends(get_super_admin)):
+        # p556-005: status is whitelisted and paid transitions move the
+        # subscription exactly like POST (grant on ->paid, revoke on
+        # paid->other) — the two write paths used to diverge silently.
+        if update.status and update.status not in PAYMENT_STATUSES:
+            raise HTTPException(status_code=400, detail="حالة دفع غير صالحة")
+        old = await main_db.payment_transactions.find_one(
+            {"id": record_id}, {"_id": 0, "payment_status": 1, "tenant_id": 1})
+        if not old:
+            raise HTTPException(status_code=404, detail="سجل الدفع غير موجود")
         update_data = {}
         if update.status:
             update_data["payment_status"] = update.status
@@ -285,12 +308,24 @@ def create_stripe_routes(db, main_db, get_current_user, get_tenant_admin, requir
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         update_data["updated_by"] = admin.get("id")
         result = await main_db.payment_transactions.update_one({"id": record_id}, {"$set": update_data})
-        if result.modified_count == 0:
+        if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="سجل الدفع غير موجود")
+        if update.status and update.status != old.get("payment_status"):
+            if update.status == "paid":
+                await _shift_subscription(old.get("tenant_id"), 30)
+            elif old.get("payment_status") == "paid":
+                await _shift_subscription(old.get("tenant_id"), -30)
         return {"success": True, "message": "تم تحديث سجل الدفع"}
 
     @router.delete("/payments/records/{record_id}")
     async def delete_payment_record(record_id: str, admin: dict = Depends(get_super_admin)):
+        # p556-005: a PAID record granted +30d of subscription — deleting it
+        # must not orphan that grant (P555-003 doctrine). Reverse the status
+        # first (PUT cancelled/refunded revokes the extension), then delete.
+        old = await main_db.payment_transactions.find_one(
+            {"id": record_id}, {"_id": 0, "payment_status": 1})
+        if old and old.get("payment_status") == "paid":
+            raise HTTPException(status_code=400, detail="سجل مدفوع لا يُحذف — غيّر حالته أولاً لتعكس التمديد")
         result = await main_db.payment_transactions.delete_one({"id": record_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="سجل الدفع غير موجود")

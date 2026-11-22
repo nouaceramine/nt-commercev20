@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import math
 import uuid
 import logging
 
@@ -78,6 +79,11 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
         rate: TaxRate,
         current_user: dict = Depends(block_cashier),  # p524: UI hides /tax-reports from cashiers
     ):
+        # p556-001: rate must be a finite 0-100 percentage — NaN used to land
+        # in BSON (500ing every report/declaration), and negative/>100 rates
+        # silently zeroed or inflated the official tax math.
+        if not math.isfinite(float(rate.rate)) or rate.rate < 0 or rate.rate > 100:
+            raise HTTPException(status_code=400, detail="نسبة الضريبة يجب أن تكون رقماً بين 0 و 100")
         rate_doc = rate.model_dump()
         rate_doc["id"] = str(uuid.uuid4())
         rate_doc["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -91,6 +97,11 @@ def create_tax_routes(db, get_current_user, block_cashier) -> dict:  # p524: cas
         rate: TaxRate,
         current_user: dict = Depends(block_cashier),  # p526-001: UI hides /tax-reports from cashiers (P524-001 covered POST only)
     ):
+        # p556-001: rate must be a finite 0-100 percentage — NaN used to land
+        # in BSON (500ing every report/declaration), and negative/>100 rates
+        # silently zeroed or inflated the official tax math.
+        if not math.isfinite(float(rate.rate)) or rate.rate < 0 or rate.rate > 100:
+            raise HTTPException(status_code=400, detail="نسبة الضريبة يجب أن تكون رقماً بين 0 و 100")
         update_data = rate.model_dump()
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         result = await db.tax_rates.update_one(

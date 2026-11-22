@@ -88,6 +88,11 @@ def create_banking_routes(db, get_current_user) -> dict:
         current_user: dict = Depends(block_cashier),
     ):
         update_data = account.model_dump()
+        # p556-007: create pops initial_balance into current_balance (p505) —
+        # re-admitting it here injected a phantom opening-history field (NaN
+        # included) that contradicts the ledger chain. Opening balance is
+        # immutable post-create; corrections go through transactions.
+        update_data.pop("initial_balance", None)
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         result = await db.bank_accounts.update_one(
             {"id": account_id}, {"$set": update_data}
