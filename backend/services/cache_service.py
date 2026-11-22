@@ -92,3 +92,16 @@ class CacheManager:
 
 # Singleton instance
 cache = CacheManager()
+
+# p549: one shared stats-cache bust for every money writer (p273/p548 doctrine:
+# a write that moves money or stock must not leave a cached report behind —
+# today TTL 60s, past days 3600s). Tenant-scoped keys only; failures are
+# swallowed (the TTL self-heals).
+def bust_stats_caches(tenant_id) -> None:
+    try:
+        tid = tenant_id or "main"
+        for _p in ("dashboard", "sales", "profit"):
+            cache.delete(f"stats:{_p}:{tid}")
+        cache.delete_pattern(f"stats:dailyfull:{tid}:*")
+    except Exception:
+        pass

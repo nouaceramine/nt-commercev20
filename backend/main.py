@@ -604,6 +604,22 @@ async def startup_event():
                     name="p266_wallet_entity")
             except Exception:
                 pass
+            # p549: digital code inventory — one live copy per code. The
+            # uploaders were check-then-insert; concurrent uploads duplicated a
+            # live code and the same code could be sold twice. Unique indexes
+            # close the race (writers tolerate DuplicateKeyError); a legacy
+            # duplicate in one DB only skips that DB's DDL (p547 doctrine).
+            try:
+                await _d.idoom_codes.create_index(
+                    [("code", 1)], unique=True, name="p549_idoom_code")
+            except Exception:
+                pass
+            try:
+                await _d.digital_codes.create_index(
+                    [("product_id", 1), ("code_hash", 1)], unique=True,
+                    partialFilterExpression={"is_used": False}, name="p549_digital_code")
+            except Exception:
+                pass
             # p260: invoice_number lookup indexes for global search prefix scans
             for _coll in ("sales", "purchases"):
                 try:

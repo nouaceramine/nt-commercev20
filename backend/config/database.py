@@ -196,6 +196,22 @@ async def init_tenant_database(tenant_id: str) -> AsyncIOMotorDatabase:
     except Exception as exc:
         logger.warning("journal_entries uniq_entry_number on new tenant %s: %s", tenant_id, exc)
 
+    # p549: wallet entity uniqueness + code-inventory race guards on the legacy
+    # provisioning path (template-copied tenants inherit them from the golden
+    # template; the startup sweep covers every tenant at boot)
+    for _coll, _keys, _kw in (
+        ("wallets", [("entity_type", 1), ("entity_id", 1)],
+         {"unique": True, "sparse": True, "name": "p266_wallet_entity"}),
+        ("idoom_codes", [("code", 1)], {"unique": True, "name": "p549_idoom_code"}),
+        ("digital_codes", [("product_id", 1), ("code_hash", 1)],
+         {"unique": True, "partialFilterExpression": {"is_used": False},
+          "name": "p549_digital_code"}),
+    ):
+        try:
+            await tenant_db[_coll].create_index(_keys, **_kw)
+        except Exception as exc:
+            logger.warning("p549 index %s on new tenant %s: %s", _coll, tenant_id, exc)
+
     # Initialize cash boxes
     boxes = [
         {"id": "cash", "name": "الصندوق النقدي", "name_fr": "Caisse", "type": "cash", "balance": 0},

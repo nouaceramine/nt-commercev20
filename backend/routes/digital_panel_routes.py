@@ -357,6 +357,20 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         if cost_source not in ("wallet", "panel"):
             cost_source = "wallet"
         doc["cost_source"] = cost_source
+        # p549-008: a debt sale needs a REAL customer (the mirror $inc matches
+        # nothing for a ghost — the debt vanishes), and a reseller sale needs a
+        # REAL reseller (otherwise the wallet pays the cost and nobody is
+        # charged the price). Validate before any money moves (p506 doctrine).
+        if doc["payment_method"] == "debt":
+            if not doc.get("customer_id"):
+                raise HTTPException(status_code=400, detail="البيع بالدين يتطلب اختيار زبون")
+            if not await db.customers.find_one({"id": doc["customer_id"]}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        if doc["payment_method"] == "reseller":
+            if not doc.get("reseller_id"):
+                raise HTTPException(status_code=400, detail="بيع الموزّع يتطلب اختيار موزّع")
+            if not await db.resellers.find_one({"id": doc["reseller_id"]}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الموزّع غير موجود")
         wallet_debited = False
         panel_debited = False
         if cost > 0:
@@ -529,6 +543,13 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             except Exception:
                 logger.exception("p295: platform commission record failed for subscription %s", sub_id)
 
+        # p549-011: the subscription sale moved money — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(user.get("tenant_id"))
+        except Exception:
+            pass
+
         doc.pop("_id", None)
         doc["status"] = _sub_status(doc.get("end_date"))
         return doc
@@ -540,6 +561,25 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
         merged = {**existing, **payload}
         doc = _build_sub_doc(merged, user)
+        # p549-009: once the sale is journaled, financial fields are frozen —
+        # editing price/cost/payment/reseller used to rewrite the panel stats
+        # with no matching money movement, diverging from the sales journal
+        # (daily-full subs_* lines vs /reports/profit). Non-financial edits
+        # (dates, credentials, notes...) stay free.
+        journaled = await db.sales.find_one({"items.subscription_id": sub_id}, {"_id": 1})
+        if journaled:
+            def _num_changed(a, b):
+                try:
+                    return abs(float(a or 0) - float(b or 0)) > 0.005
+                except (TypeError, ValueError):
+                    return True
+            if (_num_changed(doc.get("price"), existing.get("price"))
+                    or _num_changed(doc.get("cost"), existing.get("cost"))
+                    or doc.get("payment_method") != (existing.get("payment_method") or "cash")
+                    or (doc.get("reseller_id") or "") != (existing.get("reseller_id") or "")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="الحقول المالية غير قابلة للتعديل بعد ترحيل قيد البيع")
         doc["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.digital_subscriptions.update_one({"id": sub_id}, {"$set": doc})
         result = await db.digital_subscriptions.find_one({"id": sub_id}, {"_id": 0})
@@ -622,6 +662,12 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
                     logger.exception("panel topup failed after retries")
                     raise HTTPException(status_code=500, detail="فشل شحن رصيد البانل")
                 await asyncio.sleep(0.05 * (_attempt + 1))
+        # p549-011: cash → prepaid panel asset — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(admin.get("tenant_id"))
+        except Exception:
+            pass
         return result
 
     @router.get("/panel-balance/transactions")
@@ -680,7 +726,21 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             "created_at": now,
             "created_by": user.get("name", ""),
         }
-        await db.digital_services.insert_one(dict(service_doc))
+        try:
+            await db.digital_services.insert_one(dict(service_doc))
+        except Exception:
+            # p549-010: the wallet was already debited — refund it, never leave
+            # money taken for a service that was never delivered
+            if cost > 0:
+                try:
+                    from services.wallet_service import credit_wallet
+                    await credit_wallet(main_db, tenant_id, cost,
+                                        "platform_catalog_refund", ref_id,
+                                        "استرجاع شراء باقة فاشل", user.get("name", ""),
+                                        entity_type="tenant")
+                except Exception:
+                    logger.exception("catalog purchase compensation failed for %s", ref_id)
+            raise HTTPException(status_code=500, detail="فشل تسجيل شراء الباقة")
         service_doc.pop("_id", None)
         return service_doc
 

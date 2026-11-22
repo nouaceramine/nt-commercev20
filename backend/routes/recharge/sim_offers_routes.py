@@ -119,8 +119,13 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
         if payload.offer_value < 0 or payload.bonus < 0 or payload.sim_cost < 0:
             raise HTTPException(status_code=400, detail="قيم غير صالحة")
         is_credit = payload.payment_type == "credit"
-        if is_credit and not payload.customer_id:
-            raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+        if is_credit:
+            if not payload.customer_id:
+                raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+            # p549-012: a ghost customer made the debt mirror $inc match nothing
+            # (debt recorded on a sale row, invisible everywhere else)
+            if not await db.customers.find_one({"id": payload.customer_id}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الزبون غير موجود")
 
         op = OPERATORS[payload.operator]
         now = datetime.now(timezone.utc).isoformat()
@@ -283,6 +288,10 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
                             {"id": "cash"},
                             {"$inc": {"balance": -payload.sale_price}, "$set": {"updated_at": now}},
                         )
+                        # p549-012: drop the journaled income row too — the old
+                        # rollback reversed the box but left an orphan income txn
+                        await db.transactions.delete_one(
+                            {"reference_type": "sim_activation", "reference_id": activation_id})
                 except Exception:
                     logger.exception("rollback: cash/customer revert failed")
             if sale_inserted:
@@ -304,6 +313,13 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
             if isinstance(e, HTTPException):
                 raise
             raise HTTPException(status_code=500, detail="فشل تسجيل عملية بيع الشريحة") from e
+
+        # p549-011: the activation moved money/stock — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(user.get("tenant_id"))
+        except Exception:
+            pass
 
         return doc
 

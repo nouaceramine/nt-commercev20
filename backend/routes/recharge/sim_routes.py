@@ -210,6 +210,12 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
                     logger.exception("sim purchase failed after retries: %s", payload.slot_id)
                     raise HTTPException(status_code=500, detail="فشل تسجيل شراء الشرائح")
                 continue
+        # p549-011: restock moves cash → SIM stock — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(admin.get("tenant_id"))
+        except Exception:
+            pass
         return result
 
     @router.post("/sim/slots/{slot_id}/topup")
@@ -267,6 +273,12 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
             logger.exception("sim topup failed: %s", e)
             raise HTTPException(status_code=500, detail="فشل شحن رصيد الشريحة") from e
 
+        # p549-011: cash → SIM balance — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(admin.get("tenant_id"))
+        except Exception:
+            pass
         return {"slot_id": slot_id, "amount": amount, "new_balance": round(old_balance + amount, 2)}
 
     @router.post("/sim/transfer")
@@ -364,6 +376,12 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         except Exception:
             logger.exception("sim transfer audit log failed for %s", transfer_id)
 
+        # p549-011: the transfer moved balances — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(admin.get("tenant_id"))
+        except Exception:
+            pass
         return {"ok": True, "transfer_id": transfer_id, "amount": amount}
 
     return router

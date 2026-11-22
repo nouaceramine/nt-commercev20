@@ -83,10 +83,19 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
 
     # Get customer name
     customer_name = "عميل نقدي"
+    customer = None
     if recharge.customer_id:
         customer = await db.customers.find_one({"id": recharge.customer_id}, {"_id": 0, "name": 1})
         if customer:
             customer_name = customer["name"]
+    # p549-001: a credit (آجل) recharge is a DEBT — it needs a real customer to
+    # attach to, exactly like card/idoom/sim credit sales (p506-006 doctrine).
+    # A ghost id used to record debt nobody could ever see or settle.
+    if recharge.payment_method == "credit":
+        if not recharge.customer_id:
+            raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+        if not customer:
+            raise HTTPException(status_code=404, detail="الزبون غير موجود")
         # p170: tag customer category (زبون شحن الرصيد)
         from services.customer_sources import tag_customer_source, SOURCE_RECHARGE
         await tag_customer_source(db, SOURCE_RECHARGE, customer_id=recharge.customer_id)
@@ -100,29 +109,12 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     recharge_code = await generate_code(db, "recharges", "RE", 5, with_year=True)
 
     # Debit the platform wallet by the recharge cost — blocks (HTTP 400) if balance is insufficient.
+    # p549-001b: the debit and the commission record move INSIDE the saga guard
+    # (flags below) — a commission failure used to leak the wallet debit.
     from services.wallet_service import debit_wallet, credit_wallet
+    from services.commission_engine import record_platform_commission, reverse_platform_commission
     entity_id = user.get("tenant_id") or user.get("id", "")
     wallet_txn_id = str(uuid.uuid4())  # generate txn id so we can store it on the task
-    await debit_wallet(
-        main_db, entity_id, cost, "recharge", wallet_txn_id,
-        f"شحن {operator_config['name']} - {recharge.phone_number} ({recharge_code})",
-        user.get("name", ""),
-    )
-
-    # p205: platform commission ledger — platform margin = (platform% − tenant%) × amount.
-    # platform_commission defaults to the tenant rate (margin 0) until the owner
-    # configures their real upstream deal via /saas/recharge-config.
-    from services.commission_engine import record_platform_commission, reverse_platform_commission
-    await record_platform_commission(
-        main_db,
-        service_type="recharge", tenant_id=entity_id,
-        reference_type="recharge", reference_id=recharge_id,
-        gross_amount=recharge.amount,
-        tenant_commission_pct=operator_config.get("commission", 0),
-        platform_commission_pct=operator_config.get("platform_commission", operator_config.get("commission", 0)),
-        operator=recharge.operator,
-        meta={"phone_number": recharge.phone_number, "code": recharge_code},
-    )
 
     bridge_task_id = str(uuid.uuid4())
     txn_record_id = str(uuid.uuid4())
@@ -159,8 +151,32 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
     sale_cash_inserted = False
     sale_credit_inserted = False  # p232
     bridge_task_inserted = False
+    wallet_debited = False        # p549
+    commission_recorded = False   # p549
     is_credit_sale = recharge.payment_method == "credit"
     try:
+        # p549-001b: wallet debit + commission inside the guard
+        await debit_wallet(
+            main_db, entity_id, cost, "recharge", wallet_txn_id,
+            f"شحن {operator_config['name']} - {recharge.phone_number} ({recharge_code})",
+            user.get("name", ""),
+        )
+        wallet_debited = True
+        # p205: platform commission ledger — platform margin = (platform% − tenant%) × amount.
+        # platform_commission defaults to the tenant rate (margin 0) until the owner
+        # configures their real upstream deal via /saas/recharge-config.
+        await record_platform_commission(
+            main_db,
+            service_type="recharge", tenant_id=entity_id,
+            reference_type="recharge", reference_id=recharge_id,
+            gross_amount=recharge.amount,
+            tenant_commission_pct=operator_config.get("commission", 0),
+            platform_commission_pct=operator_config.get("platform_commission", operator_config.get("commission", 0)),
+            operator=recharge.operator,
+            meta={"phone_number": recharge.phone_number, "code": recharge_code},
+        )
+        commission_recorded = True
+
         await db.recharges.insert_one(recharge_doc)
         recharge_inserted = True
 
@@ -179,14 +195,24 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 }],
                 "subtotal": sale_price, "discount_total": 0, "tax_total": 0,
                 "total": sale_price, "paid_amount": 0, "debt_amount": sale_price,
+                "remaining": sale_price,  # p549: canonical open-debt fields (p494)
                 "face_amount": recharge.amount,  # p223
-                "payment_method": "credit",
+                "payment_method": "credit", "payment_type": "credit",
+                "status": "unpaid",
                 "customer_id": recharge.customer_id, "customer_name": customer_name,
                 "type": "recharge_credit", "source": "pos_quick_flexy",
                 "user_id": user.get("id"), "user_name": user.get("name", ""),
                 "created_at": now,
             })
             sale_credit_inserted = True  # p232
+            # p549-001: mirror the debt on the customer record — idoom/card/IPTV
+            # all do; without it settlement (which decrements the mirror) drove
+            # the customer's balance NEGATIVE while the sale rows were clean.
+            await db.customers.update_one(
+                {"id": recharge.customer_id},
+                {"$inc": {"total_purchases": sale_price, "balance": sale_price,
+                          "total_debt": sale_price}},
+            )
             # Update user's open daily session
             try:
                 await db.daily_sessions.update_one(
@@ -308,6 +334,14 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 await db.sales.delete_one({"invoice_number": f"FLEXY-{recharge_id[:6].upper()}", "type": "recharge_credit"})
             except Exception:
                 logger.exception("Rollback: failed to delete credit sale row for recharge %s", recharge_id)
+            try:  # p549: reverse the customer debt mirror too
+                await db.customers.update_one(
+                    {"id": recharge.customer_id},
+                    {"$inc": {"total_purchases": -sale_price, "balance": -sale_price,
+                              "total_debt": -sale_price}},
+                )
+            except Exception:
+                logger.exception("Rollback: failed to reverse customer mirror for %s", recharge_id)
             try:
                 await db.daily_sessions.update_one(
                     {"user_id": user.get("id"), "status": "open"},
@@ -346,22 +380,31 @@ async def execute_recharge_saga(db, main_db, effective_config: dict, recharge, u
                 await db.recharges.delete_one({"id": recharge_id})
             except Exception:
                 logger.exception("Rollback: failed to delete recharge %s", recharge_id)
-        try:
-            await credit_wallet(
-                main_db, entity_id, cost, "recharge_refund", wallet_txn_id,
-                f"استرجاع شحن فاشل {recharge_code}", user.get("name", ""),
-            )
-        except Exception:
-            logger.exception("Rollback: failed to compensate wallet for recharge %s", recharge_id)
-        try:
-            await reverse_platform_commission(
-                main_db, reference_type="recharge", reference_id=recharge_id,
-                reason="recharge_saga_rollback",
-            )
-        except Exception:
-            logger.exception("Rollback: failed to reverse commission for recharge %s", recharge_id)
+        if wallet_debited:  # p549: never refund a debit that never happened
+            try:
+                await credit_wallet(
+                    main_db, entity_id, cost, "recharge_refund", wallet_txn_id,
+                    f"استرجاع شحن فاشل {recharge_code}", user.get("name", ""),
+                )
+            except Exception:
+                logger.exception("Rollback: failed to compensate wallet for recharge %s", recharge_id)
+        if commission_recorded:  # p549
+            try:
+                await reverse_platform_commission(
+                    main_db, reference_type="recharge", reference_id=recharge_id,
+                    reason="recharge_saga_rollback",
+                )
+            except Exception:
+                logger.exception("Rollback: failed to reverse commission for recharge %s", recharge_id)
         if isinstance(e, HTTPException):
             raise
         raise HTTPException(status_code=500, detail="فشل تسجيل عملية الشحن") from e
+
+    # p549-011: every recharge moves money — bust the cached reports (p273/p548)
+    try:
+        from services.cache_service import bust_stats_caches
+        bust_stats_caches(user.get("tenant_id"))
+    except Exception:
+        pass
 
     return recharge_doc

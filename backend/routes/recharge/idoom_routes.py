@@ -9,6 +9,8 @@ import csv
 import logging
 import math
 
+from pymongo.errors import DuplicateKeyError
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,17 +95,23 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
             if existing:
                 duplicates += 1
                 continue
-            await db.idoom_codes.insert_one({
-                "id": str(uuid.uuid4()),
-                "code": code,
-                "denomination": denomination,
-                "status": "available",
-                "created_at": now,
-                "added_by": admin.get("name", ""),
-                "sold_at": None,
-                "sold_txn_id": None,
-                "customer_id": None,
-            })
+            try:
+                await db.idoom_codes.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "code": code,
+                    "denomination": denomination,
+                    "status": "available",
+                    "created_at": now,
+                    "added_by": admin.get("name", ""),
+                    "sold_at": None,
+                    "sold_txn_id": None,
+                    "customer_id": None,
+                })
+            except DuplicateKeyError:
+                # p549-004: lost the race against the p549_idoom_code unique
+                # index — the other uploader's copy wins, this one is a duplicate
+                duplicates += 1
+                continue
             inserted += 1
         return {"inserted": inserted, "duplicates": duplicates, "errors": errors}
 
@@ -133,7 +141,12 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
             customer_doc = await db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
             if not customer_doc:
                 raise HTTPException(status_code=404, detail="الزبون غير موجود")
-        elif body.payment_method != "wallet":
+        else:
+            # p549-002: "wallet" is a REAL cash box (seeded المحفظة الإلكترونية),
+            # not an exemption — the old special case skipped both validation and
+            # the money leg, so a wallet sale delivered a code and journaled
+            # income with ZERO money movement. Every non-credit method is a cash
+            # box id (card_sale doctrine).
             if not await db.cash_boxes.find_one({"id": body.payment_method}, {"_id": 1}):
                 raise HTTPException(status_code=404, detail="الصندوق غير موجود")
 
@@ -206,11 +219,26 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
                     )
                 except Exception:
                     pass
-            elif body.payment_method != "wallet":
+            else:
                 await db.cash_boxes.update_one(
                     {"id": body.payment_method},
                     {"$inc": {"balance": sell_price}, "$set": {"updated_at": now}},
                 )
+                # p549-002: income is journaled only when money actually enters a
+                # box — a credit sale records NO income until the debt is settled
+                # (card_sale doctrine); the old shared insert booked phantom
+                # income against a "credit"/ghost box for money never received.
+                await db.transactions.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "cash_box_id": body.payment_method,
+                    "type": "income",
+                    "amount": sell_price,
+                    "description": f"بيع كود Idoom {body.denomination} دج",
+                    "reference_type": "idoom_sell",
+                    "reference_id": txn_id,
+                    "created_at": now,
+                    "created_by": user.get("name", ""),
+                })
                 # Daily session cash sales
                 try:
                     await db.daily_sessions.update_one(
@@ -219,17 +247,6 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
                     )
                 except Exception:
                     pass
-            await db.transactions.insert_one({
-                "id": str(uuid.uuid4()),
-                "cash_box_id": body.payment_method,
-                "type": "income",
-                "amount": sell_price,
-                "description": f"بيع كود Idoom {body.denomination} دج" + (f" (آجل - {customer_name})" if is_credit else ""),
-                "reference_type": "idoom_sell",
-                "reference_id": txn_id,
-                "created_at": now,
-                "created_by": user.get("name", ""),
-            })
         except Exception as e:
             # DB logging failed after wallet was already debited — compensate + release code
             from services.wallet_service import credit_wallet
@@ -246,6 +263,13 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
             except Exception:
                 logger.exception("Failed to release reserved idoom code %s", code_doc.get("id"))
             raise HTTPException(status_code=500, detail="فشل تسجيل عملية البيع") from e
+
+        # p549-011: the sale moved money/stock — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(user.get("tenant_id"))
+        except Exception:
+            pass
 
         return {
             "ok": True,

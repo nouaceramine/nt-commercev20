@@ -228,6 +228,12 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
                     logger.exception("card purchase failed after retries: %s", payload.card_id)
                     raise HTTPException(status_code=500, detail="فشل تسجيل التموين")
                 continue
+        # p549-011: restock moves cash → stock — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(admin.get("tenant_id"))
+        except Exception:
+            pass
         return result
 
     @router.get("/cards/purchases")
@@ -385,6 +391,13 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
                 logger.exception("card sale rollback (stock) failed for %s", payload.card_id)
             logger.exception("card sale failed: %s", e)
             raise HTTPException(status_code=500, detail="فشل تسجيل بيع البطاقة") from e
+
+        # p549-011: the sale moved money/stock — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(user.get("tenant_id"))
+        except Exception:
+            pass
 
         return {
             "ok": True,

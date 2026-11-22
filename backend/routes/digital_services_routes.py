@@ -11,6 +11,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from utils.permissions import create_cashier_block
 
@@ -69,7 +70,13 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 "code": await _poc(db, "wallets", "WL", 6, field="code"),
                 "balance": 0, "currency": "DZD", "created_at": _now(),
             }
-            await db.wallets.insert_one(dict(w))
+            try:
+                await db.wallets.insert_one(dict(w))
+            except DuplicateKeyError:
+                # p549-013: lost the create race against the wallet unique index
+                # — re-read the winner's wallet instead of 500ing/duplicating
+                w = await db.wallets.find_one(
+                    {"entity_type": "user", "entity_id": user_id}, {"_id": 0})
         return w
 
     async def _wallet_txn(user_id: str, ttype: str, amount: float, before: float, after: float, desc: str, ref: str = None):
@@ -200,13 +207,19 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 skipped += 1
                 continue
             enc = encrypt_code(code)
-            await db.digital_codes.insert_one({
-                "id": str(uuid.uuid4()), "product_id": product_id,
-                "code_encrypted": enc["encrypted"], "iv": enc["iv"], "tag": enc["tag"],
-                "code_hash": _code_hash(code),
-                "serial": serial, "expiry_date": row.expiry_date or "",
-                "is_used": False, "used_at": None, "order_id": None, "created_at": _now(),
-            })
+            try:
+                await db.digital_codes.insert_one({
+                    "id": str(uuid.uuid4()), "product_id": product_id,
+                    "code_encrypted": enc["encrypted"], "iv": enc["iv"], "tag": enc["tag"],
+                    "code_hash": _code_hash(code),
+                    "serial": serial, "expiry_date": row.expiry_date or "",
+                    "is_used": False, "used_at": None, "order_id": None, "created_at": _now(),
+                })
+            except DuplicateKeyError:
+                # p549-003: lost the race against the p549_digital_code unique
+                # index — the other upload wins, this copy is a duplicate
+                skipped += 1
+                continue
             inserted += 1
         return {"inserted": inserted, "skipped": skipped, "stock": await _product_stock(product_id)}
 
@@ -230,13 +243,18 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 skipped += 1
                 continue
             enc = encrypt_code(code)
-            await db.digital_codes.insert_one({
-                "id": str(uuid.uuid4()), "product_id": product_id,
-                "code_encrypted": enc["encrypted"], "iv": enc["iv"], "tag": enc["tag"],
-                "code_hash": _code_hash(code),
-                "serial": serial, "expiry_date": expiry,
-                "is_used": False, "used_at": None, "order_id": None, "created_at": _now(),
-            })
+            try:
+                await db.digital_codes.insert_one({
+                    "id": str(uuid.uuid4()), "product_id": product_id,
+                    "code_encrypted": enc["encrypted"], "iv": enc["iv"], "tag": enc["tag"],
+                    "code_hash": _code_hash(code),
+                    "serial": serial, "expiry_date": expiry,
+                    "is_used": False, "used_at": None, "order_id": None, "created_at": _now(),
+                })
+            except DuplicateKeyError:
+                # p549-003: same unique-index race guard as the JSON uploader
+                skipped += 1
+                continue
             inserted += 1
         return {"inserted": inserted, "skipped": skipped, "stock": await _product_stock(product_id)}
 
@@ -294,10 +312,16 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
         amount = product["price"] * data.quantity
-        count = await db.digital_orders.count_documents({}) + 1
+        # p549-006: atomic counter — count+1 duplicated DIG- numbers under races
+        from services.code_generator import next_code as _next_code
+        order_number = await _next_code(db, "digital_orders", "DIG-", 6,
+                                        with_year=False, field="order_number")
         order = {
             "id": str(uuid.uuid4()),
-            "order_number": f"DIG-{count:06d}",
+            "order_number": order_number,
+            # p549-007: sale-time cost snapshot (p548 doctrine) — stats must not
+            # rewrite history when the product cost changes later
+            "cost_price": product.get("cost_price", 0) or 0,
             "user_id": user.get("id"),
             "user_name": user.get("name", user.get("email", "")),
             "product_id": product["id"],
@@ -346,6 +370,12 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                               f"شراء {product['name']}", order["id"])
             await db.digital_orders.insert_one(dict(order))
             order.pop("_id", None)
+            # p549-011: the order moved money/codes — bust the cached reports
+            try:
+                from services.cache_service import bust_stats_caches
+                bust_stats_caches(user.get("tenant_id"))
+            except Exception:
+                pass
             if order["status"] == "COMPLETED":
                 await _notify_order_completed(order)
             return order
@@ -357,6 +387,11 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         }.get(data.payment_method, "")
         await db.digital_orders.insert_one(dict(order))
         order.pop("_id", None)
+        try:  # p549-011
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(user.get("tenant_id"))
+        except Exception:
+            pass
         return order
 
     @router.get("/orders")
@@ -431,6 +466,11 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
                 {"id": order_id, "status": "DELIVERING"}, {"$set": {"status": "PENDING"}})
             raise
 
+        try:  # p549-011
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(admin.get("tenant_id"))
+        except Exception:
+            pass
         order["status"] = "COMPLETED"
         order["code_ids"] = code_ids
         await _notify_order_completed(order)
@@ -450,15 +490,19 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
     async def wallet_deposit(data: DepositBody, user: dict = Depends(block_cashier)):
         if not math.isfinite(data.amount) or data.amount <= 0:
             raise HTTPException(status_code=400, detail="المبلغ غير صالح")
-        wallet = await _get_wallet(user.get("id"))
-        before = wallet.get("balance", 0)
-        await db.wallets.update_one(
+        await _get_wallet(user.get("id"))
+        # p549-005: atomic read-modify-write — the old read-then-$inc broke the
+        # ledger chain (two concurrent deposits both logged before=X/after=X+amt)
+        # and one response returned a stale balance.
+        updated = await db.wallets.find_one_and_update(
             {"entity_type": "user", "entity_id": user.get("id")},
-            {"$inc": {"balance": data.amount}}
-        )
-        await _wallet_txn(user.get("id"), "DEPOSIT", data.amount, before, before + data.amount,
+            {"$inc": {"balance": data.amount}},
+            return_document=ReturnDocument.AFTER, projection={"_id": 0})
+        after = round(float((updated or {}).get("balance", 0) or 0), 2)
+        before = round(after - data.amount, 2)
+        await _wallet_txn(user.get("id"), "DEPOSIT", data.amount, before, after,
                           data.note or "شحن رصيد")
-        return {"balance": before + data.amount, "message": "تم شحن الرصيد"}
+        return {"balance": after, "message": "تم شحن الرصيد"}
 
     @router.post("/wallet/pay")
     async def wallet_pay(body: dict, user: dict = Depends(block_cashier)):
@@ -513,6 +557,11 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             {"id": order_id},
             {"$set": {"status": status, "code_ids": code_ids, "payment_method": "wallet"}}
         )
+        try:  # p549-011
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(user.get("tenant_id"))
+        except Exception:
+            pass
         return {"status": status, "balance": before - amount}
 
     # ── Stats / profit report (admin) ──
@@ -522,14 +571,21 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
         product_cost = {}
         async for p in db.digital_products.find({}, {"_id": 0, "id": 1, "cost_price": 1}):
             product_cost[p["id"]] = p.get("cost_price", 0) or 0
+        # p549-007: sale-time cost snapshot first (p548 doctrine) — the live
+        # product cost is only a fallback for pre-snapshot legacy rows
+        def _line_cost(o):
+            snap = o.get("cost_price")
+            if snap is None:
+                snap = product_cost.get(o.get("product_id"), 0)
+            return snap * o.get("quantity", 1)
         revenue = sum(o.get("amount", 0) for o in orders)
-        cost = sum(product_cost.get(o.get("product_id"), 0) * o.get("quantity", 1) for o in orders)
+        cost = sum(_line_cost(o) for o in orders)
         by_product = {}
         for o in orders:
             bp = by_product.setdefault(o.get("product_name", ""), {"orders": 0, "revenue": 0, "cost": 0})
             bp["orders"] += o.get("quantity", 1)
             bp["revenue"] += o.get("amount", 0)
-            bp["cost"] += product_cost.get(o.get("product_id"), 0) * o.get("quantity", 1)
+            bp["cost"] += _line_cost(o)
         for v in by_product.values():
             v["profit"] = v["revenue"] - v["cost"]
         pending = await db.digital_orders.count_documents({"status": "PENDING"})
