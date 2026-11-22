@@ -2,11 +2,11 @@
 Supplier Routes - Extracted from server.py
 CRUD, advance payments, debt payment
 """
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 
 def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -21,7 +21,7 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
 
     @router.get("/paginated")
     async def get_suppliers_paginated(
-        search: Optional[str] = None, family_id: Optional[str] = None,
+        search: str | None = None, family_id: str | None = None,
         page: int = 1, page_size: int = 20,
         admin: dict = Depends(require_permission("suppliers.edit"))
     ):
@@ -57,12 +57,26 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
                 s[field] = ""
         return s
 
+    # p552: edit whitelist. Mirror/financial fields (balance, advance_balance,
+    # total_purchases), the derived family_name, and system fields are
+    # server-owned — a raw dict PUT previously rewrote them directly with zero
+    # financial movement (proven on staging: balance=999999 stuck).
+    SUPPLIER_EDITABLE = {"name", "name_fr", "phone", "email", "address",
+                         "notes", "family_id", "code", "rc"}
+
     @router.put("/{supplier_id}")
     async def update_supplier(supplier_id: str, updates: dict, admin: dict = Depends(require_permission("suppliers.edit"))):
         s = await db.suppliers.find_one({"id": supplier_id})
         if not s:
             raise HTTPException(status_code=404, detail="Supplier not found")
-        update_data = {k: v for k, v in updates.items() if v is not None and k != "id"}
+        update_data = {k: v for k, v in updates.items()
+                       if v is not None and k in SUPPLIER_EDITABLE}
+        if "name" in update_data:
+            import re
+            nm = re.sub(r"<[^>]+>", "", str(update_data["name"])).strip()
+            if not nm:
+                raise HTTPException(status_code=400, detail="اسم المورد مطلوب")
+            update_data["name"] = nm[:255]
         if "family_id" in update_data:
             if update_data["family_id"]:
                 family = await db.supplier_families.find_one({"id": update_data["family_id"]}, {"_id": 0, "name": 1})
@@ -88,7 +102,7 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
         method = payment.payment_method or "cash"
         if not await db.cash_boxes.find_one({"id": method}):
             raise HTTPException(status_code=404, detail="الصندوق غير موجود")
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         advance_record = {"id": str(uuid.uuid4()), "supplier_id": supplier_id, "supplier_name": supplier["name"], "amount": amount, "payment_method": method, "notes": payment.notes, "user_id": user["id"], "user_name": user.get("name", ""), "created_at": now}
         # p203: the advance actually leaves the chosen cash box (it never did
         # before), and everything commits or aborts together (pattern p195)
@@ -97,8 +111,12 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
         # (WriteConflict) so the advance was lost (proven on staging:
         # [500, 500, 200] of 3 concurrent writes, balance/box short by 2x).
         import asyncio as _asyncio
-        from config.database import client as _client, main_db as _main_db
-        from pymongo.errors import DuplicateKeyError as _DKE, PyMongoError as _PME
+
+        from pymongo.errors import DuplicateKeyError as _DKE
+        from pymongo.errors import PyMongoError as _PME
+
+        from config.database import client as _client
+        from config.database import main_db as _main_db
         from services.outbox import outbox_write
         for _attempt in range(5):
             try:
