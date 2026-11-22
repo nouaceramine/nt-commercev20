@@ -131,8 +131,11 @@ def create_support_routes() -> dict:
     async def read_ticket(ticket_id: str, user: dict = Depends(require_tenant), _cb: dict = Depends(block_cashier)):
         t = await _own_ticket(ticket_id, user)
         if t.get("tenant_unread"):
+            # p550: optimistic clear — a reply landing between find and update
+            # bumps updated_at and must keep its unread flag alive.
             await main_db.support_tickets.update_one(
-                {"id": ticket_id}, {"$set": {"tenant_unread": False}})
+                {"id": ticket_id, "tenant_unread": True, "updated_at": t.get("updated_at")},
+                {"$set": {"tenant_unread": False}})
             t["tenant_unread"] = False
         return {"ticket": t}
 
@@ -144,11 +147,13 @@ def create_support_routes() -> dict:
         if not (body.message or "").strip():
             raise HTTPException(status_code=400, detail="الرسالة فارغة")
         new_status = "open" if t["status"] == "resolved" else t["status"]
-        await main_db.support_tickets.update_one(
-            {"id": ticket_id},
+        res = await main_db.support_tickets.update_one(
+            {"id": ticket_id, "status": {"$ne": "closed"}},  # p550: never reopen a ticket closed mid-reply
             {"$push": {"messages": _msg("tenant", user.get("full_name") or user.get("name") or "", body.message)},
              "$set": {"status": new_status, "updated_at": _now(),
                       "platform_unread": True, "tenant_unread": False}})
+        if res.matched_count == 0:
+            raise HTTPException(status_code=400, detail="التذكرة مغلقة")
         return {"ok": True, "status": new_status}
 
     @tenant_router.post("/tickets/{ticket_id}/close")
@@ -180,7 +185,8 @@ def create_support_routes() -> dict:
             raise HTTPException(status_code=404, detail="التذكرة غير موجودة")
         if t.get("platform_unread"):
             await main_db.support_tickets.update_one(
-                {"id": ticket_id}, {"$set": {"platform_unread": False}})
+                {"id": ticket_id, "platform_unread": True, "updated_at": t.get("updated_at")},
+                {"$set": {"platform_unread": False}})
             t["platform_unread"] = False
         return {"ticket": t}
 
@@ -194,11 +200,13 @@ def create_support_routes() -> dict:
         if not (body.message or "").strip():
             raise HTTPException(status_code=400, detail="الرسالة فارغة")
         new_status = "in_progress" if t["status"] == "open" else t["status"]
-        await main_db.support_tickets.update_one(
-            {"id": ticket_id},
+        res = await main_db.support_tickets.update_one(
+            {"id": ticket_id, "status": {"$ne": "closed"}},  # p550: close must not be lost to a late reply
             {"$push": {"messages": _msg("platform", admin.get("full_name") or "الدعم الفني", body.message)},
              "$set": {"status": new_status, "updated_at": _now(),
                       "platform_unread": False, "tenant_unread": True}})
+        if res.matched_count == 0:
+            raise HTTPException(status_code=400, detail="التذكرة مغلقة")
         return {"ok": True, "status": new_status}
 
     @admin_router.put("/tickets/{ticket_id}")

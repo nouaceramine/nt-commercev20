@@ -93,6 +93,13 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
             raise HTTPException(status_code=403, detail="البث العام متاح للإدارة فقط")
         if user_id is not None and user_id != user["id"] and not is_admin:
             raise HTTPException(status_code=403, detail="لا يمكنك إرسال إشعار لمستخدم آخر")
+        # p550: no notifications addressed to ghosts. Tenant owners are synthetic
+        # principals (id == tenant_id) with no row in tenant users; employees live
+        # in tenant users. Anything else must resolve before accepting the address.
+        if user_id is not None and user_id not in (user.get("id"), user.get("tenant_id")):
+            _target = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1})
+            if not _target:
+                raise HTTPException(status_code=400, detail="المستخدم الهدف غير موجود")
         notification_doc = {
             "id": str(uuid.uuid4()),
             "title": title,
@@ -108,7 +115,13 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
 
     @router.put("/notifications/{notification_id}/read")
     async def mark_notification_read(notification_id: str, user: dict = Depends(require_tenant)):
-        """Mark notification as read"""
+        """Mark notification as read — p550: own + broadcast only, real 404."""
+        existing = await db.notifications.find_one(
+            {"id": notification_id}, {"_id": 0, "user_id": 1})
+        if not existing:
+            raise HTTPException(status_code=404, detail="الإشعار غير موجود")
+        if existing.get("user_id") not in (None, user["id"]):
+            raise HTTPException(status_code=403, detail="هذا الإشعار موجه لمستخدم آخر")
         await db.notifications.update_one(
             {"id": notification_id},
             {"$set": {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
@@ -123,7 +136,17 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
 
     @router.delete("/notifications/{notification_id}")
     async def delete_notification(notification_id: str, user: dict = Depends(require_tenant)):
-        """Delete a notification"""
+        """Delete a notification — p550: own targeted; broadcast is admin-only; real 404."""
+        existing = await db.notifications.find_one(
+            {"id": notification_id}, {"_id": 0, "user_id": 1})
+        if not existing:
+            raise HTTPException(status_code=404, detail="الإشعار غير موجود")
+        is_admin = user.get("role") in ("admin", "manager", "tenant_admin", "super_admin")
+        if existing.get("user_id") is None:
+            if not is_admin:
+                raise HTTPException(status_code=403, detail="حذف الإشعارات العامة متاح للإدارة فقط")
+        elif existing.get("user_id") != user["id"] and not is_admin:
+            raise HTTPException(status_code=403, detail="هذا الإشعار موجه لمستخدم آخر")
         await db.notifications.delete_one({"id": notification_id})
         return {"message": "تم حذف الإشعار"}
 
@@ -589,13 +612,19 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         user: dict = Depends(require_tenant)
     ):
         """Get all notifications with pagination"""
-        query = {"channel": {"$ne": "smart"}}
+        # p550: /notifications/all must follow the same addressing rule as the
+        # bell — own targeted + broadcast (+ legacy rows with no user_id). It
+        # previously leaked admin-targeted notifications to every tenant role.
+        query = {"channel": {"$ne": "smart"},
+                 "$or": [{"user_id": user["id"]}, {"user_id": None}, {"user_id": {"$exists": False}}]}
         if unread_only:
             query["read"] = False
 
         notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
         total = await db.notifications.count_documents(query)
-        unread_count = await db.notifications.count_documents({"read": False, "channel": {"$ne": "smart"}})
+        unread_count = await db.notifications.count_documents(
+            {"read": False, "channel": {"$ne": "smart"},
+             "$or": [{"user_id": user["id"]}, {"user_id": None}, {"user_id": {"$exists": False}}]})
 
         return {
             "notifications": notifications,
@@ -605,8 +634,10 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
 
     @router.put("/notifications/mark-all-read")
     async def mark_all_notifications_read_v2(user: dict = Depends(require_tenant)):
+        # p550: never mark other users' targeted notifications read.
         await db.notifications.update_many(
-            {"read": False, "channel": {"$ne": "smart"}},
+            {"read": False, "channel": {"$ne": "smart"},
+             "$or": [{"user_id": user["id"]}, {"user_id": None}, {"user_id": {"$exists": False}}]},
             {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
         )
         return {"success": True}

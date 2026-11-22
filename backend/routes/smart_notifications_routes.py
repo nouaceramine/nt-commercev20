@@ -1,7 +1,7 @@
 """
 Smart Notifications Routes — robot alerts view over the unified notifications store (channel=smart).
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -37,9 +37,11 @@ def create_smart_notifications_routes(db, main_db, get_current_user) -> dict:
 
     @router.put("/{notification_id}/read")
     async def mark_as_read(notification_id: str, user: dict = Depends(block_cashier)):  # p531
-        await db.notifications.update_one(
+        res = await db.notifications.update_one(
             {"id": notification_id, "channel": "smart"}, {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
         )
+        if res.matched_count == 0:  # p550: no phantom-200
+            raise HTTPException(status_code=404, detail="التنبيه غير موجود")
         return {"message": "ok"}
 
     @router.put("/mark-all-read")

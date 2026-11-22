@@ -233,10 +233,28 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
 
     @router.delete("/{employee_id}")
     async def delete_employee(employee_id: str, admin: dict = Depends(require_permission("employees.edit"))):
+        # p550: deleting the employee must revoke the linked login FIRST.
+        # The old flow removed only the HR row and left users/identity_registry
+        # alive — the deleted employee kept logging in with full access.
+        emp = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        linked_user_id = emp.get("user_id")
+        if linked_user_id:
+            from config.database import main_db
+            from utils.identity import remove_identity
+            # Login routing dies first (identity + directory), then the credential
+            # row; only then may the HR row disappear. Aborting keeps the employee
+            # recoverable instead of leaving an orphan ACTIVE login.
+            await remove_identity(user_id=linked_user_id)
+            await main_db.tenant_user_directory.delete_one({"user_id": linked_user_id})
+            await db.users.delete_one({"id": linked_user_id})
+            await db.employees.update_one(
+                {"id": employee_id}, {"$unset": {"user_id": "", "user_email": ""}})
         result = await db.employees.delete_one({"id": employee_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Employee not found")
-        return {"message": "Employee deleted successfully"}
+        return {"success": True, "deleted_account": bool(linked_user_id)}
 
     # ── Account Management ──
     @router.post("/{employee_id}/create-account")

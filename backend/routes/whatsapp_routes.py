@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 import uuid
 import logging
 import os
-from pymongo.errors import DuplicateKeyError
+import time
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +96,36 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
     block_cashier = create_cashier_block(get_current_user)  # p531: /whatsapp hidden from cashier in UI
     """Create WhatsApp routes with dependencies"""
 
+    _wa_idx = set()
+
+    async def _ensure_whatsapp_indexes():
+        """p550: lazy per-tenant unique indexes behind the two check-then-write
+        races (first config read, template name). create_index is idempotent; a
+        legacy duplicate only logs and the writers still stay correct where the
+        index exists."""
+        name = getattr(db, "name", None)
+        if not name or name in _wa_idx:
+            return
+        _wa_idx.add(name)
+        for coll, keys, kw in (
+            ("whatsapp_config", [("tenant_id", 1)],
+             {"unique": True, "name": "p550_whatsapp_config_tenant"}),
+            ("whatsapp_templates", [("name", 1)],
+             {"unique": True, "partialFilterExpression": {"name": {"$gt": ""}},
+              "name": "p550_whatsapp_template_name"}),
+        ):
+            try:
+                await db[coll].create_index(keys, **kw)
+            except PyMongoError as exc:
+                logger.warning("p550 whatsapp index %s on %s: %s", coll, name, exc)
+
     @router.get("/config")
     async def get_whatsapp_config(current_user: dict = Depends(block_cashier)):  # p531
         tenant_id = current_user.get("tenant_id")
         if not tenant_id:
             raise HTTPException(status_code=403, detail="Tenant access required")
 
+        await _ensure_whatsapp_indexes()
         config = await db.whatsapp_config.find_one(
             {"tenant_id": tenant_id}, {"_id": 0}
         )
@@ -115,7 +140,11 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
                 "allowed_commands": ["expense", "invoice", "balance", "report", "sales"],
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            await db.whatsapp_config.insert_one(config)
+            try:
+                await db.whatsapp_config.insert_one(config)
+            except DuplicateKeyError:  # p550: concurrent first read — re-read the winner
+                config = await db.whatsapp_config.find_one(
+                    {"tenant_id": tenant_id}, {"_id": 0}) or config
             config.pop("_id", None)
 
         # Mask access token (p298: stored AES-256-GCM encrypted — decrypt to mask;
@@ -151,9 +180,14 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
             from services.crypto_fields import encrypt_field as _ef
             update_data["access_token"] = _ef(tok)
 
-        await db.whatsapp_config.update_one(
-            {"tenant_id": tenant_id}, {"$set": update_data}, upsert=True
-        )
+        await _ensure_whatsapp_indexes()
+        try:
+            await db.whatsapp_config.update_one(
+                {"tenant_id": tenant_id}, {"$set": update_data}, upsert=True
+            )
+        except DuplicateKeyError:  # p550: concurrent upsert — settle on the winner
+            await db.whatsapp_config.update_one(
+                {"tenant_id": tenant_id}, {"$set": update_data})
         return {"success": True, "message": "تم تحديث إعدادات WhatsApp بنجاح"}
 
     @router.get("/webhook")
@@ -297,21 +331,53 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
         body = (tpl.body or "").strip()
         if not name or not body:
             raise HTTPException(status_code=400, detail="اسم القالب ونصه مطلوبان")
-        if await db.whatsapp_templates.find_one({"name": name}):
-            raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
-        doc = {"id": str(uuid.uuid4()), **tpl.model_dump(),
-               "created_at": datetime.now(timezone.utc).isoformat()}
-        doc["name"], doc["body"] = name, body
-        await db.whatsapp_templates.insert_one(dict(doc))
-        doc.pop("_id", None)
-        return doc
+        # p550: the unique index alone cannot win the FIRST race — four uvicorn
+        # workers may all insert before the lazy build lands (the build then
+        # fails on those very duplicates). Serialize the name claim through the
+        # always-unique _id of a tiny lock collection; the index remains the
+        # steady-state guard once it exists.
+        lock_id = "name:" + name
+        lock = {"_id": lock_id, "expires_at": time.time() + 60}
+        try:
+            await db.whatsapp_template_locks.insert_one(lock)
+        except DuplicateKeyError:
+            await db.whatsapp_template_locks.delete_one(
+                {"_id": lock_id, "expires_at": {"$lt": time.time()}})
+            try:
+                await db.whatsapp_template_locks.insert_one(lock)
+            except DuplicateKeyError:
+                raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
+        try:
+            await _ensure_whatsapp_indexes()
+            if await db.whatsapp_templates.find_one({"name": name}):
+                raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
+            doc = {"id": str(uuid.uuid4()), **tpl.model_dump(),
+                   "created_at": datetime.now(timezone.utc).isoformat()}
+            doc["name"], doc["body"] = name, body
+            try:
+                await db.whatsapp_templates.insert_one(dict(doc))
+            except DuplicateKeyError:  # p550: steady-state unique index guard
+                raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
+            doc.pop("_id", None)
+            return doc
+        finally:
+            await db.whatsapp_template_locks.delete_one({"_id": lock_id})
 
     @router.put("/templates/{template_id}")
     async def update_template(template_id: str, tpl: TemplateBody, current_user: dict = Depends(get_current_user)):
         _require_template_admin(current_user)
         if not (tpl.name or "").strip() or not (tpl.body or "").strip():
             raise HTTPException(status_code=400, detail="اسم القالب ونصه مطلوبان")
-        res = await db.whatsapp_templates.update_one({"id": template_id}, {"$set": tpl.model_dump()})
+        name = tpl.name.strip()
+        clash = await db.whatsapp_templates.find_one(
+            {"name": name, "id": {"$ne": template_id}}, {"_id": 0, "id": 1})
+        if clash:
+            raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
+        try:
+            res = await db.whatsapp_templates.update_one(
+                {"id": template_id}, {"$set": {**tpl.model_dump(), "name": name}})
+        except DuplicateKeyError:  # p550: concurrent rename onto the same name
+            raise HTTPException(status_code=400, detail="يوجد قالب بهذا الاسم")
         if res.matched_count == 0:
             raise HTTPException(status_code=404, detail="القالب غير موجود")
         return await db.whatsapp_templates.find_one({"id": template_id}, {"_id": 0})
@@ -319,7 +385,9 @@ def create_whatsapp_routes(db, get_current_user) -> dict:
     @router.delete("/templates/{template_id}")
     async def delete_template(template_id: str, current_user: dict = Depends(get_current_user)):
         _require_template_admin(current_user)
-        await db.whatsapp_templates.delete_one({"id": template_id})
+        res = await db.whatsapp_templates.delete_one({"id": template_id})
+        if res.deleted_count == 0:  # p550: no phantom-200
+            raise HTTPException(status_code=404, detail="القالب غير موجود")
         return {"message": "تم حذف القالب"}
 
     return router

@@ -131,12 +131,21 @@ def create_chat_routes(db, get_current_user) -> dict:
 
     @router.post("/rooms")
     async def create_room(data: dict, user: dict = Depends(block_cashier)):  # p531
-        raw_members = data.get("members")
+        raw_members = data.get("members") if isinstance(data.get("members"), list) else []
+        members = list(dict.fromkeys([user.get("id")] + raw_members))
+        others = [m for m in members if m != user.get("id")]
+        if others:  # p550: rooms may only contain real active users of THIS tenant
+            valid = await db.users.find(
+                {"id": {"$in": others}, "is_active": {"$ne": False}}, {"_id": 0, "id": 1}
+            ).to_list(None)
+            valid_ids = {u.get("id") for u in valid}
+            if any(m not in valid_ids for m in others):
+                raise HTTPException(status_code=400, detail="عضو الغرفة غير موجود")
         room = {
             "id": str(uuid.uuid4()),
             "name_ar": data.get("name_ar", "غرفة جديدة"),
             "name_fr": data.get("name_fr", ""),
-            "members": list(dict.fromkeys([user.get("id")] + (raw_members if isinstance(raw_members, list) else []))),
+            "members": members,
             "created_by": user.get("id", ""),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -161,7 +170,14 @@ def create_chat_routes(db, get_current_user) -> dict:
 
     @router.get("/rooms/{room_id}/messages")
     async def get_messages(room_id: str, limit: int = 50, user: dict = Depends(block_cashier)):  # p531
-        await _member_room(room_id, user.get("id", ""))
+        uid = user.get("id", "")
+        await _member_room(room_id, uid)
+        # p550: fetching the thread IS the read receipt — the unread badge used
+        # to stay >0 forever because nothing ever added the reader to read_by.
+        await db.chat_messages.update_many(
+            {"room_id": room_id, "read_by": {"$nin": [uid]}},
+            {"$addToSet": {"read_by": uid}}
+        )
         return await db.chat_messages.find(
             {"room_id": room_id}, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)
