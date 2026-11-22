@@ -4,7 +4,7 @@ Authentication utilities for NT Commerce
 import jwt
 import bcrypt
 from datetime import datetime, timezone, timedelta
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config.database import main_db, get_tenant_db, set_tenant_context
 from utils.jwt_config import SECRET_KEY, ALGORITHM
@@ -15,15 +15,59 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 security = HTTPBearer()
 
 
-def ensure_active_account(user: dict, tenant: dict | None = None) -> dict:
-    """Reject disabled users/tenants on every request, not only at login."""
+def _tenant_subscription_expired(tenant: dict) -> bool:
+    """Mirror unified-login's expiry rule for already-issued tokens."""
+    raw_end = tenant.get("subscription_ends_at")
+    if not raw_end or tenant.get("is_trial"):
+        return False
+    try:
+        end_date = datetime.fromisoformat(str(raw_end).replace("Z", "+00:00"))
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+        return end_date < datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
+def expired_subscription_allowed(request: Request | None) -> bool:
+    """Wallet stays reachable after expiry so the tenant can settle/renew."""
+    if request is None:
+        return False
+    path = request.url.path
+    return path == "/api/wallet" or path.startswith("/api/wallet/")
+
+
+def ensure_active_account(user: dict, tenant: dict | None = None, allow_expired: bool = False) -> dict:
+    """Reject disabled/expired users/tenants on every request, not only at login."""
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     if user.get("is_active") is False or user.get("active") is False:
         raise HTTPException(status_code=403, detail="Account is deactivated")
-    if tenant is not None and (tenant.get("is_active") is False or tenant.get("active") is False):
-        raise HTTPException(status_code=403, detail="Tenant is deactivated")
+    if tenant is not None:
+        if tenant.get("is_active") is False or tenant.get("active") is False:
+            raise HTTPException(status_code=403, detail="Tenant is deactivated")
+        if _tenant_subscription_expired(tenant) and not allow_expired:
+            raise HTTPException(status_code=403, detail="Subscription expired")
     return user
+
+
+async def ensure_active_impersonation(payload: dict) -> None:
+    """Revoke impersonation JWTs as soon as their audit session closes.
+
+    Legacy impersonation tokens carried only `impersonated_by`; requiring the
+    new session claim makes those stale tokens fail closed instead of silently
+    living for the full JWT expiry.
+    """
+    session_id = payload.get("impersonation_session_id")
+    if not payload.get("impersonated_by") and not session_id:
+        return
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Impersonation session required")
+    log = await main_db.impersonation_logs.find_one(
+        {"id": session_id}, {"_id": 0, "status": 1, "tenant_id": 1})
+    if (not log or log.get("status") != "active"
+            or log.get("tenant_id") != payload.get("tenant_id")):
+        raise HTTPException(status_code=401, detail="Impersonation session closed")
 
 def email_ci(email: str) -> dict:
     """Case-insensitive exact-match Mongo query value for an email field."""
@@ -46,7 +90,7 @@ def decode_token(token: str) -> dict:
     """Decode and validate JWT token"""
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), request: Request = None) -> dict:
     """Get the current authenticated user from JWT token.
 
     NOTE: A parallel implementation lives in main.py for the legacy in-file routes.
@@ -60,6 +104,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     """
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        await ensure_active_impersonation(payload)
+        allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type", "tenant")
         role = payload.get("role")
@@ -79,14 +125,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
             if not tenant:
                 raise HTTPException(status_code=401, detail="Tenant not found")
-            ensure_active_account({"id": tenant_id}, tenant)
+            ensure_active_account({"id": tenant_id}, tenant, allow_expired=allow_expired)
             tenant_db = get_tenant_db(tenant_id)
             set_tenant_context(tenant_db)
             user = await tenant_db.users.find_one({"id": user_id})
             if user:
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
-                return ensure_active_account(user, tenant)
+                return ensure_active_account(user, tenant, allow_expired=allow_expired)
             # Fallback: user_id might equal tenant_id (legacy tokens) -> build user from saas_tenants
             # p293 security: هذا المسار البديل لرموز قديمة sub==tenant_id فقط —
             # أي رمز بـ sub آخر غير معروف كان يتحول لمدير المستأجر (ثغرة تصعيد صلاحيات)
@@ -100,7 +146,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     "tenant_id": tenant_id,
                     "user_type": "tenant",
                     "company_name": tenant.get("company_name", ""),
-                }, tenant)
+                }, tenant, allow_expired=allow_expired)
 
         # Fallback: platform-level users (admin/demo/staff) whose tokens carry
         # no tenant_id and no super_admin role — they live in main_db.users.
@@ -118,10 +164,12 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(security), request: Request = None) -> dict:
     """Get tenant user - sets up tenant DB context"""
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        await ensure_active_impersonation(payload)
+        allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type", "tenant")
         role = payload.get("role")
@@ -142,20 +190,20 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
                     tenant_db = get_tenant_db(tenant_id)
                     set_tenant_context(tenant_db)
                     user["tenant_id"] = tenant_id
-                return ensure_active_account(user, tenant)
+                return ensure_active_account(user, tenant, allow_expired=allow_expired)
         
         if tenant_id:
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
             if not tenant:
                 raise HTTPException(status_code=401, detail="Tenant not found")
-            ensure_active_account({"id": tenant_id}, tenant)
+            ensure_active_account({"id": tenant_id}, tenant, allow_expired=allow_expired)
             tenant_db = get_tenant_db(tenant_id)
             set_tenant_context(tenant_db)
             user = await tenant_db.users.find_one({"id": user_id})
             if user:
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
-                return ensure_active_account(user, tenant)
+                return ensure_active_account(user, tenant, allow_expired=allow_expired)
         
         # Fallback: platform-level users (admin/demo/staff) whose tokens carry
         # no tenant_id and no super_admin role — they live in main_db.users.

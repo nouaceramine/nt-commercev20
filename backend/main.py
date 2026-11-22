@@ -57,7 +57,7 @@ from config.database import (
 
 # JWT Settings
 from utils.jwt_config import SECRET_KEY, ALGORITHM
-from utils.auth import ensure_active_account
+from utils.auth import ensure_active_account, ensure_active_impersonation, expired_subscription_allowed
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 # Currency
@@ -201,9 +201,11 @@ def create_access_token(data: dict) -> str:
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), request: Request = None) -> dict:
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        await ensure_active_impersonation(payload)
+        allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type")
         role = payload.get("role")
@@ -234,7 +236,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
             if not tenant:
                 raise HTTPException(status_code=401, detail="Tenant not found")
-            ensure_active_account({"id": tenant_id}, tenant)
+            ensure_active_account({"id": tenant_id}, tenant, allow_expired=allow_expired)
 
             if user is None:
                 # p293 security: البديل لرموز قديمة sub==tenant_id فقط — كان أي sub
@@ -269,7 +271,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                     user["features"] = features_map
                     user["limits"] = {**plan.get("limits", {}), **tenant.get("limits_override", {})}
                 user["company_name"] = tenant.get("company_name", "")
-            return ensure_active_account(user, tenant)
+            return ensure_active_account(user, tenant, allow_expired=allow_expired)
 
         if user_type == "agent" or role == "agent":
             agent = await main_db.saas_agents.find_one(
@@ -297,15 +299,17 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             if not tenant:
                 raise HTTPException(status_code=401, detail="Tenant not found")
             user["tenant_id"] = tenant_id
-        return ensure_active_account(user, tenant)
+        return ensure_active_account(user, tenant, allow_expired=allow_expired)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(security), request: Request = None) -> dict:
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        await ensure_active_impersonation(payload)
+        allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type")
         tenant_id = payload.get("tenant_id")
@@ -322,7 +326,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
             if not tenant:
                 raise HTTPException(status_code=401, detail="Tenant not found")
-            ensure_active_account({"id": tenant_id}, tenant)
+            ensure_active_account({"id": tenant_id}, tenant, allow_expired=allow_expired)
         if user is None and tenant_id:
             if tenant and user_id == tenant_id:
                 user = {"id": tenant["id"], "email": tenant["email"], "name": tenant["name"], "role": "admin"}
@@ -330,7 +334,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             user = await main_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
-        ensure_active_account(user, tenant)
+        ensure_active_account(user, tenant, allow_expired=allow_expired)
         return {"user": user, "db": tenant_db, "tenant_id": tenant_id}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

@@ -10,6 +10,7 @@ import os
 import socket
 import httpx
 import logging
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError, OperationFailure
 from urllib.parse import urlparse
 from utils.auth import email_ci
@@ -147,6 +148,8 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
         tenant_user = {"id": new_uid, "role": "admin", "name": tenant.get("name", "")}
 
     actual_user_id = tenant_user["id"]
+    session_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
 
     access_token = create_access_token({
         "sub": actual_user_id,           # <-- real user id in tenant_db.users
@@ -155,6 +158,7 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
         "type": "tenant",
         "tenant_id": tenant_id,
         "impersonated_by": admin.get("id"),
+        "impersonation_session_id": session_id,  # p551: stop must revoke this JWT
     })
 
     plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
@@ -173,8 +177,6 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
     forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
     if forwarded:
         client_host = forwarded.split(",")[0].strip()
-    session_id = str(uuid.uuid4())
-    started_at = datetime.now(timezone.utc).isoformat()
     log_doc = {
         "id": session_id,
         "tenant_id": tenant_id,
@@ -230,14 +232,16 @@ async def stop_impersonation(session_id: str, admin: dict = Depends(get_super_ad
         duration = max(0, int((stopped_at - started_dt).total_seconds()))
     except Exception:
         duration = None
-    await main_db.impersonation_logs.update_one(
-        {"id": session_id},
+    res = await main_db.impersonation_logs.update_one(
+        {"id": session_id, "status": "active"},
         {"$set": {
             "stopped_at": stopped_at.isoformat(),
             "duration_seconds": duration,
             "status": "closed",
         }},
     )
+    if res.matched_count == 0:  # p551: concurrent stop — the first writer owns the duration
+        return {"ok": True, "already_closed": True}
     return {"ok": True, "duration_seconds": duration}
 
 
@@ -454,25 +458,52 @@ async def update_tenant(tenant_id: str, updates: TenantUpdate, admin: dict = Dep
         if existing_email:
             raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
         from utils.identity import assert_email_globally_free, reserve_identity
+        old_email = (tenant.get("email") or "").strip().lower()
         await assert_email_globally_free(new_email, exclude_user_id=tenant_id)
         await reserve_identity(new_email, "owner", tenant_id, tenant_id=tenant_id, name=update_data.get("name", tenant.get("name", "")))
+        claim_id = str(uuid.uuid4())
         try:
+            # p551: the non-transactional claim is the single-winner gate. Two
+            # concurrent email edits previously entered two transactions and
+            # surfaced a raw 500/write-conflict (and could leave split identity
+            # state); the loser now fails closed with a clean 409.
+            claim = await db.saas_tenants.update_one(
+                {"id": tenant_id, "email": email_ci(old_email),
+                 "_email_change_claim": {"$exists": False}},
+                {"$set": {"_email_change_claim": claim_id}},
+            )
+            if claim.matched_count != 1:
+                await main_db.identity_registry.delete_one(
+                    {"email": new_email, "kind": "owner", "user_id": tenant_id})
+                raise HTTPException(status_code=409, detail="تم تعديل بريد المشترك بالفعل، أعد المحاولة")
             async with await client.start_session() as session:
                 async with session.start_transaction():
-                    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": update_data}, session=session)
+                    moved = await db.saas_tenants.update_one(
+                        {"id": tenant_id, "_email_change_claim": claim_id},
+                        {"$set": update_data, "$unset": {"_email_change_claim": ""}},
+                        session=session,
+                    )
+                    if moved.matched_count != 1:
+                        raise HTTPException(status_code=409, detail="تم تعديل بريد المشترك بالفعل، أعد المحاولة")
                     await get_tenant_db(tenant_id).users.update_many(
-                        {"email": email_ci(tenant.get("email", ""))},
+                        {"email": email_ci(old_email)},
                         {"$set": {"email": new_email}}, session=session,
                     )
                     await main_db.identity_registry.delete_one(
-                        {"email": (tenant.get("email") or "").strip().lower(),
-                         "kind": "owner", "user_id": tenant_id}, session=session,
+                        {"email": old_email, "kind": "owner", "user_id": tenant_id},
+                        session=session,
                     )
         except DuplicateKeyError:
             await main_db.identity_registry.delete_one({"email": new_email, "kind": "owner", "user_id": tenant_id})
+            await db.saas_tenants.update_one(
+                {"id": tenant_id, "_email_change_claim": claim_id},
+                {"$unset": {"_email_change_claim": ""}})
             raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم بالفعل")
         except Exception:
             await main_db.identity_registry.delete_one({"email": new_email, "kind": "owner", "user_id": tenant_id})
+            await db.saas_tenants.update_one(
+                {"id": tenant_id, "_email_change_claim": claim_id},
+                {"$unset": {"_email_change_claim": ""}})
             raise
 
     # p183: changing the activity re-adapts the tenant's features automatically
@@ -568,7 +599,7 @@ async def bulk_update_features(body: dict, admin: dict = Depends(get_super_admin
 
 
 # Collections that must NEVER be bulk-cleaned by tenant_id during cascade delete
-_CASCADE_EXCLUDE = {"saas_tenants", "saas_plans", "users", "agent_commissions"}
+_CASCADE_EXCLUDE = {"saas_tenants", "saas_plans", "users", "agent_commissions", "saas_tenant_lifecycle_locks"}
 
 
 async def _cascade_delete_tenant(tenant: dict, admin: dict) -> dict:
@@ -584,6 +615,17 @@ async def _cascade_delete_tenant(tenant: dict, admin: dict) -> dict:
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%d_%H%M%S")
     steps = {}
+
+    # 0) Kill identity/login routing before the slower archive phase. The
+    # dynamic tenant_id sweep below cannot see malformed legacy rows whose
+    # tenant_id is missing; the email predicate closes that residue class.
+    from utils.identity import remove_identity
+    await remove_identity(user_id=tenant_id)
+    if email:
+        await remove_identity(email=email)
+        await main_db.tenant_user_directory.delete_many(
+            {"$or": [{"tenant_id": tenant_id}, {"email": email.strip().lower()}]})
+    steps["identity_removed"] = True
 
     # 1) Archive tenant DB to JSON files (volume-mounted /backups)
     tenant_db = client[db_name]
@@ -665,7 +707,38 @@ async def delete_tenant(tenant_id: str, admin: dict = Depends(get_super_admin)):
     tenant = await db.saas_tenants.find_one({"id": tenant_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    report = await _cascade_delete_tenant(tenant, admin)
+
+    # p551: one cascade writer per tenant. Concurrent deletes previously all
+    # archived/dropped/audited the same tenant (and one lost with a raw 500
+    # DatabaseDropPending). The lock is fail-closed and recoverable if stale.
+    lock_id = "tenant-delete:" + tenant_id
+    now = datetime.now(timezone.utc)
+    lock_doc = {
+        "_id": lock_id,
+        "tenant_id": tenant_id,
+        "action": "tenant_cascade_delete",
+        "admin_id": admin.get("id", ""),
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=30)).isoformat(),
+    }
+    try:
+        await main_db.saas_tenant_lifecycle_locks.insert_one(lock_doc)
+    except DuplicateKeyError:
+        existing = await main_db.saas_tenant_lifecycle_locks.find_one({"_id": lock_id}, {"_id": 1, "expires_at": 1})
+        if existing and existing.get("expires_at", "") < now.isoformat():
+            await main_db.saas_tenant_lifecycle_locks.delete_one(
+                {"_id": lock_id, "expires_at": existing.get("expires_at")})
+            try:
+                await main_db.saas_tenant_lifecycle_locks.insert_one(lock_doc)
+            except DuplicateKeyError:
+                raise HTTPException(status_code=409, detail="عملية حذف أخرى جارية لهذا المشترك")
+        else:
+            raise HTTPException(status_code=409, detail="عملية حذف أخرى جارية لهذا المشترك")
+
+    try:
+        report = await _cascade_delete_tenant(tenant, admin)
+    finally:
+        await main_db.saas_tenant_lifecycle_locks.delete_one({"_id": lock_id})
     return {"message": "تم حذف المستأجر وكل بياناته المرتبطة بنجاح", "report": report}
 
 
@@ -747,8 +820,19 @@ async def toggle_tenant_status(tenant_id: str, admin: dict = Depends(get_super_a
     tenant = await db.saas_tenants.find_one({"id": tenant_id})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    new_status = not tenant.get("is_active", True)
-    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"is_active": new_status}})
+    # p551: invert atomically. Parallel toggles must interleave as real flips;
+    # find-then-write let several requests return the same copied value.
+    toggled = await db.saas_tenants.find_one_and_update(
+        {"id": tenant_id},
+        [{"$set": {
+            "is_active": {"$not": [{"$ifNull": ["$is_active", True]}]},
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }}],
+        return_document=ReturnDocument.AFTER,
+    )
+    if not toggled:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    new_status = toggled.get("is_active", True)
     # If deactivating a tenant, reverse PENDING commissions that are still inside
     # the 7-day chargeback window. Using chargeback_until > now is the canonical
     # check — it avoids re-doing a date calculation and handles edge cases where
@@ -892,48 +976,52 @@ async def get_tenant_wallet(
 
 @router.post("/saas/tenants/{tenant_id}/extend-subscription")
 async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admin: dict = Depends(get_super_admin)):
-    tenant = await db.saas_tenants.find_one({"id": tenant_id})
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-
-    current_end = datetime.fromisoformat(tenant.get("subscription_ends_at", datetime.now(timezone.utc).isoformat()).replace('Z', '+00:00'))
-    now = datetime.now(timezone.utc)
-    start_date = max(current_end, now)
-
-    if payment.subscription_type == "monthly":
-        new_end = start_date + timedelta(days=30)
-    elif payment.subscription_type == "6months":
-        new_end = start_date + timedelta(days=180)
-    else:  # subscription_type is schema-validated: monthly, 6months or yearly.
-        new_end = start_date + timedelta(days=365)
-
     transaction_id = (payment.transaction_id or "").strip()
-    payment_doc = {
-        "id": str(uuid.uuid4()),
-        "tenant_id": tenant_id,
-        "tenant_name": tenant.get("name", ""),
-        "amount": payment.amount,
-        "payment_method": payment.payment_method,
-        "subscription_type": payment.subscription_type,
-        "period_start": start_date.isoformat(),
-        "period_end": new_end.isoformat(),
-        "notes": payment.notes or "",
-        "transaction_id": transaction_id,
-        "created_by": admin.get("id", ""),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    # p266: every recorded subscription payment gets an atomic code
+    created_at = datetime.now(timezone.utc).isoformat()
     from services.code_generator import public_order_code as _poc
-    payment_doc["payment_code"] = await _poc(db, "saas_payments", "PAY", 6, field="payment_code")
+    payment_code = await _poc(db, "saas_payments", "PAY", 6, field="payment_code")
 
-    # The subscription update, payment and idempotency claim commit together.
-    # The claim's unique _id closes the concurrent duplicate-transaction race
-    # without requiring a migration over historical saas_payments rows.
+    # p551: current_end must be re-read INSIDE each transaction attempt. The
+    # old flow calculated it before the transaction, so two different payments
+    # racing from the same end date both wrote the same +30d result (one paid
+    # month was silently lost). Write-conflict retries now extend the winner's
+    # committed end date.
     try:
         for attempt in range(3):
             try:
                 async with await client.start_session() as session:
                     async with session.start_transaction():
+                        tenant_now = await db.saas_tenants.find_one({"id": tenant_id}, session=session)
+                        if not tenant_now:
+                            raise HTTPException(status_code=404, detail="Tenant not found")
+                        current_end = datetime.fromisoformat(
+                            tenant_now.get("subscription_ends_at", datetime.now(timezone.utc).isoformat()).replace("Z", "+00:00"))
+                        if current_end.tzinfo is None:
+                            current_end = current_end.replace(tzinfo=timezone.utc)
+                        now = datetime.now(timezone.utc)
+                        start_date = max(current_end, now)
+                        if payment.subscription_type == "monthly":
+                            new_end = start_date + timedelta(days=30)
+                        elif payment.subscription_type == "6months":
+                            new_end = start_date + timedelta(days=180)
+                        else:  # schema-validated: monthly, 6months or yearly.
+                            new_end = start_date + timedelta(days=365)
+
+                        payment_doc = {
+                            "id": str(uuid.uuid4()),
+                            "tenant_id": tenant_id,
+                            "tenant_name": tenant_now.get("name", ""),
+                            "amount": payment.amount,
+                            "payment_method": payment.payment_method,
+                            "subscription_type": payment.subscription_type,
+                            "period_start": start_date.isoformat(),
+                            "period_end": new_end.isoformat(),
+                            "notes": payment.notes or "",
+                            "transaction_id": transaction_id,
+                            "created_by": admin.get("id", ""),
+                            "created_at": created_at,
+                            "payment_code": payment_code,
+                        }
                         if transaction_id:
                             import hashlib
                             claim_id = hashlib.sha256(f"{tenant_id}\0{transaction_id}".encode()).hexdigest()
@@ -941,7 +1029,7 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
                                 "_id": claim_id,
                                 "tenant_id": tenant_id,
                                 "transaction_id": transaction_id,
-                                "created_at": payment_doc["created_at"],
+                                "created_at": created_at,
                             }, session=session)
                         update_result = await db.saas_tenants.update_one(
                             {"id": tenant_id},
@@ -956,11 +1044,8 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
                         if update_result.matched_count != 1:
                             raise HTTPException(status_code=404, detail="Tenant not found")
                         await db.saas_payments.insert_one(payment_doc, session=session)
-                break
+                return {"new_subscription_ends_at": new_end.isoformat()}
             except OperationFailure as exc:
-                # Competing inserts of the same claim may surface as a
-                # transient WiredTiger write conflict. Retry the transaction;
-                # the next attempt deterministically hits the duplicate claim.
                 if exc.has_error_label("TransientTransactionError") and attempt < 2:
                     import asyncio
                     await asyncio.sleep(0.05 * (attempt + 1))
@@ -968,8 +1053,6 @@ async def extend_subscription(tenant_id: str, payment: SubscriptionPayment, admi
                 raise
     except DuplicateKeyError:
         raise HTTPException(status_code=409, detail="Duplicate payment transaction")
-
-    return {"new_subscription_ends_at": new_end.isoformat()}
 
 
 # ============ Golden Template management (p31) ============
