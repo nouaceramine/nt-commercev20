@@ -571,6 +571,29 @@ async def startup_event():
                     name="p504_client_ref")
             except Exception:
                 pass
+            # p547: e-commerce money/stock race guards (P547-003/004/005).
+            # Manual orders carry external_id "" — the partial filter keeps
+            # them out; legacy duplicates only skip the DDL (code-level dedup
+            # still applies), same doctrine as p257/p504.
+            try:
+                await _d.ecom_orders.create_index(
+                    [("channel", 1), ("external_id", 1)], unique=True,
+                    partialFilterExpression={"external_id": {"$type": "string", "$gt": ""}},
+                    name="p547_ecom_channel_ext")
+            except Exception:
+                pass
+            try:
+                await _d.ecom_referral_rewards.create_index(
+                    [("order_id", 1)], unique=True,
+                    partialFilterExpression={"order_id": {"$type": "string"}},
+                    name="p547_referral_order")
+            except Exception:
+                pass
+            try:
+                await _d.cash_boxes.create_index(
+                    [("id", 1)], unique=True, name="p547_cashbox_id")
+            except Exception:
+                pass
             # p266: tenant wallets — atomic codes + no entity duplicates
             try:
                 await _d.wallets.create_index(

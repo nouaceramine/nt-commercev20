@@ -9,6 +9,7 @@ import re
 import uuid
 
 from fastapi import HTTPException
+from pymongo.errors import DuplicateKeyError
 
 from routes.ecom.constants import ORDER_STATUS_KEYS, ORDER_STATUSES, STATUS_TRANSITIONS
 
@@ -397,13 +398,21 @@ async def _cash_tx(db, box_id, tx_type, amount, description, ref_type, ref_id, n
     p239: the docstring always promised journaling but the movement was a
     silent $inc — now every movement also writes a transactions ledger row
     (same shape as the recharge path) so cashbox history reconciles."""
-    await db.cash_boxes.update_one(
-        {"id": box_id},
-        {"$inc": {"balance": amount if tx_type == "income" else -amount},
-         "$set": {"updated_at": now},
-         "$setOnInsert": {"name": box_name, "name_fr": box_name, "type": "ecom"}},
-        upsert=True,
-    )
+    try:  # P547-005: with p547_cashbox_id unique, a losing concurrent upsert
+        # raises DuplicateKeyError instead of splitting the wallet into two
+        # box documents — retry as a plain increment on the winner's doc.
+        await db.cash_boxes.update_one(
+            {"id": box_id},
+            {"$inc": {"balance": amount if tx_type == "income" else -amount},
+             "$set": {"updated_at": now},
+             "$setOnInsert": {"name": box_name, "name_fr": box_name, "type": "ecom"}},
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        await db.cash_boxes.update_one(
+            {"id": box_id},
+            {"$inc": {"balance": amount if tx_type == "income" else -amount},
+             "$set": {"updated_at": now}})
     await db.transactions.insert_one({  # p239
         "id": str(uuid.uuid4()),
         "cash_box_id": box_id,
@@ -446,8 +455,36 @@ async def _auto_expense(db, amount, category, title, now):
     })
 
 
+async def _claim_order_flag(db, order_id: str, flag: str, now: str) -> bool:
+    """P547-001: atomically claim a money-hook flag BEFORE moving money.
+    Only the hook instance that flips the flag performs the movement —
+    overlapping shipped/delivered/refunded hooks (staff click vs courier
+    webhook) can no longer double-book or silently skip a reversal."""
+    doc = await db.ecom_orders.find_one_and_update(
+        {"id": order_id, flag: {"$ne": True}},
+        {"$set": {flag: True, "updated_at": now}})
+    return doc is not None
+
+
+async def _await_order_flag(db, order_id: str, flag: str, timeout: float = 3.0) -> bool:
+    """Bounded wait for a flag an in-flight sibling hook is expected to set."""
+    import asyncio as _aio
+    waited = 0.0
+    while waited < timeout:
+        doc = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0, flag: 1})
+        if (doc or {}).get(flag):
+            return True
+        await _aio.sleep(0.05)
+        waited += 0.05
+    return False
+
+
 async def _record_store_accounting(db, order_id: str, new_status: str, now: str, user: dict) -> None:
     """p86: link store orders to the ecom wallet + expense ledger (idempotent).
+    P547-001: every movement is gated by an atomic flag claim — the old
+    read-check-move-write pattern double-booked the shipping expense under
+    overlapping transitions and could lose the wallet reversal forever
+    (refunded is terminal — the money stayed booked in the courier wallet).
 
     Wallet = money the courier collects/holds on our behalf:
       delivered -> + (total - shipping_fee)       (net COD the courier pays out)
@@ -464,45 +501,51 @@ async def _record_store_accounting(db, order_id: str, new_status: str, now: str,
     total = round(float(order.get("total") or 0), 2)
     shipping = round(float(order.get("shipping_fee") or 0), 2)
     packaging = round(float(order.get("packaging_cost") or 0), 2)
-    flags = {}
 
-    if new_status == "shipped" and not order.get("shipping_expensed") and shipping > 0:
-        await _auto_expense(db, shipping, "شحن المتجر الإلكتروني", f"رسوم شحن الطلب {code}", now)
-        flags["shipping_expensed"] = True
-
-    elif new_status == "delivered" and not order.get("wallet_booked"):
-        net = round(total - shipping, 2)
-        if net > 0:
-            await _cash_tx(db, box_id, "income", net,
-                           f"تحصيل طلب المتجر {code} (صافي بعد الشحن)", "ecom_delivery", order_id, now, user, box_name)
-        if not order.get("shipping_expensed") and shipping > 0:
+    if new_status == "shipped":
+        if shipping > 0 and await _claim_order_flag(db, order_id, "shipping_expensed", now):
             await _auto_expense(db, shipping, "شحن المتجر الإلكتروني", f"رسوم شحن الطلب {code}", now)
-            flags["shipping_expensed"] = True
-        flags["wallet_booked"] = True
+
+    elif new_status == "delivered":
+        # claim BEFORE the movement so a concurrent refunded hook can see (and
+        # reverse) the booking the moment it checks.
+        if await _claim_order_flag(db, order_id, "wallet_booked", now):
+            net = round(total - shipping, 2)
+            if net > 0:
+                await _cash_tx(db, box_id, "income", net,
+                               f"تحصيل طلب المتجر {code} (صافي بعد الشحن)", "ecom_delivery", order_id, now, user, box_name)
+        if shipping > 0 and await _claim_order_flag(db, order_id, "shipping_expensed", now):
+            await _auto_expense(db, shipping, "شحن المتجر الإلكتروني", f"رسوم شحن الطلب {code}", now)
 
     elif new_status == "refunded":
         fee = round(float(order.get("return_fee") or 0), 2)
-        if order.get("wallet_booked") and not order.get("wallet_reversed"):
-            net = round(total - shipping, 2)
-            if net > 0:
-                await _cash_tx(db, box_id, "expense", net,
-                               f"عكس تحصيل الطلب المرتجع {code}", "ecom_return_reversal", order_id, now, user, box_name)
-            flags["wallet_reversed"] = True
-        if not order.get("return_deducted"):
+        if await _claim_order_flag(db, order_id, "wallet_reversed", now):
+            booked = bool(order.get("wallet_booked"))
+            if not booked and any(h.get("status") == "delivered" for h in order.get("status_history") or []):
+                # the delivered hook is in flight RIGHT NOW (its status claim
+                # is what allowed this refund) — bounded wait for its booking,
+                # then reverse it. Without this the reversal was lost forever.
+                booked = await _await_order_flag(db, order_id, "wallet_booked", timeout=3.0)
+            if booked:
+                net = round(total - shipping, 2)
+                if net > 0:
+                    await _cash_tx(db, box_id, "expense", net,
+                                   f"عكس تحصيل الطلب المرتجع {code}", "ecom_return_reversal", order_id, now, user, box_name)
+        if await _claim_order_flag(db, order_id, "return_deducted", now):
             courier_charge = round(shipping + fee, 2)
             if courier_charge > 0:
                 await _cash_tx(db, box_id, "expense", courier_charge,
                                f"رسوم شركة التوصيل للطلب المرتجع {code}", "ecom_return_fee", order_id, now, user, box_name)
-            flags["return_deducted"] = True
-        if not order.get("return_expensed"):
-            exp = round(fee + packaging + (0 if order.get("shipping_expensed") else shipping), 2)
+        if await _claim_order_flag(db, order_id, "return_expensed", now):
+            ship_expensed = bool(order.get("shipping_expensed"))
+            if shipping > 0 and not ship_expensed:
+                # a shipped/delivered hook may be claiming the shipping
+                # expense right now — wait briefly so it is not booked twice.
+                ship_expensed = await _await_order_flag(db, order_id, "shipping_expensed", timeout=1.5)
+            exp = round(fee + packaging + (0 if ship_expensed else shipping), 2)
             if exp > 0:
                 await _auto_expense(db, exp, "مرتجعات المتجر",
                                     f"خسائر إرجاع الطلب {code} (إرجاع {fee} + تغليف {packaging})", now)
-            flags["return_expensed"] = True
-
-    if flags:
-        await db.ecom_orders.update_one({"id": order_id}, {"$set": {**flags, "updated_at": now}})
 
 
 async def sync_sale_doc(db, order: dict) -> None:

@@ -17,6 +17,7 @@ Each ecom_order doc:
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+import asyncio
 import math
 import uuid
 import re
@@ -707,6 +708,30 @@ async def update_order(order_id: str, body: dict, user: dict = Depends(block_cas
             status_code=400,
             detail="لا يمكن تعديل المنتجات أو الرسوم بعد الشحن/التسليم/الإغلاق — أنشئ طلباً جديداً",
         )
+    # P547-002: serialize items-edit + inventory resync per order — two
+    # concurrent edits restored the old basket twice and deducted twice,
+    # corrupting stock vs the recorded basket (proven: stock 4 vs wanted 7).
+    _edit_locked = False
+    if "items" in body and order.get("inventory_deducted"):
+        for _ in range(100):  # bounded wait (~5s) for an in-flight edit
+            _claim = await db.ecom_orders.find_one_and_update(
+                {"id": order_id, "edit_lock": {"$ne": True}},
+                {"$set": {"edit_lock": True}})
+            if _claim:
+                _edit_locked = True
+                break
+            await asyncio.sleep(0.05)
+        if not _edit_locked:
+            raise HTTPException(
+                status_code=409,
+                detail="تعديل آخر جارٍ على هذا الطلب — أعد المحاولة بعد لحظات",
+            )
+        # P547-002 (تابع): أعد قراءة الطلب تحت القفل — لقطة ما قبل القفل تحمل
+        # inventory_deductions بالية فيسترجع الخاسر سلة قديمة ويخصم الجديدة.
+        order = await db.ecom_orders.find_one({"id": order_id})
+        if not order:
+            await db.ecom_orders.update_one({"id": order_id}, {"$unset": {"edit_lock": ""}})
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
     updates: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if "customer" in body and isinstance(body["customer"], dict):
         merged = {**(order.get("customer") or {}), **{k: (v or "").strip() if isinstance(v, str) else v for k, v in body["customer"].items()}}
@@ -752,16 +777,20 @@ async def update_order(order_id: str, body: dict, user: dict = Depends(block_cas
             raise HTTPException(status_code=400, detail="نوع التوصيل غير صالح — المسموح: home أو office")
         updates["delivery_type"] = dt
 
-    await db.ecom_orders.update_one({"id": order_id}, {"$set": updates})
-    # p138: mirror delivery type to the webstore twin so /store orders stays in sync
-    if "delivery_type" in updates and order.get("channel") == "webstore" and order.get("external_id"):
-        try:
-            await db.store_orders.update_one(
-                {"id": order["external_id"]},
-                {"$set": {"delivery_type": updates["delivery_type"]}},
-            )
-        except Exception as _me:  # noqa: BLE001
-            logger.warning("p138 store_orders delivery_type mirror failed: %s", _me)
+    try:
+        await db.ecom_orders.update_one({"id": order_id}, {"$set": updates})
+        # p138: mirror delivery type to the webstore twin so /store orders stays in sync
+        if "delivery_type" in updates and order.get("channel") == "webstore" and order.get("external_id"):
+            try:
+                await db.store_orders.update_one(
+                    {"id": order["external_id"]},
+                    {"$set": {"delivery_type": updates["delivery_type"]}},
+                )
+            except Exception as _me:  # noqa: BLE001
+                logger.warning("p138 store_orders delivery_type mirror failed: %s", _me)
+    finally:
+        if _edit_locked:
+            await db.ecom_orders.update_one({"id": order_id}, {"$unset": {"edit_lock": ""}})
     refreshed = await db.ecom_orders.find_one({"id": order_id}, {"_id": 0})
     return refreshed
 

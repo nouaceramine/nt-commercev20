@@ -31,6 +31,7 @@ import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel
 
 from config.database import db, main_db, get_tenant_db
@@ -210,7 +211,17 @@ async def _create_intake_order(tdb, source: dict, payload: dict) -> dict:
             doc["network_trust"] = net
     except Exception:  # noqa: BLE001
         pass
-    await tdb.ecom_orders.insert_one(doc)
+    try:
+        await tdb.ecom_orders.insert_one(doc)
+    except DuplicateKeyError:
+        # P547-003: concurrent identical webhooks — the p547_ecom_channel_ext
+        # unique index lets exactly one insert win; losers dedup cleanly.
+        if external_id:
+            existing = await tdb.ecom_orders.find_one(
+                {"channel": channel, "external_id": external_id}, {"_id": 0, "order_code": 1})
+            if existing:
+                return {"created": False, "order_code": existing.get("order_code")}
+        raise
     try:
         await sync_sale_doc(tdb, doc)
     except Exception:  # noqa: BLE001

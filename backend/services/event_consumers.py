@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from config.database import main_db, get_tenant_db
 from services.event_bus import RedisEventBus
 from models.events import Event
+from pymongo.errors import DuplicateKeyError
 
 log = logging.getLogger("event_consumers")
 
@@ -829,18 +830,23 @@ async def handle_referral_outcome(event: Event) -> None:
     amount = round(rval if rtype == "fixed" else total * rval / 100, 2)
     if amount <= 0:
         return
-    await tdb.ecom_referral_rewards.insert_one({
-        "id": str(uuid.uuid4()),
-        "referral_id": order["referral_id"],
-        "order_id": order_id,
-        "order_code": order.get("order_code"),
-        "reward_type": rtype,
-        "reward_value": rval,
-        "order_total": total,
-        "amount": amount,
-        "status": "due",
-        "created_at": now,
-    })
+    try:  # P547-004: the p547_referral_order unique index makes the
+        # docstring's "idempotent per order" promise real — a concurrent
+        # duplicate delivery loses at the index and is swallowed here.
+        await tdb.ecom_referral_rewards.insert_one({
+            "id": str(uuid.uuid4()),
+            "referral_id": order["referral_id"],
+            "order_id": order_id,
+            "order_code": order.get("order_code"),
+            "reward_type": rtype,
+            "reward_value": rval,
+            "order_total": total,
+            "amount": amount,
+            "status": "due",
+            "created_at": now,
+        })
+    except DuplicateKeyError:
+        pass
 
 
 def register_handlers(bus: RedisEventBus) -> None:
