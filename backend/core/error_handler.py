@@ -16,6 +16,8 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from . import registry
@@ -24,7 +26,28 @@ from .logging_config import get_module_logger
 _core_logger = get_module_logger("core")
 
 
+def _sanitize_nonfinite(obj):
+    """p555-007: rewrite NaN/Inf floats to strings — they are valid in
+    pydantic error payloads but crash strict json.dumps with a 500."""
+    import math as _m
+    if isinstance(obj, float) and not _m.isfinite(obj):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_nonfinite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_nonfinite(v) for v in obj]
+    return obj
+
+
 def install_error_handling(app) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+        """p555-007: same shape as FastAPI's default 422, but NaN/Inf-safe."""
+        return JSONResponse(
+            status_code=422,
+            content={"detail": jsonable_encoder(_sanitize_nonfinite(exc.errors()))},
+        )
+
     @app.middleware("http")
     async def _metrics_middleware(request: Request, call_next):
         """Track per-component request counts and response times."""

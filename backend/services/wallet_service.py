@@ -120,6 +120,16 @@ async def debit_wallet(main_db, entity_id, amount, ref_type, ref_id, description
     The conditional ($gte) + $inc update guarantees concurrent debits cannot double-spend.
     Returns (new_balance, transaction_dict).
     """
+    # p555-001: NaN/Inf wall — `x <= 0` is False for NaN, and MongoDB range
+    # queries match NaN only against NaN, so a poisoned amount slipped past
+    # both layers; $inc by NaN bricks the wallet balance forever.
+    import math as _math
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
+    if not _math.isfinite(amount) or amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
     wallet = await get_or_create_wallet(main_db, entity_id, entity_type)
     updated = await main_db.wallets.find_one_and_update(
         {"entity_id": entity_id, "balance": {"$gte": amount}},
@@ -170,6 +180,14 @@ async def credit_wallet(main_db, entity_id, amount, ref_type, ref_id, descriptio
     Used to compensate (refund) a previous debit when a dependent operation fails.
     Returns (new_balance, transaction_dict).
     """
+    # p555-001: same NaN/Inf wall as debit_wallet (defense in depth).
+    import math as _math
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
+    if not _math.isfinite(amount) or amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
     wallet = await get_or_create_wallet(main_db, entity_id, entity_type)
     updated = await main_db.wallets.find_one_and_update(
         {"entity_id": entity_id},

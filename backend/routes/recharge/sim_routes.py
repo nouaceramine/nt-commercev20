@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import math
 import uuid
 
 
@@ -48,6 +49,16 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         """Update SIM slot info"""
         now = datetime.now(timezone.utc).isoformat()
         update_data = {**slot_data, "last_updated": now}
+        # p555-001: free-dict update — wall the numeric fields against NaN/Inf
+        for _nf in ("balance", "bonus_balance", "empty_sims", "sim_unit_cost"):
+            if _nf in update_data:
+                try:
+                    _fv = float(update_data[_nf])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="قيمة رقمية غير صالحة")
+                if not math.isfinite(_fv):
+                    raise HTTPException(status_code=400, detail="القيم الرقمية غير المنتهية غير مقبولة")
+                update_data[_nf] = _fv
 
         await db.sim_slots.update_one(
             {"slot_id": slot_id},
@@ -60,6 +71,8 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
     async def update_sim_balance(slot_id: int, balance_data: SimBalanceUpdate, admin: dict = Depends(get_tenant_admin)):
         """Update SIM slot balance"""
         now = datetime.now(timezone.utc).isoformat()
+        if not math.isfinite(balance_data.balance):  # p555-001: NaN/Inf wall
+            raise HTTPException(status_code=400, detail="الرصيد غير صالح")
 
         # Get current slot
         slot = await db.sim_slots.find_one({"slot_id": slot_id})
@@ -150,8 +163,11 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         under concurrency. Now one MongoDB transaction: slot re-read inside the
         tx, cash box validated (404 «الصندوق غير موجود»), all-or-nothing.
         """
-        qty = int(payload.quantity or 0)
+        qty_raw = float(payload.quantity or 0)
         cost = float(payload.unit_cost or 0)
+        if not math.isfinite(qty_raw) or not math.isfinite(cost):  # p555-001 (int(NaN) 500'd first)
+            raise HTTPException(status_code=400, detail="قيم رقمية غير صالحة")
+        qty = int(qty_raw)
         if qty <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
         if cost < 0:
@@ -222,7 +238,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
     async def topup_sim_slot(slot_id: int, payload: SimTopupIn, admin: dict = Depends(get_tenant_admin)):
         """Charge the owner's own operator SIM with balance paid from a cash box."""
         amount = float(payload.amount or 0)
-        if amount <= 0:
+        if not math.isfinite(amount) or amount <= 0:  # p555-001: NaN/Inf wall
             raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         slot = await db.sim_slots.find_one({"slot_id": slot_id}, {"_id": 0})
         if not slot:
@@ -286,7 +302,7 @@ def build_sim_router(db, main_db=None, require_tenant=None, get_tenant_admin=Non
         """1:1 balance transfer between operator SIMs, or SIM ↔ platform wallet."""
         from pymongo import ReturnDocument as _RD
         amount = float(payload.amount or 0)
-        if amount <= 0:
+        if not math.isfinite(amount) or amount <= 0:  # p555-001: NaN/Inf wall
             raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
         if payload.from_kind not in ("slot", "wallet") or payload.to_kind not in ("slot", "wallet"):
             raise HTTPException(status_code=400, detail="نوع الطرف غير صالح")

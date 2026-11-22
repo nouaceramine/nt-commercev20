@@ -405,9 +405,14 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
 
         reseller_debited = False
 
-        # If the sale is attributed to a reseller, charge the reseller's OWN balance
-        # (a tenant-local ledger) by the sale PRICE.
-        if doc["reseller_id"]:
+        # Charge the reseller's OWN balance (a tenant-local ledger) by the sale
+        # PRICE — only when the reseller is the payer (pm="reseller").
+        # p555-002: the old condition fired whenever reseller_id was set — with
+        # pm="cash" the cash box was ALSO credited (paid twice, baseline D1:
+        # reseller −1200 AND cash +1200) and with pm="debt" the customer mirror
+        # AND the reseller were both charged. reseller_id with cash/debt is
+        # attribution only.
+        if doc["payment_method"] == "reseller" and doc["reseller_id"]:
             try:
                 _, _ = await _move_reseller_balance(
                     doc["reseller_id"], "debit", doc["price"],
@@ -588,9 +593,52 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
 
     @router.delete("/subscriptions/{sub_id}")
     async def delete_subscription(sub_id: str, admin: dict = Depends(get_tenant_admin)):
-        res = await db.digital_subscriptions.delete_one({"id": sub_id})
-        if res.deleted_count == 0:
+        """Delete a subscription. p555-003: a JOURNALED subscription (sale row
+        exists) is immutable financial history — p549-009 froze its edits, this
+        forbids its deletion (400). Legacy un-journaled rows are deleted WITH
+        full reversal of every money effect (wallet/panel cost refund, reseller
+        credit, customer debt-mirror reversal); any compensation failure keeps
+        the row and returns 500."""
+        sub = await db.digital_subscriptions.find_one({"id": sub_id}, {"_id": 0})
+        if not sub:
             raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
+        journaled = await db.sales.find_one({"items.subscription_id": sub_id}, {"_id": 1})
+        if journaled:
+            raise HTTPException(
+                status_code=400,
+                detail="لا يمكن حذف اشتراك مرحَّل في سجل المبيعات — التاريخ المالي غير قابل لإعادة الكتابة")
+        pm = (sub.get("payment_method") or "cash")
+        cost = _to_float(sub.get("cost"))
+        price = _to_float(sub.get("price"))
+        entity_id = admin.get("tenant_id") or admin.get("id", "")
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            if cost > 0:
+                if (sub.get("cost_source") or "wallet") == "panel":
+                    await db.digital_panel_balance.update_one(
+                        {"id": "default"},
+                        {"$inc": {"balance": cost}, "$set": {"updated_at": now}})
+                else:
+                    from services.wallet_service import credit_wallet
+                    await credit_wallet(
+                        main_db, entity_id, cost, "digital_subscription_delete_refund",
+                        sub_id, "استرجاع تكلفة اشتراك محذوف", admin.get("name", ""))
+            if pm == "reseller" and sub.get("reseller_id"):
+                await _move_reseller_balance(
+                    sub["reseller_id"], "credit", price,
+                    "استرجاع اشتراك محذوف", "digital_subscription_delete",
+                    sub_id, admin.get("name", ""))
+            if pm == "debt" and sub.get("customer_id"):
+                await db.customers.update_one(
+                    {"id": sub["customer_id"]},
+                    {"$inc": {"total_purchases": -price, "balance": -price,
+                              "total_debt": -price}})
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("p555: delete compensation failed for %s — row kept", sub_id)
+            raise HTTPException(status_code=500, detail="فشل عكس آثار الاشتراك — لم يُحذف")
+        await db.digital_subscriptions.delete_one({"id": sub_id})
         return {"success": True}
 
     # ============================================================

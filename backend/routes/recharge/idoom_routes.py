@@ -1,5 +1,5 @@
 """Idoom ADSL code inventory — stats, listing, bulk CSV upload, atomic sell."""
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -54,8 +54,8 @@ def build_idoom_router(db, main_db, require_tenant, get_tenant_admin):
     async def list_idoom_codes(
         status: Optional[str] = None,
         denomination: Optional[float] = None,
-        skip: int = 0,
-        limit: int = 50,
+        skip: int = Query(0, ge=0),        # p555-006: negative skip used to 500
+        limit: int = Query(50, ge=1, le=200),  # p555-006: negative = abs single batch
         admin: dict = Depends(get_tenant_admin),
     ):
         query: dict = {}

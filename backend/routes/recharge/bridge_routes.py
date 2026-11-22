@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, Literal
 from datetime import datetime, timezone
 import logging
+import math
 import httpx
 
 from .helpers import _assert_safe_bridge_url
@@ -286,6 +287,8 @@ def build_bridge_router(db, main_db, require_tenant, get_tenant_admin, get_tenan
         Auth via bridge secret — no admin JWT required.
         """
         now = datetime.now(timezone.utc).isoformat()
+        if not math.isfinite(body.balance):  # p555-001: NaN/Inf wall
+            raise HTTPException(status_code=400, detail="الرصيد غير صالح")
         await tenant_db.sim_slots.update_one(
             {"slot_id": slot_id},
             {"$set": {

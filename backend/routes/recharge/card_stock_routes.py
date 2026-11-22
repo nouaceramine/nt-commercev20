@@ -22,6 +22,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from pymongo import ReturnDocument
 from pymongo.errors import PyMongoError
+import math
 import uuid
 import logging
 
@@ -150,9 +151,11 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
         """
         qty = float(payload.quantity or 0)
         cost = float(payload.unit_cost or 0)
-        if qty <= 0:
+        # p555-001: NaN cost skips the cash leg (`total > 0` is False) while
+        # stock += NaN poisons the card — silent asset corruption.
+        if not math.isfinite(qty) or qty <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
-        if cost < 0:
+        if not math.isfinite(cost) or cost < 0:
             raise HTTPException(status_code=400, detail="سعر الشراء غير صالح")
 
         now = datetime.now(timezone.utc).isoformat()
@@ -246,7 +249,8 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
     async def sell_card(payload: CardSellIn, user: dict = Depends(require_tenant)):
         """Sell cards from stock: sales row (type card_sale) + cash box / customer debt."""
         qty = float(payload.quantity or 0)
-        if qty <= 0:
+        # p555-001: NaN slips past `qty <= 0` and $inc poisons the stock forever
+        if not math.isfinite(qty) or qty <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
 
         # p492: validate the money/debt counterpart BEFORE claiming stock — a ghost
@@ -274,9 +278,9 @@ def build_card_stock_router(db, main_db=None, require_tenant=None, get_tenant_ad
         now = datetime.now(timezone.utc).isoformat()
         unit_cost = float(card.get("unit_cost", 0) or 0)
         sell_price = float(payload.sell_price) if payload.sell_price else float(card.get("sell_price") or card.get("denomination") or 0)
-        if sell_price <= 0:
+        if not math.isfinite(sell_price) or sell_price <= 0:  # p555-001: NaN/Inf wall
             await db.card_stock.update_one({"id": payload.card_id}, {"$inc": {"quantity": qty}})
-            raise HTTPException(status_code=400, detail="أدخل سعر البيع")
+            raise HTTPException(status_code=400, detail="أدخل سعر بيع صالحًا")
         total = round(sell_price * qty, 2)
         profit = round((sell_price - unit_cost) * qty, 2)
         is_credit = payload.payment_method == "credit"

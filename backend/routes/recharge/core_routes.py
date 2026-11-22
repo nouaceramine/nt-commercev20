@@ -1,5 +1,5 @@
 """Recharge core routes — config, create (saga), history, stats, status poll, auto-recharge."""
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import logging
@@ -67,13 +67,15 @@ def build_core_router(db, main_db, require_tenant, get_tenant_admin, RECHARGE_CO
         return [RechargeResponse(**r) for r in recharges]
 
     @router.get("/recharge/stats")
-    async def get_recharge_stats(days: int = 30, admin: dict = Depends(get_tenant_admin)):
+    async def get_recharge_stats(days: int = Query(30, ge=1, le=3660), admin: dict = Depends(get_tenant_admin)):  # p555-006
         """Get recharge statistics"""
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
         # Total by operator
         pipeline = [
-            {"$match": {"created_at": {"$gte": start_date}}},
+            {"$match": {"created_at": {"$gte": start_date},
+                        # p555-005: failed (wallet-refunded) recharges are not revenue
+                        "status": {"$ne": "failed"}}},
             {"$group": {
                 "_id": "$operator",
                 "count": {"$sum": 1},
@@ -86,7 +88,7 @@ def build_core_router(db, main_db, require_tenant, get_tenant_admin, RECHARGE_CO
         # Today's stats
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         today_stats = await db.recharges.aggregate([
-            {"$match": {"created_at": {"$gte": today}}},
+            {"$match": {"created_at": {"$gte": today}, "status": {"$ne": "failed"}}},  # p555-005
             {"$group": {
                 "_id": None,
                 "count": {"$sum": 1},

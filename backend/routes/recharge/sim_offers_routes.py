@@ -20,6 +20,7 @@ Side effects of an activation:
 from datetime import datetime, timezone
 from typing import Optional
 import logging
+import math
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -78,6 +79,11 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
     async def create_offer(payload: SimOfferIn, admin: dict = Depends(get_tenant_admin)):
         if payload.operator not in OPERATORS:
             raise HTTPException(status_code=400, detail="متعامل غير معروف")
+        # p555-001: NaN/Inf wall on the offer's numeric fields
+        for _v in (payload.offer_value, payload.default_sale_price,
+                   payload.sim_cost, payload.typical_bonus):
+            if not math.isfinite(float(_v or 0)):
+                raise HTTPException(status_code=400, detail="قيم رقمية غير صالحة")
         doc = payload.model_dump()
         doc["id"] = str(uuid.uuid4())
         doc["operator_name"] = OPERATORS[payload.operator]["name_ar"]
@@ -90,6 +96,16 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
     async def update_offer(offer_id: str, payload: dict, admin: dict = Depends(get_tenant_admin)):
         payload.pop("id", None)
         payload.pop("_id", None)
+        # p555-001: NaN/Inf wall on numeric updates
+        for _nf in ("offer_value", "default_sale_price", "sim_cost", "typical_bonus"):
+            if _nf in payload:
+                try:
+                    _fv = float(payload[_nf])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="قيمة رقمية غير صالحة")
+                if not math.isfinite(_fv):
+                    raise HTTPException(status_code=400, detail="القيم الرقمية غير المنتهية غير مقبولة")
+                payload[_nf] = _fv
         if "operator" in payload and payload["operator"] in OPERATORS:
             payload["operator_name"] = OPERATORS[payload["operator"]]["name_ar"]
         res = await db.sim_offers.update_one({"id": offer_id}, {"$set": payload})
@@ -114,6 +130,11 @@ def build_sim_offers_router(db, main_db=None, require_tenant=None, get_tenant_ad
     async def create_activation(payload: SimActivationIn, user: dict = Depends(require_tenant)):
         if payload.operator not in OPERATORS:
             raise HTTPException(status_code=400, detail="متعامل غير معروف")
+        # p555-001: NaN slips past every `<= 0` check and poisons the slot
+        # (balance −= NaN) and the cash box (+= NaN) — wall all four numbers.
+        if not all(math.isfinite(float(v or 0)) for v in
+                   (payload.sale_price, payload.offer_value, payload.bonus, payload.sim_cost)):
+            raise HTTPException(status_code=400, detail="القيم الرقمية غير المنتهية غير مقبولة")
         if payload.sale_price <= 0:
             raise HTTPException(status_code=400, detail="سعر البيع يجب أن يكون أكبر من صفر")
         if payload.offer_value < 0 or payload.bonus < 0 or payload.sim_cost < 0:
