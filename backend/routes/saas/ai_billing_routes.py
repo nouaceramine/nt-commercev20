@@ -90,6 +90,20 @@ async def put_config(data: BillingConfigIn, admin: dict = Depends(get_super_admi
         raise HTTPException(status_code=400, detail="هامش غير صالح")
     if not math.isfinite(data.usd_dzd_rate) or data.usd_dzd_rate <= 0:
         raise HTTPException(status_code=400, detail="سعر الصرف غير صالح")
+    # p553: model_prices is a raw dict — validate every entry, or NaN/negative
+    # per-token prices reach compute_cost_usd and poison usage_records/billing.
+    if data.model_prices is not None:
+        if not isinstance(data.model_prices, dict):
+            raise HTTPException(status_code=400, detail="أسعار النماذج غير صالحة")
+        for _model, _entry in data.model_prices.items():
+            if not isinstance(_model, str) or not isinstance(_entry, dict):
+                raise HTTPException(status_code=400, detail="أسعار النماذج غير صالحة")
+            for _k, _v in _entry.items():
+                if _k not in ("in", "out", "per_image"):
+                    raise HTTPException(status_code=400, detail=f"حقل سعر غير معروف: {_k}")
+                if (isinstance(_v, bool) or not isinstance(_v, (int, float))
+                        or not math.isfinite(_v) or _v < 0):
+                    raise HTTPException(status_code=400, detail=f"سعر النموذج {_model} غير صالح")
     doc = {
         "id": "global",
         "margin_pct": float(data.margin_pct),
@@ -165,8 +179,8 @@ async def _record_ai_commission(tid, month, cost_usd, cfg, amount_dzd):
     """p295: platform margin on a billed AI invoice = markup over upstream cost.
     Idempotent per (ai_invoice, tenant:month) via the engine's unique reference."""
     try:
-        if amount_dzd <= 0:
-            return
+        if amount_dzd <= 0 or not math.isfinite(amount_dzd) or not math.isfinite(float(cost_usd)):
+            return  # p553: never ledger a poisoned (NaN/inf) commission
         from services.commission_engine import record_platform_commission
 
         gross_dzd = round(float(cost_usd) * float(cfg["usd_dzd_rate"]), 2)
@@ -198,6 +212,23 @@ async def run_billing(data: RunIn, admin: dict = Depends(get_super_admin)):
         tid = r["_id"]
         billed_usd = round(r["cost_usd"] * (1 + cfg["margin_pct"] / 100), 4)
         amount_dzd = round(billed_usd * cfg["usd_dzd_rate"], 2)
+        # p553: a poisoned usage row (NaN/inf cost) must never reach
+        # debit_wallet — mark failed with an explicit error, no claim race.
+        if not (math.isfinite(r["cost_usd"]) and math.isfinite(billed_usd)
+                and math.isfinite(amount_dzd)):
+            await main_db.ai_invoices.update_one(
+                {"tenant_id": tid, "month": data.month},
+                {"$set": {"status": "failed",
+                          "error": "بيانات استهلاك فاسدة (قيمة غير منتهية) — راجع model_prices",
+                          "claimed_at": now},
+                 "$setOnInsert": {"id": str(uuid.uuid4()), "tenant_id": tid,
+                                  "month": data.month, "code": "", "created_at": now}},
+                upsert=True,
+            )
+            results["failed"].append(
+                {"tenant_id": tid, "amount_dzd": 0, "code": "",
+                 "error": "poisoned usage (non-finite cost)"})
+            continue
         existing = await main_db.ai_invoices.find_one(
             {"tenant_id": tid, "month": data.month}, {"_id": 0}
         )

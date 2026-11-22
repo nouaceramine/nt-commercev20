@@ -16,6 +16,7 @@ a metering bug must never take down AI features, but a real cap breach must.
 """
 from datetime import datetime, timezone
 import logging
+import math
 import uuid
 
 from fastapi import HTTPException
@@ -60,12 +61,22 @@ def month_key(dt: datetime | None = None) -> str:
     return (dt or datetime.now(timezone.utc)).strftime("%Y-%m")
 
 
+def _clean_price(v, fallback):
+    """p553: ignore poisoned overrides (NaN/inf/negative/non-numeric) — fall back
+    to the default so a corrupt config can never poison usage records."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return fallback
+    return v if math.isfinite(v) and v >= 0 else fallback
+
+
 def compute_cost_usd(model: str, tokens_in: int, tokens_out: int, prices: dict | None = None) -> float:
     prices = prices or {}
     pin, pout = DEFAULT_MODEL_PRICING.get(model or "", _FALLBACK_PRICE)
     over = (prices.get(model) or {}) if isinstance(prices, dict) else {}
-    pin = float(over.get("in", pin))
-    pout = float(over.get("out", pout))
+    pin = _clean_price(over.get("in", pin), pin)
+    pout = _clean_price(over.get("out", pout), pout)
     return round((tokens_in or 0) / 1_000_000 * pin + (tokens_out or 0) / 1_000_000 * pout, 6)
 
 
@@ -141,7 +152,7 @@ async def record_ai_image_usage(main_db, *, model: str, count: int = 1, feature:
         cfg = await get_billing_config(main_db)
         price = DEFAULT_IMAGE_PRICING.get(model or "", _FALLBACK_IMAGE_PRICE)
         over = ((cfg.get("model_prices") or {}).get(model) or {}) if isinstance(cfg.get("model_prices"), dict) else {}
-        price = float(over.get("per_image", price))
+        price = _clean_price(over.get("per_image", price), price)
         cost = round(price * max(int(count or 1), 1), 6)
         now = datetime.now(timezone.utc)
         await main_db.usage_records.insert_one({

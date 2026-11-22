@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
+import math
 from importlib.util import find_spec
 
 logger = logging.getLogger(__name__)
@@ -1520,8 +1521,11 @@ async def get_robot_history(robot: str = None, limit: int = 20, user: dict = Dep
 @robot_router.post("/interval/{robot_name}")
 async def set_robot_interval(robot_name: str, body: dict, user: dict = Depends(get_tenant_admin)) -> dict:  # p523
     interval = body.get("interval_seconds")
-    if not isinstance(interval, (int, float)) or interval < 60:
-        raise HTTPException(status_code=400, detail="interval_seconds يجب أن يكون >= 60")
+    # p553: isinstance(nan/inf, float) is True and ordered comparisons pass —
+    # int(nan) then raised ValueError → 500 on platform infra. Wall it off.
+    if (isinstance(interval, bool) or not isinstance(interval, (int, float))
+            or not math.isfinite(interval) or interval < 60 or interval > 604800):
+        raise HTTPException(status_code=400, detail="interval_seconds يجب أن يكون بين 60 و 604800")
     ok = await robot_manager.set_interval(robot_name, int(interval))
     if not ok:
         raise HTTPException(status_code=404, detail="الروبوت غير موجود")

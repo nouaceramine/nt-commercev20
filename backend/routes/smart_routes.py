@@ -283,6 +283,15 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
 
     @router.post("/smart/competitor-watch")
     async def add_competitor_watch(data: CompetitorWatchIn, user: dict = Depends(get_tenant_admin)):
+        # p553: same strict money parsing as the PUT price path (p497a) — the
+        # create model let NaN (500 AFTER the insert → poisoned doc) and
+        # negative prices straight into price_history.
+        if not data.product_name.strip():
+            raise HTTPException(status_code=400, detail="اسم المنتج مطلوب")
+        for _f in ("my_price", "competitor_price"):
+            _v = getattr(data, _f)
+            if not math.isfinite(_v) or _v < 0:
+                raise HTTPException(status_code=400, detail="الأسعار يجب أن تكون أرقاماً موجبة صحيحة")
         doc = data.model_dump()
         doc.update({"id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat(),
                     "price_history": [{"price": data.competitor_price, "at": datetime.now(timezone.utc).isoformat()}]
@@ -455,6 +464,9 @@ def create_smart_router_ext(db, main_db, require_tenant, get_tenant_admin, get_t
 
     @router.put("/smart/wa-bot/settings")
     async def set_wa_bot(data: WaBotSettings, user: dict = Depends(get_tenant_admin)):
+        # p553: bound the suggestions knob (negative/huge values were stored).
+        if not (1 <= data.max_suggestions <= 10):
+            raise HTTPException(status_code=400, detail="عدد الاقتراحات بين 1 و 10")
         await db.wa_bot_settings.update_one({"id": "main"}, {"$set": data.model_dump()}, upsert=True)
         return {"ok": True, "enabled": data.enabled}
 
@@ -482,6 +494,17 @@ def create_smart_router_ext(db, main_db, require_tenant, get_tenant_admin, get_t
         if not (0 <= data.discount_pct <= 90):
             raise HTTPException(status_code=400, detail="نسبة الخصم بين 0 و 90")
         ends = data.ends_at
+        # p553: ends_at was stored unchecked — garbage strings silently broke
+        # the report window, and a past date left an "active" dead campaign.
+        if ends:
+            try:
+                _ends_dt = datetime.fromisoformat(ends.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                raise HTTPException(status_code=400, detail="صيغة ends_at غير صالحة (ISO 8601)")
+            if _ends_dt.tzinfo is None:
+                _ends_dt = _ends_dt.replace(tzinfo=timezone.utc)
+            if data.active and _ends_dt <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="تاريخ النهاية يجب أن يكون في المستقبل")
         if data.active and not ends:
             ends = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59).isoformat()
         doc = {"active": data.active, "discount_pct": data.discount_pct,

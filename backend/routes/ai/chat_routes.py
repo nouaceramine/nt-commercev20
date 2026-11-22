@@ -3,9 +3,10 @@ AI Accounting Routes for NT Commerce
 Handles AI chat, insights, and agent endpoints
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -490,7 +491,8 @@ def create_ai_routes(db, get_current_user) -> dict:
         return out
 
     @router.get("/forecast/{forecast_type}")
-    async def get_forecast(forecast_type: str, periods: int = 3, user=Depends(block_cashier)):  # p531
+    async def get_forecast(forecast_type: str, periods: int = Query(3, ge=1, le=24),  # p553: bounds
+                           user=Depends(block_cashier)):  # p531
         """Get financial forecast"""
         if forecast_type not in ["revenue", "cash_flow"]:
             raise HTTPException(status_code=400, detail="Invalid forecast type")
@@ -537,7 +539,9 @@ def create_ai_routes(db, get_current_user) -> dict:
         """Get daily financial summary"""
         if not date:
             date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        
+        elif not re.match(r"^\d{4}-\d{2}-\d{2}$", date):  # p553: reject malformed dates
+            raise HTTPException(status_code=400, detail="صيغة التاريخ: YYYY-MM-DD")
+
         # Check if we have a cached summary
         cached = await db.daily_reports.find_one({"date": date}, {"_id": 0})
         if cached:
