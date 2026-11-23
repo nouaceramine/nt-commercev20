@@ -54,7 +54,9 @@ class StockTransferCreate(BaseModel):
     from_warehouse: str
     to_warehouse: str
     product_id: str
-    quantity: int = Field(gt=0)
+    # p558: float — weight-sold products (sold_by_weight) move in fractions;
+    # the int wall blocked legitimate 2.5kg transfers with a bare 422.
+    quantity: float = Field(gt=0, le=1000000, allow_inf_nan=False)
 
 class StockTransferResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")

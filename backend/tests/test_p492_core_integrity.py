@@ -209,12 +209,16 @@ def test_cost_drift_uses_the_purchase_transaction_session():
 
 
 class WarehouseStockCollection:
-    def __init__(self, stock=None):
+    def __init__(self, stock=None, any_row=None):
         self.stock = stock
+        self.any_row = any_row  # p558: row found by the {"product_id": ...} probe
         self.inserted = None
         self.atomic_update = None
 
-    async def find_one(self, query, session=None):
+    async def find_one(self, query, projection=None, session=None):
+        # p558: the init-once path probes {"product_id": pid} for ANY row.
+        if "product_id" in query and "id" not in query:
+            return self.any_row
         return self.stock
 
     async def insert_one(self, doc, session=None):
@@ -228,9 +232,22 @@ class WarehouseStockCollection:
         return self.stock
 
 
+class WarehouseStockProducts:
+    """p558: product-level init-flag claim stub."""
+
+    def __init__(self, claim_won=True):
+        self.claim_won = claim_won
+        self.claimed = None
+
+    async def find_one_and_update(self, query, update, session=None, **kw):
+        self.claimed = (query, update)
+        return {"id": query["id"]} if self.claim_won else None
+
+
 class WarehouseStockDB:
-    def __init__(self, stock=None):
-        self.warehouse_stock = WarehouseStockCollection(stock)
+    def __init__(self, stock=None, any_row=None, claim_won=True):
+        self.warehouse_stock = WarehouseStockCollection(stock, any_row)
+        self.products = WarehouseStockProducts(claim_won)
 
 
 def test_warehouse_stock_initialization_uses_unique_mongo_id():
@@ -272,6 +289,34 @@ def test_warehouse_stock_rejects_atomic_overdraw():
         ))
     assert error.value.status_code == 400
     assert db.warehouse_stock.stock["quantity"] == 1.0
+
+
+def test_warehouse_stock_no_inheritance_when_rows_exist_elsewhere():
+    """p558: a missing location row starts at ZERO when the product already has
+    location rows — the legacy total-inheritance fires only on the true first
+    row, so a purchase/sale at an untouched location can no longer inflate
+    sum(locations) past products.quantity."""
+    from services.warehouse_stock import adjust_warehouse_stock
+    db = WarehouseStockDB(stock=None, any_row={"_id": "other", "quantity": 7.0})
+    quantity = asyncio.run(adjust_warehouse_stock(
+        db, "TEST-P492-product", "TEST-P492-w2", 5,
+        product_quantity_before=20, session=None,
+    ))
+    assert quantity == 5  # 0 + delta, not 20 + delta
+    assert db.warehouse_stock.inserted["quantity"] == 5
+
+
+def test_warehouse_stock_no_inheritance_when_flag_already_claimed():
+    """p558: a concurrent first-write that lost the product-level flag claim
+    starts at zero even when no rows are visible yet."""
+    from services.warehouse_stock import adjust_warehouse_stock
+    db = WarehouseStockDB(stock=None, any_row=None, claim_won=False)
+    quantity = asyncio.run(adjust_warehouse_stock(
+        db, "TEST-P492-product", "TEST-P492-w2", 5,
+        product_quantity_before=20, session=None,
+    ))
+    assert quantity == 5
+    assert db.warehouse_stock.inserted["quantity"] == 5
 
 
 def test_inventory_code_generation_requires_tenant_context():

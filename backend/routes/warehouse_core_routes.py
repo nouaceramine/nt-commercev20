@@ -1,5 +1,6 @@
 """Warehouse, stock-transfer and inventory-session routes."""
 import asyncio
+import random
 import uuid
 from datetime import datetime, timezone
 
@@ -22,8 +23,6 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
         w = WarehouseCreate(**warehouse)
         wid = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        if w.is_main:
-            await db.warehouses.update_many({"is_main": True}, {"$set": {"is_main": False}})
         from services.code_generator import generate_code
         code = await generate_code(db, "warehouses", "DP", 5, with_year=False)
         doc = {
@@ -31,7 +30,30 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
             "phone": w.phone or "", "manager": w.manager or "", "notes": w.notes or "",
             "is_main": w.is_main, "created_at": now,
         }
-        await db.warehouses.insert_one(doc)
+        if w.is_main:
+            # p558: the clear-then-set swap is ONE transaction guarded by the
+            # p558_single_main_warehouse partial unique index — two concurrent
+            # mains can no longer coexist (a racing loser retries into the
+            # clear-then-set sequence and wins cleanly).
+            for attempt in range(8):
+                try:
+                    async with await client.start_session() as tx_session:
+                        async with tx_session.start_transaction():
+                            await db.warehouses.update_many(
+                                {"is_main": True}, {"$set": {"is_main": False}},
+                                session=tx_session)
+                            await db.warehouses.insert_one(dict(doc), session=tx_session)
+                    break
+                except DuplicateKeyError:
+                    if attempt == 7:
+                        raise HTTPException(status_code=409, detail="تعارض تزامن على المخزن الرئيسي — أعد المحاولة")
+                    await asyncio.sleep(min(0.9, 0.02 * (2 ** attempt)) * (0.5 + random.random()))
+                except PyMongoError as exc:
+                    if attempt == 7 or not exc.has_error_label("TransientTransactionError"):
+                        raise
+                    await asyncio.sleep(min(0.9, 0.02 * (2 ** attempt)) * (0.5 + random.random()))
+        else:
+            await db.warehouses.insert_one(doc)
         doc.pop("_id", None)
         return doc
 
@@ -47,8 +69,27 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
             raise HTTPException(status_code=404, detail="Warehouse not found")
         update_data = WarehouseUpdate(**updates).model_dump(exclude_unset=True, exclude_none=True)
         if update_data.get("is_main"):
-            await db.warehouses.update_many({"is_main": True}, {"$set": {"is_main": False}})
-        if update_data:
+            # p558: atomic swap under the p558_single_main_warehouse index.
+            for attempt in range(8):
+                try:
+                    async with await client.start_session() as tx_session:
+                        async with tx_session.start_transaction():
+                            await db.warehouses.update_many(
+                                {"is_main": True}, {"$set": {"is_main": False}},
+                                session=tx_session)
+                            await db.warehouses.update_one(
+                                {"id": warehouse_id}, {"$set": update_data},
+                                session=tx_session)
+                    break
+                except DuplicateKeyError:
+                    if attempt == 7:
+                        raise HTTPException(status_code=409, detail="تعارض تزامن على المخزن الرئيسي — أعد المحاولة")
+                    await asyncio.sleep(min(0.9, 0.02 * (2 ** attempt)) * (0.5 + random.random()))
+                except PyMongoError as exc:
+                    if attempt == 7 or not exc.has_error_label("TransientTransactionError"):
+                        raise
+                    await asyncio.sleep(min(0.9, 0.02 * (2 ** attempt)) * (0.5 + random.random()))
+        elif update_data:
             await db.warehouses.update_one({"id": warehouse_id}, {"$set": update_data})
         return await db.warehouses.find_one({"id": warehouse_id}, {"_id": 0})
 
@@ -111,19 +152,22 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
     async def create_stock_transfer(transfer: dict, admin: dict = Depends(require_permission("warehouses.edit"))):
         from models.schemas import StockTransferCreate
         t = StockTransferCreate(**transfer)
-        for attempt in range(5):
+        # p558: 8 attempts with jittered backoff — under a 12-way depletion race
+        # the 5 fixed-backoff attempts exhausted and the losing transfers died
+        # with a bare 500 (WriteConflict) instead of settling as clean 400s.
+        for attempt in range(8):
             try:
                 async with await client.start_session() as tx_session:
                     async with tx_session.start_transaction():
                         return await _create_stock_transfer_impl(t, tx_session)
             except DuplicateKeyError:
-                if attempt == 4:
+                if attempt == 7:
                     raise
-                await asyncio.sleep(0.02 * (2 ** attempt))
+                await asyncio.sleep(min(0.9, 0.02 * (2 ** attempt)) * (0.5 + random.random()))
             except PyMongoError as exc:
-                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                if attempt == 7 or not exc.has_error_label("TransientTransactionError"):
                     raise
-                await asyncio.sleep(0.02 * (2 ** attempt))
+                await asyncio.sleep(min(0.9, 0.02 * (2 ** attempt)) * (0.5 + random.random()))
 
     @router.get("/stock-transfers")
     async def get_stock_transfers(user: dict = Depends(require_permission("warehouses.view"))):
@@ -206,6 +250,11 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
                         db, product_id, main_warehouse["id"], counted_quantity - old_quantity,
                         product_quantity_before=old_quantity, session=session,
                         initialize_from_product=True,
+                        # p558: the count is GLOBAL but the delta lands on the
+                        # main location — when other locations hold stock the
+                        # delta can exceed the main row, and blocking the whole
+                        # session with a bare 400 stranded it active forever.
+                        allow_negative=True,
                     )
                 await db.products.update_one(
                     {"id": product_id},

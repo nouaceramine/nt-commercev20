@@ -30,7 +30,24 @@ async def adjust_warehouse_stock(
     now = datetime.now(timezone.utc).isoformat()
     stock = await db.warehouse_stock.find_one({"id": stock_id}, session=session)
     if stock is None:
-        initial = float(product_quantity_before or 0) if initialize_from_product else 0.0
+        # p558: the legacy "first location inherits the product total" path must
+        # fire exactly once per product and only while NO location rows exist.
+        # The product-level flag is claimed atomically — a racing first-write at
+        # another location loses with a TransientTransactionError and retries
+        # into the row-aware branch — so a second untouched location can no
+        # longer re-inherit the full total and inflate sum(locations) past
+        # products.quantity.
+        initial = 0.0
+        if initialize_from_product:
+            claim = await db.products.find_one_and_update(
+                {"id": product_id, "warehouse_stock_init": {"$ne": True}},
+                {"$set": {"warehouse_stock_init": True}},
+                session=session)
+            if claim is not None:
+                any_row = await db.warehouse_stock.find_one(
+                    {"product_id": product_id}, {"_id": 1}, session=session)
+                if not any_row:
+                    initial = float(product_quantity_before or 0)
         new_quantity = initial + delta
         # p501: reversal paths (purchase delete/reopen, manual quantity set) pass
         # allow_negative — products.quantity already goes negative there, and

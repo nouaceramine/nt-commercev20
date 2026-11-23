@@ -1,6 +1,6 @@
 # p188: Bill of Materials — production recipes & manufacturing runs
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from pymongo.errors import PyMongoError, DuplicateKeyError
@@ -10,30 +10,32 @@ import uuid
 
 class Component(BaseModel):
     product_id: str
-    quantity: float  # per one output batch
+    # p558: finite+positive — NaN slipped past every `<= 0` comparison guard
+    # (nan <= 0 is False) and a negative component made a run INFLATE stock.
+    quantity: float = Field(gt=0, allow_inf_nan=False)  # per one output batch
 
 
 class RecipeCreate(BaseModel):
     product_id: str  # output product
     name: str
-    output_qty: float = 1
+    output_qty: float = Field(default=1, gt=0, allow_inf_nan=False)
     components: List[Component]
 
 
 class RecipeUpdate(BaseModel):
     name: Optional[str] = None
-    output_qty: Optional[float] = None
+    output_qty: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
     components: Optional[List[Component]] = None
 
 
 class RunCreate(BaseModel):
     recipe_id: str
-    batches: float = 1
+    batches: float = Field(default=1, gt=0, allow_inf_nan=False)
 
 
 class WasteCreate(BaseModel):
     product_id: str
-    quantity: float
+    quantity: float = Field(gt=0, allow_inf_nan=False)
     reason: Optional[str] = ""
 
 
@@ -65,8 +67,8 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=404, detail="المنتج النهائي غير موجود")
         if not components:
             raise HTTPException(status_code=400, detail="الوصفة تحتاج مكوّناً واحداً على الأقل")
-        if output_qty <= 0:
-            raise HTTPException(status_code=400, detail="كمية الإنتاج يجب أن تكون موجبة")
+        if not math.isfinite(output_qty) or output_qty <= 0:
+            raise HTTPException(status_code=422, detail="كمية الإنتاج يجب أن تكون رقمًا منتهيًا موجبًا")
         seen = set()
         enriched = []
         for c in components:
@@ -75,8 +77,8 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             if c.product_id in seen:
                 raise HTTPException(status_code=400, detail="مكوّن مكرر في الوصفة")
             seen.add(c.product_id)
-            if c.quantity <= 0:
-                raise HTTPException(status_code=400, detail="كمية المكوّن يجب أن تكون موجبة")
+            if not math.isfinite(c.quantity) or c.quantity <= 0:
+                raise HTTPException(status_code=422, detail="كمية المكوّن يجب أن تكون رقمًا منتهيًا موجبًا")
             cp = await _product(c.product_id)
             if not cp:
                 raise HTTPException(status_code=404, detail=f"مكوّن غير موجود: {c.product_id}")
@@ -217,6 +219,16 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
                               "is_non_stockable": bool(cp and cp.get("is_non_stockable")),
                               "stock": (cp.get("quantity") or 0) if cp else 0})
         output_qty = r["output_qty"] * data.batches
+        # p558: runtime wall — recipes written before the schema walls (or
+        # seeded directly) could carry negative/NaN components; a run must
+        # refuse them instead of inflating or poisoning stock.
+        if not (math.isfinite(output_qty) and output_qty > 0):
+            raise HTTPException(status_code=422, detail="كمية إنتاج الوصفة غير صالحة")
+        for c in comp_snap:
+            if not (math.isfinite(c["consumed"]) and c["consumed"] > 0):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"كمية مكوّن غير صالحة في الوصفة: {c.get('product_name') or c['product_id']}")
         total_cost = sum(c["unit_cost"] * c["consumed"] for c in comp_snap)
         unit_cost = round(total_cost / output_qty, 2) if output_qty else 0
 
@@ -252,6 +264,11 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
             try:
                 async with await _client.start_session() as _tx:
                     async with _tx.start_transaction():
+                        # p558: mirror every stock move into the main location
+                        # row so sum(warehouse_stock) == products.quantity.
+                        from services.warehouse_stock import adjust_warehouse_stock
+                        _main = await db.warehouses.find_one(
+                            {"is_main": True}, {"_id": 0, "id": 1}, session=_tx)
                         for c in comp_snap:
                             if c["is_non_stockable"]:
                                 continue
@@ -265,11 +282,23 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
                                     status_code=400,
                                     detail=f"مخزون غير كافٍ للمكوّن '{c['product_name']}': "
                                            f"المتاح {c['stock']} والمطلوب {c['consumed']}")
+                            if _main:
+                                await adjust_warehouse_stock(
+                                    db, c["product_id"], _main["id"], -c["consumed"],
+                                    product_quantity_before=float(c["stock"] or 0),
+                                    session=_tx, initialize_from_product=True,
+                                    allow_negative=True)
                         await db.products.update_one(
                             {"id": r["product_id"]},
                             {"$inc": {"quantity": output_qty},
                              "$set": {"purchase_price": unit_cost}},
                             session=_tx)
+                        if _main and not out_p.get("is_non_stockable"):
+                            await adjust_warehouse_stock(
+                                db, r["product_id"], _main["id"], output_qty,
+                                product_quantity_before=float(out_p.get("quantity", 0) or 0),
+                                session=_tx, initialize_from_product=True,
+                                allow_negative=True)
                         await _orders().insert_one(dict(doc), session=_tx)
                         await _recipes().update_one(
                             {"id": r["id"]},
@@ -327,6 +356,17 @@ def create_production_routes(db, get_current_user, get_tenant_admin) -> dict:
                             raise HTTPException(
                                 status_code=400,
                                 detail="الكمية أكبر من المخزون المتاح")
+                        # p558: mirror into the main location row.
+                        if not p.get("is_non_stockable"):
+                            _main = await db.warehouses.find_one(
+                                {"is_main": True}, {"_id": 0, "id": 1}, session=_tx)
+                            if _main:
+                                from services.warehouse_stock import adjust_warehouse_stock
+                                await adjust_warehouse_stock(
+                                    db, data.product_id, _main["id"], -data.quantity,
+                                    product_quantity_before=float(claimed.get("quantity", 0) or 0),
+                                    session=_tx, initialize_from_product=True,
+                                    allow_negative=True)
                         await db.waste_log.insert_one(dict(doc), session=_tx)
                 break
             except HTTPException:

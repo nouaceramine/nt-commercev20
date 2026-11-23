@@ -4,9 +4,10 @@ Collections: defective_goods, defective_inspections, supplier_returns,
 return_tracking, disposal_records, defect_categories, return_reasons, disposal_methods
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime, timezone
+import math
 import uuid
 
 
@@ -37,15 +38,65 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
         defect_type: str = "manufacturing"
         defect_severity: str = "medium"
         description: str = ""
-        quantity: int = Field(default=1, ge=1)
-        unit_cost: float = Field(default=0, ge=0)
+        quantity: int = Field(default=1, ge=1, le=1000000)
+        # p558: finite wall — 1e999 (inf) passed ge=0, was stored, then the
+        # response serializer 500'd on the committed poison.
+        unit_cost: float = Field(default=0, ge=0, allow_inf_nan=False)
 
     class InspectionCreate(BaseModel):
         defective_goods_id: str
         confirmed_defective: bool = True
         actual_defect_type: str = ""
-        actual_quantity: int = 1
+        actual_quantity: int = Field(default=1, ge=0, le=1000000)
         recommended_action: str = "return_to_supplier"
+
+    # p558: PUT whitelist — the raw pass-through let callers rewrite quantity/
+    # status/product_id (stock-affecting fields) and poison unit_cost with inf.
+    class DefectiveUpdate(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        defect_type: Optional[str] = None
+        defect_severity: Optional[str] = None
+        description: Optional[str] = None
+        supplier_id: Optional[str] = None
+        supplier_name: Optional[str] = None
+        unit_cost: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+
+    _DEFECTIVE_IMMUTABLE = {"id", "defective_number", "product_id", "product_name",
+                            "quantity", "total_cost", "status", "inspected_by",
+                            "inspected_at", "created_at", "created_by", "_id",
+                            "updated_at"}
+
+    def _validate_movement_items(items):
+        # p558: supplier-return / disposal items were raw dicts — negative or
+        # infinite quantity/unit_cost poisoned the stored totals.
+        for i in items:
+            q, c = i.get("quantity", 0), i.get("unit_cost", 0)
+            if (not isinstance(q, (int, float)) or isinstance(q, bool)
+                    or not math.isfinite(float(q)) or float(q) <= 0):
+                raise HTTPException(status_code=422,
+                                    detail="كمية البند يجب أن تكون رقمًا منتهيًا أكبر من صفر")
+            if (not isinstance(c, (int, float)) or isinstance(c, bool)
+                    or not math.isfinite(float(c)) or float(c) < 0):
+                raise HTTPException(status_code=422,
+                                    detail="تكلفة البند يجب أن تكون رقمًا منتهيًا لا تقل عن صفر")
+
+    async def _mirror_main_location(product, pid, delta, session):
+        # p558: keep sum(warehouse_stock) == products.quantity — every stock
+        # move in this module also moves the main location row (the same
+        # convention as manual quantity set / inventory sessions).
+        if not product or product.get("is_non_stockable"):
+            return
+        if "quantity" not in product:
+            return
+        main = await db.warehouses.find_one({"is_main": True}, {"_id": 0, "id": 1},
+                                            session=session)
+        if not main:
+            return
+        from services.warehouse_stock import adjust_warehouse_stock
+        await adjust_warehouse_stock(
+            db, pid, main["id"], delta,
+            product_quantity_before=float(product.get("quantity", 0) or 0),
+            session=session, initialize_from_product=True, allow_negative=True)
 
     class SupplierReturnCreate(BaseModel):
         supplier_id: str
@@ -145,11 +196,18 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
                             await db.products.update_one(
                                 {"id": data.product_id}, {"$inc": {stock_field: -data.quantity}},
                                 session=tx_session)
+                            await _mirror_main_location(product, data.product_id,
+                                                        -data.quantity, tx_session)
                         await db.defective_goods.insert_one(item, session=tx_session)
                         # Record the loss as an expense (inside the same transaction)
                         if item["total_cost"] > 0:
                             await db.expenses.insert_one({
                                 "id": str(uuid.uuid4()),
+                                # p558: carry the DEF number — the legacy
+                                # non-sparse unique expense_number index on
+                                # template-copied DBs 500'd every SECOND
+                                # unnumbered expense (E11000 null).
+                                "expense_number": item["defective_number"],
                                 "type": "defective_goods",
                                 "category": "منتجات معيبة",
                                 "amount": item["total_cost"],
@@ -199,10 +257,20 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
 
     @router.put("/goods/{item_id}")
     async def update_defective(item_id: str, data: dict, admin: dict = Depends(get_tenant_admin)):
-        data.pop("id", None)
-        data.pop("defective_number", None)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        res = await db.defective_goods.update_one({"id": item_id}, {"$set": data})
+        forbidden = _DEFECTIVE_IMMUTABLE & set(data)
+        if forbidden:
+            raise HTTPException(status_code=422,
+                                detail=f"حقول غير قابلة للتعديل: {sorted(forbidden)}")
+        validated = DefectiveUpdate(**data)
+        update_data = validated.model_dump(exclude_unset=True, exclude_none=True)
+        if "unit_cost" in update_data:
+            goods = await db.defective_goods.find_one({"id": item_id}, {"_id": 0, "quantity": 1})
+            if not goods:
+                raise HTTPException(status_code=404, detail="العنصر غير موجود")
+            update_data["total_cost"] = round(
+                float(goods.get("quantity", 0) or 0) * update_data["unit_cost"], 2)
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        res = await db.defective_goods.update_one({"id": item_id}, {"$set": update_data})
         if res.matched_count == 0:
             raise HTTPException(status_code=404, detail="العنصر غير موجود")
         return await db.defective_goods.find_one({"id": item_id}, {"_id": 0})
@@ -228,6 +296,8 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
                                     {"id": goods["product_id"]},
                                     {"$inc": {stock_field: goods.get("quantity", 0)}},
                                     session=tx_session)
+                                await _mirror_main_location(product, goods["product_id"],
+                                                            goods.get("quantity", 0), tx_session)
                         await db.defective_goods.delete_one({"id": item_id}, session=tx_session)
                         await db.defective_inspections.delete_many({"defective_goods_id": item_id}, session=tx_session)
                         await db.expenses.delete_many(
@@ -284,6 +354,8 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
                                     await db.products.update_one(
                                         {"id": pid}, {"$inc": {stock_field: goods.get("quantity", 0)}},
                                         session=tx_session)
+                                    await _mirror_main_location(product, pid,
+                                                                goods.get("quantity", 0), tx_session)
                             await db.expenses.delete_many(
                                 {"reference_type": "defective_goods", "reference_id": goods["id"]},
                                 session=tx_session)
@@ -300,6 +372,7 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ── Supplier Returns ──
     @router.post("/returns")
     async def create_return(data: SupplierReturnCreate, admin: dict = Depends(get_tenant_admin)):
+        _validate_movement_items(data.items)
         total_qty = sum(i.get("quantity", 0) for i in data.items)
         total_val = sum(i.get("quantity", 0) * i.get("unit_cost", 0) for i in data.items)
         ret = {
@@ -335,7 +408,23 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
         old = await db.supplier_returns.find_one({"id": return_id}, {"_id": 0})
         if not old:
             raise HTTPException(status_code=404, detail="طلب الإرجاع غير موجود")
-        data.pop("id", None)
+        # p558: whitelist — the raw pass-through could rewrite items/totals and
+        # store an infinite refund.
+        forbidden = ({"id", "return_number", "items", "total_quantity",
+                      "total_value", "created_at", "created_by", "_id"} & set(data))
+        if forbidden:
+            raise HTTPException(status_code=422,
+                                detail=f"حقول غير قابلة للتعديل: {sorted(forbidden)}")
+        if "refund_amount" in data:
+            rv = data["refund_amount"]
+            if (not isinstance(rv, (int, float)) or isinstance(rv, bool)
+                    or not math.isfinite(float(rv)) or float(rv) < 0):
+                raise HTTPException(status_code=422,
+                                    detail="مبلغ الاسترداد يجب أن يكون رقمًا منتهيًا لا يقل عن صفر")
+        if "status" in data and not isinstance(data["status"], str):
+            raise HTTPException(status_code=422, detail="الحالة يجب أن تكون نصًا")
+        data = {k: v for k, v in data.items()
+                if k in ("status", "notes", "refund_amount")}
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         new_status = data.get("status")
         if new_status and new_status != old.get("status"):
@@ -356,6 +445,7 @@ def create_defective_routes(db, get_current_user, get_tenant_admin) -> dict:
     # ── Disposals ──
     @router.post("/disposals")
     async def create_disposal(data: DisposalCreate, admin: dict = Depends(get_tenant_admin)):
+        _validate_movement_items(data.items)
         total_qty = sum(i.get("quantity", 0) for i in data.items)
         total_val = sum(i.get("quantity", 0) * i.get("unit_cost", 0) for i in data.items)
         disp = {

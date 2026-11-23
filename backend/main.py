@@ -623,6 +623,39 @@ async def startup_event():
                     name="p557_ad_lead_ext")
             except Exception:
                 pass
+            # p558: repair the pre-p196 non-sparse unique expense_number index —
+            # template-copied DBs inherited it, so every SECOND unnumbered
+            # expense (defective-goods loss, ecom/worker expense) died on
+            # E11000 null. Spec drift only: drop + recreate sparse.
+            try:
+                _ex558 = None
+                async for _ix in _d.expenses.list_indexes():
+                    if _ix.get("name") == "expense_number_1":
+                        _ex558 = _ix
+                        break
+                if _ex558 is not None and not _ex558.get("sparse"):
+                    await _d.expenses.drop_index("expense_number_1")
+                    await _d.expenses.create_index(
+                        "expense_number", unique=True, sparse=True)
+            except Exception:
+                pass
+            # p558: exactly one main warehouse per tenant — reconcile legacy
+            # double-mains deterministically (keep the earliest), then a
+            # partial unique index makes the create/update swap race-safe.
+            try:
+                _mains558 = await _d.warehouses.find(
+                    {"is_main": True}, {"_id": 0, "id": 1, "created_at": 1}
+                ).sort("created_at", 1).to_list(None)
+                if len(_mains558) > 1:
+                    await _d.warehouses.update_many(
+                        {"is_main": True, "id": {"$ne": _mains558[0]["id"]}},
+                        {"$set": {"is_main": False}})
+                await _d.warehouses.create_index(
+                    [("is_main", 1)], unique=True,
+                    partialFilterExpression={"is_main": True},
+                    name="p558_single_main_warehouse")
+            except Exception:
+                pass
             # p266: tenant wallets — atomic codes + no entity duplicates
             try:
                 await _d.wallets.create_index(

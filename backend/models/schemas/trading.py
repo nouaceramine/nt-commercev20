@@ -120,7 +120,8 @@ class PurchaseItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     product_id: Optional[str] = None
     product_name: str
-    quantity: int = Field(gt=0)
+    # p558: fractional quantities (weight-sold products) — same wall as sales.
+    quantity: float = Field(gt=0, le=1000000, allow_inf_nan=False)
     unit_price: float = Field(ge=0, allow_inf_nan=False)
     total: float = Field(ge=0, allow_inf_nan=False)
     # p173: selling_price removed — retail_price (below) is the ONLY sale-price field.

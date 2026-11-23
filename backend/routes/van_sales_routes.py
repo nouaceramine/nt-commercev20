@@ -65,7 +65,8 @@ class VanUpdate(BaseModel):
 
 class TransferItem(BaseModel):
     product_id: str
-    quantity: int = Field(gt=0, le=1000000)
+    # p558: fractional loads for weight-sold products.
+    quantity: float = Field(gt=0, le=1000000, allow_inf_nan=False)
 
 
 class LoadIn(BaseModel):
