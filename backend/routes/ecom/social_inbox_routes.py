@@ -25,14 +25,17 @@ Public ingestion (token = secret):
 from datetime import datetime, timezone
 from typing import Optional
 import logging
+import math
 import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from pymongo.errors import DuplicateKeyError
 
 from config.database import db, main_db, get_tenant_db
 from services.code_generator import public_hex_code
+from services.ecom.webhook_security import decode_json_body, read_signed_body
 from utils.auth import require_tenant
 
 from utils.permissions import create_cashier_block
@@ -72,6 +75,28 @@ class ConvertIn(BaseModel):
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _positive_qty(value: int) -> int:
+    """P557-003: conversion mirrors manual order validation — no silent 1."""
+    try:
+        f = float(value)
+        i = int(f)
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=400, detail="الكمية غير صالحة")
+    if not math.isfinite(f) or f != i or i < 1 or i > 100000:
+        raise HTTPException(status_code=400, detail="الكمية يجب أن تكون عدداً صحيحاً بين 1 و100000")
+    return i
+
+
+def _money(value: float, label: str) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صالح")
+    if not math.isfinite(f) or f < 0 or f > 1_000_000_000:
+        raise HTTPException(status_code=400, detail=f"{label} يجب أن يكون رقماً بين 0 ومليار")
+    return round(f, 2)
 
 
 def create_social_inbox_routes() -> dict:
@@ -190,15 +215,27 @@ def create_social_inbox_routes() -> dict:
             raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
         if not (body.product or "").strip():
             raise HTTPException(status_code=400, detail="المنتج مطلوب")
-        qty = max(1, int(body.qty or 1))
-        price = max(0.0, float(body.price or 0))
-        shipping = max(0.0, float(body.shipping_fee or 0))
+        qty = _positive_qty(body.qty)
+        price = _money(body.price or 0, "السعر")
+        shipping = _money(body.shipping_fee or 0, "رسوم الشحن")
         subtotal = round(qty * price, 2)
         now = _now()
         order_id = str(uuid.uuid4())
+        order_code = await public_hex_code(db, "SOC")  # p258: tenant-stamped
+        # P557-003: claim the conversation BEFORE creating the order. The old
+        # read-then-insert let concurrent converts pass the `order_id` check and
+        # create multiple real orders for one thread.
+        claim = await db.ecom_social_conversations.find_one_and_update(
+            {"id": conv_id, "$or": [{"order_id": {"$exists": False}},
+                                    {"order_id": None}, {"order_id": ""}]},
+            {"$set": {"order_id": order_id, "order_code": order_code,
+                      "status": "converting", "conversion_claim_at": now,
+                      "updated_at": now}})
+        if not claim:
+            raise HTTPException(status_code=409, detail="المحادثة حُوِّلت إلى طلب من قبل")
         doc = {
             "id": order_id,
-            "order_code": await public_hex_code(db, "SOC"),  # p258: tenant-stamped
+            "order_code": order_code,
             "channel": conv["channel"],
             "external_id": "",
             "integration_id": conv.get("source_id"),
@@ -244,7 +281,15 @@ def create_social_inbox_routes() -> dict:
                 doc["network_trust"] = net
         except Exception:  # noqa: BLE001
             pass
-        await db.ecom_orders.insert_one(doc)
+        try:
+            await db.ecom_orders.insert_one(doc)
+        except Exception:
+            # release the claim if the write itself failed (duplicate/order store error)
+            await db.ecom_social_conversations.update_one(
+                {"id": conv_id, "order_id": order_id, "status": "converting"},
+                {"$set": {"status": conv.get("status", "open"), "updated_at": _now()},
+                 "$unset": {"order_id": "", "order_code": "", "conversion_claim_at": ""}})
+            raise
         # p280: realtime event — other open sessions refresh instantly
         try:
             from services.outbox import outbox_write as _obw
@@ -288,10 +333,8 @@ def create_social_inbox_routes() -> dict:
             {"token": token, "active": {"$ne": False}}, {"_id": 0})
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        # P557-008: bounded public body (same 1 MiB wall as signed webhooks).
+        payload = decode_json_body(await read_signed_body(request))
 
         ext_user = str(payload.get("external_user_id") or "").strip()
         text = str(payload.get("text") or "").strip()
@@ -324,9 +367,18 @@ def create_social_inbox_routes() -> dict:
                 "created_at": now,
                 "updated_at": now,
             }
-            await tdb.ecom_social_conversations.insert_one(conv)
-            await tdb.ecom_social_sources.update_one(
-                {"id": source["id"]}, {"$inc": {"stats.conversations": 1}})
+            try:
+                await tdb.ecom_social_conversations.insert_one(conv)
+                await tdb.ecom_social_sources.update_one(
+                    {"id": source["id"]}, {"$inc": {"stats.conversations": 1}})
+            except DuplicateKeyError:
+                # P557-002: a concurrent first message won the active-conversation
+                # index — continue on the winner instead of splitting the thread.
+                conv = await tdb.ecom_social_conversations.find_one(
+                    {"source_id": source["id"], "external_user_id": ext_user,
+                     "status": {"$ne": "closed"}}, {"_id": 0})
+                if not conv:
+                    raise
         msg = {
             "id": str(uuid.uuid4()),
             "conversation_id": conv["id"],
@@ -336,7 +388,11 @@ def create_social_inbox_routes() -> dict:
             "external_message_id": ext_mid,
             "at": now,
         }
-        await tdb.ecom_social_messages.insert_one(msg)
+        try:
+            await tdb.ecom_social_messages.insert_one(msg)
+        except DuplicateKeyError:
+            # P557-002: retried provider delivery arriving concurrently.
+            return {"ok": True, "duplicate": True, "conversation_id": conv["id"]}
         await tdb.ecom_social_conversations.update_one(
             {"id": conv["id"]},
             {"$set": {"last_message": text, "last_at": now, "updated_at": now,

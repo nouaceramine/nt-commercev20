@@ -206,6 +206,15 @@ async def init_tenant_database(tenant_id: str) -> AsyncIOMotorDatabase:
         ("digital_codes", [("product_id", 1), ("code_hash", 1)],
          {"unique": True, "partialFilterExpression": {"is_used": False},
           "name": "p549_digital_code"}),
+        ("ecom_social_messages", [("source_id", 1), ("external_message_id", 1)],
+         {"unique": True, "partialFilterExpression": {"external_message_id": {"$type": "string", "$gt": ""}},
+          "name": "p557_social_message_ext"}),
+        ("ecom_social_conversations", [("source_id", 1), ("external_user_id", 1)],
+         {"unique": True, "partialFilterExpression": {"status": {"$in": ["open", "converted", "converting"]}},
+          "name": "p557_social_active_conv"}),
+        ("leads", [("source", 1), ("lead_id", 1)],
+         {"unique": True, "partialFilterExpression": {"lead_id": {"$type": "string", "$gt": ""}},
+          "name": "p557_ad_lead_ext"}),
     ):
         try:
             await tenant_db[_coll].create_index(_keys, **_kw)

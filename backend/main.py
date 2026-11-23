@@ -506,7 +506,7 @@ async def startup_event():
     # (e.g. sales.code MP00001 on NT-0004) only skips that one index.
     try:
         from config.database import get_tenant_db as _get_tenant_db2, main_db as _main_db2
-        _dbs2 = []
+        _dbs2 = [client["template_tenant"]]
         async for t in _main_db2.saas_tenants.find({}, {"_id": 0, "id": 1}):
             if t.get("id"):
                 try:
@@ -597,6 +597,30 @@ async def startup_event():
             try:
                 await _d.cash_boxes.create_index(
                     [("id", 1)], unique=True, name="p547_cashbox_id")
+            except Exception:
+                pass
+            # p557: external-ingress replay guards. Partial filters keep legacy
+            # blank external ids / closed conversations out; a legacy duplicate
+            # in one DB only skips that DB's DDL while the writers still dedup.
+            try:
+                await _d.ecom_social_messages.create_index(
+                    [("source_id", 1), ("external_message_id", 1)], unique=True,
+                    partialFilterExpression={"external_message_id": {"$type": "string", "$gt": ""}},
+                    name="p557_social_message_ext")
+            except Exception:
+                pass
+            try:
+                await _d.ecom_social_conversations.create_index(
+                    [("source_id", 1), ("external_user_id", 1)], unique=True,
+                    partialFilterExpression={"status": {"$in": ["open", "converted", "converting"]}},
+                    name="p557_social_active_conv")
+            except Exception:
+                pass
+            try:
+                await _d.leads.create_index(
+                    [("source", 1), ("lead_id", 1)], unique=True,
+                    partialFilterExpression={"lead_id": {"$type": "string", "$gt": ""}},
+                    name="p557_ad_lead_ext")
             except Exception:
                 pass
             # p266: tenant wallets — atomic codes + no entity duplicates

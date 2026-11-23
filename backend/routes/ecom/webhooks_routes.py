@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException, Header
 from typing import Optional
+from pymongo.errors import DuplicateKeyError
 
 from config.database import client as mongo_client, main_db
 from services.crypto_fields import decrypt_field
@@ -46,6 +47,10 @@ async def _get_integration(tenant_id: str, integration_id: str, channels):
         {"id": integration_id, "channel": channel_query})
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
+    # P557-004: Shopify used the raw HMAC helper directly, bypassing the active
+    # flag enforced for every other channel. Disabled integrations fail closed.
+    if integration.get("is_active") is False:
+        raise HTTPException(status_code=403, detail="Integration is disabled")
     return db, integration
 
 
@@ -80,7 +85,10 @@ async def shopify_order_webhook(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    parsed = parse_shopify_order(payload, integration_id)
+    try:
+        parsed = parse_shopify_order(payload, integration_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     result = await upsert_shopify_order(db, parsed)
 
     # Bump integration stats + last_sync
@@ -307,7 +315,10 @@ async def tiktok_webhook(tenant_id: str, integration_id: str, request: Request):
     raw_body = await read_signed_body(request)
     verify_ecom_webhook(integration, "tiktok", raw_body, request.headers)
     payload = decode_json_body(raw_body)
-    parsed = parse_tiktok_order(payload, integration_id)
+    try:
+        parsed = parse_tiktok_order(payload, integration_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not parsed:
         return {"ok": True, "skipped": "not_an_order"}
 
@@ -343,7 +354,18 @@ async def tiktok_webhook(tenant_id: str, integration_id: str, request: Request):
     from services.ecom.duplicate_detector import annotate_order as _annot_dup
     await _annot_dup(db, doc)
 
-    await db.ecom_orders.insert_one(doc)
+    try:
+        await db.ecom_orders.insert_one(doc)
+    except DuplicateKeyError:
+        # P557-005: p547's unique (channel, external_id) index arbitrates a
+        # concurrent retry; the loser answers as a clean duplicate, not a 500.
+        existing = await db.ecom_orders.find_one(
+            {"channel": "tiktok", "external_id": parsed["external_id"]},
+            {"_id": 0, "order_code": 1})
+        if existing:
+            return {"ok": True, "duplicate": True, "created": False,
+                    "order_code": existing.get("order_code")}
+        raise
     # p280: realtime event — other open sessions refresh instantly
     try:
         from services.outbox import outbox_write as _obw
@@ -396,7 +418,12 @@ async def _upsert_lead(db, channel: str, integration_id: str, parsed: dict) -> N
     await _annot_dup_lead(db, doc)
 
 
-    await db.ecom_leads.insert_one(doc)
+    try:
+        await db.ecom_leads.insert_one(doc)
+    except DuplicateKeyError:
+        # P557-002: the enhanced lead index exists; concurrent messaging retries
+        # must be idempotent at the writer too.
+        return
     await db.ecom_integrations.update_one(
         {"id": integration_id},
         {"$inc": {"stats.leads": 1}, "$set": {"last_sync_at": now, "mode": "live"}},

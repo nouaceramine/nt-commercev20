@@ -11,10 +11,33 @@ import base64
 import hashlib
 import hmac
 import logging
+import math
 from datetime import datetime, timezone
 import uuid
+from pymongo.errors import DuplicateKeyError
 
 logger = logging.getLogger(__name__)
+
+
+def _positive_qty(value) -> int:
+    try:
+        f = float(value)
+        i = int(f)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("كمية Shopify غير صالحة")
+    if not math.isfinite(f) or f != i or i < 1 or i > 100000:
+        raise ValueError("كمية Shopify يجب أن تكون عدداً صحيحاً بين 1 و100000")
+    return i
+
+
+def _money(value, label: str) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{label} غير صالح")
+    if not math.isfinite(f) or f < 0 or f > 1_000_000_000:
+        raise ValueError(f"{label} يجب أن يكون رقماً بين 0 ومليار")
+    return round(f, 2)
 
 
 def verify_shopify_hmac(raw_body: bytes, hmac_header: str, secret: str) -> bool:
@@ -102,19 +125,25 @@ def parse_shopify_order(payload: dict, integration_id: str) -> dict:
     items_raw = payload.get("line_items") or []
     items: list = []
     for li in items_raw:
-        qty = int(li.get("quantity", 0) or 0)
-        price = float(li.get("price", 0) or 0)
+        qty = _positive_qty(li.get("quantity", 1))
+        price = _money(li.get("price", 0) or 0, "سعر Shopify")
         items.append({
             "name": li.get("name") or li.get("title") or "—",
             "sku": li.get("sku") or "",
-            "qty": max(1, qty),
+            "qty": qty,
             "price": price,
             "total": round(qty * price, 2),
         })
     subtotal = round(sum(i["total"] for i in items), 2)
-    shipping_fee = float((payload.get("shipping_lines") or [{}])[0].get("price", 0) or 0)
+    shipping_fee = _money((payload.get("shipping_lines") or [{}])[0].get("price", 0) or 0,
+                          "رسوم شحن Shopify")
     # Shopify includes total in the payload — prefer it (handles discounts/taxes correctly).
-    total = float(payload.get("total_price", 0) or 0) or round(subtotal + shipping_fee, 2)
+    total_raw = payload.get("total_price")
+    total = (_money(total_raw, "إجمالي Shopify") if total_raw not in (None, "")
+             else round(subtotal + shipping_fee, 2))
+    external_id = str(payload.get("id") or "").strip()
+    if not external_id:
+        raise ValueError("معرّف طلب Shopify مفقود")
 
     name_parts = [customer.get("first_name", ""), customer.get("last_name", "")]
     customer_name = " ".join([p for p in name_parts if p]).strip() or shipping.get("name", "") or "Shopify Customer"
@@ -122,9 +151,9 @@ def parse_shopify_order(payload: dict, integration_id: str) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     return {
         "id": str(uuid.uuid4()),
-        "order_code": f"SHO-{str(payload.get('order_number') or payload.get('id'))}",
+        "order_code": f"SHO-{str(payload.get('order_number') or external_id)}",
         "channel": "shopify",
-        "external_id": str(payload.get("id")),
+        "external_id": external_id,
         "integration_id": integration_id,
         "status": "new",
         "payment_status": payload.get("financial_status") or "unpaid",
@@ -162,6 +191,15 @@ async def upsert_shopify_order(db, parsed: dict) -> dict:
     )
     if existing:
         return {"order": existing, "created": False}
-    await db.ecom_orders.insert_one(parsed)
+    try:
+        await db.ecom_orders.insert_one(parsed)
+    except DuplicateKeyError:
+        # P557-004: p547's unique (channel, external_id) index decides the
+        # concurrent winner; losers answer with the existing order, not a 500.
+        existing = await db.ecom_orders.find_one(
+            {"channel": "shopify", "external_id": parsed["external_id"]}, {"_id": 0})
+        if existing:
+            return {"order": existing, "created": False}
+        raise
     parsed.pop("_id", None)
     return {"order": parsed, "created": True}

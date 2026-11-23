@@ -27,6 +27,7 @@ Dedup: a payload carrying an external order id is upserted — repeats return
 from datetime import datetime, timezone
 from typing import Optional
 import logging
+import math
 import secrets
 import uuid
 
@@ -36,6 +37,7 @@ from pydantic import BaseModel
 
 from config.database import db, main_db, get_tenant_db
 from services.code_generator import public_hex_code
+from services.ecom.webhook_security import decode_json_body, read_signed_body
 from utils.auth import require_tenant
 
 from utils.permissions import create_cashier_block
@@ -126,6 +128,29 @@ def _extract(payload: dict, paths: str) -> str:
     return ""
 
 
+def _positive_int(value, label: str) -> int:
+    """P557-001: external intake must not coerce 0/1.5/NaN into a real order."""
+    try:
+        f = float(str(value).strip())
+        i = int(f)
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صالحة")
+    if not math.isfinite(f) or f != i or i < 1 or i > 100000:
+        raise HTTPException(status_code=400, detail=f"{label} يجب أن تكون عدداً صحيحاً بين 1 و100000")
+    return i
+
+
+def _money(value, label: str) -> float:
+    """Finite non-negative amount with a sane business ceiling."""
+    try:
+        f = float(str(value).strip())
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صالح")
+    if not math.isfinite(f) or f < 0 or f > 1_000_000_000:
+        raise HTTPException(status_code=400, detail=f"{label} يجب أن يكون رقماً بين 0 ومليار")
+    return round(f, 2)
+
+
 async def _create_intake_order(tdb, source: dict, payload: dict) -> dict:
     mapping = {**DEFAULT_MAPPINGS.get(source["source_type"], {}),
                **(source.get("mapping") or {})}
@@ -134,19 +159,11 @@ async def _create_intake_order(tdb, source: dict, payload: dict) -> dict:
     if not name or not phone:
         raise HTTPException(status_code=422,
                             detail="تعذر استخراج الاسم/الهاتف — راجعوا خريطة الحقول")
-    try:
-        qty = max(1, int(float(_extract(payload, mapping.get("qty", "")) or 1)))
-    except ValueError:
-        qty = 1
-    try:
-        price = float(_extract(payload, mapping.get("price", "")) or 0)
-    except ValueError:
-        price = 0.0
+    qty_raw = _extract(payload, mapping.get("qty", ""))
+    qty = _positive_int(qty_raw or "1", "الكمية")
+    price = _money(_extract(payload, mapping.get("price", "")) or "0", "السعر")
     total_raw = _extract(payload, mapping.get("total", ""))
-    try:
-        total = round(float(total_raw), 2) if total_raw else round(qty * price, 2)
-    except ValueError:
-        total = round(qty * price, 2)
+    total = _money(total_raw, "الإجمالي") if total_raw else round(qty * price, 2)
     product = _extract(payload, mapping.get("product", "")) or "منتج"
     channel = CHANNEL_MAP.get(source["source_type"], "custom-intake")
     external_id = _extract(payload, mapping.get("external_id", ""))
@@ -317,12 +334,9 @@ def create_intake_routes() -> dict:
             {"token": token, "active": {"$ne": False}}, {"_id": 0})
         if not source:
             raise HTTPException(status_code=404, detail="Intake source not found")
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON body")
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="JSON object expected")
+        # P557-008: token-secured public ingress gets the same bounded body
+        # wall as signed webhooks (1 MiB), before JSON parsing.
+        payload = decode_json_body(await read_signed_body(request))
 
         await tdb.ecom_intake_sources.update_one(
             {"id": source["id"]},

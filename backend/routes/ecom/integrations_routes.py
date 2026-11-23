@@ -8,6 +8,7 @@ each channel can have its own auth shape. Real channels are added in P2+.
 Until then, integrations remain in "mock" mode and webhook/poll workers no-op.
 """
 from datetime import datetime, timezone
+import math
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,6 +30,17 @@ from services.crypto_fields import (
 )  # p272
 
 router = APIRouter(tags=["E-Commerce Integrations"])
+
+
+def _return_fee(value) -> float:
+    """P557-006: courier return fee is money — finite, explicit, bounded."""
+    try:
+        fee = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(status_code=400, detail="سعر الإرجاع يجب أن يكون رقماً")
+    if not math.isfinite(fee) or fee < 0 or fee > 1_000_000:
+        raise HTTPException(status_code=400, detail="سعر الإرجاع يجب أن يكون بين 0 ومليون")
+    return round(fee, 2)
 
 
 # Public-safe projection: omit secrets when listing.
@@ -203,7 +215,7 @@ async def create_integration(body: dict, user: dict = Depends(block_cashier)):
         "kind": kind,
         "name": name,
         "credentials": credentials,
-        "return_fee": max(0.0, float(body.get("return_fee") or 0)),  # p59: courier return price
+        "return_fee": _return_fee(body.get("return_fee") or 0),  # p59: courier return price
         "is_active": bool(body.get("is_active", True)),
         "mode": "live" if has_real_creds else "mock",
         "last_sync_at": None,
@@ -232,13 +244,17 @@ async def update_integration(integration_id: str, body: dict, user: dict = Depen
     if "is_active" in body:
         updates["is_active"] = bool(body["is_active"])
     if "return_fee" in body:  # p59
-        try:
-            updates["return_fee"] = max(0.0, float(body["return_fee"] or 0))
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="سعر الإرجاع يجب أن يكون رقماً")
+        updates["return_fee"] = _return_fee(body["return_fee"] or 0)
     if "credentials" in body and isinstance(body["credentials"], dict):
         # Merge — clients can send {api_key: 'new'} without resending all keys.
-        merged = {**_decrypt_creds(existing.get("credentials") or {}), **body["credentials"]}  # p272
+        # P557-006: the API returns masked values ("••••1234"). If a client
+        # round-trips them unchanged, preserve the stored secret instead of
+        # encrypting the mask and silently breaking the live channel.
+        supplied = {
+            k: v for k, v in body["credentials"].items()
+            if not (isinstance(v, str) and v.startswith("••••"))
+        }
+        merged = {**_decrypt_creds(existing.get("credentials") or {}), **supplied}  # p272
         updates["credentials"] = _encrypt_creds(merged)  # p272
 
     await db.ecom_integrations.update_one({"id": integration_id}, {"$set": updates})

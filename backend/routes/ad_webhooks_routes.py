@@ -14,7 +14,10 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException, Depends, Query
+from pymongo.errors import DuplicateKeyError
+
+from services.ecom.webhook_security import read_signed_body
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +44,8 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None,
 
     async def _handle_lead(source: str, request: Request, secret_env: str, sig_header: str, prefix: str = "sha256=", target_db=None):
         tdb = target_db if target_db is not None else db  # p95b: tenant-scoped writes
-        raw = await request.body()
+        # P557-008: signed ad webhooks share the same 1 MiB bounded body wall.
+        raw = await read_signed_body(request)
         secret = os.environ.get(secret_env, "")
         if not secret:
             raise HTTPException(status_code=503, detail=f"{secret_env} غير مضبوط")
@@ -81,24 +85,41 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None,
             "raw": {k: v for k, v in fields.items() if k not in ("raw",)},
             "created_at": now,
         }
-        await tdb.leads.insert_one(dict(lead))
+        if lead.get("lead_id"):
+            existing = await tdb.leads.find_one(
+                {"source": source, "lead_id": lead["lead_id"]}, {"_id": 0, "id": 1})
+            if existing:
+                return {"success": True, "lead_created": False, "duplicate": True,
+                        "lead_id": existing.get("id")}
+        try:
+            await tdb.leads.insert_one(dict(lead))
+        except DuplicateKeyError:
+            # P557-007: p557_ad_lead_ext arbitrates concurrent/retried delivery.
+            existing = await tdb.leads.find_one(
+                {"source": source, "lead_id": lead.get("lead_id")}, {"_id": 0, "id": 1})
+            return {"success": True, "lead_created": False, "duplicate": True,
+                    "lead_id": (existing or {}).get("id")}
 
         # Add to customers if new (by phone)
         customer_created = False
         if phone:
             existing = await tdb.customers.find_one({"phone": phone}, {"_id": 0, "id": 1})
             if not existing:
-                await tdb.customers.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "name": name or f"زبون {source}",
-                    "phone": phone,
-                    "email": email,
-                    "source": source,
-                    "balance": 0,
-                    "total_purchases": 0,
-                    "created_at": now,
-                })
-                customer_created = True
+                try:
+                    await tdb.customers.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "name": name or f"زبون {source}",
+                        "phone": phone,
+                        "email": email,
+                        "source": source,
+                        "balance": 0,
+                        "total_purchases": 0,
+                        "created_at": now,
+                    })
+                    customer_created = True
+                except DuplicateKeyError:
+                    # uniq_phone_nonempty (p494) may be claimed by a concurrent lead.
+                    customer_created = False
 
         # Notification for admins
         await tdb.notifications.insert_one({
@@ -122,7 +143,7 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None,
         """Meta webhook handshake (hub.challenge)."""
         params = request.query_params
         verify_token = os.environ.get("FB_VERIFY_TOKEN", "")
-        if verify_token and params.get("hub.verify_token") == verify_token:
+        if verify_token and hmac.compare_digest(params.get("hub.verify_token", ""), verify_token):
             return int(params.get("hub.challenge", "0")) if params.get("hub.challenge", "").isdigit() else params.get("hub.challenge", "")
         raise HTTPException(status_code=403, detail="رمز التحقق غير صالح")
 
@@ -172,7 +193,7 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None,
     @router.post("/facebook-leads/{tenant_id}")
     async def facebook_leads_tenant(tenant_id: str, request: Request):
         tdb = get_tenant_db(tenant_id) if get_tenant_db else db
-        raw = await request.body()
+        raw = await read_signed_body(request)
         secret = os.environ.get("FB_APP_SECRET", "")
         if not secret:
             raise HTTPException(status_code=503, detail="FB_APP_SECRET غير مضبوط")
@@ -202,9 +223,9 @@ def create_ad_webhooks_routes(db, main_db, get_current_user, get_tenant_db=None,
 
     # ── Admin: leads list + webhook config status ──
     @router.get("/leads")
-    async def list_leads(source: str = None, limit: int = 50, user: dict = Depends(_read_guard)):
+    async def list_leads(source: str = None, limit: int = Query(50, ge=1, le=200), user: dict = Depends(_read_guard)):
         query = {"source": source} if source else {}
-        return await db.leads.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 200))
+        return await db.leads.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
 
     @router.get("/config")
     async def webhook_config(user: dict = Depends(_read_guard)):
