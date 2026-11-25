@@ -168,7 +168,20 @@ class EmailService:
             try:
                 await _pace_send()  # p536: stay under the 10 req/s provider cap
                 res = await asyncio.to_thread(_r.Emails.send, params)
-                logger.info("Resend email sent to %s (id=%s)", to, (res or {}).get("id"))
+                _eid = (res or {}).get("id")
+                logger.info("Resend email sent to %s (id=%s)", to, _eid)
+                # p545: API-accepted != delivered — a past bounce puts the
+                # recipient on Resend's suppression list and every later send
+                # is silently swallowed (last_event=suppressed). Verify the
+                # event shortly after; on suppression remove it once, resend
+                # once, then alert instead of looping forever.
+                if _eid:
+                    try:
+                        asyncio.get_running_loop().create_task(
+                            self._verify_resend_delivery(_eid, to, subject, html, cfg)
+                        )
+                    except RuntimeError:
+                        pass  # no running loop (sync caller) — skip the check
                 return True
             except Exception as exc:
                 if attempt < _RATE_MAX_RETRIES and _is_rate_limited(str(exc)):
@@ -179,6 +192,60 @@ class EmailService:
                     continue
                 logger.error("Resend send failed: %s", exc)
                 return False
+
+
+    # ── p545: post-send delivery verification (suppression auto-recovery) ──
+    async def _verify_resend_delivery(self, email_id: str, to: str, subject: str,
+                                      html: str, cfg: dict, retried: bool = False) -> None:
+        """Check the real delivery event a few seconds after an accepted send.
+        last_event=suppressed means a historical bounce blacklisted the address;
+        clear the suppression entry ONCE and resend ONCE. Anything worse lands
+        in main_db.email_delivery_failures for super-admin follow-up."""
+        try:
+            await asyncio.sleep(8)
+            headers = {"Authorization": f"Bearer {cfg['resend_key']}"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(f"https://api.resend.com/emails/{email_id}", headers=headers)
+                if r.status_code != 200:
+                    return
+                event = (r.json() or {}).get("last_event")
+            if event in (None, "queued", "sent", "delivered", "opened", "clicked"):
+                return
+            logger.warning("Resend delivery event for %s: %s (email_id=%s)", to, event, email_id)
+            if event == "suppressed" and not retried:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    d = await client.delete(f"https://api.resend.com/suppressions/{to}", headers=headers)
+                if d.status_code in (200, 204, 404):
+                    logger.info("Resend suppression cleared for %s — resending once", to)
+                    import resend as _r
+                    _r.api_key = cfg["resend_key"]
+                    _sender = cfg["sender"]
+                    _from = _sender if "<" in _sender else f"NT Commerce <{_sender}>"
+                    await _pace_send()
+                    res = await asyncio.to_thread(
+                        _r.Emails.send,
+                        {"from": _from, "to": [to], "subject": subject, "html": html},
+                    )
+                    new_id = (res or {}).get("id")
+                    if new_id:
+                        await self._verify_resend_delivery(new_id, to, subject, html, cfg, retried=True)
+                    return
+            # genuine failure (bounce of a real mailbox, repeated suppression, …)
+            try:
+                from config.database import main_db
+                from datetime import datetime, timezone
+                await main_db.email_delivery_failures.update_one(
+                    {"email": to},
+                    {"$set": {"email": to, "last_event": event, "subject": subject,
+                              "email_id": email_id, "at": datetime.now(timezone.utc).isoformat()},
+                     "$inc": {"count": 1}},
+                    upsert=True,
+                )
+            except Exception:
+                pass
+            logger.error("Resend delivery FAILED for %s (event=%s) — recorded for admin follow-up", to, event)
+        except Exception as exc:  # noqa: BLE001 — watchdog must never crash the sender
+            logger.warning("p545 delivery check error: %s", type(exc).__name__)
 
     async def _send_via_sendgrid(self, to: str, subject: str, html: str, cfg: dict) -> bool:
         for attempt in range(_RATE_MAX_RETRIES + 1):
