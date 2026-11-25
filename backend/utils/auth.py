@@ -69,6 +69,55 @@ async def ensure_active_impersonation(payload: dict) -> None:
             or log.get("tenant_id") != payload.get("tenant_id")):
         raise HTTPException(status_code=401, detail="Impersonation session closed")
 
+TFA_MAX_ATTEMPTS = 5
+TFA_LOCK_MINUTES = 10
+
+
+async def tfa_locked_minutes(key: str) -> int:
+    """Minutes left on the per-user TOTP guess lockout (0 = not locked)."""
+    doc = await main_db.twofa_attempts.find_one({"_id": key}, {"_id": 0, "locked_until": 1})
+    if doc and doc.get("locked_until"):
+        try:
+            until = datetime.fromisoformat(doc["locked_until"])
+            if until > datetime.now(timezone.utc):
+                return int((until - datetime.now(timezone.utc)).total_seconds() // 60) + 1
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+async def tfa_register_failure(key: str) -> bool:
+    """Count a failed TOTP attempt atomically (worker-safe); True when this
+    failure triggers the lockout."""
+    from pymongo import ReturnDocument
+    now = datetime.now(timezone.utc)
+    att = await main_db.twofa_attempts.find_one_and_update(
+        {"_id": key},
+        {"$inc": {"count": 1}, "$set": {"last_at": now.isoformat()}},
+        upsert=True, return_document=ReturnDocument.AFTER)
+    if (att or {}).get("count", 1) >= TFA_MAX_ATTEMPTS:
+        await main_db.twofa_attempts.update_one(
+            {"_id": key},
+            {"$set": {"locked_until": (now + timedelta(minutes=TFA_LOCK_MINUTES)).isoformat(),
+                      "count": 0}})
+        return True
+    return False
+
+
+async def tfa_clear(key: str) -> None:
+    await main_db.twofa_attempts.delete_one({"_id": key})
+
+
+def ensure_token_pwv(payload: dict, record: dict | None) -> None:
+    """p560: password changes bump password_version on the account record;
+    tokens minted before the change carry the old (or no) pwv claim and must
+    die immediately. Legacy users without the field and legacy tokens without
+    the claim both read as 0 == 0, so pre-existing sessions are unaffected
+    until the first actual password change."""
+    if (record or {}).get("password_version", 0) != payload.get("pwv", 0):
+        raise HTTPException(status_code=401, detail="انتهت الجلسة — سجّل الدخول من جديد")
+
+
 def email_ci(email: str) -> dict:
     """Case-insensitive exact-match Mongo query value for an email field."""
     import re as _re
@@ -118,6 +167,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             if user:
                 user["user_type"] = "super_admin"
                 user["role"] = "super_admin"
+                ensure_token_pwv(payload, user)
                 return ensure_active_account(user)
         
         tenant_id = payload.get("tenant_id")
@@ -132,12 +182,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             if user:
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
+                ensure_token_pwv(payload, user)
                 return ensure_active_account(user, tenant, allow_expired=allow_expired)
             # Fallback: user_id might equal tenant_id (legacy tokens) -> build user from saas_tenants
             # p293 security: هذا المسار البديل لرموز قديمة sub==tenant_id فقط —
             # أي رمز بـ sub آخر غير معروف كان يتحول لمدير المستأجر (ثغرة تصعيد صلاحيات)
             if tenant and user_id == tenant_id:
                 set_tenant_context(tenant_db)
+                ensure_token_pwv(payload, tenant)
                 return ensure_active_account({
                     "id": tenant["id"],
                     "email": tenant.get("email", ""),
@@ -156,6 +208,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user = await main_db.users.find_one({"id": user_id})
         if user:
             user["user_type"] = role if role in ("admin", "cashier", "agent") else (user_type or "admin")
+            ensure_token_pwv(payload, user)
             return ensure_active_account(user)
 
         raise HTTPException(status_code=401, detail="User not found")
@@ -182,6 +235,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             if user:
                 user["user_type"] = "super_admin"
                 user["role"] = "super_admin"
+                ensure_token_pwv(payload, user)
                 tenant = None
                 if tenant_id:
                     tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
@@ -203,6 +257,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             if user:
                 user["tenant_id"] = tenant_id
                 user["user_type"] = "tenant"
+                ensure_token_pwv(payload, user)
                 return ensure_active_account(user, tenant, allow_expired=allow_expired)
         
         # Fallback: platform-level users (admin/demo/staff) whose tokens carry
@@ -213,6 +268,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
         user = await main_db.users.find_one({"id": user_id})
         if user:
             user["user_type"] = role if role in ("admin", "cashier", "agent") else (user_type or "admin")
+            ensure_token_pwv(payload, user)
             return ensure_active_account(user)
 
         raise HTTPException(status_code=401, detail="User not found")
@@ -263,6 +319,7 @@ async def get_super_admin(credentials: HTTPAuthorizationCredentials = Depends(se
         
         user["user_type"] = "super_admin"
         user["role"] = "super_admin"
+        ensure_token_pwv(payload, user)
         return ensure_active_account(user)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

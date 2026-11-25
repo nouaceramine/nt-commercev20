@@ -224,6 +224,7 @@ async def agent_login(login_data: AgentLoginRequest):
         "role": "agent",
         "type": "agent",
         "agent_type": agent.get("agent_type", "assistant"),
+        "pwv": agent.get("password_version", 0),  # p560
     })
 
     return {

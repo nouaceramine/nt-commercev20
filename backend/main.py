@@ -58,7 +58,8 @@ from config.database import (
 
 # JWT Settings
 from utils.jwt_config import SECRET_KEY, ALGORITHM
-from utils.auth import ensure_active_account, ensure_active_impersonation, expired_subscription_allowed
+from utils.auth import (ensure_active_account, ensure_active_impersonation,
+                        ensure_token_pwv, expired_subscription_allowed)
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 # Currency
@@ -253,6 +254,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                         "company_name": tenant.get("company_name", ""),
                         "created_at": tenant.get("created_at", datetime.now(timezone.utc).isoformat()),
                     }
+                    ensure_token_pwv(payload, tenant)
                 else:
                     raise HTTPException(status_code=401, detail="User not found")
             else:
@@ -260,6 +262,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 user["user_type"] = "tenant"
                 if not user.get("created_at"):
                     user["created_at"] = datetime.now(timezone.utc).isoformat()
+                ensure_token_pwv(payload, user)
 
             if tenant:
                 plan = await main_db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
@@ -282,6 +285,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 raise HTTPException(status_code=401, detail="Agent not found")
             agent["user_type"] = "agent"
             agent["role"] = "agent"
+            ensure_token_pwv(payload, agent)
             return ensure_active_account(agent)
 
         user = await main_db.users.find_one(
@@ -294,6 +298,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         user["user_type"] = user_type or "admin"
+        ensure_token_pwv(payload, user)
         tenant = None
         if tenant_id:
             tenant = await main_db.saas_tenants.find_one({"id": tenant_id}, {"_id": 0, "password": 0})
@@ -335,6 +340,12 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
             user = await main_db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "hashed_password": 0})
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
+        # p560: revoke pre-change tokens; the synthesized owner fallback
+        # (user_id == tenant_id) is checked against the tenant record.
+        if "password_version" in user:
+            ensure_token_pwv(payload, user)
+        elif tenant:
+            ensure_token_pwv(payload, tenant)
         ensure_active_account(user, tenant, allow_expired=allow_expired)
         return {"user": user, "db": tenant_db, "tenant_id": tenant_id}
     except jwt.ExpiredSignatureError:

@@ -31,7 +31,9 @@ def create_auth_routes(db, get_current_user, get_admin_user):
             raise HTTPException(status_code=401, detail="Invalid credentials")
         if user.get("is_active") is False or user.get("active") is False:
             raise HTTPException(status_code=403, detail="Account is deactivated")
-        token = auth_service.create_access_token({"sub": user["id"], "email": user["email"], "role": user.get("role", "user")})
+        token = auth_service.create_access_token({"sub": user["id"], "email": user["email"],
+                                                   "role": user.get("role", "user"),
+                                                   "pwv": user.get("password_version", 0)})  # p560
         return {"access_token": token, "token_type": "bearer", "user": {"id": user["id"], "email": user["email"], "full_name": user.get("full_name", ""), "role": user.get("role", "user"), "features": user.get("features")}}
 
     @router.post("/register")

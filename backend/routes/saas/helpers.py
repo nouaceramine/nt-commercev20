@@ -7,7 +7,7 @@ import jwt
 from config.database import db, main_db
 
 from utils.jwt_config import SECRET_KEY, ALGORITHM
-from utils.auth import ensure_active_account
+from utils.auth import ensure_active_account, ensure_token_pwv
 
 security = HTTPBearer()
 
@@ -31,6 +31,7 @@ async def get_super_admin(credentials: HTTPAuthorizationCredentials = Depends(se
             raise HTTPException(status_code=401, detail="Super admin not found")
         if user.get("role") not in ["super_admin", "saas_admin"]:
             raise HTTPException(status_code=403, detail="Super admin access required")
+        ensure_token_pwv(payload, user)
         return ensure_active_account(user)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -51,6 +52,7 @@ async def get_current_agent(credentials: HTTPAuthorizationCredentials = Depends(
             raise HTTPException(status_code=404, detail="Agent not found")
         if not agent.get("is_active", True):
             raise HTTPException(status_code=403, detail="الحساب معطل")
+        ensure_token_pwv(payload, agent)
         return agent
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

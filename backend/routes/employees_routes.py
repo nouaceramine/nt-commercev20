@@ -63,6 +63,7 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         now = datetime.now(timezone.utc).isoformat()
         hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         user_doc = {"id": user_id, "email": email_lower, "password": hashed,
+                    "hashed_password": hashed,  # p560: both fields, one truth
                     "name": emp["name"], "role": role, "employee_id": emp["id"],
                     "permissions": DEFAULT_PERMISSIONS.get(role, {}), "created_at": now}
         # p521-004: the registry entry is the global login route for this

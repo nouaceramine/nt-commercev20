@@ -106,12 +106,20 @@ def create_pin_auth_routes(main_db, get_tenant_db, get_current_user, get_tenant_
             and verify_password((payload.pin or "").strip(), user["pin_hash"])
         )
         if not ok:
-            count = (att.get("count", 0) if att else 0) + 1
-            update = {"count": count, "last_at": now.isoformat()}
+            # p560: atomic attempt accounting — a burst of concurrent wrong
+            # PINs can no longer overwrite the same count and skip the lock.
+            from pymongo import ReturnDocument as _RD
+            att2 = await main_db.pin_login_attempts.find_one_and_update(
+                {"_id": key},
+                {"$inc": {"count": 1}, "$set": {"last_at": now.isoformat()}},
+                upsert=True, return_document=_RD.AFTER)
+            count = (att2 or {}).get("count", 1)
             if count >= MAX_ATTEMPTS:
-                update["locked_until"] = (now + timedelta(minutes=LOCK_MINUTES)).isoformat()
-                update["count"] = 0
-            await main_db.pin_login_attempts.update_one({"_id": key}, {"$set": update}, upsert=True)
+                await main_db.pin_login_attempts.update_one(
+                    {"_id": key},
+                    {"$set": {"locked_until": (now + timedelta(minutes=LOCK_MINUTES)).isoformat(),
+                              "count": 0}})
+                raise HTTPException(status_code=401, detail="قُفل رمز PIN مؤقتاً بسبب تكرار المحاولات الخاطئة")
             left = MAX_ATTEMPTS - count
             msg = "رمز PIN غير صحيح" + (f" — بقيت {left} محاولات قبل القفل" if 0 < left <= 2 else "")
             raise HTTPException(status_code=401, detail=msg)
@@ -124,6 +132,7 @@ def create_pin_auth_routes(main_db, get_tenant_db, get_current_user, get_tenant_
             "type": "tenant",
             "tenant_id": tenant["id"],
             "auth_method": "pin",
+            "pwv": user.get("password_version", 0),
         })
         return {
             "access_token": access_token,

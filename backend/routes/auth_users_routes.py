@@ -16,7 +16,8 @@ import base64
 import bcrypt
 import secrets
 
-from utils.auth import email_ci
+from utils.auth import email_ci, tfa_clear, tfa_locked_minutes, tfa_register_failure
+from pymongo import ReturnDocument
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             await main_db.pending_2fa_logins.insert_one({
                 "_id": pending_id,
                 "email_code": _code,
+                "uid": user_record.get("id"),
+                "tid": user_record.get("_tid") or user_record.get("tenant_id"),
                 "payload": final_payload,
                 "attempts": 0,
                 "created_at": now.isoformat(),
@@ -207,6 +210,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         await main_db.pending_2fa_logins.insert_one({
             "_id": pending_id,
             "secret": secret,
+            "uid": user_record.get("id"),
+            "tid": user_record.get("_tid") or user_record.get("tenant_id"),
             "payload": final_payload,
             "attempts": 0,
             "created_at": now.isoformat(),
@@ -240,7 +245,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             stored_password = user.get("hashed_password") or user.get("password")
             if stored_password and verify_password(password, stored_password):
                 await _clear_failed_login(email, locals().get("request"))
-                access_token = create_access_token({"sub": user["id"], "role": user["role"]})
+                access_token = create_access_token({"sub": user["id"], "role": user["role"],
+                                                    "pwv": user.get("password_version", 0)})
                 return await _2fa_gate(user, {
                     "access_token": access_token,
                     "user_type": "admin",
@@ -269,7 +275,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "sub": agent["id"],
                         "email": agent["email"],
                         "role": "agent",
-                        "type": "agent"
+                        "type": "agent",
+                        "pwv": agent.get("password_version", 0)
                     }
                     access_token = create_access_token(token_data)
                     agent["two_fa_email_enabled"] = True  # p155: email OTP enforced for all agents
@@ -316,6 +323,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "role": emp_user.get("role", "seller"),
                             "type": "tenant",
                             "tenant_id": directory["tenant_id"],
+                            "pwv": emp_user.get("password_version", 0),
                         }
                         access_token = create_access_token(token_data)
                         # p513: employees receive the same plan ⊕ override features as
@@ -324,6 +332,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         _plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})
                         _feats = {**((_plan or {}).get("features") or {}), **(tenant.get("features_override") or {})}
                         _lims = {**((_plan or {}).get("limits") or {}), **(tenant.get("limits_override") or {})}
+                        emp_user["_tid"] = directory["tenant_id"]  # p560: backup-code lookup
                         return await _2fa_gate(emp_user, {
                             "access_token": access_token,
                             "user_type": "tenant",
@@ -412,6 +421,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     tenant_user_projection = {
                         "_id": 0, "id": 1, "role": 1, "name": 1, "email": 1,
                         "two_fa_enabled": 1, "two_fa_secret": 1, "two_fa_email_enabled": 1,
+                        "password_version": 1,
                     }
                     tenant_user = await tenant_db_conn.users.find_one(
                         {"email": email}, tenant_user_projection
@@ -444,7 +454,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "email": tenant["email"],
                         "role": "tenant_admin",
                         "type": "tenant",
-                        "tenant_id": tenant["id"]
+                        "tenant_id": tenant["id"],
+                        "pwv": tenant_user.get("password_version", 0),
                     }
                     access_token = create_access_token(token_data)
 
@@ -461,6 +472,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                     for flag in ("two_fa_enabled", "two_fa_secret", "two_fa_email_enabled"):
                         if flag not in gate_user and tenant.get(flag) is not None:
                             gate_user[flag] = tenant[flag]
+                    gate_user["_tid"] = tenant["id"]  # p560: backup-code lookup
                     return await _2fa_gate(gate_user, {
                         "access_token": access_token,
                         "user_type": "tenant",
@@ -502,9 +514,6 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         if datetime.fromisoformat(doc["expires_at"]) < datetime.now(timezone.utc):
             await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
             raise HTTPException(status_code=401, detail="انتهت صلاحية طلب التحقق — أعد تسجيل الدخول")
-        if doc.get("attempts", 0) >= 5:
-            await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
-            raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — أعد تسجيل الدخول من جديد")
         code = (body.code or "").strip().replace(" ", "")
         if doc.get("email_code"):
             # p154: email OTP — constant-time compare, same attempts policy
@@ -512,13 +521,33 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             _ok = _sec3.compare_digest(code, doc["email_code"])
         else:
             _ok = pyotp.TOTP(doc["secret"]).verify(code, valid_window=1)
+        if not _ok and doc.get("uid"):
+            # p560: backup codes shown at setup are real — sha256 at rest,
+            # single-use via an atomic $pull claim on the user record.
+            import hashlib as _hl
+            _h = _hl.sha256(code.encode()).hexdigest()
+            _ucoll = get_tenant_db(doc["tid"]).users if doc.get("tid") else main_db.users
+            _res = await _ucoll.update_one(
+                {"id": doc["uid"], "two_fa_backup_hashes": _h},
+                {"$pull": {"two_fa_backup_hashes": _h}})
+            _ok = _res.modified_count == 1
         if not _ok:
-            await main_db.pending_2fa_logins.update_one({"_id": body.pending_token}, {"$inc": {"attempts": 1}})
-            remaining = 5 - (doc.get("attempts", 0) + 1)
+            # p560: atomic attempt accounting — concurrent wrong codes can't
+            # overrun the 5-try cap (read-modify-write race before).
+            inc = await main_db.pending_2fa_logins.find_one_and_update(
+                {"_id": body.pending_token, "attempts": {"$lt": 5}},
+                {"$inc": {"attempts": 1}},
+                return_document=ReturnDocument.AFTER)
+            if inc is None:
+                await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
+                raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — أعد تسجيل الدخول من جديد")
+            remaining = 5 - inc.get("attempts", 1)
             raise HTTPException(status_code=401, detail=f"رمز التحقق غير صحيح — تبقّى {remaining} من المحاولات")
-        payload = doc["payload"]
-        await main_db.pending_2fa_logins.delete_one({"_id": body.pending_token})
-        return payload
+        # p560: atomic single-use claim — concurrent correct codes can't both win
+        claimed = await main_db.pending_2fa_logins.find_one_and_delete({"_id": body.pending_token})
+        if not claimed:
+            raise HTTPException(status_code=401, detail="انتهت صلاحية طلب التحقق — أعد تسجيل الدخول")
+        return claimed["payload"]
 
     @router.post("/auth/forgot-password")
     @limiter.limit("5/minute")
@@ -600,36 +629,58 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         now = datetime.now(timezone.utc)
         if not req or req.get("used") or req.get("expires_at", "") < now.isoformat():
             raise HTTPException(status_code=400, detail="الرمز غير صالح أو منتهي الصلاحية — اطلب رمزاً جديداً")
-        if req.get("attempts", 0) >= 5:
-            await main_db.password_reset_requests.update_one({"email": email}, {"$set": {"used": True}})
-            raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — اطلب رمزاً جديداً")
         if (body.code or "").strip() != req.get("code"):
-            await main_db.password_reset_requests.update_one({"email": email}, {"$inc": {"attempts": 1}})
-            remaining = 5 - (req.get("attempts", 0) + 1)
+            # p560: atomic attempt accounting — concurrent wrong codes can't
+            # overrun the 5-attempt cap (read-modify-write race before).
+            inc = await main_db.password_reset_requests.find_one_and_update(
+                {"email": email, "used": False, "attempts": {"$lt": 5}},
+                {"$inc": {"attempts": 1}},
+                return_document=ReturnDocument.AFTER)
+            if inc is None:
+                await main_db.password_reset_requests.update_one(
+                    {"email": email}, {"$set": {"used": True}})
+                raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — اطلب رمزاً جديداً")
+            remaining = 5 - inc.get("attempts", 1)
             raise HTTPException(status_code=400, detail=f"الرمز غير صحيح — تبقّى {remaining} من المحاولات")
         new_pw = body.new_password or ""
         if len(new_pw) < 6:
             raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 6 أحرف على الأقل")
 
+        # p560: atomic single-use claim — a concurrent pair of correct-code
+        # requests can no longer both pass the used=False check.
+        claim = await main_db.password_reset_requests.find_one_and_update(
+            {"email": email, "used": False, "code": (body.code or "").strip(),
+             "expires_at": {"$gte": now.isoformat()}},
+            {"$set": {"used": True, "used_at": now.isoformat()}, "$unset": {"code": ""}})
+        if not claim:
+            raise HTTPException(status_code=400, detail="الرمز غير صالح أو منتهي الصلاحية — اطلب رمزاً جديداً")
+
         new_hash = bcrypt.hashpw(new_pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         kind = req.get("account_kind")
+        # p560: every password write lands in BOTH fields (login prefers
+        # hashed_password) and bumps password_version so live JWTs die.
         if kind == "main_user":
-            await db.users.update_one({"id": req["account_id"]}, {"$set": {"hashed_password": new_hash}})
+            await db.users.update_one({"id": req["account_id"]}, {
+                "$set": {"hashed_password": new_hash, "password": new_hash},
+                "$inc": {"password_version": 1}})
         elif kind == "tenant_owner":
-            await db.saas_tenants.update_one({"id": req["account_id"]}, {"$set": {"password": new_hash}})
+            await db.saas_tenants.update_one({"id": req["account_id"]}, {
+                "$set": {"password": new_hash}, "$inc": {"password_version": 1}})
             tenant_db_conn = get_tenant_db(req["tenant_id"])
-            await tenant_db_conn.users.update_many({"email": email}, {"$set": {"hashed_password": new_hash}})
+            await tenant_db_conn.users.update_many({"email": email}, {
+                "$set": {"hashed_password": new_hash, "password": new_hash},
+                "$inc": {"password_version": 1}})
         elif kind == "agent":
-            await db.saas_agents.update_one({"id": req["account_id"]}, {"$set": {"password": new_hash}})
+            await db.saas_agents.update_one({"id": req["account_id"]}, {
+                "$set": {"password": new_hash}, "$inc": {"password_version": 1}})
         elif kind == "employee":
             tenant_db_conn = get_tenant_db(req["tenant_id"])
-            await tenant_db_conn.users.update_one({"id": req["account_id"]}, {"$set": {"hashed_password": new_hash}})
+            await tenant_db_conn.users.update_one({"id": req["account_id"]}, {
+                "$set": {"hashed_password": new_hash, "password": new_hash},
+                "$inc": {"password_version": 1}})
         else:
             raise HTTPException(status_code=400, detail="طلب غير صالح — اطلب رمزاً جديداً")
 
-        await main_db.password_reset_requests.update_one(
-            {"email": email}, {"$set": {"used": True, "used_at": now.isoformat()}, "$unset": {"code": ""}}
-        )
         await _clear_failed_login(email, persist=False)
         return {"message": "تم تغيير كلمة المرور بنجاح — يمكنك تسجيل الدخول الآن"}
 
@@ -669,6 +720,10 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         buffer = io.BytesIO()
         qr.save(buffer, format="PNG")
         qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+        # p560: backup codes are hashed at rest and consumed at login-verify
+        import hashlib as _hl2
+        backup_codes = [pyotp.random_base32()[:8] for _ in range(6)]
+        _hashes = [_hl2.sha256(c.encode()).hexdigest() for c in backup_codes]
         # Save secret - check both main_db and tenant db
         user_db = main_db
         user = await main_db.users.find_one({"id": current_user["id"]})
@@ -683,10 +738,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             coll = main_db.tenants if user.get("plan_name") or user.get("plan_id") else user_db.users
             await coll.update_one(
                 {"id": current_user["id"]},
-                {"$set": {"two_fa_secret_pending": secret}}
+                {"$set": {"two_fa_secret_pending": secret,
+                          "two_fa_backup_hashes_pending": _hashes}}
             )
-        # Generate backup codes
-        backup_codes = [pyotp.random_base32()[:8] for _ in range(6)]
         return {
             "secret": secret,
             "qr_code": f"data:image/png;base64,{qr_base64}",
@@ -712,13 +766,21 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         secret = user.get("two_fa_secret_pending") or user.get("two_fa_secret")
         if not secret:
             raise HTTPException(status_code=400, detail="قم بإعداد 2FA أولا")
+        _lock = await tfa_locked_minutes(current_user["id"])
+        if _lock:
+            raise HTTPException(status_code=429, detail=f"محاولات كثيرة خاطئة — حاول بعد {_lock} دقيقة")
         totp = pyotp.TOTP(secret)
         if totp.verify(code):
+            await tfa_clear(current_user["id"])
             await user_coll.update_one(
                 {"id": current_user["id"]},
-                {"$set": {"two_fa_secret": secret, "two_fa_enabled": True}, "$unset": {"two_fa_secret_pending": ""}}
+                {"$set": {"two_fa_secret": secret, "two_fa_enabled": True,
+                          "two_fa_backup_hashes": user.get("two_fa_backup_hashes_pending") or []},
+                 "$unset": {"two_fa_secret_pending": "", "two_fa_backup_hashes_pending": ""}}
             )
             return {"message": "تم تفعيل المصادقة الثنائية بنجاح", "enabled": True}
+        if await tfa_register_failure(current_user["id"]):
+            raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — حاول لاحقاً")
         raise HTTPException(status_code=400, detail="الرمز غير صحيح")
 
     @router.post("/auth/2fa/disable")
@@ -735,13 +797,21 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             user_coll = main_db.tenants
         if not user or not user.get("two_fa_secret"):
             raise HTTPException(status_code=400, detail="2FA غير مفعل")
+        _lock = await tfa_locked_minutes(current_user["id"])
+        if _lock:
+            raise HTTPException(status_code=429, detail=f"محاولات كثيرة خاطئة — حاول بعد {_lock} دقيقة")
         totp = pyotp.TOTP(user["two_fa_secret"])
         if totp.verify(code):
+            await tfa_clear(current_user["id"])
             await user_coll.update_one(
                 {"id": current_user["id"]},
-                {"$set": {"two_fa_enabled": False}, "$unset": {"two_fa_secret": "", "two_fa_secret_pending": ""}}
+                {"$set": {"two_fa_enabled": False},
+                 "$unset": {"two_fa_secret": "", "two_fa_secret_pending": "",
+                            "two_fa_backup_hashes": "", "two_fa_backup_hashes_pending": ""}}
             )
             return {"message": "تم إلغاء تفعيل المصادقة الثنائية", "enabled": False}
+        if await tfa_register_failure(current_user["id"]):
+            raise HTTPException(status_code=429, detail="محاولات كثيرة خاطئة — حاول لاحقاً")
         raise HTTPException(status_code=400, detail="الرمز غير صحيح")
 
     @router.get("/auth/2fa/status")
@@ -799,11 +869,13 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 4 أحرف على الأقل")
 
         now = datetime.now(timezone.utc).isoformat()
+        _pw_hash = hash_password(user_data.password)
         new_user = {
             "id": str(uuid.uuid4()),
             "name": user_data.name,
             "email": norm_email,
-            "password": hash_password(user_data.password),
+            "password": _pw_hash,
+            "hashed_password": _pw_hash,  # p560: single source of truth, both fields
             "role": user_data.role,
             "tenant_id": admin.get("tenant_id"),
             "permissions": {},
@@ -919,6 +991,13 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
     async def delete_user(user_id: str, admin: dict = Depends(get_admin_user)):
         if admin["id"] == user_id:
             raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        # p560: mirror update_user's guard — a platform admin must not delete
+        # super-admin accounts (the list endpoint hides them, but DELETE
+        # trusted the caller).
+        _target = await db.users.find_one({"id": user_id}, {"_id": 0, "role": 1})
+        if (_target and _target.get("role") in ("super_admin", "saas_admin")
+                and admin.get("role") != "super_admin"):
+            raise HTTPException(status_code=403, detail="لا يمكن حذف حساب سوبر أدمين - Cannot delete super_admin account")
         result = await db.users.delete_one({"id": user_id})
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="User not found")
@@ -942,7 +1021,20 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             raise HTTPException(status_code=400, detail={"message": "كلمة المرور ضعيفة", "errors": pw_check["errors"]})
 
         hashed = hash_password(password_data.new_password)
-        await db.users.update_one({"id": user_id}, {"$set": {"password": hashed}})
+        # p560: write BOTH password fields (login prefers hashed_password —
+        # writing only `password` left the old hash authoritative) and bump
+        # password_version so the target's live JWTs die immediately.
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"password": hashed, "hashed_password": hashed},
+             "$inc": {"password_version": 1}})
+        # If the target is the tenant owner's login identity, keep
+        # saas_tenants (the unified-login credential store) in sync too.
+        _tid = admin.get("tenant_id")
+        if _tid and user.get("email"):
+            await main_db.saas_tenants.update_one(
+                {"id": _tid, "email": email_ci(user["email"])},
+                {"$set": {"password": hashed}, "$inc": {"password_version": 1}})
 
         return {"message": "تم تحديث كلمة المرور بنجاح"}
 

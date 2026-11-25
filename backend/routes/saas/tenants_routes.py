@@ -127,11 +127,11 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
 
     # Resolve a *real* user inside the tenant DB so /auth/me can look it up.
     tenant_user = await tenant_db.users.find_one(
-        {"email": tenant["email"]}, {"_id": 0, "id": 1, "role": 1, "name": 1}
+        {"email": tenant["email"]}, {"_id": 0, "id": 1, "role": 1, "name": 1, "password_version": 1}
     )
     if not tenant_user:
         tenant_user = await tenant_db.users.find_one(
-            {"role": "admin"}, {"_id": 0, "id": 1, "role": 1, "name": 1}
+            {"role": "admin"}, {"_id": 0, "id": 1, "role": 1, "name": 1, "password_version": 1}
         )
     if not tenant_user:
         # Last resort: create an admin user from the tenant record so impersonation can proceed.
@@ -159,6 +159,7 @@ async def impersonate_tenant(tenant_id: str, request: Request, admin: dict = Dep
         "tenant_id": tenant_id,
         "impersonated_by": admin.get("id"),
         "impersonation_session_id": session_id,  # p551: stop must revoke this JWT
+        "pwv": tenant_user.get("password_version", 0),  # p560: survive the pwv check
     })
 
     plan = await db.saas_plans.find_one({"id": tenant.get("plan_id")}, {"_id": 0})

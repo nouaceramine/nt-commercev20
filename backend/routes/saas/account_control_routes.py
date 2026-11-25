@@ -55,6 +55,7 @@ async def impersonate_agent(agent_id: str, request: Request, admin: dict = Depen
         "type": "agent",
         "agent_type": agent.get("agent_type", "assistant"),
         "impersonated_by": admin.get("id"),
+        "pwv": agent.get("password_version", 0),  # p560
     })
 
     client_host = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \

@@ -291,7 +291,8 @@ async def tenant_login(request: Request, login_data: AgentLoginRequest):
         "email": tenant["email"],
         "role": "admin",
         "type": "tenant",
-        "tenant_id": tenant["id"]
+        "tenant_id": tenant["id"],
+        "pwv": tenant.get("password_version", 0),  # p560
     })
 
     return {
