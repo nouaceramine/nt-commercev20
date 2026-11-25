@@ -80,19 +80,32 @@ async def replay_event(event_id: str, _admin: dict = Depends(get_super_admin)):
     doc = await main_db[PROCESSED_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="event not found")
-    await main_db[PROCESSED_COLLECTION].delete_one({"event_id": event_id})
-    # p210: replaying auto-resolves any open DLQ alert for this event
-    await main_db.platform_alerts.update_many(
-        {"type": "event_dlq", "event_id": event_id, "acknowledged": False},
-        {"$set": {"acknowledged": True, "resolved_by": "replay",
-                  "acknowledged_at": datetime.now(timezone.utc).isoformat()}},
-    )
+    # p559: replay is a DLQ-rescue tool. Replaying an ok/processing event
+    # re-ran its consumers and duplicated side effects (and deleted the
+    # audit doc of a live event).
+    if doc.get("status") != "dlq":
+        raise HTTPException(
+            status_code=409,
+            detail=f"only dlq events can be replayed (status={doc.get('status')})")
+    # p559: publish BEFORE deleting the audit doc — if the bus is down the
+    # event must stay in the DLQ (old order lost it: doc deleted, alert
+    # resolved, publish returned None, event gone forever).
     new_id = await event_bus.publish(
         doc["event_type"],
         doc.get("payload_snapshot") or {},
         doc.get("tenant_id", "platform"),
         correlation_id=doc.get("correlation_id"),
         source="replay",
+    )
+    if not new_id:
+        raise HTTPException(status_code=503,
+                            detail="event bus unavailable — event kept in DLQ")
+    await main_db[PROCESSED_COLLECTION].delete_one({"event_id": event_id})
+    # p210: replaying auto-resolves any open DLQ alert for this event
+    await main_db.platform_alerts.update_many(
+        {"type": "event_dlq", "event_id": event_id, "acknowledged": False},
+        {"$set": {"acknowledged": True, "resolved_by": "replay",
+                  "acknowledged_at": datetime.now(timezone.utc).isoformat()}},
     )
     return {"ok": True, "replayed_as": new_id}
 

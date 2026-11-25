@@ -35,8 +35,9 @@ import json
 import logging
 import os
 import socket
+import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Optional
 
 from models.events import Event, ProcessedEvent
@@ -50,6 +51,14 @@ DLQ_STREAM = os.environ.get("EVENT_DLQ_STREAM", "nt:events:dlq")
 MAX_RETRIES = int(os.environ.get("EVENT_MAX_RETRIES", "3"))
 BLOCK_MS = int(os.environ.get("EVENT_BLOCK_MS", "5000"))
 BATCH = int(os.environ.get("EVENT_BATCH", "16"))
+
+# p559: pending-entry (PEL) reclaim — a consumer that dies after delivery
+# leaves its entries pending forever; the main loop only reads '>' (new)
+# entries, so without a sweep those events are silently lost.
+RECLAIM_IDLE_MS = int(os.environ.get("EVENT_RECLAIM_IDLE_MS", "60000"))
+RECLAIM_EVERY_S = float(os.environ.get("EVENT_RECLAIM_INTERVAL_S", "30"))
+# A 'processing' audit doc older than this belongs to a dead worker.
+PROCESSING_STALE_S = int(os.environ.get("EVENT_PROCESSING_STALE_S", "60"))
 
 # Mongo collection for idempotency + audit
 PROCESSED_COLLECTION = "processed_events"
@@ -124,6 +133,7 @@ class RedisEventBus:
         correlation_id: Optional[str] = None,
         priority: str = "normal",
         source: str = "",
+        event_id: Optional[str] = None,
     ) -> Optional[str]:
         """Publish an event. Returns event_id on success, None on failure
         (Redis unavailable). The application MUST treat failure as non-fatal
@@ -135,9 +145,9 @@ class RedisEventBus:
             source=source,
         )
         if not meta.correlation_id:
-            import uuid
             meta.correlation_id = str(uuid.uuid4())
         event = Event(
+            event_id=event_id or str(uuid.uuid4()),
             event_type=event_type,
             tenant_id=tenant_id,
             payload=payload,
@@ -180,6 +190,7 @@ class RedisEventBus:
         if c is None:
             log.warning("consume_loop: no client, exiting")
             return
+        last_reclaim = time.monotonic()
         while self._running:
             try:
                 # XREADGROUP blocks up to BLOCK_MS for new entries.
@@ -188,11 +199,15 @@ class RedisEventBus:
                     {STREAM_KEY: ">"},
                     count=BATCH, block=BLOCK_MS,
                 )
-                if not resp:
-                    continue
-                for _stream, messages in resp:
-                    for msg_id, fields in messages:
-                        await self._handle_message(msg_id, fields)
+                if resp:
+                    for _stream, messages in resp:
+                        for msg_id, fields in messages:
+                            await self._handle_message(msg_id, fields)
+                # p559: periodic PEL reclaim — entries whose consumer died
+                # after delivery are rescued, never silently lost.
+                if time.monotonic() - last_reclaim >= RECLAIM_EVERY_S:
+                    last_reclaim = time.monotonic()
+                    await self._reclaim_stuck(c)
             except asyncio.CancelledError:
                 log.info("consume_loop cancelled")
                 break
@@ -210,7 +225,57 @@ class RedisEventBus:
         self._running = False
 
     # ── Dispatch ─────────────────────────────────────────────────────────
-    async def _handle_message(self, msg_id: str, fields: dict) -> None:
+    async def _reclaim_stuck(self, c) -> None:
+        # p559: rescue pending entries whose consumer died after delivery
+        # (crash between read and ack). Without this sweep the event is
+        # silently lost and its processed_events doc stays 'processing'
+        # forever.
+        try:
+            res = await c.xautoclaim(STREAM_KEY, GROUP_NAME, self._consumer_name,
+                                     min_idle_time=RECLAIM_IDLE_MS,
+                                     start_id="0-0", count=BATCH)
+        except Exception as exc:
+            log.warning("reclaim sweep failed: %s", exc)
+            return
+        messages = res[1] if isinstance(res, (list, tuple)) and len(res) > 1 else []
+        for msg_id, fields in messages:
+            if not fields:
+                # stream entry was deleted — just clear the PEL slot
+                try:
+                    await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
+                except Exception:
+                    pass
+                continue
+            await self._handle_message(msg_id, fields, reclaimed=True)
+
+    async def _drop_stale_processing(self, event) -> bool:
+        # p559: a reclaimed entry whose previous consumer crashed mid-handler
+        # leaves a stale 'processing' doc. Delete it so the reclaim can
+        # re-claim and re-run (same retry semantics as the failure path).
+        # A doc fresher than PROCESSING_STALE_S belongs to a live worker —
+        # never steal it.
+        if self._db is None:
+            return False
+        try:
+            doc = await self._db[PROCESSED_COLLECTION].find_one(
+                {"event_id": event.event_id}, {"_id": 0, "status": 1, "started_at": 1})
+            if not doc or doc.get("status") != "processing":
+                return False
+            try:
+                ts = datetime.fromisoformat(
+                    str(doc.get("started_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                ts = None
+            if ts is not None and ts > datetime.now(timezone.utc) - timedelta(seconds=PROCESSING_STALE_S):
+                return False
+            res = await self._db[PROCESSED_COLLECTION].delete_one(
+                {"event_id": event.event_id, "status": "processing"})
+            return res.deleted_count == 1
+        except Exception as exc:
+            log.warning("drop_stale_processing failed: %s", exc)
+            return False
+
+    async def _handle_message(self, msg_id: str, fields: dict, reclaimed: bool = False) -> None:
         c = self._client
         try:
             event = Event.from_wire(fields)
@@ -221,11 +286,44 @@ class RedisEventBus:
                 await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
             except Exception:
                 pass
+            # p559: poison entries must surface on the DLQ dashboard and in
+            # the alert feed — they previously vanished from every audit view
+            raw_id = fields.get("event_id") or msg_id
+            try:
+                if self._db is not None:
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    await self._db[PROCESSED_COLLECTION].update_one(
+                        {"event_id": raw_id},
+                        {"$setOnInsert": {
+                            "event_id": raw_id,
+                            "event_type": fields.get("event_type") or "<unparsable>",
+                            "tenant_id": fields.get("tenant_id") or "platform",
+                            "status": "dlq",
+                            "consumer": "dlq-bad-wire",
+                            "attempts": 1,
+                            "error_log": ("bad wire: " + str(exc))[:500],
+                            "started_at": now_iso,
+                            "finished_at": now_iso,
+                            "payload_snapshot": {"raw": json.dumps(fields, default=str)[:1500]},
+                        }},
+                        upsert=True,
+                    )
+                    await self._raise_dlq_alert(raw_id,
+                                                fields.get("event_type") or "<unparsable>",
+                                                fields.get("tenant_id") or "platform",
+                                                "bad wire: " + str(exc))
+            except Exception:
+                pass
             return
 
         # Idempotency — try to claim ownership by inserting a 'processing' doc.
         # If duplicate (UniqueError) → another consumer already processed this. ACK & skip.
         claimed = await self._claim_processing(event)
+        if not claimed and reclaimed:
+            # p559: crash-window reclaim — the stale 'processing' doc belongs
+            # to a dead worker; drop it and take over instead of skipping.
+            if await self._drop_stale_processing(event):
+                claimed = await self._claim_processing(event)
         if not claimed:
             log.debug("Skipping duplicate event %s", event.event_id)
             await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
@@ -273,7 +371,8 @@ class RedisEventBus:
                 except Exception:
                     pass
                 await self._mark_finished(event, status="dlq", consumer="dlq", error=str(exc))
-                await self._raise_dlq_alert(event, str(exc))
+                await self._raise_dlq_alert(event.event_id, event.event_type,
+                                            event.tenant_id, str(exc))
                 await c.xack(STREAM_KEY, GROUP_NAME, msg_id)
             else:
                 # Re-publish for retry. We delete the 'processing' doc so the
@@ -323,7 +422,8 @@ class RedisEventBus:
         except Exception as exc:
             log.warning("mark_finished failed: %s", exc)
 
-    async def _raise_dlq_alert(self, event: Event, error: str) -> None:
+    async def _raise_dlq_alert(self, event_id: str, event_type: str,
+                               tenant_id: str, error: str) -> None:
         """p210: platform alert when an event lands in the DLQ — the
         proactive-notification half of DLQ monitoring. Deduped: one
         unacknowledged alert per event_id."""
@@ -332,15 +432,15 @@ class RedisEventBus:
         try:
             alerts = self._db["platform_alerts"]
             existing = await alerts.find_one(
-                {"type": "event_dlq", "event_id": event.event_id, "acknowledged": False})
+                {"type": "event_dlq", "event_id": event_id, "acknowledged": False})
             if existing:
                 return
             await alerts.insert_one({
                 "id": str(uuid.uuid4()),
                 "type": "event_dlq",
-                "event_id": event.event_id,
-                "event_type": event.event_type,
-                "tenant_id": event.tenant_id,
+                "event_id": event_id,
+                "event_type": event_type,
+                "tenant_id": tenant_id,
                 "error": (error or "")[:500],
                 "acknowledged": False,
                 "created_at": datetime.now(timezone.utc).isoformat(),

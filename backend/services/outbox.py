@@ -61,10 +61,15 @@ async def relay_pending(main_db) -> int:
         if not claimed:
             continue  # another worker took it
         try:
+            # p559: deterministic bus id — a crash-window reclaim republishes
+            # the SAME event_id, so processed_events dedupes the second
+            # delivery instead of double-processing the outbox event (the
+            # idempotency promise in this module's docstring made real).
             eid = await event_bus.publish(
                 doc["event_type"], doc["payload"],
                 tenant_id=doc.get("tenant_id", "platform"),
                 source=doc.get("source") or "outbox",
+                event_id="obx_" + doc["id"],
             )
             if eid:
                 await main_db.outbox.update_one(
