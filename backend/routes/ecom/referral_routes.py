@@ -21,6 +21,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from config.database import db
 from utils.auth import require_tenant
@@ -37,6 +38,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["E-Commerce Referrals"])
 
 REWARD_TYPES = ("fixed", "percent")
+
+_code_idx_ready = set()  # p561: lazy unique code index — PER DB (tenant dbs
+# are dropped/recreated; a process-global flag would skip every later tenant)
+
+
+async def _ensure_code_index():
+    """p561: the startup index run only covers DBs existing at boot — tenants
+    created later raced duplicate codes (proven: 2-3 docs from one x6 burst);
+    on older DBs the startup index turns the loser into a 500. Lazy, idempotent,
+    never fatal: with legacy duplicates the read-check below still applies."""
+    name = getattr(db, "name", "?")
+    if name in _code_idx_ready:
+        return
+    try:
+        await db.ecom_referrals.create_index("code", unique=True, name="p561_referral_code")
+    except PyMongoError as exc:
+        logger.warning("referral code index: %s", exc)
+    _code_idx_ready.add(name)
 
 
 class ReferralIn(BaseModel):
@@ -89,6 +108,7 @@ async def create_referral(body: ReferralIn, user: dict = Depends(block_cashier))
     code = (body.code or "").strip().upper()
     if not code:
         code = f"REF-{uuid.uuid4().hex[:6].upper()}"
+    await _ensure_code_index()
     if await db.ecom_referrals.find_one({"code": code}):
         raise HTTPException(status_code=409, detail="رمز الإحالة مستخدم من قبل")
     now = datetime.now(timezone.utc).isoformat()
@@ -105,7 +125,11 @@ async def create_referral(body: ReferralIn, user: dict = Depends(block_cashier))
         "created_at": now,
         "updated_at": now,
     }
-    await db.ecom_referrals.insert_one(doc)
+    try:
+        await db.ecom_referrals.insert_one(doc)
+    except DuplicateKeyError:
+        # p561: lost the concurrent-create race at the index — clean 409, no 500
+        raise HTTPException(status_code=409, detail="رمز الإحالة مستخدم من قبل")
     doc.pop("_id", None)
     return {"ok": True, "referral": doc}
 

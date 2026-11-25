@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 import csv
 import io
 import logging
+import math
 import re
 import uuid
 
@@ -51,6 +52,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["E-Commerce Bulk Import"])
 
 MAX_ROWS = 1000
+
+
+def _parse_qty(raw: str) -> int:
+    """p561: strict quantity — the P557-001 class applied to file ingestion.
+    The old max(1, int(float())) silently coerced 0 -> 1 and 2.7 -> 2, and
+    int(inf) raised OverflowError OUTSIDE the ValueError guard, killing the
+    whole batch with a 500."""
+    f = float(raw)
+    if not math.isfinite(f) or f != int(f) or f < 1 or f > 100000:
+        raise ValueError("كمية غير صالحة")
+    return int(f)
+
+
+def _parse_price(raw: str) -> float:
+    """p561: strict money — negative was silently zeroed and 1e999 (inf) was
+    STORED as the order total, poisoning every downstream sum."""
+    f = float(raw)
+    if not math.isfinite(f) or f < 0 or f > 1_000_000_000:
+        raise ValueError("سعر غير صالح")
+    return round(f, 2)
 
 COLUMN_ALIASES = {
     "name":    ["name", "الاسم", "اسم الزبون", "اسم"],
@@ -164,9 +185,9 @@ async def bulk_upload(file: UploadFile = File(...), user: dict = Depends(block_c
             errors.append({"row": idx, "reason": "هاتف غير صالح"})
             continue
         try:
-            qty = max(1, int(float(_cell(row, "qty") or 1)))
-            price = max(0.0, float(_cell(row, "price") or 0))
-        except ValueError:
+            qty = _parse_qty(_cell(row, "qty") or "1")
+            price = _parse_price(_cell(row, "price") or "0")
+        except (ValueError, OverflowError):
             errors.append({"row": idx, "reason": "كمية/سعر غير صالح"})
             continue
         product = _cell(row, "product") or "منتج"

@@ -335,6 +335,10 @@ def create_driver_routes() -> dict:
             raise HTTPException(status_code=404, detail="الطرد غير موجود في مشاويرك")
 
         if body.outcome == "failed":
+            # p561: «فشل» على طلب نهائي (مُسلَّم/ملغى/مُسترجَع) كان يُقبل فيزيد
+            # العداد ويلوث status_history بمدخل «فشل توصيل» على طلب مُسلَّم.
+            if o.get("status") not in OPEN_STATUSES:
+                raise HTTPException(status_code=400, detail="الطلب ليس في مشوار مفتوح")
             note = (body.note or "").strip() or "محاولة توصيل فاشلة"
             await tdb.ecom_orders.update_one(
                 {"id": order_id},

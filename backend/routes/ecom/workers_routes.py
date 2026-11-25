@@ -64,6 +64,46 @@ def _norm_phone(p: str) -> str:
     return d.lstrip("0")
 
 
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCK_MINUTES = 10
+
+
+async def _login_locked_minutes(phone: str) -> int:
+    """p561: minutes left on the per-phone worker-PIN lockout (0 = not locked)."""
+    doc = await main_db.ecom_worker_login_attempts.find_one(
+        {"_id": phone}, {"_id": 0, "locked_until": 1})
+    if doc and doc.get("locked_until"):
+        try:
+            until = datetime.fromisoformat(doc["locked_until"])
+            if until > datetime.now(timezone.utc):
+                return int((until - datetime.now(timezone.utc)).total_seconds() // 60) + 1
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+async def _login_register_failure(phone: str) -> bool:
+    """p561: count a failed PIN attempt atomically (worker-safe across the 4
+    uvicorn workers); True when this failure triggers the lockout."""
+    from pymongo import ReturnDocument
+    now = datetime.now(timezone.utc)
+    att = await main_db.ecom_worker_login_attempts.find_one_and_update(
+        {"_id": phone},
+        {"$inc": {"count": 1}, "$set": {"last_at": now.isoformat()}},
+        upsert=True, return_document=ReturnDocument.AFTER)
+    if (att or {}).get("count", 1) >= LOGIN_MAX_ATTEMPTS:
+        await main_db.ecom_worker_login_attempts.update_one(
+            {"_id": phone},
+            {"$set": {"locked_until": (now + timedelta(minutes=LOGIN_LOCK_MINUTES)).isoformat(),
+                      "count": 0}})
+        return True
+    return False
+
+
+async def _login_clear(phone: str) -> None:
+    await main_db.ecom_worker_login_attempts.delete_one({"_id": phone})
+
+
 def _hash_pin(pin: str) -> str:
     return bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -79,6 +119,8 @@ def _worker_token(worker: dict, tenant_id: str) -> str:
     payload = {
         "sub": worker["id"], "type": "ecom_worker", "role": "ecom_worker",
         "tenant_id": tenant_id, "name": worker.get("name", ""),
+        # p561: PIN changes bump pin_version — pre-change tokens die immediately.
+        "pwv": int(worker.get("pin_version", 0) or 0),
         "exp": datetime.now(timezone.utc) + timedelta(hours=WORKER_TOKEN_HOURS),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -106,6 +148,9 @@ async def get_ecom_worker(credentials: HTTPAuthorizationCredentials = Depends(_s
         raise HTTPException(status_code=401, detail="العامل غير موجود")
     if not worker.get("active", True):
         raise HTTPException(status_code=403, detail="حساب العامل موقوف")
+    # p561: revoke tokens minted before a PIN change (0 == 0 for legacy pairs)
+    if int(payload.get("pwv", 0) or 0) != int(worker.get("pin_version", 0) or 0):
+        raise HTTPException(status_code=401, detail="انتهت الجلسة — سجّل الدخول مجدداً")
     worker["user_type"] = "ecom_worker"
     worker["role"] = "ecom_worker"
     worker["tenant_id"] = payload["tenant_id"]
@@ -158,8 +203,18 @@ async def worker_login(body: WorkerLogin):
     ensure_active_account({"id": idx["tenant_id"]}, tenant)
     set_tenant_context(get_tenant_db(idx["tenant_id"]))
     worker = await db.ecom_workers.find_one({"id": idx["worker_id"]})
+    # p561: online-guess lockout — checked before bcrypt (cheap reject), and
+    # only counted when the worker exists (unknown phones can't be DoS-locked).
+    locked = await _login_locked_minutes(phone)
+    if locked:
+        raise HTTPException(status_code=429,
+                            detail=f"محاولات كثيرة — أعد المحاولة بعد {locked} دقيقة")
     if not worker or not _verify_pin(pin, worker.get("pin_hash", "")):
+        if worker and await _login_register_failure(phone):
+            raise HTTPException(status_code=429,
+                                detail=f"محاولات كثيرة — قُفل الدخول {LOGIN_LOCK_MINUTES} دقائق")
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+    await _login_clear(phone)
     if not worker.get("active", True):
         raise HTTPException(status_code=403, detail="حسابك موقوف — راجع صاحب المتجر")
     return {
@@ -347,6 +402,7 @@ async def update_worker(worker_id: str, body: WorkerUpdate, user: dict = Depends
         if not _valid_pin(body.pin):
             raise HTTPException(status_code=400, detail="رمز الدخول: 4 إلى 8 أرقام")
         upd["pin_hash"] = _hash_pin(body.pin.strip())
+        # p561: bump pin_version — live tokens carrying the old pwv die at once
     if body.phone:
         phone = _norm_phone(body.phone)
         clash = await main_db.ecom_worker_index.find_one({"phone": phone})
@@ -356,7 +412,10 @@ async def update_worker(worker_id: str, body: WorkerUpdate, user: dict = Depends
         await main_db.ecom_worker_index.update_one({"phone": phone},
             {"$set": {"phone": phone, "tenant_id": user.get("tenant_id"), "worker_id": worker_id}}, upsert=True)
         upd["phone"] = phone
-    await db.ecom_workers.update_one({"id": worker_id}, {"$set": upd})
+    update_ops = {"$set": upd}
+    if body.pin:
+        update_ops["$inc"] = {"pin_version": 1}
+    await db.ecom_workers.update_one({"id": worker_id}, update_ops)
     doc = await db.ecom_workers.find_one({"id": worker_id}, {"_id": 0, "pin_hash": 0})
     return {"ok": True, "worker": doc}
 
@@ -441,6 +500,11 @@ async def settle_worker_commissions(worker_id: str, body: dict, user: dict = Dep
     percent_total = round(sum(float(o.get("total") or 0) for o in orders) * pct / 100.0, 2)
     total = round(fixed_total + percent_total, 2)
     if total <= 0:
+        # p561: release the claim — the old bare raise left orders "settling"
+        # for 10 minutes and the follow-up settle lied "no due commissions".
+        await db.ecom_orders.update_many(
+            {"commission_settling": claim_id},
+            {"$unset": {"commission_settling": "", "commission_settling_at": ""}})
         raise HTTPException(status_code=400, detail="العمولة الإجمالية صفر — حدّد قاعدة العمولة أولاً")
     box_id = (body.get("payment_method") or "cash").strip()
     if box_id == "personal":
