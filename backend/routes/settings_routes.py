@@ -21,6 +21,7 @@ class DateTimeSettings(BaseModel):
     time_format: str = "HH:mm:ss"
     use_western_numerals: bool = True
     language: str = "ar"
+    timezone: str = "Africa/Algiers"  # p550: المنطقة الزمنية لعرض الوقت
 
 
 class LocaleSettings(BaseModel):
@@ -183,10 +184,23 @@ def create_settings_routes(db, get_current_user) -> dict:
             language="ar"
         )
         
-        now = datetime.now(timezone.utc)
+        # p550: عرض الوقت بمنطقة المستأجر الزمنية (افتراضي الجزائر UTC+1) بدل UTC
+        from zoneinfo import ZoneInfo
+        tz_name = "Africa/Algiers"
+        try:
+            doc = await db.settings.find_one({"type": "datetime"}, {"_id": 0, "config": 1})
+            if doc and (doc.get("config") or {}).get("timezone"):
+                tz_name = doc["config"]["timezone"]
+        except Exception:
+            pass
+        try:
+            now = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+        except Exception:
+            now = datetime.now(timezone.utc).astimezone(ZoneInfo("Africa/Algiers"))
         
         return {
             "current_datetime": now.isoformat(),
+            "timezone": tz_name,
             "formatted": {
                 "short_date": formatter.format_short_date(now),
                 "long_date": formatter.format_long_date(now),
