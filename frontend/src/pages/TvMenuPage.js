@@ -13,26 +13,6 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
   const [err, setErr] = useState(false);
   const [clock, setClock] = useState(new Date());
   const [slideIdx, setSlideIdx] = useState(0);
-  // p559: تكبير تلقائي لملء شاشة التلفاز عمودياً عندما يكون المحتوى قليلاً
-  const contentRef = useRef(null);
-  const [fillScale, setFillScale] = useState(1);
-  useEffect(() => {
-    if (sliderMode) return;
-    const measure = () => {
-      const el = contentRef.current;
-      if (!el) return;
-      const contentH = el.scrollHeight;
-      const viewH = window.innerHeight;
-      if (contentH > 0 && contentH < viewH * 0.92) {
-        setFillScale(Math.min(1.8, viewH / contentH));
-      } else {
-        setFillScale(1);
-      }
-    };
-    const t = setTimeout(measure, 300);
-    window.addEventListener('resize', measure);
-    return () => { clearTimeout(t); window.removeEventListener('resize', measure); };
-  }, [sliderMode, items.length]);
 
   const fetchMenu = useCallback(async () => {
     try {
@@ -59,6 +39,27 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
     }
     return all;
   }, [data, menuFamilies]);
+
+  // p559: تكبير تلقائي لملء شاشة التلفاز عمودياً عندما يكون المحتوى قليلاً
+  const contentRef = useRef(null);
+  const [fillScale, setFillScale] = useState(1);
+  useEffect(() => {
+    if (sliderMode) return;
+    const measure = () => {
+      const el = contentRef.current;
+      if (!el) return;
+      const contentH = el.scrollHeight;
+      const viewH = window.innerHeight;
+      if (contentH > 0 && contentH < viewH * 0.92) {
+        setFillScale(Math.min(1.8, viewH / contentH));
+      } else {
+        setFillScale(1);
+      }
+    };
+    const t = setTimeout(measure, 300);
+    window.addEventListener('resize', measure);
+    return () => { clearTimeout(t); window.removeEventListener('resize', measure); };
+  }, [sliderMode, items.length]);
 
   // p321: شرائح الصور — المنتجات المتوفرة ذات الصور فقط، صورة لكل عنصر من المعرض
   const slides = useMemo(() => {
