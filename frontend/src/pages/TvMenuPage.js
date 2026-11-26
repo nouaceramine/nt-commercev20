@@ -5,9 +5,13 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { ChefHat, Ban, WifiOff } from 'lucide-react';
 
 // p563: حركة مستمرة + فيديو خفي — تمنع شاشات العرض (webOS) من الدخول في وضع السكون
-const KB_CSS = `@keyframes tvKenBurns{0%{transform:scale(1) translate(0,0)}100%{transform:scale(1.15) translate(-2%,-2%)}}
-.tv-kb{animation:tvKenBurns 18s ease-in-out infinite alternate;will-change:transform}
-.tv-kb-alt{animation-duration:23s;animation-delay:-7s}`;
+const KB_CSS = `@keyframes tvKenBurns{0%{transform:scale(1) translate(0,0)}100%{transform:scale(1.22) translate(-3.5%,-3%)}}
+.tv-kb{animation:tvKenBurns 10s ease-in-out infinite alternate;will-change:transform}
+.tv-kb-alt{animation-duration:14s;animation-delay:-5s}
+@keyframes tvSheen{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.tv-banner{background-size:200% 100%;animation:tvSheen 6s linear infinite}
+@keyframes tvPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.tv-pulse{animation:tvPulse 2.4s ease-in-out infinite;display:inline-block}`;
 const KEEPALIVE_SRC = "/api/static/uploads/dishes/keepalive.mp4";
 const KeepAlive = () => (
   <>
@@ -159,6 +163,12 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
 
   useEffect(() => { setSlideIdx(0); }, [slides.length]);
 
+  // p563b: تحديث تلقائي كل 4 ساعات — يجلب أي نسخة جديدة ويحرر ذاكرة متصفح التلفاز
+  useEffect(() => {
+    const t = setTimeout(() => window.location.reload(), 4 * 3600 * 1000);
+    return () => clearTimeout(t);
+  }, []);
+
   // ---------- وضع الشرائح (إعلانات ملء الشاشة) ----------
   if (sliderMode && slides.length > 0 && !err) {
     const s = slides[slideIdx % slides.length];
@@ -195,7 +205,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
             )}
           </div>
           <div className="text-left">
-            <div className="inline-block bg-amber-400 text-black text-6xl font-black rounded-3xl px-8 py-3 shadow-2xl">{s.price} <span className="text-3xl">دج</span></div>
+            <div className="inline-block tv-pulse bg-amber-400 text-black text-6xl font-black rounded-3xl px-8 py-3 shadow-2xl">{s.price} <span className="text-3xl">دج</span></div>
           </div>
         </div>
         {/* مؤشر الشرائح */}
@@ -252,7 +262,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
         return (
           <div key={fam || 'general'} className="mb-5">
             <div className="mb-3 mt-1" data-testid={`tvmenu-family-${fam}`}>
-              <span className="inline-block bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-3xl font-black rounded-xl px-8 py-2 shadow-md shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
+              <span className="inline-block tv-banner bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-3xl font-black rounded-xl px-8 py-2 shadow-md shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
             </div>
             <div className={dense ? "grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3" : "grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3"}>
               {visGroups.map((g, gi) => (
@@ -268,7 +278,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
                     <h3 className="text-xl font-bold leading-snug">{g.name}</h3>
                     {g.sizes.length === 1 && !g.sizes[0].label ? (
                       <div className="flex items-center justify-between">
-                        <span className="inline-block bg-amber-400 text-black text-2xl font-black rounded-xl px-4 py-1 shadow-md">{g.sizes[0].price} <span className="text-sm font-bold">دج</span></span>
+                        <span className="inline-block tv-pulse bg-amber-400 text-black text-2xl font-black rounded-xl px-4 py-1 shadow-md">{g.sizes[0].price} <span className="text-sm font-bold">دج</span></span>
                         {g.sizes[0].remaining != null && g.sizes[0].remaining <= 10 && (
                           <span className="text-amber-400 text-base font-bold">بقي {g.sizes[0].remaining}</span>
                         )}
