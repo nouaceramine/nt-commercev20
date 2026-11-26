@@ -264,6 +264,22 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
                 status_code=400,
                 detail=f"حقول غير قابلة للتعديل من هنا: {', '.join(forbidden)}")
         update_data = {k: v for k, v in updates.items() if v is not None and k != "id"}
+        # P569-006: the whitelist blocks unknown keys but passed VALUES
+        # verbatim — a NaN/Inf/negative max_debt_limit or special_discount
+        # was stored and 500'd the whole customers list (strict JSON).
+        import math as _math
+        for _nf in ("max_debt_limit", "special_discount"):
+            if _nf in update_data:
+                try:
+                    _nv = float(update_data[_nf])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400,
+                                        detail=f"{_nf} يجب أن يكون رقمًا")
+                if not _math.isfinite(_nv) or _nv < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{_nf} يجب أن يكون رقمًا منتهيًا غير سالب")
+                update_data[_nf] = _nv
         # p494: phone uniqueness on update too (create already enforces it)
         new_phone = (update_data.get("phone") or "").strip()
         if "phone" in update_data and new_phone and new_phone != (customer.get("phone") or ""):

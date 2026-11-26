@@ -223,7 +223,9 @@ class DebtCreate(BaseModel):
     type: Literal["receivable", "payable"]  # receivable = دين على زبون, payable = دين لمورد
     party_type: Literal["customer", "supplier"]
     party_id: str
-    amount: float = Field(gt=0)  # p494c: a zero/negative debt is meaningless corruption
+    # p494c + P569-005: gt=0 rejects NaN but ACCEPTED Infinity — an
+    # infinite debt was stored (GET /api/debts 500'd on strict JSON).
+    amount: float = Field(gt=0, allow_inf_nan=False)
     due_date: Optional[str] = None
     notes: Optional[str] = ""
     reference_type: Optional[str] = None  # sale, purchase
@@ -231,7 +233,9 @@ class DebtCreate(BaseModel):
 
 class DebtPaymentCreate(BaseModel):
     debt_id: str
-    amount: float = Field(gt=0)  # p494c: a negative "payment" used to INCREASE the remaining debt
+    # p494c + P569-005: an Infinity payment passed `amount > remaining`
+    # on an inf debt (inf > inf is False) and inflated the box to inf.
+    amount: float = Field(gt=0, allow_inf_nan=False)
     payment_method: Literal["cash", "bank", "wallet", "safe", "personal"] = "cash"  # p64: +خزنة/مال خاص
     notes: Optional[str] = ""
 

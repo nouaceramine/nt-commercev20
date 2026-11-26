@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
 # ============ CUSTOMER MODELS ============
 
@@ -16,8 +16,10 @@ class CustomerCreate(BaseModel):
     commercial_register: Optional[str] = ""
     birthdate: Optional[str] = ""
     customer_type: Optional[str] = "regular"
-    max_debt_limit: Optional[float] = 0
-    special_discount: Optional[float] = 0
+    # P569-006: bare floats stored NaN/Inf verbatim — one poisoned record
+    # 500'd the whole GET /api/customers list (strict JSON).
+    max_debt_limit: Optional[float] = Field(0, ge=0, allow_inf_nan=False)
+    special_discount: Optional[float] = Field(0, ge=0, allow_inf_nan=False)
     
     @field_validator('name')
     @classmethod

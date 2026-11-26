@@ -596,6 +596,15 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
         raise HTTPException(status_code=404, detail="Sale not found")
     if not reason:
         raise HTTPException(status_code=400, detail="يجب إدخال سبب الحذف")
+    # P569-001: a RETURNED sale has already reversed every effect once
+    # (stock restored, boxes drained, mirrors decremented). Deleting it used
+    # to reverse all of that a SECOND time and then erase the document —
+    # phantom stock, double cash drain, negative customer mirrors, and only
+    # the audit snapshot remembered. Refuse; the return IS the reversal.
+    if sale.get("status") == "returned":
+        raise HTTPException(
+            status_code=409,
+            detail="الفاتورة مُرجعة مسبقاً وأُعيدت آثارها كاملة — لا تُحذف")
     now = datetime.now(timezone.utc).isoformat()
     for item in sale.get("items", []):
         # p508: non-stockable lines were never claimed at sale time — the old
