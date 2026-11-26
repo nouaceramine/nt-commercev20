@@ -147,18 +147,18 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
 
   // ---------- الوضع الشبكي (افتراضي) ----------
   return (
-    <div className="min-h-screen bg-black text-white p-8" dir="rtl" data-testid="tvmenu-page">
+    <div className="min-h-screen bg-black text-white p-5" dir="rtl" data-testid="tvmenu-page">
       {/* الترويسة */}
-      <div className="flex items-center justify-between border-b border-neutral-800 pb-5 mb-8">
+      <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-5">
         <div className="flex items-center gap-4">
-          <ChefHat className="h-12 w-12 text-amber-400" />
+          <ChefHat className="h-9 w-9 text-amber-400" />
           <div>
-            <h1 className="text-4xl font-black">{data?.restaurant_name || 'قائمة المنتجات'}</h1>
-            <p className="text-neutral-400 text-lg mt-1">القائمة المتوفرة الآن — تُحدَّث لحظيًا</p>
+            <h1 className="text-3xl font-black">{data?.restaurant_name || 'قائمة المنتجات'}</h1>
+            <p className="text-neutral-400 text-sm mt-0.5">القائمة المتوفرة الآن — تُحدَّث لحظيًا</p>
           </div>
         </div>
         <div className="text-left" dir="ltr">
-          <div className="text-4xl font-mono font-bold text-amber-400">
+          <div className="text-3xl font-mono font-bold text-amber-400">
             {clock.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
           </div>
           <div className="text-neutral-500 text-sm text-center">
@@ -183,38 +183,38 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
         const visGroups = groups.filter(g => g.sizes.some(s => s.available));
         if (visGroups.length === 0) return null;
         return (
-          <div key={fam || 'general'} className="mb-12">
-            <div className="mb-8 mt-2" data-testid={`tvmenu-family-${fam}`}>
-              <span className="inline-block bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-4xl font-black rounded-2xl px-10 py-3 shadow-lg shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
+          <div key={fam || 'general'} className="mb-7">
+            <div className="mb-4 mt-1" data-testid={`tvmenu-family-${fam}`}>
+              <span className="inline-block bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-2xl font-black rounded-xl px-6 py-1.5 shadow-md shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
               {visGroups.map(g => (
                 <div key={g.key} className="rounded-3xl bg-neutral-900 border-2 border-neutral-800 hover:border-amber-500/50 overflow-hidden shadow-xl shadow-black/60" data-testid={`tvmenu-card-${g.key}`}>
                   {g.image_url ? (
-                    <img src={g.image_url} alt={g.name} className="w-full h-60 object-cover" />
+                    <img src={g.image_url} alt={g.name} className="w-full h-32 object-cover" />
                   ) : (
-                    <div className="w-full h-60 bg-neutral-800 flex items-center justify-center">
-                      <ChefHat className="h-16 w-16 text-neutral-700" />
+                    <div className="w-full h-32 bg-neutral-800 flex items-center justify-center">
+                      <ChefHat className="h-10 w-10 text-neutral-700" />
                     </div>
                   )}
-                  <div className="p-5 space-y-3">
-                    <h3 className="text-2xl font-bold leading-snug">{g.name}</h3>
+                  <div className="p-3 space-y-2">
+                    <h3 className="text-lg font-bold leading-snug">{g.name}</h3>
                     {g.sizes.length === 1 && !g.sizes[0].label ? (
                       <div className="flex items-center justify-between">
-                        <span className="inline-block bg-amber-400 text-black text-3xl font-black rounded-2xl px-5 py-1.5 shadow-md">{g.sizes[0].price} <span className="text-lg font-bold">دج</span></span>
+                        <span className="inline-block bg-amber-400 text-black text-xl font-black rounded-xl px-3 py-1 shadow-md">{g.sizes[0].price} <span className="text-xs font-bold">دج</span></span>
                         {g.sizes[0].remaining != null && g.sizes[0].remaining <= 10 && (
-                          <span className="text-amber-400 text-lg font-bold">بقي {g.sizes[0].remaining}</span>
+                          <span className="text-amber-400 text-sm font-bold">بقي {g.sizes[0].remaining}</span>
                         )}
                       </div>
                     ) : (
                       <div className="space-y-1.5">
                         {g.sizes.map(sz => (
                           <div key={sz.label} className="flex items-center justify-between border-b border-neutral-800/60 pb-1 last:border-0">
-                            <span className="text-xl font-extrabold text-neutral-300" dir="ltr">{sz.label}</span>
+                            <span className="text-base font-extrabold text-neutral-300" dir="ltr">{sz.label}</span>
                             {sz.available ? (
-                              <span className="inline-block bg-amber-400/95 text-black text-2xl font-black rounded-xl px-4 py-0.5">{sz.price} <span className="text-sm font-bold">دج</span></span>
+                              <span className="inline-block bg-amber-400/95 text-black text-lg font-black rounded-lg px-2.5 py-0.5">{sz.price} <span className="text-[11px] font-bold">دج</span></span>
                             ) : (
-                              <span className="bg-red-600/80 text-white text-base font-bold rounded-lg px-3 py-0.5">نفذ</span>
+                              <span className="bg-red-600/80 text-white text-xs font-bold rounded px-2 py-0.5">نفذ</span>
                             )}
                           </div>
                         ))}
@@ -234,21 +234,21 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
           <h2 className="text-2xl font-bold text-red-400 mt-12 mb-6 flex items-center gap-3">
             <Ban className="h-7 w-7" /> نفذت حاليًا
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
             {soldOut.map(p => (
               <div key={p.id} className="rounded-3xl bg-neutral-900/50 border border-red-900/40 overflow-hidden opacity-60" data-testid={`tvmenu-soldout-${p.id}`}>
                 {p.image_url ? (
-                  <img src={p.image_url} alt={p.name} className="w-full h-44 object-cover grayscale" />
+                  <img src={p.image_url} alt={p.name} className="w-full h-32 object-cover grayscale" />
                 ) : (
-                  <div className="w-full h-44 bg-neutral-800/50 flex items-center justify-center grayscale">
+                  <div className="w-full h-32 bg-neutral-800/50 flex items-center justify-center grayscale">
                     <ChefHat className="h-16 w-16 text-neutral-700" />
                   </div>
                 )}
-                <div className="p-5 space-y-2">
-                  <h2 className="text-2xl font-bold text-neutral-400 leading-snug">{p.name}</h2>
+                <div className="p-3 space-y-1.5">
+                  <h2 className="text-lg font-bold text-neutral-400 leading-snug">{p.name}</h2>
                   <div className="flex items-center justify-between">
-                    <span className="text-2xl font-bold text-neutral-500 line-through">{p.price} دج</span>
-                    <span className="bg-red-600 text-white text-lg font-bold rounded-xl px-4 py-1">نفذت الكمية</span>
+                    <span className="text-lg font-bold text-neutral-500 line-through">{p.price} دج</span>
+                    <span className="bg-red-600 text-white text-xs font-bold rounded-lg px-2 py-0.5">نفذت الكمية</span>
                   </div>
                 </div>
               </div>
