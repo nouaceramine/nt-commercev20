@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
-from utils.inventory_queries import low_stock_filter
+from utils.inventory_queries import low_stock_filter, fefo_projection
 import uuid
 import io
 import logging
@@ -312,15 +312,34 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
         # 4. Expiry notifications (product lots) — p70
         from datetime import date as _date_cls
         _today = _date_cls.today()
-        exp_lots = await db.product_lots.find({"expiry_date": {"$ne": ""}}).to_list(1000)
+        # p565: full scan (no silent 1000 cap) + virtual FEFO projection — a
+        # lot whose stock is gone must NOT raise a phantom expiry alert, and
+        # alert_days=0 is honored (the P564 `or` falsy-swallow lesson).
+        exp_lots = await db.product_lots.find({"expiry_date": {"$ne": ""}}).to_list(None)
+        _pids = [pid for pid in {lot.get("product_id") for lot in exp_lots} if pid]
+        _prods = await db.products.find(
+            {"id": {"$in": _pids}}, {"_id": 0, "id": 1, "quantity": 1, "name_ar": 1, "name_en": 1}
+        ).to_list(None)
+        _pmap = {p["id"]: p for p in _prods}
+        _by_product = {}
+        for lot in exp_lots:
+            _by_product.setdefault(lot.get("product_id"), []).append(lot)
+        _projection = {}
+        for pid, prod_lots in _by_product.items():
+            _prod = _pmap.get(pid)
+            if _prod is None:
+                continue
+            _projection.update(fefo_projection(prod_lots, _prod.get("quantity")))
 
         for lot in exp_lots:
+            if _projection.get(lot.get("id"), 0.0) <= 0:
+                continue
             try:
                 _exp = datetime.fromisoformat(lot["expiry_date"]).date()
             except Exception:
                 continue
             _remaining = (_exp - _today).days
-            _alert = int(lot.get("alert_days", 30) or 30)
+            _alert = int(lot.get("alert_days") if lot.get("alert_days") is not None else 30)
             if _remaining > _alert:
                 continue
             existing = await db.notifications.find_one({
@@ -329,7 +348,7 @@ def create_notifications_routes(db, require_tenant, get_tenant_admin, get_curren
                 "read": False
             })
             if not existing:
-                _prod = await db.products.find_one({"id": lot.get("product_id")}, {"_id": 0, "name_ar": 1, "name_en": 1})
+                _prod = _pmap.get(lot.get("product_id"))
                 _pname = (_prod.get("name_ar") or _prod.get("name_en")) if _prod else "منتج"
                 _lot_no = lot.get("lot_number", "") or "-"
                 if _remaining < 0:

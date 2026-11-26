@@ -2,11 +2,11 @@
 Products Routes - Extracted from server.py
 Full CRUD, pagination, quick search, barcode/SKU generation
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
-from utils.inventory_queries import low_stock_filter
+from utils.inventory_queries import low_stock_filter, fefo_projection
 from services.warehouse_stock import adjust_warehouse_stock
 import uuid
 import re
@@ -509,10 +509,29 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
 
     # ── p169: Expiry report — lots approaching/past their expiry date ──
     @router.get("/expiring-report")
-    async def get_expiring_report(days: int = 60, admin: dict = Depends(require_permission("products.view"))):
+    async def get_expiring_report(days: int = Query(60, ge=0, le=3650), admin: dict = Depends(require_permission("products.view"))):
         from datetime import date as _date_cls
         today = _date_cls.today()
-        lots = await db.product_lots.find({"expiry_date": {"$ne": ""}}, {"_id": 0}).to_list(5000)
+        # p565: full scan (no silent 5000 cap) + virtual FEFO projection of the
+        # CURRENT stock onto the lots — the report shows what is still on hand,
+        # not what was once received (a sold-out lot reports nothing).
+        lots = await db.product_lots.find({"expiry_date": {"$ne": ""}}, {"_id": 0}).to_list(None)
+        prod_ids = [pid for pid in {lot.get("product_id") for lot in lots} if pid]
+        products = await db.products.find(
+            {"id": {"$in": prod_ids}},
+            {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1,
+             "retail_price": 1, "quantity": 1, "image_url": 1, "barcode": 1},
+        ).to_list(None)
+        pmap = {prod["id"]: prod for prod in products}
+        by_product = {}
+        for lot in lots:
+            by_product.setdefault(lot.get("product_id"), []).append(lot)
+        projection = {}
+        for pid, prod_lots in by_product.items():
+            product = pmap.get(pid)
+            if product is None:
+                continue
+            projection.update(fefo_projection(prod_lots, product.get("quantity")))
         rows = []
         for lot in lots:
             try:
@@ -522,10 +541,12 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             remaining = (exp - today).days
             if remaining > days:
                 continue
-            product = await db.products.find_one({"id": lot.get("product_id")}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1, "purchase_price": 1, "retail_price": 1, "quantity": 1, "image_url": 1, "barcode": 1})
+            product = pmap.get(lot.get("product_id"))
             if not product:
                 continue
-            qty = float(lot.get("quantity") or 0)
+            qty = projection.get(lot.get("id"), 0.0)
+            if qty <= 0:
+                continue
             if remaining < 0:
                 status = "expired"
             elif remaining <= 7:
@@ -545,10 +566,11 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 "remaining_days": remaining,
                 "status": status,
                 "lot_quantity": qty,
+                "received_quantity": float(lot.get("quantity") or 0),
                 "purchase_price": float(product.get("purchase_price") or 0),
                 "retail_price": float(product.get("retail_price") or 0),
                 "stock_value": round(qty * float(product.get("purchase_price") or 0), 2),
-                "alert_days": int(lot.get("alert_days") or 30),
+                "alert_days": int(lot.get("alert_days") if lot.get("alert_days") is not None else 30),
             })
         rows.sort(key=lambda r: r["remaining_days"])
         summary = {
@@ -841,7 +863,11 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     async def get_product_lots(product_id: str, user: dict = Depends(require_tenant)):
         from datetime import date as date_class
         lots = await db.product_lots.find({"product_id": product_id}, {"_id": 0}).to_list(1000)
+        # p565: additive remaining_quantity (virtual FEFO of the live stock).
+        product = await db.products.find_one({"id": product_id}, {"_id": 0, "quantity": 1})
+        projection = fefo_projection(lots, (product or {}).get("quantity"))
         for lot in lots:
+            lot["remaining_quantity"] = projection.get(lot.get("id"), 0.0)
             if lot.get("expiry_date"):
                 try:
                     exp = datetime.fromisoformat(lot["expiry_date"]).date()
@@ -879,11 +905,29 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         return lot_doc
 
     @router.delete("/{product_id}/lots/{lot_id}")
-    async def delete_product_lot(product_id: str, lot_id: str, admin: dict = Depends(require_permission("products.edit"))):
-        result = await db.product_lots.delete_one({"id": lot_id, "product_id": product_id})
-        if result.deleted_count == 0:
+    async def delete_product_lot(product_id: str, lot_id: str, force: bool = False, admin: dict = Depends(require_permission("products.edit"))):
+        # p565 delete doctrine: a lot whose projected remaining is >0 is live
+        # stock tracking — refuse silently dropping it (400) unless force=true,
+        # and audit every deletion (P564-009/P555-003 doctrine).
+        lot = await db.product_lots.find_one({"id": lot_id, "product_id": product_id}, {"_id": 0})
+        if not lot:
             raise HTTPException(status_code=404, detail="الدُفعة غير موجودة")
-        return {"message": "تم الحذف"}
+        siblings = await db.product_lots.find(
+            {"product_id": product_id}, {"_id": 0, "id": 1, "expiry_date": 1, "quantity": 1}
+        ).to_list(None)
+        product = await db.products.find_one({"id": product_id}, {"_id": 0, "quantity": 1})
+        remaining = fefo_projection(siblings, (product or {}).get("quantity")).get(lot_id, 0.0)
+        if remaining > 0 and not force:
+            raise HTTPException(
+                status_code=400,
+                detail=f"الدُفعة ما زالت تحمل {remaining:g} وحدة متبقية — أعد الطلب مع force=true للحذف القسري",
+            )
+        await db.product_lots.delete_one({"id": lot_id, "product_id": product_id})
+        await _audit_product("lot_delete", product_id, "", admin, {
+            "lot_id": lot_id, "lot_number": lot.get("lot_number", ""),
+            "remaining_quantity": remaining, "forced": bool(force),
+        })
+        return {"message": "تم الحذف", "forced": bool(force), "remaining_quantity": remaining}
 
     # ── Product Supplier Links ──
     async def _lock_product_supplier_links(product_id: str, session):

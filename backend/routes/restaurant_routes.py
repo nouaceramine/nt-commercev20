@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import uuid
+import re
 import asyncio  # p494: تراجع قصير في حلقات الادعاء الذري
 import secrets  # p323: rotating QR table tokens
 import logging
@@ -67,6 +68,58 @@ class DiscountIn(BaseModel):
     value: Optional[float] = None
     code: Optional[str] = None
     reason: Optional[str] = None
+
+
+def _first_present(doc: dict, fields) -> "Optional[float]":
+    """First field whose value is not None (an explicit 0 is a real value)."""
+    for f in fields:
+        v = doc.get(f)
+        if v is not None:
+            return v
+    return None
+
+
+def _promo_out_of_window(promo: dict) -> bool:
+    """p565: honor the coupon date window if the doc carries one.
+    start-ish fields (start_date/valid_from) in the future or end-ish fields
+    (end_date/valid_until/expiry_date/expires_at) in the past ⇒ out of window.
+    Accepts ISO dates or datetimes; unparseable values are ignored (legacy
+    docs keep working)."""
+    from datetime import date as _date_cls
+
+    def _as_moment(v):
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, str) and v.strip():
+            s = v.strip().replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(s)
+            except ValueError:
+                try:
+                    return datetime.combine(_date_cls.fromisoformat(s[:10]), datetime.min.time())
+                except ValueError:
+                    return None
+        return None
+
+    now = datetime.now(timezone.utc)
+    for f in ("start_date", "valid_from"):
+        m = _as_moment(promo.get(f))
+        if m is not None:
+            if m.tzinfo is None:
+                m = m.replace(tzinfo=timezone.utc)
+            if m > now:
+                return True
+    for f in ("end_date", "valid_until", "expiry_date", "expires_at"):
+        m = _as_moment(promo.get(f))
+        if m is not None:
+            if m.tzinfo is None:
+                m = m.replace(tzinfo=timezone.utc)
+            # a bare date ends at the END of that day
+            if m.hour == 0 and m.minute == 0 and m.second == 0 and m.microsecond == 0:
+                m = m + timedelta(days=1)
+            if m <= now:
+                return True
+    return False
 
 
 class OrderSettingsIn(BaseModel):
@@ -6311,20 +6364,29 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         )
         dtype, dval, code = None, None, None
         if data.code:
+            code_clean = data.code.strip()
+            # p565: the lookup is case-insensitive (the promotions module
+            # enforces case-insensitive uniqueness) and honors the coupon's
+            # date window — an expired / not-yet-started promo is "منتهٍ".
             promo = await db.promotions.find_one(
-                {"code": data.code.strip(), "is_active": {"$ne": False}}, {"_id": 0}
+                {"code": {"$regex": f"^{re.escape(code_clean)}$", "$options": "i"},
+                 "is_active": {"$ne": False}},
+                {"_id": 0},
             )
-            if not promo:
+            if not promo or _promo_out_of_window(promo):
                 raise HTTPException(status_code=404, detail="كوبون غير صالح أو منتهٍ")
             ptype = str(promo.get("discount_type") or promo.get("type") or "percent")
-            pval = float(
-                promo.get("discount_percent")
-                or promo.get("discount_value")
-                or promo.get("value")
-                or 0
-            )
-            dtype = "amount" if ptype in ("amount", "fixed") else "percent"
-            dval, code = pval, data.code.strip()
+            if ptype in ("amount", "fixed"):
+                dtype = "amount"
+                raw = _first_present(promo, ("discount_value", "value", "discount_percent"))
+            else:
+                dtype = "percent"
+                raw = _first_present(promo, ("discount_percent", "discount_value", "value"))
+            # p565: `is not None` — an explicit 0 no longer falls through to
+            # another field (the P564 falsy-swallow lesson); the walls below
+            # reject it with 400.
+            dval = float(raw) if raw is not None else 0.0
+            code = code_clean
         else:
             if data.type not in ("percent", "amount") or data.value is None:
                 raise HTTPException(status_code=400, detail="حدد نوع الخصم وقيمته")
