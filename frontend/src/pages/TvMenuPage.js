@@ -1,6 +1,6 @@
 // p320+p321: شاشة تلفاز المنتجات — توفر حي مربوط بالمخزون/الوصفات، تحديث كل 10 ث
 // الوضع الافتراضي: شبكة بطاقات. ?mode=slider : شرائح صور بملء الشاشة تدور كل 8 ث
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ChefHat, Ban, WifiOff } from 'lucide-react';
 
@@ -13,6 +13,26 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
   const [err, setErr] = useState(false);
   const [clock, setClock] = useState(new Date());
   const [slideIdx, setSlideIdx] = useState(0);
+  // p559: تكبير تلقائي لملء شاشة التلفاز عمودياً عندما يكون المحتوى قليلاً
+  const contentRef = useRef(null);
+  const [fillScale, setFillScale] = useState(1);
+  useEffect(() => {
+    if (sliderMode) return;
+    const measure = () => {
+      const el = contentRef.current;
+      if (!el) return;
+      const contentH = el.scrollHeight;
+      const viewH = window.innerHeight;
+      if (contentH > 0 && contentH < viewH * 0.92) {
+        setFillScale(Math.min(1.8, viewH / contentH));
+      } else {
+        setFillScale(1);
+      }
+    };
+    const t = setTimeout(measure, 300);
+    window.addEventListener('resize', measure);
+    return () => { clearTimeout(t); window.removeEventListener('resize', measure); };
+  }, [sliderMode, items.length]);
 
   const fetchMenu = useCallback(async () => {
     try {
@@ -148,6 +168,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
   // ---------- الوضع الشبكي (افتراضي) ----------
   return (
     <div className="min-h-screen bg-black text-white p-5" dir="rtl" data-testid="tvmenu-page">
+     <div ref={contentRef} style={fillScale !== 1 ? { transform: `scale(${fillScale})`, transformOrigin: 'top right', width: `${100 / fillScale}%` } : undefined}>
       {/* الترويسة */}
       <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-5">
         <div className="flex items-center gap-4">
@@ -256,6 +277,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
           </div>
         </>
       )}
+     </div>
     </div>
   );
 }
