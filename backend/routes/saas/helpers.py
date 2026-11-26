@@ -63,7 +63,7 @@ async def get_current_agent(credentials: HTTPAuthorizationCredentials = Depends(
         agent_id = payload.get("sub")
         agent = await db.saas_agents.find_one({"id": agent_id})
         if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+            raise HTTPException(status_code=401, detail="Agent not found")
         if not agent.get("is_active", True):
             raise HTTPException(status_code=403, detail="الحساب معطل")
         ensure_token_pwv(payload, agent)

@@ -16,9 +16,19 @@ security = HTTPBearer()
 
 
 def _tenant_subscription_expired(tenant: dict) -> bool:
-    """Mirror unified-login's expiry rule for already-issued tokens."""
-    raw_end = tenant.get("subscription_ends_at")
-    if not raw_end or tenant.get("is_trial"):
+    """Expiry predicate for already-issued tokens AND login/PIN surfaces.
+
+    p570: `is_trial` used to bypass expiry entirely, so a trial whose
+    trial_ends_at had passed kept logging in forever (and agent-created trials
+    carried no subscription_ends_at at all). A trial expires by trial_ends_at
+    (falling back to the mirrored subscription_ends_at); a paid tenant expires
+    by subscription_ends_at.
+    """
+    if tenant.get("is_trial"):
+        raw_end = tenant.get("trial_ends_at") or tenant.get("subscription_ends_at")
+    else:
+        raw_end = tenant.get("subscription_ends_at")
+    if not raw_end:
         return False
     try:
         end_date = datetime.fromisoformat(str(raw_end).replace("Z", "+00:00"))
@@ -27,6 +37,11 @@ def _tenant_subscription_expired(tenant: dict) -> bool:
         return end_date < datetime.now(timezone.utc)
     except (TypeError, ValueError):
         return False
+
+
+def tenant_access_expired(tenant: dict) -> bool:
+    """Public alias for login surfaces that must mirror token enforcement."""
+    return _tenant_subscription_expired(tenant)
 
 
 def expired_subscription_allowed(request: Request | None) -> bool:

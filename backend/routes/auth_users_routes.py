@@ -16,7 +16,7 @@ import base64
 import bcrypt
 import secrets
 
-from utils.auth import email_ci, tfa_clear, tfa_locked_minutes, tfa_register_failure
+from utils.auth import email_ci, tfa_clear, tfa_locked_minutes, tfa_register_failure, tenant_access_expired
 from pymongo import ReturnDocument
 
 logger = logging.getLogger(__name__)
@@ -323,10 +323,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             if tenant:
                 if not tenant.get("is_active", True):
                     raise HTTPException(status_code=403, detail="حساب المتجر معطل")
-                if tenant.get("subscription_ends_at"):
-                    end_date = datetime.fromisoformat(tenant["subscription_ends_at"].replace("Z", "+00:00"))
-                    if end_date < datetime.now(timezone.utc) and not tenant.get("is_trial"):
-                        raise HTTPException(status_code=403, detail="انتهت صلاحية اشتراك المتجر")
+                if tenant_access_expired(tenant):
+                    raise HTTPException(status_code=403, detail="انتهت صلاحية اشتراك المتجر")
                 tenant_db_conn = get_tenant_db(directory["tenant_id"])
                 emp_user = await tenant_db_conn.users.find_one({"id": directory["user_id"]}, {"_id": 0})
                 if emp_user:
@@ -389,11 +387,9 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         raise HTTPException(status_code=403, detail=_msg)
                     await _clear_failed_login(email, locals().get("request"))
 
-                    # Check subscription
-                    if tenant.get("subscription_ends_at"):
-                        end_date = datetime.fromisoformat(tenant["subscription_ends_at"].replace("Z", "+00:00"))
-                        if end_date < datetime.now(timezone.utc) and not tenant.get("is_trial"):
-                            raise HTTPException(status_code=403, detail="انتهت صلاحية الاشتراك")
+                    # Check subscription/trial expiry (p570: trials expire too)
+                    if tenant_access_expired(tenant):
+                        raise HTTPException(status_code=403, detail="انتهت صلاحية الاشتراك")
 
                     # Check if this is the first login - create database if not initialized
                     tenant_id = tenant['id']

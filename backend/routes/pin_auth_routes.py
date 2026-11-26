@@ -14,6 +14,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from utils.auth import tenant_access_expired
+
 
 def create_pin_auth_routes(main_db, get_tenant_db, get_current_user, get_tenant_admin,
                            hash_password, verify_password, create_access_token, limiter=None) -> dict:
@@ -36,16 +38,14 @@ def create_pin_auth_routes(main_db, get_tenant_db, get_current_user, get_tenant_
         return await main_db.saas_tenants.find_one(
             {"$or": [{"short_id": code.upper()}, {"short_id": code}, {"id": code}]},
             {"_id": 0, "id": 1, "name": 1, "company_name": 1, "is_active": 1,
-             "subscription_ends_at": 1, "is_trial": 1, "short_id": 1},
+             "subscription_ends_at": 1, "trial_ends_at": 1, "is_trial": 1, "short_id": 1},
         )
 
     def _check_tenant_access(tenant):
         if not tenant.get("is_active", True):
             raise HTTPException(status_code=403, detail="حساب المتجر معطل")
-        if tenant.get("subscription_ends_at"):
-            end = datetime.fromisoformat(tenant["subscription_ends_at"].replace("Z", "+00:00"))
-            if end < _now() and not tenant.get("is_trial"):
-                raise HTTPException(status_code=403, detail="انتهت صلاحية اشتراك المتجر")
+        if tenant_access_expired(tenant):
+            raise HTTPException(status_code=403, detail="انتهت صلاحية اشتراك المتجر")
 
     class PinLoginIn(BaseModel):
         shop_code: str

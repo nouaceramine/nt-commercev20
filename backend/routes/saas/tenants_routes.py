@@ -4,6 +4,7 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 import json
+import math
 import bcrypt
 import ipaddress
 import os
@@ -59,6 +60,44 @@ SUPPORTED_FEATURES = {
     "accounting", "digital_services", "employees", "expenses", "partners",
     "promotions", "purchases", "screen_recording", "sms", "whatsapp",
 }
+
+
+def _clean_features_override(value):
+    """Generic tenant update must honor the same supported-keys filter as the
+    dedicated features endpoint (p570)."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="features_override يجب أن يكون كائنًا")
+    return {k: bool(v) for k, v in value.items() if k in SUPPORTED_FEATURES}
+
+
+def _clean_limits_override(value):
+    """Finite, non-negative numeric limits only (P569 NaN/Inf doctrine)."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="limits_override يجب أن يكون كائنًا")
+    clean = {}
+    for key, val in value.items():
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val) or val < 0:
+            raise HTTPException(status_code=400, detail=f"قيمة الحد {key} يجب أن تكون رقمًا منتهيًا غير سالب")
+        clean[key] = val
+    return clean
+
+
+async def _reverse_pending_commissions(tenant_id: str) -> None:
+    """Reverse PENDING commissions still inside the chargeback window.
+    Shared by toggle-status and the generic PUT so both deactivation paths
+    behave identically (p570)."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.agent_commissions.update_many(
+            {"tenant_id": tenant_id, "status": "pending", "chargeback_until": {"$gt": now}},
+            {"$set": {"status": "reversed", "updated_at": now}},
+        )
+    except Exception as rev_err:
+        logger.warning("Failed to reverse commissions for tenant %s: %s", tenant_id, rev_err)
 
 
 @router.get("/saas/tenants", response_model=List[TenantResponse])
@@ -294,6 +333,13 @@ async def create_tenant(tenant: TenantCreate, admin: dict = Depends(get_super_ad
     plan = await db.saas_plans.find_one({"id": tenant.plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="الخطة غير موجودة")
+    if tenant.agent_id:
+        _agent = await db.saas_agents.find_one(
+            {"id": tenant.agent_id}, {"_id": 0, "id": 1, "is_active": 1})
+        if not _agent:
+            raise HTTPException(status_code=404, detail="الوكيل غير موجود")
+        if _agent.get("is_active") is False:
+            raise HTTPException(status_code=400, detail="الوكيل معطل")
 
     now = datetime.now(timezone.utc)
     if tenant.subscription_type == "monthly":
@@ -446,6 +492,18 @@ async def update_tenant(tenant_id: str, updates: TenantUpdate, admin: dict = Dep
         raise HTTPException(status_code=404, detail="Tenant not found")
 
     update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
+    if "plan_id" in update_data:
+        _plan = await db.saas_plans.find_one({"id": update_data["plan_id"]}, {"_id": 0, "id": 1})
+        if not _plan:
+            raise HTTPException(status_code=404, detail="الخطة غير موجودة")
+    if "features_override" in update_data:
+        update_data["features_override"] = _clean_features_override(update_data["features_override"])
+    if "limits_override" in update_data:
+        update_data["limits_override"] = _clean_limits_override(update_data["limits_override"])
+    # p570: the generic PUT is a second deactivation path — it must reverse
+    # in-window pending commissions exactly like toggle-status does.
+    _will_deactivate = (update_data.get("is_active") is False
+                        and tenant.get("is_active", True) is not False)
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     new_email = update_data.get("email")
@@ -506,6 +564,9 @@ async def update_tenant(tenant_id: str, updates: TenantUpdate, admin: dict = Dep
                 {"id": tenant_id, "_email_change_claim": claim_id},
                 {"$unset": {"_email_change_claim": ""}})
             raise
+
+    if _will_deactivate:
+        await _reverse_pending_commissions(tenant_id)
 
     # p183: changing the activity re-adapts the tenant's features automatically
     if update_data.get("business_type") and update_data["business_type"] != tenant.get("business_type"):
@@ -839,14 +900,7 @@ async def toggle_tenant_status(tenant_id: str, admin: dict = Depends(get_super_a
     # check — it avoids re-doing a date calculation and handles edge cases where
     # the record's window has already expired (those must not be clawed back).
     if not new_status:
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            await db.agent_commissions.update_many(
-                {"tenant_id": tenant_id, "status": "pending", "chargeback_until": {"$gt": now}},
-                {"$set": {"status": "reversed", "updated_at": now}},
-            )
-        except Exception as rev_err:
-            logger.warning("Failed to reverse commissions for tenant %s: %s", tenant_id, rev_err)
+        await _reverse_pending_commissions(tenant_id)
     return {"is_active": new_status}
 
 

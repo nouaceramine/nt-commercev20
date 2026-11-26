@@ -119,6 +119,17 @@ class TenantCreate(BaseModel):
     def _validate_create_email(cls, v: str) -> str:
         return _validate_email(v)
 
+    @field_validator("subscription_type")
+    @classmethod
+    def _validate_create_subscription_type(cls, value: str) -> str:
+        # p570: TenantCreate fed three creators (super-admin, public register,
+        # agent self-service); only SubscriptionPayment had the whitelist, so
+        # an unsupported cycle stored "weekly" and silently mapped to a yearly
+        # expiry with a zero commission price.
+        if value not in {"monthly", "6months", "yearly"}:
+            raise ValueError("Unsupported subscription type")
+        return value
+
 
 class TenantUpdate(BaseModel):
     business_type: Optional[str] = None

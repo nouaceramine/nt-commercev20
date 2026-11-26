@@ -3,9 +3,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 import uuid
 import bcrypt
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
-from config.database import client, db
+from config.database import client, db, main_db
 from utils.auth import email_ci
 from .schemas import TenantCreate, AgentLoginRequest
 from .helpers import get_current_agent, create_access_token, next_tenant_short_id
@@ -55,6 +56,87 @@ async def _create_agent_commission(agent: dict, tenant_id: str, tenant_name: str
         logging.getLogger(__name__).warning(f"Failed to create commission record: {exc}")
 
 router = APIRouter(tags=["SaaS Agent Self-Service"])
+
+AGENT_LOGIN_MAX_ATTEMPTS = 5
+AGENT_LOGIN_LOCK_MINUTES = 10
+
+
+def _agent_login_key(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+async def _agent_login_locked_minutes(email: str) -> int:
+    doc = await main_db.agent_login_attempts.find_one(
+        {"_id": _agent_login_key(email)}, {"_id": 0, "locked_until": 1})
+    if doc and doc.get("locked_until"):
+        try:
+            until = datetime.fromisoformat(doc["locked_until"])
+            if until > datetime.now(timezone.utc):
+                return int((until - datetime.now(timezone.utc)).total_seconds() // 60) + 1
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+async def _agent_login_failed(email: str) -> None:
+    now = datetime.now(timezone.utc)
+    att = await main_db.agent_login_attempts.find_one_and_update(
+        {"_id": _agent_login_key(email)},
+        {"$inc": {"count": 1}, "$set": {"last_at": now.isoformat()}},
+        upsert=True, return_document=ReturnDocument.AFTER)
+    if (att or {}).get("count", 1) >= AGENT_LOGIN_MAX_ATTEMPTS:
+        await main_db.agent_login_attempts.update_one(
+            {"_id": _agent_login_key(email)},
+            {"$set": {"locked_until": (now + timedelta(minutes=AGENT_LOGIN_LOCK_MINUTES)).isoformat(),
+                      "count": 0}})
+
+
+async def _agent_login_clear(email: str) -> None:
+    await main_db.agent_login_attempts.delete_one({"_id": _agent_login_key(email)})
+
+
+async def _agent_email_otp_gate(agent: dict, payload: dict) -> dict:
+    """Direct agent login must pass the same mandatory email-OTP gate as the
+    unified login (p570) — a password alone never releases a token."""
+    import secrets as _sec
+    now = datetime.now(timezone.utc)
+    await main_db.pending_2fa_logins.delete_many({"expires_at": {"$lt": now.isoformat()}})
+    code = f"{_sec.randbelow(1000000):06d}"
+    pending_id = str(uuid.uuid4())
+    await main_db.pending_2fa_logins.insert_one({
+        "_id": pending_id,
+        "email_code": code,
+        "uid": agent.get("id"),
+        "tid": None,
+        "payload": payload,
+        "attempts": 0,
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=10)).isoformat(),
+    })
+    try:
+        from services.email_service import send_email as _send_mail
+        await _send_mail(
+            agent.get("email", ""),
+            "رمز الدخول — NT Commerce",
+            html=(
+                "<div dir='rtl' style='font-family:Arial,sans-serif;padding:24px;max-width:480px'>"
+                "<h2 style='color:#1e40af;margin:0 0 12px'>رمز التحقق لتسجيل الدخول</h2>"
+                "<p style='color:#334155'>محاولة دخول إلى حساب وكيل. الرمز صالح 10 دقائق:</p>"
+                f"<div style='font-size:32px;letter-spacing:8px;font-weight:bold;text-align:center;"
+                f"background:#f1f5f9;border-radius:12px;padding:16px;margin:16px 0;direction:ltr'>{code}</div>"
+                "<p style='color:#94a3b8;font-size:12px'>إن لم تطلب هذا الرمز تجاهل الرسالة وغيّر كلمة المرور فوراً.</p>"
+                "</div>"
+            ),
+        )
+    except Exception as _exc:
+        import logging as _lg
+        _lg.getLogger(__name__).error("agent 2FA email send failed: %s", type(_exc).__name__)
+    return {
+        "requires_2fa": True,
+        "pending_token": pending_id,
+        "method": "email",
+        "message": "أرسلنا رمز تحقق من 6 أرقام إلى بريدك الإلكتروني — صالح 10 دقائق",
+    }
 
 
 @router.get("/saas/agent/me")
@@ -208,16 +290,20 @@ async def agent_create_tenant(tenant: TenantCreate, agent: dict = Depends(get_cu
 
 @router.post("/saas/agent-login")
 async def agent_login(login_data: AgentLoginRequest):
-    agent = await db.saas_agents.find_one({"email": email_ci(login_data.email)})
-    if not agent:
-        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+    email = (login_data.email or "").strip().lower()
+    locked = await _agent_login_locked_minutes(email)
+    if locked:
+        raise HTTPException(status_code=429, detail=f"الحساب مقفل مؤقتاً — حاول بعد {locked} دقيقة")
 
-    if not bcrypt.checkpw(login_data.password.encode('utf-8'), agent["password"].encode('utf-8')):
+    agent = await db.saas_agents.find_one({"email": email_ci(email)})
+    if not agent or not bcrypt.checkpw(login_data.password.encode('utf-8'), agent["password"].encode('utf-8')):
+        await _agent_login_failed(email)
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
 
     if not agent.get("is_active", True):
         raise HTTPException(status_code=403, detail="الحساب معطل")
 
+    await _agent_login_clear(email)
     access_token = create_access_token({
         "sub": agent["id"],
         "email": agent["email"],
@@ -225,19 +311,16 @@ async def agent_login(login_data: AgentLoginRequest):
         "type": "agent",
         "agent_type": agent.get("agent_type", "assistant"),
         "pwv": agent.get("password_version", 0),  # p560
-        "jti": uuid.uuid4().hex,  # p566: revocable agent session
+        "jti": uuid.uuid4().hex,  # p566: revocable agent session — recorded on OTP release
     })
-    try:
-        from utils.auth import record_login_session
-        await record_login_session(access_token)
-    except Exception:  # noqa: BLE001 — mirroring must never break login
-        pass
-
-    return {
+    payload = {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": {k: v for k, v in agent.items() if k not in ["_id", "password"]}
+        "user_type": "agent",
+        "redirect_to": "/agent/dashboard",
+        "user": {k: v for k, v in agent.items() if k not in ["_id", "password"]},
     }
+    return await _agent_email_otp_gate(agent, payload)
 
 
 # ============================================================
