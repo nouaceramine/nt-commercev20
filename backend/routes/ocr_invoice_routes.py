@@ -237,6 +237,13 @@ def create_ocr_invoice_routes(db, require_tenant, get_tenant_admin, CURRENCY, Ap
         key = await db.api_keys.find_one({"id": key_id}, {"_id": 0})
         if not key:
             raise HTTPException(status_code=404, detail="API Key not found")
+        # p566: hold the list endpoint's masking line — internal keys show
+        # the preview only, and secret_value is never exposed anywhere.
+        kv = key.get("key_value") or key.get("api_key", "") or ""
+        key["key_preview"] = f"...{kv[-4:]}" if len(kv) > 4 else kv
+        if key.get("type") == "internal" or not key.get("type"):
+            key["key_value"] = key["key_preview"]
+        key.pop("secret_value", None)
         return key
 
     @router.put("/api-keys/{key_id}/toggle")

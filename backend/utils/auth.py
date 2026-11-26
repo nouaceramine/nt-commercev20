@@ -69,6 +69,92 @@ async def ensure_active_impersonation(payload: dict) -> None:
             or log.get("tenant_id") != payload.get("tenant_id")):
         raise HTTPException(status_code=401, detail="Impersonation session closed")
 
+async def ensure_token_not_revoked(payload: dict) -> None:
+    """p566: sessions terminated from the security panel tombstone their jti
+    in revoked_sessions; any token carrying that jti dies at the next
+    request. Legacy tokens without a jti claim skip the check (the pwv
+    0==0 doctrine) so pre-existing sessions are unaffected."""
+    jti = payload.get("jti")
+    if not jti:
+        return
+    if await main_db.revoked_sessions.find_one({"id": jti}, {"_id": 1}):
+        raise HTTPException(status_code=401, detail="انتهت الجلسة — سجّل الدخول من جديد")
+
+
+async def record_login_session(token: str, request=None) -> None:
+    """p566: give the security «active sessions» panel a real writer — every
+    delivered login token (jti claim) is mirrored into user_sessions.
+    Impersonation tokens carry no jti; their lifecycle stays with
+    impersonation_logs (P551/P566-003)."""
+    try:
+        claims = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except Exception:  # noqa: BLE001
+        return
+    jti = claims.get("jti")
+    if not jti:
+        return
+    now = datetime.now(timezone.utc)
+    exp = claims.get("exp")
+    try:
+        expires_dt = datetime.fromtimestamp(int(exp), timezone.utc) if exp             else now + timedelta(hours=24)
+    except (TypeError, ValueError, OSError):
+        expires_dt = now + timedelta(hours=24)
+    ip, ua = "", ""
+    if request is not None:
+        try:
+            ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+                or (request.client.host if request.client else "")
+            ua = (request.headers.get("user-agent") or "")[:300]
+        except Exception:  # noqa: BLE001
+            pass
+    doc = {
+        "id": jti,
+        "user_id": claims.get("sub"),
+        "email": claims.get("email", ""),
+        "tenant_id": claims.get("tenant_id"),
+        "user_type": claims.get("type") or claims.get("role", ""),
+        "role": claims.get("role", ""),
+        "auth_method": claims.get("auth_method", "password"),
+        "ip": ip,
+        "user_agent": ua,
+        "created_at": now.isoformat(),
+        "expires_at": expires_dt.isoformat(),
+        "expires_dt": expires_dt,  # BSON date for the TTL index
+    }
+    await main_db.user_sessions.replace_one({"id": jti}, doc, upsert=True)
+    try:
+        await main_db.user_sessions.create_index("expires_dt", expireAfterSeconds=0)
+        await main_db.revoked_sessions.create_index("id", unique=True)
+        await main_db.revoked_sessions.create_index("expires_dt", expireAfterSeconds=0)
+    except Exception:  # noqa: BLE001 — index races between workers are benign
+        pass
+
+
+async def revoke_session(session_id: str, revoked_by: str = "") -> bool:
+    """p566: real termination — remove the panel row AND tombstone the jti so
+    the JWT itself dies at its next request (ensure_token_not_revoked)."""
+    doc = await main_db.user_sessions.find_one_and_delete({"id": session_id})
+    if not doc:
+        return False
+    now = datetime.now(timezone.utc)
+    try:
+        expires_dt = datetime.fromisoformat(
+            str(doc.get("expires_at", "")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        expires_dt = now + timedelta(hours=24)
+    await main_db.revoked_sessions.replace_one({"id": session_id}, {
+        "id": session_id,
+        "user_id": doc.get("user_id"),
+        "tenant_id": doc.get("tenant_id"),
+        "email": doc.get("email", ""),
+        "revoked_by": revoked_by,
+        "revoked_at": now.isoformat(),
+        "expires_at": doc.get("expires_at"),
+        "expires_dt": expires_dt,
+    }, upsert=True)
+    return True
+
+
 TFA_MAX_ATTEMPTS = 5
 TFA_LOCK_MINUTES = 10
 
@@ -154,6 +240,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         await ensure_active_impersonation(payload)
+        await ensure_token_not_revoked(payload)
         allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type", "tenant")
@@ -222,6 +309,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         await ensure_active_impersonation(payload)
+        await ensure_token_not_revoked(payload)
         allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type", "tenant")

@@ -190,8 +190,10 @@ def create_security_routes(db, main_db, get_current_user, get_super_admin) -> di
 
     @router.delete("/sessions/{session_id}")
     async def terminate_session(session_id: str, admin: dict = Depends(get_super_admin)):
-        result = await main_db.user_sessions.delete_one({"id": session_id})
-        if result.deleted_count == 0:
+        # p566: real termination — tombstone the token's jti so the JWT dies
+        # at its next request, not just the panel row.
+        from utils.auth import revoke_session
+        if not await revoke_session(session_id, revoked_by=admin.get("email", "")):
             raise HTTPException(status_code=404, detail="الجلسة غير موجودة")
         return {"message": "تم إنهاء الجلسة"}
 

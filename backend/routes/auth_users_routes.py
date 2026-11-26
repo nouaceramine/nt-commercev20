@@ -156,7 +156,24 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
     PENDING_2FA_TTL_MINUTES = 5
     RESET_CODE_TTL_MINUTES = 15
 
-    async def _2fa_gate(user_record: dict, final_payload: dict) -> dict:
+    def _mint_login_token(claims: dict) -> str:
+        # p566: jti makes the session addressable by the security panel
+        # (terminate = tombstone the jti).
+        claims["jti"] = uuid.uuid4().hex
+        return create_access_token(claims)
+
+    async def _record_session_delivery(final_payload: dict, request=None) -> None:
+        # p566: record only DELIVERED tokens — 2FA-gated payloads are stashed
+        # server-side and recorded at login-verify when actually released.
+        try:
+            from utils.auth import record_login_session
+            token = (final_payload or {}).get("access_token")
+            if token:
+                await record_login_session(token, request)
+        except Exception:  # noqa: BLE001 — session mirroring must never break login
+            pass
+
+    async def _2fa_gate(user_record: dict, final_payload: dict, request=None) -> dict:
         """If the account has TOTP 2FA enabled, stash the minted login payload
         server-side (5 min TTL, single use) and ask the client for the
         authenticator code instead of returning the token directly."""
@@ -203,6 +220,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             }
         secret = user_record.get("two_fa_secret")
         if not (user_record.get("two_fa_enabled") and secret):
+            await _record_session_delivery(final_payload, request)
             return final_payload
         # lazy cleanup of expired pending logins (ISO strings compare lexically in UTC)
         await main_db.pending_2fa_logins.delete_many({"expires_at": {"$lt": now.isoformat()}})
@@ -245,8 +263,8 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
             stored_password = user.get("hashed_password") or user.get("password")
             if stored_password and verify_password(password, stored_password):
                 await _clear_failed_login(email, locals().get("request"))
-                access_token = create_access_token({"sub": user["id"], "role": user["role"],
-                                                    "pwv": user.get("password_version", 0)})
+                access_token = _mint_login_token({"sub": user["id"], "role": user["role"],
+                                                  "pwv": user.get("password_version", 0)})
                 return await _2fa_gate(user, {
                     "access_token": access_token,
                     "user_type": "admin",
@@ -259,7 +277,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "permissions": user.get("permissions", {}),
                         "features": user.get("features")
                     }
-                })
+                }, request)
 
         # 2. Check Agents
         agent = await db.saas_agents.find_one({"email": email_ci(email)}, {"_id": 0})
@@ -278,7 +296,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "type": "agent",
                         "pwv": agent.get("password_version", 0)
                     }
-                    access_token = create_access_token(token_data)
+                    access_token = _mint_login_token(token_data)
                     agent["two_fa_email_enabled"] = True  # p155: email OTP enforced for all agents
                     return await _2fa_gate(agent, {
                         "access_token": access_token,
@@ -292,7 +310,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "current_balance": agent.get("current_balance", 0),
                             "credit_limit": agent.get("credit_limit", 0)
                         }
-                    })
+                    }, request)
             except Exception:
                 pass
 
@@ -325,7 +343,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "tenant_id": directory["tenant_id"],
                             "pwv": emp_user.get("password_version", 0),
                         }
-                        access_token = create_access_token(token_data)
+                        access_token = _mint_login_token(token_data)
                         # p513: employees receive the same plan ⊕ override features as
                         # the tenant owner (canon: get_effective_features); previously
                         # absent → opt-in UI gates stayed shut until a /me refresh.
@@ -350,7 +368,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                                 "features": _feats,
                                 "limits": _lims,
                             },
-                        })
+                        }, request)
 
         # 3. Check Tenants
         tenant = await db.saas_tenants.find_one({"email": email_ci(email)}, {"_id": 0})
@@ -457,7 +475,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                         "tenant_id": tenant["id"],
                         "pwv": tenant_user.get("password_version", 0),
                     }
-                    access_token = create_access_token(token_data)
+                    access_token = _mint_login_token(token_data)
 
                     # Get plan info with features and limits
                     # p513: plan-less tenants keep their explicit overrides (canon:
@@ -490,7 +508,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
                             "features": features,
                             "limits": limits
                         }
-                    })
+                    }, request)
             except HTTPException:
                 raise
             except Exception:
@@ -547,6 +565,7 @@ def create_auth_users_routes(db, main_db, get_current_user, get_admin_user, get_
         claimed = await main_db.pending_2fa_logins.find_one_and_delete({"_id": body.pending_token})
         if not claimed:
             raise HTTPException(status_code=401, detail="انتهت صلاحية طلب التحقق — أعد تسجيل الدخول")
+        await _record_session_delivery(claimed["payload"], request)
         return claimed["payload"]
 
     @router.post("/auth/forgot-password")

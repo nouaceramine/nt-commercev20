@@ -48,6 +48,7 @@ async def impersonate_agent(agent_id: str, request: Request, admin: dict = Depen
     if not agent.get("is_active", True):
         raise HTTPException(status_code=400, detail="حساب الوكيل معطل")
 
+    session_id = str(uuid.uuid4())
     access_token = create_access_token({
         "sub": agent["id"],
         "email": agent["email"],
@@ -56,11 +57,11 @@ async def impersonate_agent(agent_id: str, request: Request, admin: dict = Depen
         "agent_type": agent.get("agent_type", "assistant"),
         "impersonated_by": admin.get("id"),
         "pwv": agent.get("password_version", 0),  # p560
+        "impersonation_session_id": session_id,  # p566: dies with the audit session
     })
 
     client_host = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
         or (request.client.host if request.client else "unknown")
-    session_id = str(uuid.uuid4())
     await db.impersonation_logs.insert_one({
         "id": session_id,
         "tenant_id": agent_id,                      # timeline groups on this field
@@ -106,10 +107,17 @@ async def reset_tenant_password(tenant_id: str, data: PasswordResetIn,
     if not tenant:
         raise HTTPException(status_code=404, detail="المشترك غير موجود")
     hashed = bcrypt.hashpw(data.new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    await db.saas_tenants.update_one({"id": tenant_id}, {"$set": {"password": hashed}})
+    # p566: bump password_version so every live tenant session dies with the
+    # reset (the P560 pwv doctrine on the admin surface), and write BOTH hash
+    # fields (login prefers hashed_password — the P560-002 lesson).
+    await db.saas_tenants.update_one({"id": tenant_id},
+                                     {"$set": {"password": hashed},
+                                      "$inc": {"password_version": 1}})
     # keep the tenant-DB admin user in sync so the new password works at login
     tdb = get_tenant_db(tenant_id)
-    await tdb.users.update_many({"email": tenant["email"]}, {"$set": {"hashed_password": hashed}})
+    await tdb.users.update_many({"email": tenant["email"]},
+                                {"$set": {"hashed_password": hashed, "password": hashed},
+                                 "$inc": {"password_version": 1}})
     await _log_security_event(admin, "password_reset", "tenant", tenant_id, tenant.get("name", ""), request)
     return {"ok": True, "message": "تم تغيير كلمة مرور المشترك"}
 
@@ -122,6 +130,9 @@ async def reset_agent_password(agent_id: str, data: PasswordResetIn,
     if not agent:
         raise HTTPException(status_code=404, detail="الوكيل غير موجود")
     hashed = bcrypt.hashpw(data.new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    await db.saas_agents.update_one({"id": agent_id}, {"$set": {"password": hashed}})
+    # p566: same doctrine for agents — live agent tokens die with the reset.
+    await db.saas_agents.update_one({"id": agent_id},
+                                    {"$set": {"password": hashed},
+                                     "$inc": {"password_version": 1}})
     await _log_security_event(admin, "password_reset", "agent", agent_id, agent.get("name", ""), request)
     return {"ok": True, "message": "تم تغيير كلمة مرور الوكيل"}

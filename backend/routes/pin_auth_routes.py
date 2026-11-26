@@ -7,6 +7,7 @@ after 5 failures. Tokens are minted in the exact tenant-employee shape
 used by /auth/unified-login so permissions apply identically.
 """
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -133,7 +134,13 @@ def create_pin_auth_routes(main_db, get_tenant_db, get_current_user, get_tenant_
             "tenant_id": tenant["id"],
             "auth_method": "pin",
             "pwv": user.get("password_version", 0),
+            "jti": uuid.uuid4().hex,  # p566: revocable POS session
         })
+        try:
+            from utils.auth import record_login_session
+            await record_login_session(access_token)
+        except Exception:  # noqa: BLE001 — mirroring must never break login
+            pass
         return {
             "access_token": access_token,
             "user_type": "tenant",

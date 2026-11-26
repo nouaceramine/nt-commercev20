@@ -59,7 +59,8 @@ from config.database import (
 # JWT Settings
 from utils.jwt_config import SECRET_KEY, ALGORITHM
 from utils.auth import (ensure_active_account, ensure_active_impersonation,
-                        ensure_token_pwv, expired_subscription_allowed)
+                        ensure_token_not_revoked, ensure_token_pwv,
+                        expired_subscription_allowed)
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 # Currency
@@ -207,6 +208,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         await ensure_active_impersonation(payload)
+        await ensure_token_not_revoked(payload)
         allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type")
@@ -315,6 +317,7 @@ async def get_tenant_user(credentials: HTTPAuthorizationCredentials = Depends(se
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         await ensure_active_impersonation(payload)
+        await ensure_token_not_revoked(payload)
         allow_expired = expired_subscription_allowed(request)
         user_id = payload.get("sub")
         user_type = payload.get("type")

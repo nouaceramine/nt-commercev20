@@ -293,7 +293,13 @@ async def tenant_login(request: Request, login_data: AgentLoginRequest):
         "type": "tenant",
         "tenant_id": tenant["id"],
         "pwv": tenant.get("password_version", 0),  # p560
+        "jti": uuid.uuid4().hex,  # p566: revocable session
     })
+    try:
+        from utils.auth import record_login_session
+        await record_login_session(access_token)
+    except Exception:  # noqa: BLE001 — mirroring must never break login
+        pass
 
     return {
         "access_token": access_token,

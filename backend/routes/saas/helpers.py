@@ -7,7 +7,7 @@ import jwt
 from config.database import db, main_db
 
 from utils.jwt_config import SECRET_KEY, ALGORITHM
-from utils.auth import ensure_active_account, ensure_token_pwv
+from utils.auth import ensure_active_account, ensure_token_not_revoked, ensure_token_pwv
 
 security = HTTPBearer()
 
@@ -25,6 +25,7 @@ async def get_super_admin(credentials: HTTPAuthorizationCredentials = Depends(se
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        await ensure_token_not_revoked(payload)
         user_id = payload.get("sub")
         user = await main_db.users.find_one({"id": user_id})
         if not user:
@@ -44,6 +45,19 @@ async def get_current_agent(credentials: HTTPAuthorizationCredentials = Depends(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        await ensure_token_not_revoked(payload)
+        # p566: agent impersonation tokens carry impersonation_session_id and
+        # die with their audit session (the P551 tenant-impersonation
+        # doctrine). Legacy impersonation tokens without the claim fail closed.
+        _sid = payload.get("impersonation_session_id")
+        if payload.get("impersonated_by") or _sid:
+            if not _sid:
+                raise HTTPException(status_code=401, detail="Impersonation session required")
+            _log = await db.impersonation_logs.find_one(
+                {"id": _sid}, {"_id": 0, "status": 1, "tenant_id": 1})
+            if (not _log or _log.get("status") != "active"
+                    or _log.get("tenant_id") != payload.get("sub")):
+                raise HTTPException(status_code=401, detail="Impersonation session closed")
         if payload.get("type") != "agent" and payload.get("role") != "agent":
             raise HTTPException(status_code=403, detail="Agent access required")
         agent_id = payload.get("sub")
