@@ -45,7 +45,18 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         total_amount = sum(s.get("total", 0) for s in sales)
         total_paid = sum(s.get("paid_amount", 0) for s in sales)
         total_discount = sum(s.get("discount", 0) for s in sales)
-        total_profit = sum((i.get("unit_price", 0) - i.get("purchase_price", i.get("unit_price", 0) * 0.7)) * i.get("quantity", 1) for s in sales for i in s.get("items", []))
+        # p564-010: p548-002 doctrine — a legacy row without a purchase_price
+        # snapshot falls back to the PRODUCT cost; the old 0.7x heuristic
+        # fabricated a 30% margin on every legacy line
+        from services.reporting import product_price_map as _ppm
+        _costs = await _ppm(db, (i.get("product_id") for s in sales for i in s.get("items", [])))
+        total_profit = 0
+        for s in sales:
+            for i in s.get("items", []):
+                _pp = i.get("purchase_price")
+                if _pp is None:
+                    _pp = _costs.get(i.get("product_id"), 0)
+                total_profit += (i.get("unit_price", 0) - _pp) * i.get("quantity", 1)
         by_employee, by_payment, product_sales = {}, {}, {}
         for sale in sales:
             eid = sale.get("employee_id", "unknown")

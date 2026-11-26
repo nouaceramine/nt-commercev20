@@ -8,6 +8,7 @@ import csv
 import io
 import json
 import math
+import uuid
 from datetime import datetime, timezone
 from bson import ObjectId
 from openpyxl import Workbook, load_workbook
@@ -58,6 +59,18 @@ EXPORTABLE_COLLECTIONS = {
 }
 
 
+# p564-002: replace mode wipes the collection — for financial documents and
+# money-mirror carriers that orphans journal entries and balances forever
+# (same doctrine as the long-standing products guard below).
+NO_REPLACE_COLLECTIONS = {"products", "sales", "purchases", "expenses", "debts",
+                          "customers", "suppliers"}
+
+# p564-004: sign wall — negative numbers must never enter through import
+_NUMERIC_IMPORT_FIELDS = ("retail_price", "wholesale_price", "purchase_price",
+                          "amount", "total", "discount", "salary", "remaining",
+                          "tax_rate", "quantity", "min_stock")
+
+
 def create_import_export_routes(db, get_current_user) -> dict:
     router = APIRouter(prefix="/data", tags=["data-import-export"])
 
@@ -68,9 +81,40 @@ def create_import_export_routes(db, get_current_user) -> dict:
             return get_tenant_db(tenant_id)
         return db
 
+    def _require_admin(user):
+        # p564-001: the export/read side had no role gate at all while the
+        # import side was admin-only and the UI shows the page to admins only —
+        # a cashier could dump the whole tenant (salaries included).
+        if user.get("role") not in ("admin", "super_admin"):
+            raise HTTPException(status_code=403,
+                                detail="غير مصرح — تصدير البيانات واستيرادها للمدير فقط")
+
+    def _finalize_record(record):
+        """p564: canonical id + created_at preservation + sign wall.
+        Returns an Arabic error string when the row must be rejected, else None."""
+        rid = str(record.pop("id", "") or "").strip()
+        record["id"] = rid or str(uuid.uuid4())
+        cat = str(record.pop("created_at", "") or "").strip()
+        if cat:
+            try:
+                datetime.fromisoformat(cat.replace("Z", "+00:00"))
+                record["created_at"] = cat
+            except (ValueError, AttributeError):
+                record["created_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            record["created_at"] = datetime.now(timezone.utc).isoformat()
+        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+        for f in _NUMERIC_IMPORT_FIELDS:
+            v = record.get(f)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) \
+                    and math.isfinite(v) and v < 0:
+                return f"قيمة سالبة غير مقبولة في الحقل {f}"
+        return None
+
     @router.get("/collections")
     async def get_exportable_collections(tenant_id: Optional[str] = None, user: dict = Depends(get_current_user)):
         """Get list of collections available for import/export"""
+        _require_admin(user)  # p564-001
         tdb = _resolve_db(user, tenant_id)
         result = []
         for key, info in EXPORTABLE_COLLECTIONS.items():
@@ -92,6 +136,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
         user: dict = Depends(get_current_user)
     ):
         """Export collection data as CSV or Excel"""
+        _require_admin(user)  # p564-001
         if collection not in EXPORTABLE_COLLECTIONS:
             raise HTTPException(status_code=400, detail=f"Collection '{collection}' not exportable")
 
@@ -106,7 +151,9 @@ def create_import_export_routes(db, get_current_user) -> dict:
             writer = csv.DictWriter(output, fieldnames=["id"] + fields, extrasaction='ignore')
             writer.writeheader()
             for doc in docs:
-                row = {"id": str(doc.get("_id", ""))}
+                # p564-003: the id column carries the business id so an
+                # export->import round-trip re-keys the same documents
+                row = {"id": str(doc.get("id") or doc.get("_id", ""))}
                 for f in fields:
                     val = doc.get(f, "")
                     if isinstance(val, ObjectId):
@@ -135,7 +182,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
             ws.append(headers)
 
             for doc in docs:
-                row = [str(doc.get("_id", ""))]
+                row = [str(doc.get("id") or doc.get("_id", ""))]  # p564-003
                 for f in fields:
                     val = doc.get(f, "")
                     if isinstance(val, ObjectId):
@@ -166,7 +213,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
             from utils.csv_safe import sanitize_csv_value
             # Tab-separated UTF-8 text (opens cleanly in Excel/notepad)
             def _txt_row(doc):
-                vals = [str(doc.get("_id", ""))]
+                vals = [str(doc.get("id") or doc.get("_id", ""))]  # p564-003
                 for f in fields:
                     val = doc.get(f, "")
                     if isinstance(val, ObjectId):
@@ -211,7 +258,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
                     return txt
 
             def _pdf_row(doc):
-                vals = [str(doc.get("_id", ""))[:12]]
+                vals = [str(doc.get("id") or doc.get("_id", ""))[:12]]  # p564-003
                 for f in fields:
                     val = doc.get(f, "")
                     if isinstance(val, ObjectId):
@@ -254,7 +301,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
                 table.rows[0].cells[i].text = str(h)
             for doc in docs:
                 cells = table.add_row().cells
-                vals = [str(doc.get("_id", ""))]
+                vals = [str(doc.get("id") or doc.get("_id", ""))]  # p564-003
                 for f in fields:
                     val = doc.get(f, "")
                     if isinstance(val, ObjectId):
@@ -291,11 +338,21 @@ def create_import_export_routes(db, get_current_user) -> dict:
         if user.get("role") not in ["admin", "super_admin"]:
             raise HTTPException(status_code=403, detail="Admin only")
 
+        # p564-002: replace fails closed on financial/mirror collections
+        if mode == "replace" and collection in NO_REPLACE_COLLECTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"استبدال «{EXPORTABLE_COLLECTIONS[collection]['label_ar']}» غير مدعوم "
+                       "لأنه يفسد القيود المحاسبية والمرايا المالية المرتبطة؛ استخدم وضع الإضافة",
+            )
+
         tdb = _resolve_db(user, tenant_id)
         fields = EXPORTABLE_COLLECTIONS[collection]["fields"]
         content = await file.read()
         filename = file.filename.lower()
         records = []
+        parse_errors = []      # p564-004: rejected rows (sign wall)
+        skipped_invalid = 0
 
         try:
             if filename.endswith('.csv') or filename.endswith('.txt'):
@@ -320,8 +377,15 @@ def create_import_export_routes(db, get_current_user) -> dict:
                                 except (ValueError, TypeError):
                                     val = 0
                             record[f] = val
-                    record["created_at"] = datetime.now(timezone.utc).isoformat()
-                    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    # p564-003/011: keep the round-trip id and original date
+                    for _extra in ("id", "created_at"):
+                        if row.get(_extra):
+                            record[_extra] = row[_extra]
+                    _err = _finalize_record(record)
+                    if _err:
+                        parse_errors.append(f"Row {reader.line_num}: {_err}")
+                        skipped_invalid += 1
+                        continue
                     records.append(record)
 
             elif filename.endswith('.xlsx') or filename.endswith('.xls'):
@@ -347,8 +411,17 @@ def create_import_export_routes(db, get_current_user) -> dict:
                                 except (ValueError, TypeError):
                                     val = 0
                             record[field] = val
-                    record["created_at"] = datetime.now(timezone.utc).isoformat()
-                    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    # p564-003/011: keep the round-trip id and original date
+                    for _extra in ("id", "created_at"):
+                        if _extra in headers_row:
+                            _xi = headers_row.index(_extra)
+                            if _xi < len(row) and row[_xi] not in (None, ""):
+                                record[_extra] = row[_xi]
+                    _err = _finalize_record(record)
+                    if _err:
+                        parse_errors.append(f"Row: {_err}")
+                        skipped_invalid += 1
+                        continue
                     records.append(record)
                 wb.close()
             elif filename.endswith('.docx'):
@@ -378,8 +451,17 @@ def create_import_export_routes(db, get_current_user) -> dict:
                                 except (ValueError, TypeError):
                                     val = 0
                             record[field] = val
-                    record["created_at"] = datetime.now(timezone.utc).isoformat()
-                    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    # p564-003/011: keep the round-trip id and original date
+                    for _extra in ("id", "created_at"):
+                        if _extra in headers_row:
+                            _xi = headers_row.index(_extra)
+                            if _xi < len(row) and row[_xi] not in (None, ""):
+                                record[_extra] = row[_xi]
+                    _err = _finalize_record(record)
+                    if _err:
+                        parse_errors.append(f"Row: {_err}")
+                        skipped_invalid += 1
+                        continue
                     records.append(record)
 
             elif filename.endswith('.pdf'):
@@ -439,7 +521,10 @@ def create_import_export_routes(db, get_current_user) -> dict:
             raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
 
         if not records:
-            raise HTTPException(status_code=400, detail="No valid records found")
+            detail = "No valid records found"
+            if skipped_invalid:
+                detail = "كل الصفوف مرفوضة: " + "؛ ".join(parse_errors[:3])
+            raise HTTPException(status_code=400, detail=detail)
 
         # Log the import
         import_log = {
@@ -453,17 +538,14 @@ def create_import_export_routes(db, get_current_user) -> dict:
         }
 
         if collection == "products":
-            if mode == "replace":
-                raise HTTPException(
-                    status_code=400,
-                    detail="استبدال المنتجات غير مدعوم لأنه قد يفسد المخزون والمراجع المرتبطة؛ استخدم وضع الإضافة",
-                )
+            # p564-002: replace mode is refused earlier for every financial /
+            # mirror-carrying collection (products included)
             from services.product_excel import apply_product_excel_row
 
             created = 0
             updated = 0
             skipped = 0
-            errors = []
+            errors = list(parse_errors)  # p564-004: sign-wall rejections from the parse stage
             now = datetime.now(timezone.utc).isoformat()
             source = "smart_import" if file.filename.lower() == "smart_import.csv" else "data_import"
             for index, record in enumerate(records):
@@ -510,17 +592,32 @@ def create_import_export_routes(db, get_current_user) -> dict:
                 "records_updated": updated,
                 "skipped_duplicates": 0,
                 "skipped_rows": skipped,
+                "skipped_invalid": skipped_invalid,
                 "errors": errors[:10],
                 "mode": mode,
             }
 
-        if mode == "replace":
-            await tdb[collection].delete_many({})
-
         inserted = 0
         skipped_dups = 0
-        if records:
-            from pymongo.errors import BulkWriteError
+        from pymongo.errors import BulkWriteError
+        if mode == "replace":
+            # p564-002: only non-financial reference data reaches this branch
+            # (employees) — delete+insert must succeed or fail as ONE unit.
+            from config.database import client as _client
+            try:
+                async with await _client.start_session() as _session:
+                    async with _session.start_transaction():
+                        await tdb[collection].delete_many({}, session=_session)
+                        if records:
+                            await tdb[collection].insert_many(records, ordered=False,
+                                                              session=_session)
+                inserted = len(records)
+            except BulkWriteError:
+                raise HTTPException(status_code=400,
+                                    detail="فشل الاستبدال — لم تتغير البيانات (تعارض قيود التفرد)")
+            import_log["inserted_count"] = inserted
+            import_log["skipped_duplicates"] = skipped_dups
+        elif records:
             try:
                 # unordered: valid rows still import when some hit unique indexes
                 result = await tdb[collection].insert_many(records, ordered=False)
@@ -536,15 +633,19 @@ def create_import_export_routes(db, get_current_user) -> dict:
         return {
             "success": True,
             "message": f"Imported {inserted} records to {collection}"
-                       + (f" ({skipped_dups} duplicates skipped)" if skipped_dups else ""),
+                       + (f" ({skipped_dups} duplicates skipped)" if skipped_dups else "")
+                       + (f" ({skipped_invalid} invalid rows rejected)" if skipped_invalid else ""),
             "records_imported": inserted,
             "skipped_duplicates": skipped_dups,
+            "skipped_invalid": skipped_invalid,
+            "errors": parse_errors[:10],
             "mode": mode
         }
 
     @router.get("/import-history")
     async def get_import_history(tenant_id: Optional[str] = None, user: dict = Depends(get_current_user)):
         """Get import history"""
+        _require_admin(user)  # p564-001
         tdb = _resolve_db(user, tenant_id)
         cursor = tdb["import_logs"].find({}).sort("created_at", -1).limit(50)
         logs = await cursor.to_list(length=50)
@@ -559,6 +660,7 @@ def create_import_export_routes(db, get_current_user) -> dict:
         user: dict = Depends(get_current_user)
     ):
         """Download empty template for import"""
+        _require_admin(user)  # p564-001
         if collection not in EXPORTABLE_COLLECTIONS:
             raise HTTPException(status_code=400, detail="Invalid collection")
 

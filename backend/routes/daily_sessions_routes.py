@@ -314,6 +314,12 @@ def create_daily_sessions_routes(db, get_current_user, get_tenant_admin, require
             raise HTTPException(status_code=404, detail="الحصة غير موجودة")
         if session["status"] == "open":
             raise HTTPException(status_code=400, detail="لا يمكن حذف حصة مفتوحة")
+        # p564-009: p555-003 delete doctrine — a session that transferred its
+        # counted cash to the safe owns two session_close ledger transactions;
+        # deleting it orphans the ledger and hides the money movement
+        if session.get("cash_transferred_to_safe"):
+            raise HTTPException(status_code=400,
+                                detail="لا يمكن حذف حصة حوّلت حصيلتها إلى الخزنة — القيود المالية مرتبطة بها")
         await db.daily_sessions.delete_one({"id": session_id})
         return {"message": "تم حذف الحصة بنجاح"}
 

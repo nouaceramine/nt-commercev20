@@ -243,7 +243,11 @@ def create_smart_router(db, main_db, require_tenant, get_tenant_admin, limiter=N
     @router.get("/smart/stock-forecast")
     async def stock_forecast(days: int = Query(14, ge=7, le=60), user: dict = Depends(require_tenant)):
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        sales = await db.sales.find({"created_at": {"$gte": since}, "status": {"$ne": "cancelled"}},
+        # p564-006: returned sales are not demand — counting them inflated
+        # velocity and fired phantom stockout alerts (restock-suggestions and
+        # every other report exclude them)
+        sales = await db.sales.find({"created_at": {"$gte": since},
+                                     "status": {"$nin": ["cancelled", "returned"]}},
                                     {"_id": 0, "items": 1}).to_list(5000)
         velocity = {}  # product_id → units/day
         for s in sales:
@@ -527,8 +531,13 @@ def create_smart_router_ext(db, main_db, require_tenant, get_tenant_admin, get_t
         if not started:
             return {"report": None}
         rng = {"created_at": {"$gte": started, "$lte": ended}}
-        orders = await db.ecom_orders.find({**rng, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(2000)
-        sales = await db.sales.find({**rng, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(2000)
+        # p564-005: p554-001 doctrine — web-store orders are mirrored INTO
+        # sales (p87), so the sales half must exclude source=webstore and both
+        # halves must exclude cancelled/refunded/returned (a return is not
+        # flash-day revenue)
+        orders = await db.ecom_orders.find({**rng, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(2000)
+        sales = await db.sales.find({**rng, "status": {"$nin": ["cancelled", "returned", "refunded"]},
+                                     "source": {"$ne": "webstore"}}, {"_id": 0}).to_list(2000)
         rev = sum(float(o.get("total") or 0) for o in orders) + sum(float(s2.get("total") or 0) for s2 in sales)
         return {"report": {"orders_count": len(orders) + len(sales), "revenue": round(rev, 2),
                            "window": {"from": started, "to": ended},

@@ -480,6 +480,10 @@ async def get_product_sales_tracking(
 
     all_sales = await db.sales.find(query, {"_id": 0}).to_list(10000)
 
+    # Get product info (p564-010: fetched before the loop — its cost is the
+    # fallback for legacy rows without a purchase_price snapshot)
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+
     # Filter sales containing this product
     product_sales = []
     total_quantity = 0
@@ -503,15 +507,14 @@ async def get_product_sales_tracking(
                 )
                 total_quantity += item.get("quantity", 1)
                 total_revenue += item.get("total", 0)
-                purchase_price = item.get(
-                    "purchase_price", item.get("unit_price", 0) * 0.7
-                )
+                # p564-010: real product cost fallback (p548-002 doctrine) —
+                # the 0.7x heuristic fabricated a 30% margin on legacy rows
+                purchase_price = item.get("purchase_price")
+                if purchase_price is None:
+                    purchase_price = (product or {}).get("purchase_price", 0)
                 total_profit += (item.get("unit_price", 0) - purchase_price) * item.get(
                     "quantity", 1
                 )
-
-    # Get product info
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
 
     return {
         "product": product,

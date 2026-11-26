@@ -272,9 +272,17 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
                 {"_id": 0, "total": 1, "items": 1},
             ).to_list(5000)
             ecom_revenue = round(sum(float(s.get("total") or 0) for s in ecom_sales), 2)
+            # p564-010: legacy rows without a purchase_price snapshot fall back
+            # to the product cost (the POS loop right above already does) —
+            # a zero here silently understated the ecom COGS breakdown
+            _ecom_pmap = await product_price_map(
+                db, (it.get("product_id") for s in ecom_sales for it in (s.get("items") or [])))
             for s in ecom_sales:
                 for it in (s.get("items") or []):
-                    ecom_cogs += int(it.get("quantity", 0) or 0) * float(it.get("purchase_price") or 0)
+                    _pp = it.get("purchase_price")
+                    if _pp is None:
+                        _pp = _ecom_pmap.get(it.get("product_id"), 0)
+                    ecom_cogs += int(it.get("quantity", 0) or 0) * float(_pp or 0)
             ecom_cogs = round(ecom_cogs, 2)
         except Exception:
             ecom_revenue = ecom_cogs = 0
@@ -348,7 +356,10 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
 
         pipeline = [
             {"$match": {"closed_at": {"$gte": start_date}, "status": "closed"}},
-            {"$group": {"_id": "$user_id", "user_name": {"$first": "$user_name"}, "total_sales": {"$sum": "$total_sales"}, "sessions_count": {"$sum": 1}, "total_difference": {"$sum": {"$subtract": ["$closing_cash", {"$add": ["$opening_cash", "$cash_sales"]}]}}}},
+            # p564-007: same cash-difference doctrine as /daily-sessions/summary
+            # (p216) — debt collections add to the drawer, payouts subtract;
+            # without them the two endpoints disagreed on the same sessions
+            {"$group": {"_id": "$user_id", "user_name": {"$first": "$user_name"}, "total_sales": {"$sum": "$total_sales"}, "sessions_count": {"$sum": 1}, "total_difference": {"$sum": {"$subtract": ["$closing_cash", {"$add": ["$opening_cash", "$cash_sales", {"$ifNull": ["$debt_collections", 0]}, {"$multiply": [{"$ifNull": ["$debt_payouts", 0]}, -1]}]}]}}}},
             {"$sort": {"total_sales": -1}}
         ]
         result = await db.daily_sessions.aggregate(pipeline).to_list(50)

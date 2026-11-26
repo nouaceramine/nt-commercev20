@@ -12,6 +12,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
+from pymongo.errors import DuplicateKeyError
+
 logger = logging.getLogger(__name__)
 
 CHECK_INTERVAL = 600          # فحص كل 10 دقائق
@@ -100,13 +102,34 @@ async def _notify_telegram(tdb, doc: dict) -> None:
         logger.warning("crm report telegram notify failed: %s", exc)
 
 
+async def _claim_period(main_db, period: str, key: str) -> bool:
+    """p564-008: the scheduler loop runs in EVERY uvicorn worker — without a
+    distributed claim each worker passed the find_one dedup check and
+    dispatched its own notification per tenant (x4 duplicate Telegram).
+    One atomic insert per (period, period_key): the winner runs the cycle,
+    losers skip. Claims are trimmed below."""
+    try:
+        await main_db.crm_report_claims.insert_one(
+            {"_id": f"{period}:{key}",
+             "claimed_at": datetime.now(timezone.utc).isoformat()})
+        return True
+    except DuplicateKeyError:
+        return False
+
+
 async def _cycle(main_db, get_tenant_db) -> None:
     now = datetime.now(ALGIERS)
     for period in ("weekly", "monthly"):
         if not is_report_due(period, now):
             continue
         key = period_key(period, now)
-        async for tenant in main_db.saas_tenants.find({}, {"_id": 0, "id": 1}):
+        if not await _claim_period(main_db, period, key):
+            continue  # another worker already owns this period
+        # p564-008: lifecycle filter (the security_routes doctrine) — a
+        # suspended/frozen tenant must not keep receiving reports + Telegram
+        async for tenant in main_db.saas_tenants.find(
+                {"is_active": {"$ne": False}, "is_frozen": {"$ne": True}},
+                {"_id": 0, "id": 1}):
             try:
                 tdb = get_tenant_db(tenant["id"])
                 has_crm = await tdb.crm_clients.estimated_document_count() or await tdb.crm_units.estimated_document_count()
@@ -119,6 +142,11 @@ async def _cycle(main_db, get_tenant_db) -> None:
                 logger.info("crm %s report generated for tenant %s", period, tenant["id"])
             except Exception:  # noqa: BLE001
                 logger.exception("crm report cycle failed for tenant %s", tenant.get("id"))
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+            await main_db.crm_report_claims.delete_many({"claimed_at": {"$lt": cutoff}})
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def start_crm_reports_scheduler(main_db, get_tenant_db) -> None:
