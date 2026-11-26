@@ -21,7 +21,7 @@ export default function ScreensPage() {
     { value: 'catalog', labelAr: 'كتالوج المنتجات (شبكة)', labelFr: 'Catalogue (grille)' },
     { value: 'slider', labelAr: 'شرائح إعلانية بالصور', labelFr: 'Diaporama' },
     ...(hasRest ? [
-      { value: 'menu', labelAr: 'قائمة المطعم (بالوصفات)', labelFr: 'Menu restaurant' },
+      { value: 'menu', labelAr: 'المنيو الجديد — مجمّع بالعائلات والأحجام', labelFr: 'Nouveau menu (familles et tailles)' },
       { value: 'orders', labelAr: 'أرقام الطلبات الجاهزة', labelFr: 'Commandes pretes' },
     ] : []),
   ];
@@ -38,6 +38,34 @@ export default function ScreensPage() {
       setProducts(arr);
     }).catch(() => {});
   }, []);
+
+  // p552: عائلات المنتجات لمنتقي عائلات شاشة المنيو
+  const [families, setFamilies] = useState([]);
+  const [famPicker, setFamPicker] = useState({});  // screenId -> {open, fams:[]}
+  useEffect(() => {
+    apiClient.get('/product-families').then(r => {
+      const arr = Array.isArray(r.data) ? r.data : [];
+      setFamilies(arr.map(f => f.name_ar || f.name_en || f.name || '').filter(Boolean));
+    }).catch(() => {});
+  }, []);
+
+  const toggleFamPicker = (s) => {
+    setFamPicker(prev => {
+      const cur = prev[s.id];
+      if (cur?.open) { const n = { ...prev }; delete n[s.id]; return n; }
+      return { ...prev, [s.id]: { open: true, fams: [...(s.menu_families || [])] } };
+    });
+  };
+
+  const saveFamilies = async (id) => {
+    const fams = famPicker[id]?.fams || [];
+    try {
+      await apiClient.put(`/restaurant/screens/${id}`, { menu_families: fams });
+      toast.success(isAr ? (fams.length ? `هذه الشاشة تعرض الآن: ${fams.join('، ')}` : 'الشاشة تعرض كل العائلات الآن') : 'Familles enregistrees');
+      setFamPicker(prev => { const n = { ...prev }; delete n[id]; return n; });
+      load();
+    } catch { toast.error(isAr ? 'فشل الحفظ' : 'Echec'); }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -199,6 +227,41 @@ export default function ScreensPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {hasRest && (s.mode === 'menu' || s.mode === 'slider') && (
+                    <>
+                      <Button size="sm" variant="outline" className="w-full" onClick={() => toggleFamPicker(s)} data-testid={`screen-families-${s.id}`}>
+                        {isAr
+                          ? `عائلات المنيو ${(s.menu_families || []).length ? `(${(s.menu_families || []).join('، ')})` : '(كل العائلات)'}`
+                          : 'Familles du menu'}
+                      </Button>
+                      {famPicker[s.id]?.open && (
+                        <div className="border rounded-lg p-2 space-y-1" data-testid={`screen-fampicker-${s.id}`}>
+                          {families.map(f => {
+                            const checked = famPicker[s.id].fams.includes(f);
+                            return (
+                              <label key={f} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted rounded px-1 py-0.5" data-testid={`screen-fam-${s.id}-${f}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => setFamPicker(prev => {
+                                    const cur = prev[s.id];
+                                    const fams = checked ? cur.fams.filter(x => x !== f) : [...cur.fams, f];
+                                    return { ...prev, [s.id]: { ...cur, fams } };
+                                  })}
+                                />
+                                <span>{f}</span>
+                              </label>
+                            );
+                          })}
+                          {families.length === 0 && <p className="text-xs text-muted-foreground">{isAr ? 'لا عائلات بعد' : 'Aucune famille'}</p>}
+                          <div className="flex gap-2 pt-1">
+                            <Button size="sm" className="flex-1" onClick={() => saveFamilies(s.id)} data-testid={`screen-fam-save-${s.id}`}>{isAr ? 'حفظ العائلات' : 'Enregistrer'}</Button>
+                            <Button size="sm" variant="ghost" onClick={() => setFamPicker(prev => ({ ...prev, [s.id]: { ...prev[s.id], fams: [] } }))}>{isAr ? 'الكل' : 'Toutes'}</Button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                   <Button size="sm" variant="outline" className="w-full" onClick={() => togglePicker(s)} data-testid={`screen-products-${s.id}`}>
                     {isAr
                       ? `تحديد المنتجات ${(s.product_ids || []).length ? `(${(s.product_ids || []).length} محدد)` : '(الكل حاليًا)'}`
