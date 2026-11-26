@@ -177,6 +177,14 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
 
     @router.delete("/resellers/{reseller_id}")
     async def delete_reseller(reseller_id: str, admin: dict = Depends(get_tenant_admin)):
+        # p563-005: a reseller with a non-zero balance is a live liability —
+        # deleting them orphaned the prepaid balance and its ledger
+        # (P555-003 delete doctrine). Settle the balance first.
+        reseller = await db.resellers.find_one({"id": reseller_id}, {"_id": 0, "balance": 1})
+        if not reseller:
+            raise HTTPException(status_code=404, detail="الموزّع غير موجود")
+        if abs(_to_float(reseller.get("balance"))) > 0.005:
+            raise HTTPException(status_code=400, detail="لا يمكن حذف موزّع له رصيد قائم — سوِّ الرصيد أولاً")
         res = await db.resellers.delete_one({"id": reseller_id})
         if res.deleted_count == 0:
             raise HTTPException(status_code=404, detail="الموزّع غير موجود")
@@ -344,6 +352,12 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
         now = datetime.now(timezone.utc).isoformat()
         doc = _build_sub_doc(payload, user)
         doc.update({"id": sub_id, "created_at": now, "created_by": user.get("name", "")})
+        # p563-004: sign wall — _to_float only walls NaN/Inf. A negative price
+        # CREDITED the reseller (debit of −x), WIPED the customer debt mirror
+        # or DRAINED the cash box; a negative cost skipped the platform-wallet
+        # debit (cost>0 guard) and booked phantom profit (price − (−x)).
+        if doc["price"] < 0 or doc["cost"] < 0:
+            raise HTTPException(status_code=400, detail="القيم السالبة غير مقبولة")
 
         # Unified tenant wallet (choice 1-أ): a digital/IPTV/system-subscription sale
         # draws from the tenant's OWN single platform wallet (main_db.wallets), funded
@@ -566,6 +580,8 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
             raise HTTPException(status_code=404, detail="الاشتراك غير موجود")
         merged = {**existing, **payload}
         doc = _build_sub_doc(merged, user)
+        if doc["price"] < 0 or doc["cost"] < 0:  # p563-004: sign wall
+            raise HTTPException(status_code=400, detail="القيم السالبة غير مقبولة")
         # p549-009: once the sale is journaled, financial fields are frozen —
         # editing price/cost/payment/reseller used to rewrite the panel stats
         # with no matching money movement, diverging from the sales journal
@@ -578,10 +594,14 @@ def create_digital_panel_routes(db, main_db, require_tenant, get_tenant_admin) -
                     return abs(float(a or 0) - float(b or 0)) > 0.005
                 except (TypeError, ValueError):
                     return True
+            # p563-006: customer_id is financial attribution on a journaled
+            # debt sale — re-pointing it stranded the debt mirror + sale row
+            # on the old customer while the sub displayed the new one.
             if (_num_changed(doc.get("price"), existing.get("price"))
                     or _num_changed(doc.get("cost"), existing.get("cost"))
                     or doc.get("payment_method") != (existing.get("payment_method") or "cash")
-                    or (doc.get("reseller_id") or "") != (existing.get("reseller_id") or "")):
+                    or (doc.get("reseller_id") or "") != (existing.get("reseller_id") or "")
+                    or (doc.get("customer_id") or "") != (existing.get("customer_id") or "")):
                 raise HTTPException(
                     status_code=400,
                     detail="الحقول المالية غير قابلة للتعديل بعد ترحيل قيد البيع")

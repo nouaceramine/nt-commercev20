@@ -32,6 +32,7 @@ Order processing is **atomic & all-or-nothing**:
 """
 import uuid
 import logging
+import math
 import re
 from datetime import datetime, timezone
 from typing import Optional, List, Literal
@@ -506,6 +507,31 @@ def build_supplier_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="tenant required")
         tenant_db = get_tenant_db(tenant_id)
 
+        # p563-002: sign/NaN wall on the price BEFORE anything moves
+        # (p555-001 doctrine) — a negative price wrote a negative sale and
+        # NaN poisoned the sale row and the daily session counters.
+        sell_price = float(body.sell_price) if body.sell_price else float(body.denomination)
+        if not math.isfinite(sell_price) or sell_price <= 0:
+            raise HTTPException(status_code=400, detail="سعر البيع غير صالح")
+        sell_price = round(sell_price, 2)
+
+        # p563-002: validate the money/debt counterpart BEFORE claiming stock
+        # (p492 doctrine). Every non-credit method is a REAL cash box id
+        # (p549-002 doctrine) — a ghost/unknown method used to record a paid
+        # sale with NO money movement.
+        is_credit = body.payment_method == "credit"
+        customer_name = ""
+        if is_credit:
+            if not body.customer_id:
+                raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
+            cust = await tenant_db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
+            if not cust:
+                raise HTTPException(status_code=404, detail="الزبون غير موجود")
+            customer_name = cust.get("name", "")
+        else:
+            if not await tenant_db.cash_boxes.find_one({"id": body.payment_method}, {"_id": 1}):
+                raise HTTPException(status_code=404, detail="الصندوق غير موجود")
+
         # Atomically reserve & mark sold
         card = await tenant_db.platform_cards.find_one_and_update(
             {"operator": body.operator, "denomination": body.denomination, "status": "available"},
@@ -515,29 +541,9 @@ def build_supplier_router() -> APIRouter:
         if not card:
             raise HTTPException(status_code=404, detail=f"لا توجد كروت متاحة من {body.operator} {body.denomination}")
 
-        sell_price = float(body.sell_price) if body.sell_price else float(body.denomination)
-        is_credit = body.payment_method == "credit"
-
-        # If credit -> require customer_id and fetch their name
-        customer_name = ""
-        if is_credit:
-            if not body.customer_id:
-                # Rollback the card
-                await tenant_db.platform_cards.update_one(
-                    {"id": card["id"]},
-                    {"$set": {"status": "available", "sold_at": None, "sold_to": None}},
-                )
-                raise HTTPException(status_code=400, detail="البيع الآجل يتطلب اختيار زبون")
-            cust = await tenant_db.customers.find_one({"id": body.customer_id}, {"_id": 0, "name": 1})
-            if not cust:
-                await tenant_db.platform_cards.update_one(
-                    {"id": card["id"]},
-                    {"$set": {"status": "available", "sold_at": None, "sold_to": None}},
-                )
-                raise HTTPException(status_code=404, detail="الزبون غير موجود")
-            customer_name = cust.get("name", "")
-
-        # Insert a full sale row (so existing reports + /customers/{id}/debt pick it up)
+        # Insert a full sale row (so existing reports + /customers/{id}/debt pick it up).
+        # p563-002: canonical open-debt fields (status/remaining — p549-001
+        # doctrine) so the standard settlement flow can allocate the payment.
         sale_id = str(uuid.uuid4())
         sale_row = {
             "id": sale_id,
@@ -557,50 +563,129 @@ def build_supplier_router() -> APIRouter:
             "total": sell_price,
             "paid_amount": 0 if is_credit else sell_price,
             "debt_amount": sell_price if is_credit else 0,
-            "payment_method": "credit" if is_credit else "cash",
+            "remaining": sell_price if is_credit else 0,
+            "payment_method": "credit" if is_credit else body.payment_method,
+            "payment_type": "credit" if is_credit else "cash",
+            "payments": [] if is_credit else [{"amount": sell_price, "method": body.payment_method, "at": _now()}],
             "customer_id": body.customer_id,
             "customer_name": customer_name,
             "customer_phone": body.customer_phone,
             "type": "platform_card",
             "source": "pos_quick_card",
+            "status": "unpaid" if is_credit else "paid",
             "user_id": current_user.get("id"),
             "user_name": current_user.get("name", ""),
             "created_at": _now(),
         }
-        await tenant_db.sales.insert_one(sale_row)
-
-        # Also keep the lighter platform_card_sales log for the cards reports
-        await tenant_db.platform_card_sales.insert_one({
-            "id": sale_id,
-            "type": "platform_card",
-            "operator": body.operator,
-            "denomination": body.denomination,
-            "code": card.get("code"),
-            "sell_price": sell_price,
-            "payment_method": "credit" if is_credit else "cash",
-            "customer_id": body.customer_id,
-            "customer_name": customer_name,
-            "customer_phone": body.customer_phone,
-            "card_id": card.get("id"),
-            "created_at": _now(),
-            "user_id": current_user.get("id"),
-        })
-
-        # Update the user's open daily session (best-effort; ignore if none)
+        sale_inserted = money_done = False
         try:
-            user_id_for_session = current_user.get("id")
-            if user_id_for_session:
-                inc = {"total_sales": sell_price, "sales_count": 1}
-                if is_credit:
-                    inc["credit_sales"] = sell_price
-                else:
-                    inc["cash_sales"] = sell_price
-                await tenant_db.daily_sessions.update_one(
-                    {"user_id": user_id_for_session, "status": "open"},
-                    {"$inc": inc},
+            await tenant_db.sales.insert_one(sale_row)
+            sale_inserted = True
+
+            # Also keep the lighter platform_card_sales log for the cards reports
+            await tenant_db.platform_card_sales.insert_one({
+                "id": sale_id,
+                "type": "platform_card",
+                "operator": body.operator,
+                "denomination": body.denomination,
+                "code": card.get("code"),
+                "sell_price": sell_price,
+                "payment_method": "credit" if is_credit else body.payment_method,
+                "customer_id": body.customer_id,
+                "customer_name": customer_name,
+                "customer_phone": body.customer_phone,
+                "card_id": card.get("id"),
+                "created_at": _now(),
+                "user_id": current_user.get("id"),
+            })
+
+            if is_credit:
+                # p563-002: mirror the debt on the customer record (p549-001
+                # doctrine) — without it the settlement flow decremented a
+                # mirror that was never incremented (balance drove negative).
+                await tenant_db.customers.update_one(
+                    {"id": body.customer_id},
+                    {"$inc": {"total_purchases": sell_price, "balance": sell_price,
+                              "total_debt": sell_price}},
                 )
-        except Exception as exc:
-            logger.warning("daily_sessions update failed: %s", exc)
+            else:
+                # p563-002: the money enters the chosen cash box (p549-002
+                # doctrine) — the old code journaled a paid sale and bumped
+                # the daily session but never moved any money.
+                await tenant_db.cash_boxes.update_one(
+                    {"id": body.payment_method},
+                    {"$inc": {"balance": sell_price}, "$set": {"updated_at": _now()}},
+                )
+                await tenant_db.transactions.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "cash_box_id": body.payment_method,
+                    "type": "income",
+                    "amount": sell_price,
+                    "description": f"بيع بطاقة {body.operator} {body.denomination} دج",
+                    "reference_type": "platform_card",
+                    "reference_id": sale_id,
+                    "created_at": _now(),
+                    "created_by": current_user.get("name", ""),
+                })
+            money_done = True
+
+            # Update the user's open daily session (best-effort; ignore if none)
+            try:
+                user_id_for_session = current_user.get("id")
+                if user_id_for_session:
+                    inc = {"total_sales": sell_price, "sales_count": 1}
+                    if is_credit:
+                        inc["credit_sales"] = sell_price
+                    else:
+                        inc["cash_sales"] = sell_price
+                    await tenant_db.daily_sessions.update_one(
+                        {"user_id": user_id_for_session, "status": "open"},
+                        {"$inc": inc},
+                    )
+            except Exception as exc:
+                logger.warning("daily_sessions update failed: %s", exc)
+        except Exception as e:
+            # p563-002: full rollback — the card is released, the money leg
+            # reversed, the journal rows removed (house saga doctrine).
+            logger.exception("platform card sale failed — rolling back: %s", e)
+            if sale_inserted:
+                try:
+                    await tenant_db.sales.delete_one({"id": sale_id})
+                    await tenant_db.platform_card_sales.delete_one({"id": sale_id})
+                except Exception:
+                    logger.exception("rollback: sale rows delete failed for %s", sale_id)
+            if money_done:
+                try:
+                    if is_credit:
+                        await tenant_db.customers.update_one(
+                            {"id": body.customer_id},
+                            {"$inc": {"total_purchases": -sell_price, "balance": -sell_price,
+                                      "total_debt": -sell_price}},
+                        )
+                    else:
+                        await tenant_db.cash_boxes.update_one(
+                            {"id": body.payment_method},
+                            {"$inc": {"balance": -sell_price}, "$set": {"updated_at": _now()}},
+                        )
+                        await tenant_db.transactions.delete_one(
+                            {"reference_type": "platform_card", "reference_id": sale_id})
+                except Exception:
+                    logger.exception("rollback: money revert failed for %s", sale_id)
+            try:
+                await tenant_db.platform_cards.update_one(
+                    {"id": card["id"]},
+                    {"$set": {"status": "available", "sold_at": None, "sold_to": None}},
+                )
+            except Exception:
+                logger.exception("rollback: card release failed for %s", card.get("id"))
+            raise HTTPException(status_code=500, detail="فشل تسجيل بيع البطاقة") from e
+
+        # p549-011: the sale moved money/stock — bust the cached reports
+        try:
+            from services.cache_service import bust_stats_caches
+            bust_stats_caches(tenant_id)
+        except Exception:
+            pass
 
         return {
             "sale": {
@@ -609,7 +694,7 @@ def build_supplier_router() -> APIRouter:
                 "operator": body.operator,
                 "denomination": body.denomination,
                 "sell_price": sell_price,
-                "payment_method": "credit" if is_credit else "cash",
+                "payment_method": "credit" if is_credit else body.payment_method,
                 "customer_id": body.customer_id,
                 "customer_name": customer_name,
                 "is_credit": is_credit,
@@ -688,6 +773,12 @@ def build_supplier_router() -> APIRouter:
         resolved = []
         total = 0.0
         for it in payload.items:
+            # p563-007: "sim" used to fall into the else branch and resolve
+            # against the IDOOM catalog/stock — an idoom catalog_id labeled
+            # "sim" was ordered, paid and delivered as idoom codes. There is
+            # no tenant-side SIM delivery flow yet, so fail closed.
+            if it.type == "sim":
+                raise HTTPException(status_code=400, detail="طلبات شرائح SIM من المنصة غير مدعومة بعد")
             catalog_coll = main_db.platform_card_catalog if it.type == "card" else main_db.platform_idoom_catalog
             stock_coll = main_db.platform_card_stock if it.type == "card" else main_db.platform_idoom_stock
             cat = await catalog_coll.find_one({"id": it.catalog_id, "is_active": True}, {"_id": 0})
@@ -774,80 +865,116 @@ def build_supplier_router() -> APIRouter:
                 "required": total,
                 "available": (current or {}).get("balance", 0),
             })
-        await _ensure_wallet(PLATFORM_WALLET_ID)
-        await main_db.wallets.update_one({"entity_id": PLATFORM_WALLET_ID}, {"$inc": {"balance": total}})
-        await main_db.wallet_transfers.insert_one({
-            "id": str(uuid.uuid4()),
-            "from_entity_id": tenant_id,
-            "from_entity_type": "tenant",
-            "to_entity_id": PLATFORM_WALLET_ID,
-            "to_entity_type": "platform",
-            "amount": total,
-            "fee": 0,
-            "currency": "DZD",
-            "reference_type": "supplier_order",
-            "reference_id": order_id,
-            "description": f"شراء أكواد من المنصة - طلب {order_id[:8]}",
-            "created_at": _now(),
-        })
-
-        # --- Move codes to tenant_db & mark sold ---
+        # p563-001: everything after the tenant debit runs under a
+        # compensation guard. Any delivery failure (e.g. the tenant already
+        # owns a colliding idoom code → DuplicateKeyError on p549_idoom_code)
+        # refunds the transfer, releases every reserved central code and
+        # removes partial tenant-side deliveries — all-or-nothing.
         tenant_db = get_tenant_db(tenant_id)
-        order_items_doc = []
-        for stock_coll, ids, candidates, r in reservations:
-            # Mark as sold in central stock
-            await stock_coll.update_many({"id": {"$in": ids}}, {"$set": {"status": "sold"}})
-            # Insert into tenant's own stock (re-using existing collections)
-            if r["type"] == "idoom":
-                tenant_docs = [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "code": c["code"],
-                        "denomination": r["denomination"],
-                        "status": "available",
-                        "source": "platform",
-                        "platform_order_id": order_id,
-                        "created_at": _now(),
-                    } for c in candidates
-                ]
-                if tenant_docs:
-                    await tenant_db.idoom_codes.insert_many(tenant_docs)
-            else:  # card
-                tenant_docs = [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "code": c["code"],
-                        "operator": r["operator"],
-                        "denomination": r["denomination"],
-                        "status": "available",
-                        "source": "platform",
-                        "platform_order_id": order_id,
-                        "created_at": _now(),
-                    } for c in candidates
-                ]
-                if tenant_docs:
-                    await tenant_db.platform_cards.insert_many(tenant_docs)
-            order_items_doc.append({
-                "type": r["type"],
-                "catalog_id": r["catalog_id"],
-                "operator": r["operator"],
-                "denomination": r["denomination"],
-                "quantity": r["quantity"],
-                "unit_price": r["unit_price"],
-                "subtotal": r["subtotal"],
-                "code_ids": ids,
+        _platform_credited = False
+        try:
+            await _ensure_wallet(PLATFORM_WALLET_ID)
+            await main_db.wallets.update_one({"entity_id": PLATFORM_WALLET_ID}, {"$inc": {"balance": total}})
+            _platform_credited = True
+            await main_db.wallet_transfers.insert_one({
+                "id": str(uuid.uuid4()),
+                "from_entity_id": tenant_id,
+                "from_entity_type": "tenant",
+                "to_entity_id": PLATFORM_WALLET_ID,
+                "to_entity_type": "platform",
+                "amount": total,
+                "fee": 0,
+                "currency": "DZD",
+                "reference_type": "supplier_order",
+                "reference_id": order_id,
+                "description": f"شراء أكواد من المنصة - طلب {order_id[:8]}",
+                "created_at": _now(),
             })
 
-        order_doc = {
-            "id": order_id,
-            "tenant_id": tenant_id,
-            "items": order_items_doc,
-            "total": total,
-            "status": "completed",
-            "created_at": _now(),
-            "completed_at": _now(),
-        }
-        await main_db.supplier_orders.insert_one(order_doc)
+            # --- Move codes to tenant_db & mark sold ---
+            tenant_db = get_tenant_db(tenant_id)
+            order_items_doc = []
+            for stock_coll, ids, candidates, r in reservations:
+                # Mark as sold in central stock
+                await stock_coll.update_many({"id": {"$in": ids}}, {"$set": {"status": "sold"}})
+                # Insert into tenant's own stock (re-using existing collections)
+                if r["type"] == "idoom":
+                    tenant_docs = [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "code": c["code"],
+                            "denomination": r["denomination"],
+                            "status": "available",
+                            "source": "platform",
+                            "platform_order_id": order_id,
+                            "created_at": _now(),
+                        } for c in candidates
+                    ]
+                    if tenant_docs:
+                        await tenant_db.idoom_codes.insert_many(tenant_docs)
+                else:  # card
+                    tenant_docs = [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "code": c["code"],
+                            "operator": r["operator"],
+                            "denomination": r["denomination"],
+                            "status": "available",
+                            "source": "platform",
+                            "platform_order_id": order_id,
+                            "created_at": _now(),
+                        } for c in candidates
+                    ]
+                    if tenant_docs:
+                        await tenant_db.platform_cards.insert_many(tenant_docs)
+                order_items_doc.append({
+                    "type": r["type"],
+                    "catalog_id": r["catalog_id"],
+                    "operator": r["operator"],
+                    "denomination": r["denomination"],
+                    "quantity": r["quantity"],
+                    "unit_price": r["unit_price"],
+                    "subtotal": r["subtotal"],
+                    "code_ids": ids,
+                })
+
+            order_doc = {
+                "id": order_id,
+                "tenant_id": tenant_id,
+                "items": order_items_doc,
+                "total": total,
+                "status": "completed",
+                "created_at": _now(),
+                "completed_at": _now(),
+            }
+            await main_db.supplier_orders.insert_one(order_doc)
+        except Exception as _order_exc:
+            logger.exception("supplier order %s failed post-payment — compensating", order_id)
+            try:
+                await tenant_db.platform_cards.delete_many({"platform_order_id": order_id})
+                await tenant_db.idoom_codes.delete_many({"platform_order_id": order_id})
+            except Exception:
+                logger.exception("supplier order %s: tenant-side cleanup failed", order_id)
+            for _sc, _ids, _, _ in reservations:
+                try:
+                    await _sc.update_many(
+                        {"id": {"$in": _ids}},
+                        {"$set": {"status": "available", "tenant_id": None, "sold_at": None}})
+                except Exception:
+                    logger.exception("supplier order %s: central release failed", order_id)
+            try:
+                if _platform_credited:
+                    await main_db.wallets.update_one(
+                        {"entity_id": PLATFORM_WALLET_ID}, {"$inc": {"balance": -total}})
+                await main_db.wallets.update_one(
+                    {"entity_id": tenant_id}, {"$inc": {"balance": total}})
+                await main_db.wallet_transfers.delete_many(
+                    {"reference_type": "supplier_order", "reference_id": order_id})
+            except Exception:
+                logger.critical("supplier order %s: WALLET COMPENSATION FAILED — manual reconciliation", order_id)
+            raise HTTPException(
+                status_code=500,
+                detail="فشل تسليم الأكواد إلى حسابك — استُرجع المبلغ كاملاً ولم يُسجَّل أي طلب") from _order_exc
 
         # Notify tenant
         await _create_notification(

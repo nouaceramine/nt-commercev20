@@ -513,12 +513,18 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             raise HTTPException(status_code=404, detail="الطلب غير موجود")
         if order.get("user_id") != user.get("id"):
             raise HTTPException(status_code=403, detail="غير مصرّح")
-        if order["status"] == "COMPLETED":
-            return {"message": "مدفوع مسبقاً"}
+        # p563-003: a wallet-paid order is never re-payable, even while it
+        # still awaits delivery (status stays PENDING for the deliver flow —
+        # the admin UI keys the deliver button on it).
+        if order["status"] == "COMPLETED" or order.get("wallet_paid"):
+            return {"message": "مدفوع مسبقاً", "status": order["status"], "paid": True}
         # p495c: atomically claim the order so concurrent pays cannot
         # double-debit; revert to PENDING on any failure.
+        # p563-003: the claim also requires wallet_paid to be unset — the old
+        # filter matched a wallet-paid PENDING order again and every repeat
+        # call debited the wallet once more.
         claimed = await db.digital_orders.find_one_and_update(
-            {"id": order_id, "status": "PENDING"},
+            {"id": order_id, "status": "PENDING", "wallet_paid": {"$ne": True}},
             {"$set": {"status": "PAYING"}},
             projection={"_id": 0})
         if not claimed:
@@ -551,18 +557,37 @@ def create_digital_services_routes(db, main_db, get_current_user, get_tenant_adm
             await db.digital_orders.update_one(
                 {"id": order_id, "status": "PAYING"}, {"$set": {"status": "PENDING"}})
             raise
-        await _wallet_txn(user.get("id"), "PURCHASE", amount, before, before - amount,
-                          f"شراء {order['product_name']}", order_id)
-        await db.digital_orders.update_one(
-            {"id": order_id},
-            {"$set": {"status": status, "code_ids": code_ids, "payment_method": "wallet"}}
-        )
+        # p563-003: the wallet is already debited — a failure here must
+        # refund it, release the codes and re-open the order (house saga
+        # doctrine), never leave money taken on a stuck PAYING order.
+        try:
+            await _wallet_txn(user.get("id"), "PURCHASE", amount, before, before - amount,
+                              f"شراء {order['product_name']}", order_id)
+            await db.digital_orders.update_one(
+                {"id": order_id},
+                {"$set": {"status": status, "code_ids": code_ids, "payment_method": "wallet",
+                          "wallet_paid": True, "paid_at": _now()}}
+            )
+        except Exception:
+            try:
+                await db.wallets.update_one(
+                    {"entity_type": "user", "entity_id": user.get("id")},
+                    {"$inc": {"balance": amount}})
+                if code_ids:
+                    await db.digital_codes.update_many(
+                        {"id": {"$in": code_ids}, "order_id": order_id},
+                        {"$set": {"is_used": False, "used_at": None, "order_id": None}})
+                await db.digital_orders.update_one(
+                    {"id": order_id, "status": "PAYING"}, {"$set": {"status": "PENDING"}})
+            except Exception:
+                logger.critical("wallet_pay post-debit compensation FAILED for order %s", order_id)
+            raise
         try:  # p549-011
             from services.cache_service import bust_stats_caches
             bust_stats_caches(user.get("tenant_id"))
         except Exception:
             pass
-        return {"status": status, "balance": before - amount}
+        return {"status": status, "paid": True, "balance": before - amount}
 
     # ── Stats / profit report (admin) ──
     @router.get("/stats")
