@@ -109,7 +109,7 @@ export default function TvHubPage() {
   }
   // p329: catalog/slider عامان لكل الأنشطة؛ orders/menu للمطاعم
   if (config.mode === 'orders') return <OrderBoardPage tenantIdProp={config.tenant_id} />;
-  if (config.mode === 'menu') return <TvMenuPage tenantIdProp={config.tenant_id} menuFamilies={config.menu_families} />;  // p552
+  if (config.mode === 'menu') return <TvMenuPage tenantIdProp={config.tenant_id} menuFamilies={config.menu_families} menuFamiliesLeft={config.menu_families_left} />;  // p552+p562
   if (config.mode === 'slider') {
     return config.has_restaurant
       ? <TvMenuPage tenantIdProp={config.tenant_id} forceSlider menuFamilies={config.menu_families} />  // p552

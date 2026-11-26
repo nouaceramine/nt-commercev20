@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ChefHat, Ban, WifiOff } from 'lucide-react';
 
-export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } = {}) {  // p322: props for TvHub embedding; p552: menuFamilies = عائلات هذه الشاشة (فارغ = الكل)
+export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, menuFamiliesLeft } = {}) {  // p322: props; p552: فلتر عائلات; p562: عمود أيسر اختياري
   const { tenantId: paramTenantId } = useParams();
   const tenantId = tenantIdProp || paramTenantId;
   const [searchParams] = useSearchParams();
@@ -30,15 +30,22 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
     return () => { clearInterval(t); clearInterval(c); };
   }, [fetchMenu]);
 
+  const twoCol = !!(menuFamiliesLeft && menuFamiliesLeft.length);  // p562
   const items = useMemo(() => {
     const all = data?.items || [];
-    // p552: فلترة حسب عائلات الشاشة المحددة من لوحة التحكم (فارغ = كل العائلات)
-    if (menuFamilies && menuFamilies.length) {
-      const keep = new Set(menuFamilies);
-      return all.filter(p => keep.has(p.family || ''));
-    }
-    return all;
-  }, [data, menuFamilies]);
+    // p552: فلترة حسب عائلات الشاشة (العمود الأيمن عند التقسيم) — فارغ = كل العائلات
+    const right = (menuFamilies && menuFamilies.length)
+      ? all.filter(p => new Set(menuFamilies).has(p.family || ''))
+      : all;
+    // p562: العمود الأيسر
+    const left = twoCol ? all.filter(p => new Set(menuFamiliesLeft).has(p.family || '')) : [];
+    return twoCol ? [...right, ...left] : right;
+  }, [data, menuFamilies, menuFamiliesLeft, twoCol]);
+  const itemsLeft = useMemo(() => {
+    if (!twoCol) return [];
+    const all = data?.items || [];
+    return all.filter(p => new Set(menuFamiliesLeft).has(p.family || ''));
+  }, [data, menuFamiliesLeft, twoCol]);
 
   // p559: تكبير تلقائي لملء شاشة التلفاز — يجرّب درجات تنازلية ويختار أكبر تكبير لا يتجاوز الشاشة
   const contentRef = useRef(null);
@@ -91,10 +98,10 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
   // p548: تجميع حسب العائلة + دمج الأحجام (L/XL/MEGA) في بطاقة واحدة لسهولة القراءة
   const SIZE_RE = /\s*حجم\s*(MEGA|XL|L)$/;
   const SIZE_ORDER = { 'L': 0, 'XL': 1, 'MEGA': 2 };
-  const families = useMemo(() => {
+  const buildFamilies = (list) => {
     const famOrder = [];
     const famMap = new Map();
-    for (const p of items) {
+    for (const p of list) {
       const fam = p.family || '';
       if (!famMap.has(fam)) { famMap.set(fam, new Map()); famOrder.push(fam); }
       const groups = famMap.get(fam);
@@ -109,7 +116,12 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
       ...g,
       sizes: g.sizes.sort((a, b) => (SIZE_ORDER[a.label] ?? 3) - (SIZE_ORDER[b.label] ?? 3)),
     }))]);
-  }, [items]);
+  };
+  const families = useMemo(() => {
+    const rightSet = twoCol ? items.filter(p => new Set(menuFamilies).has(p.family || '')) : items;
+    return buildFamilies(rightSet);
+  }, [items, twoCol, menuFamilies]);
+  const familiesLeft = useMemo(() => buildFamilies(itemsLeft), [itemsLeft]);
   const availBases = new Set();
   for (const p of items) {
     if (!p.available) continue;
@@ -217,15 +229,15 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
       )}
 
       {/* المتوفرة — مجمعة حسب العائلة، كل وجبة بأحجامها في بطاقة واحدة */}
-      {families.map(([fam, groups]) => {
+      {(() => { const renderSections = (fams, dense) => fams.map(([fam, groups]) => {
         const visGroups = groups.filter(g => g.sizes.some(s => s.available));
         if (visGroups.length === 0) return null;
         return (
           <div key={fam || 'general'} className="mb-5">
             <div className="mb-3 mt-1" data-testid={`tvmenu-family-${fam}`}>
-              <span className="inline-block bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-2xl font-black rounded-xl px-6 py-1.5 shadow-md shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
+              <span className="inline-block bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-3xl font-black rounded-xl px-8 py-2 shadow-md shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
+            <div className={dense ? "grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3" : "grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3"}>
               {visGroups.map(g => (
                 <div key={g.key} className="rounded-3xl bg-neutral-900 border-2 border-neutral-800 hover:border-amber-500/50 overflow-hidden shadow-xl shadow-black/60" data-testid={`tvmenu-card-${g.key}`}>
                   {g.image_url ? (
@@ -236,21 +248,21 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
                     </div>
                   )}
                   <div className="p-2.5 space-y-1.5">
-                    <h3 className="text-lg font-bold leading-snug">{g.name}</h3>
+                    <h3 className="text-xl font-bold leading-snug">{g.name}</h3>
                     {g.sizes.length === 1 && !g.sizes[0].label ? (
                       <div className="flex items-center justify-between">
-                        <span className="inline-block bg-amber-400 text-black text-xl font-black rounded-xl px-3 py-1 shadow-md">{g.sizes[0].price} <span className="text-xs font-bold">دج</span></span>
+                        <span className="inline-block bg-amber-400 text-black text-2xl font-black rounded-xl px-4 py-1 shadow-md">{g.sizes[0].price} <span className="text-sm font-bold">دج</span></span>
                         {g.sizes[0].remaining != null && g.sizes[0].remaining <= 10 && (
-                          <span className="text-amber-400 text-sm font-bold">بقي {g.sizes[0].remaining}</span>
+                          <span className="text-amber-400 text-base font-bold">بقي {g.sizes[0].remaining}</span>
                         )}
                       </div>
                     ) : (
                       <div className="space-y-1.5">
                         {g.sizes.map(sz => (
                           <div key={sz.label} className="flex items-center justify-between border-b border-neutral-800/60 pb-1 last:border-0">
-                            <span className="text-base font-extrabold text-neutral-300" dir="ltr">{sz.label}</span>
+                            <span className="text-lg font-extrabold text-neutral-300" dir="ltr">{sz.label}</span>
                             {sz.available ? (
-                              <span className="inline-block bg-amber-400/95 text-black text-lg font-black rounded-lg px-2.5 py-0.5">{sz.price} <span className="text-[11px] font-bold">دج</span></span>
+                              <span className="inline-block bg-amber-400/95 text-black text-xl font-black rounded-lg px-3 py-0.5">{sz.price} <span className="text-xs font-bold">دج</span></span>
                             ) : (
                               <span className="bg-red-600/80 text-white text-xs font-bold rounded px-2 py-0.5">نفذ</span>
                             )}
@@ -264,7 +276,14 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
             </div>
           </div>
         );
-      })}
+      });
+      return twoCol ? (
+        <div className="flex gap-8 items-start" data-testid="tvmenu-twocol">
+          <div className="w-1/2">{renderSections(families, true)}</div>
+          <div className="w-1/2">{renderSections(familiesLeft, true)}</div>
+        </div>
+      ) : renderSections(families, false);
+      })()}
 
       {/* النافدة — تبقى ظاهرة كإشعار نفاد */}
       {soldOut.length > 0 && (
@@ -283,9 +302,9 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies } =
                   </div>
                 )}
                 <div className="p-2.5 space-y-1">
-                  <h2 className="text-base font-bold text-neutral-400 leading-snug">{p.name}</h2>
+                  <h2 className="text-lg font-bold text-neutral-400 leading-snug">{p.name}</h2>
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-bold text-neutral-500 line-through">{p.price} دج</span>
+                    <span className="text-xl font-bold text-neutral-500 line-through">{p.price} دج</span>
                     <span className="bg-red-600 text-white text-xs font-bold rounded-lg px-2 py-0.5">نفذت الكمية</span>
                   </div>
                 </div>

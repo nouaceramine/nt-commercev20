@@ -28,8 +28,10 @@ export default function RestaurantPOSPage() {
   const [cart, setCart] = useState([]); // {key, product_id, name, price, qty, mods}
   const [search, setSearch] = useState('');
   const [fam, setFam] = useState('');
-  const [modFor, setModFor] = useState(null);
+  const [modFor, setModFor] = useState(null);   // p561: مجموعة البطاقة المفتوحة {base, variants, image_url}
   const [modSel, setModSel] = useState({});
+  const [selVar, setSelVar] = useState(null);    // p561: المتغير/الحجم المختار داخل الحوار
+  const [custPrice, setCustPrice] = useState(''); // p561: سعر مخصص (اختياري)
   const [sending, setSending] = useState(false);
   const [bill, setBill] = useState(null); // order being billed (table mode)
   const [discType, setDiscType] = useState('percent');
@@ -210,19 +212,47 @@ export default function RestaurantPOSPage() {
   }, [products, search, fam, topIds]);
 
   const families = useMemo(() => [...new Set(products.map(p => p.family_name).filter(Boolean))], [products]);
+  // p561: أيقونة العائلة = أول صورة منتج فيها
+  const familyImgs = useMemo(() => {
+    const m = {};
+    for (const p of products) if (p.family_name && p.image_url && !m[p.family_name]) m[p.family_name] = p.image_url;
+    return m;
+  }, [products]);
+  // p561: دمج أحجام المنتج الواحد (L/XL/MEGA) في بطاقة واحدة
+  const SIZE_RE = /\s*حجم\s*(MEGA|XL|L)$/;
+  const SIZE_ORDER = { 'L': 0, 'XL': 1, 'MEGA': 2 };
+  const dishGroups = useMemo(() => {
+    const map = new Map();
+    for (const p of dishes) {
+      const nm = p.name_ar || p.name || '';
+      const mt = nm.match(SIZE_RE);
+      const base = mt ? nm.replace(SIZE_RE, '').trim() : nm;
+      if (!map.has(base)) map.set(base, []);
+      map.get(base).push(p);
+    }
+    return [...map.entries()].map(([base, list]) => {
+      list.sort((a, b) => {
+        const ma = (a.name_ar || a.name || '').match(SIZE_RE);
+        const mb = (b.name_ar || b.name || '').match(SIZE_RE);
+        return (SIZE_ORDER[ma?.[1]] ?? 3) - (SIZE_ORDER[mb?.[1]] ?? 3);
+      });
+      return { base, variants: list, image_url: list.find(x => x.image_url)?.image_url || '', top: list.some(x => topIds.includes(x.id)) };
+    });
+  }, [dishes, topIds]);
   // p494h: حلّ الطاولة من أحدث لقطة — selTable يبقى كائنًا قديمًا active_order_id=null بعد الإرسال فيخفي زر الفاتورة
   const tableOrder = useCallback((t) => {
     const fresh = tables.find(x => x.id === t?.id) || t;
     return orders.find(o => o.id === fresh?.active_order_id);
   }, [orders, tables]);
 
-  const addDish = (p, mods = []) => {
+  const addDish = (p, mods = [], customPrice = null) => {  // p561: customPrice = تجاوز سعر الوحدة
     const delta = mods.reduce((a, m) => a + (Number(m.price_delta) || 0), 0);
-    const key = p.id + '|' + mods.map(m => m.option).join('+');
+    const base = customPrice != null && customPrice !== '' && !isNaN(Number(customPrice)) ? Number(customPrice) : (Number(p.retail_price) || 0);
+    const key = p.id + '|' + mods.map(m => m.option).join('+') + '|' + base;
     setCart(prev => {
       const ex = prev.find(o => o.key === key);
       if (ex) return prev.map(o => o.key === key ? { ...o, qty: o.qty + 1 } : o);
-      return [...prev, { key, product_id: p.id, name: p.name_ar || p.name || p.name_en, price: (Number(p.retail_price) || 0) + delta, qty: 1, mods }];
+      return [...prev, { key, product_id: p.id, name: p.name_ar || p.name || p.name_en, price: base + delta, qty: 1, mods }];
     });
   };
   const setQty = (key, q) => setCart(prev => q <= 0 ? prev.filter(o => o.key !== key) : prev.map(o => o.key === key ? { ...o, qty: q } : o));
@@ -303,7 +333,7 @@ export default function RestaurantPOSPage() {
       <div className="p-3 space-y-3 pb-32" dir="rtl" data-testid="resto-pos-page">
         {/* header */}
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <h1 className="text-xl font-bold flex items-center gap-2">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
             <UtensilsCrossed className="h-6 w-6" />{isAr ? 'POS المطعم' : 'POS Restaurant'}
           </h1>
           {/* p478: أدوات الموبايل فقط — شريط الديسكتوب الأصلي محفوظ تحت lg */}
@@ -398,10 +428,10 @@ export default function RestaurantPOSPage() {
               return (
                 <button key={t.id} data-testid={`resto-table-${t.id}`}
                   onClick={() => setSelTable(sel ? null : t)}
-                  className={`shrink-0 min-w-[84px] min-h-[56px] rounded-xl border-2 px-3 py-1 text-center transition-all ${
+                  className={`shrink-0 min-w-[96px] min-h-[64px] rounded-xl border-2 px-3 py-1.5 text-center transition-all ${
                     sel ? 'border-primary bg-primary/10' : occ ? 'border-amber-500 bg-amber-50/60' : 'border-emerald-500/50'}`}>
-                  <div className="font-bold">{t.name}</div>
-                  <div className={`text-[11px] ${occ ? 'text-amber-700' : 'text-emerald-700'}`}>
+                  <div className="font-bold text-lg">{t.name}</div>
+                  <div className={`text-sm ${occ ? 'text-amber-700' : 'text-emerald-700'}`}>
                     {occ ? (isAr ? 'مشغولة' : 'Occ.') : (isAr ? 'فارغة' : 'Libre')}
                   </div>
                 </button>
@@ -425,45 +455,59 @@ export default function RestaurantPOSPage() {
               placeholder={isAr ? 'بحث فوري عن صنف...' : 'Recherche...'} data-testid="resto-search" />
           </div>
         </div>
-        <div className="flex gap-1 overflow-x-auto pb-1" data-testid="resto-families">
+        <div className="flex gap-2 overflow-x-auto pb-1" data-testid="resto-families">
           <button onClick={() => setFam('')} data-testid="resto-fam-all"
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${!fam ? 'bg-primary text-primary-foreground' : ''}`}>
+            className={`shrink-0 px-4 py-2 rounded-full text-base font-bold border min-h-[48px] ${!fam ? 'bg-primary text-primary-foreground' : ''}`}>
             {isAr ? 'الكل' : 'Tout'}
           </button>
           {families.map(f => (
             <button key={f} onClick={() => setFam(fam === f ? '' : f)} data-testid={`resto-fam-${f}`}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${fam === f ? 'bg-primary text-primary-foreground' : ''}`}>
+              className={`shrink-0 flex items-center gap-2 px-4 py-1.5 rounded-full text-base font-bold border min-h-[48px] ${fam === f ? 'bg-primary text-primary-foreground' : ''}`}>
+              {familyImgs[f] && <img src={familyImgs[f]} alt="" className="h-9 w-9 rounded-full object-cover border" loading="lazy" />}
               {f}
             </button>
           ))}
         </div>
 
-        {/* products grid — big touch targets with photos, top sellers first */}
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2" data-testid="resto-grid">
-          {dishes.map((p, idx) => (
-            <button key={p.id} data-testid={`resto-item-${p.id}`}
-              onClick={() => (p.modifier_groups || []).length ? (setModFor(p), setModSel({})) : addDish(p)}
-              className="relative rounded-xl border bg-card overflow-hidden text-right active:scale-95 transition-transform min-h-[110px] flex flex-col">
-              {p.image_url ? (
-                <img src={p.image_url} alt="" className="w-full h-20 object-cover" loading="lazy" />
+        {/* products grid — p561: بطاقة واحدة لكل منتج (الأحجام تُدمج)، أيقونات أصغر وخط أكبر */}
+        <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-8 gap-2" data-testid="resto-grid">
+          {dishGroups.map((g) => (
+            <button key={g.base} data-testid={`resto-item-${g.variants[0].id}`}
+              onClick={() => {
+                const needDlg = g.variants.length > 1 || (g.variants[0].modifier_groups || []).length > 0;
+                if (needDlg) { setModFor(g); setSelVar(g.variants[0]); setModSel({}); setCustPrice(''); }
+                else addDish(g.variants[0]);
+              }}
+              className="relative rounded-xl border bg-card overflow-hidden text-right active:scale-95 transition-transform min-h-[100px] flex flex-col">
+              {g.image_url ? (
+                <img src={g.image_url} alt="" className="w-full h-14 object-cover" loading="lazy" />
               ) : (
-                <div className="w-full h-20 bg-muted flex items-center justify-center">
-                  <UtensilsCrossed className="h-6 w-6 text-muted-foreground/40" />
+                <div className="w-full h-14 bg-muted flex items-center justify-center">
+                  <UtensilsCrossed className="h-5 w-5 text-muted-foreground/40" />
                 </div>
               )}
-              {topIds.includes(p.id) && idx < 10 && (
+              {g.top && (
                 <span className="absolute top-1 right-1 bg-orange-500 text-white rounded-full p-1" title={isAr ? 'الأكثر مبيعًا' : 'Top'}>
                   <Flame className="h-3 w-3" />
                 </span>
               )}
+              {g.variants.length > 1 && (
+                <span className="absolute top-1 left-1 bg-black/70 text-white rounded-md px-1.5 py-0.5 text-[10px] font-bold" dir="ltr">
+                  {g.variants.map(v => (v.name_ar || v.name || '').match(SIZE_RE)?.[1]).filter(Boolean).join('/')}
+                </span>
+              )}
               <div className="p-1.5 flex-1 flex flex-col justify-between">
-                <div className="text-xs font-bold leading-tight line-clamp-2">{p.name_ar || p.name || p.name_en}</div>
-                <div className="text-primary font-bold text-sm">{fmt(p.retail_price)}</div>
+                <div className="text-sm font-bold leading-tight line-clamp-2">{g.base}</div>
+                <div className="text-primary font-bold text-base">
+                  {g.variants.length > 1
+                    ? `${fmt(g.variants[0].retail_price)}+`
+                    : fmt(g.variants[0].retail_price)}
+                </div>
               </div>
             </button>
           ))}
         </div>
-        {dishes.length === 0 && (
+        {dishGroups.length === 0 && (
           <p className="text-center text-muted-foreground py-8" data-testid="resto-empty">{isAr ? 'لا أصناف مطابقة' : 'Aucun article'}</p>
         )}
 
@@ -474,13 +518,13 @@ export default function RestaurantPOSPage() {
               {cart.map(o => (
                 <div key={o.key} className="flex items-center gap-2 py-1.5">
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate">{o.name}</p>
-                    {o.mods.length > 0 && <p className="text-[11px] text-muted-foreground truncate">{o.mods.map(m => m.option).join(' + ')}</p>}
+                    <p className="font-semibold text-base truncate">{o.name}</p>
+                    {o.mods.length > 0 && <p className="text-sm text-muted-foreground truncate">{o.mods.map(m => m.option).join(' + ')}</p>}
                   </div>
                   <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => setQty(o.key, o.qty - 1)} data-testid={`resto-minus-${o.product_id}`}>
                     {o.qty === 1 ? <Trash2 className="h-4 w-4" /> : <Minus className="h-4 w-4" />}
                   </Button>
-                  <span className="w-6 text-center font-bold">{o.qty}</span>
+                  <span className="w-8 text-center font-bold text-lg">{o.qty}</span>
                   <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => setQty(o.key, o.qty + 1)} data-testid={`resto-plus-${o.product_id}`}>
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -520,19 +564,42 @@ export default function RestaurantPOSPage() {
           </div>
         )}
 
-        {/* modifier dialog */}
-        {modFor && (
+        {/* p561: حوار الصنف الموحّد — حجم + إضافات + سعر مخصص */}
+        {modFor && selVar && (
           <div className="fixed inset-0 z-30 bg-black/50 flex items-end md:items-center md:justify-center" onClick={() => setModFor(null)}>
-            <div className="bg-background w-full md:max-w-md rounded-t-2xl md:rounded-2xl p-4 space-y-4 max-h-[75vh] overflow-y-auto" onClick={e => e.stopPropagation()} data-testid="resto-mod-dialog">
-              <h3 className="font-bold text-lg">{modFor.name_ar || modFor.name || modFor.name_en}</h3>
-              {(modFor.modifier_groups || []).map(g => (
+            <div className="bg-background w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-4 space-y-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()} data-testid="resto-mod-dialog">
+              <div className="flex items-center gap-3">
+                {modFor.image_url && <img src={modFor.image_url} alt="" className="h-14 w-14 rounded-xl object-cover border" />}
+                <h3 className="font-bold text-xl flex-1">{modFor.base}</h3>
+              </div>
+
+              {modFor.variants.length > 1 && (
+                <div>
+                  <p className="font-semibold text-base mb-1.5">{isAr ? 'الحجم' : 'Taille'} *</p>
+                  <div className="flex flex-wrap gap-2">
+                    {modFor.variants.map(v => {
+                      const lbl = (v.name_ar || v.name || '').match(SIZE_RE)?.[1] || (v.name_ar || v.name);
+                      const sel = selVar.id === v.id;
+                      return (
+                        <Button key={v.id} size="lg" variant={sel ? 'default' : 'outline'} className="min-h-[52px] text-lg font-bold"
+                          data-testid={`resto-size-${lbl}`}
+                          onClick={() => setSelVar(v)}>
+                          <span dir="ltr">{lbl}</span> — {fmt(v.retail_price)}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {(selVar.modifier_groups || []).map(g => (
                 <div key={g.name}>
-                  <p className="font-semibold text-sm mb-1">{g.name}{g.required ? ' *' : ''}</p>
+                  <p className="font-semibold text-base mb-1.5">{g.name}{g.required ? ' *' : ''}</p>
                   <div className="flex flex-wrap gap-2">
                     {(g.options || []).map(op => {
                       const sel = (modSel[g.name] || []).includes(op.name);
                       return (
-                        <Button key={op.name} size="sm" variant={sel ? 'default' : 'outline'} className="min-h-[44px]"
+                        <Button key={op.name} size="lg" variant={sel ? 'default' : 'outline'} className="min-h-[52px] text-base"
                           data-testid={`resto-mod-${op.name}`}
                           onClick={() => setModSel(prev => {
                             const cur = prev[g.name] || [];
@@ -547,19 +614,33 @@ export default function RestaurantPOSPage() {
                   </div>
                 </div>
               ))}
-              <Button className="w-full min-h-[48px]" data-testid="resto-mod-confirm"
+
+              <div>
+                <p className="font-semibold text-base mb-1.5">{isAr ? 'سعر مخصص (اختياري — يتجاوز سعر القائمة)' : 'Prix personnalise (optionnel)'}</p>
+                <Input
+                  value={custPrice}
+                  onChange={e => setCustPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+                  inputMode="decimal"
+                  dir="ltr"
+                  className="text-center text-xl font-bold min-h-[52px]"
+                  placeholder={String(selVar.retail_price ?? '')}
+                  data-testid="resto-custom-price"
+                />
+              </div>
+
+              <Button className="w-full min-h-[56px] text-xl font-bold" data-testid="resto-mod-confirm"
                 onClick={() => {
-                  const groups = modFor?.modifier_groups || [];
+                  const groups = selVar?.modifier_groups || [];
                   for (const g of groups) if (g.required && !(modSel[g.name] || []).length) { toast.error((isAr ? 'اختر من: ' : 'Choix: ') + g.name); return; }
                   const mods = [];
                   for (const g of groups) for (const opName of (modSel[g.name] || [])) {
                     const op = (g.options || []).find(o2 => o2.name === opName);
                     if (op) mods.push({ group: g.name, option: op.name, price_delta: Number(op.price_delta) || 0, product_id: op.product_id || null, qty: op.qty || 1 });
                   }
-                  addDish(modFor, mods);
-                  setModFor(null); setModSel({});
+                  addDish(selVar, mods, custPrice.trim() || null);
+                  setModFor(null); setSelVar(null); setModSel({}); setCustPrice('');
                 }}>
-                {isAr ? 'إضافة' : 'Ajouter'}
+                {isAr ? 'إضافة للطلب' : 'Ajouter'}
               </Button>
             </div>
           </div>

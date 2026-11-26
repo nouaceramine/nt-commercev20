@@ -62,6 +62,7 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
         product_ids: Optional[List[str]] = None   # p333: تحديد منتجات الشاشة (فارغ = الكل)
         grid_layout: Optional[int] = None         # p333: 1/4/6/8 خانات — 0/None = تلقائي
         menu_families: Optional[List[str]] = None # p552: عائلات المنيو لهذه الشاشة (فارغ = الكل)
+        menu_families_left: Optional[List[str]] = None  # p562: عائلات العمود الأيسر عند تقسيم الشاشة
 
     _pair_idx_ready = False  # p519: فهارس display_pairings تُنشأ كسولًا مرة واحدة
 
@@ -187,6 +188,15 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
             if len(fams) > 50:
                 raise HTTPException(status_code=400, detail="50 عائلة كحد أقصى لكل شاشة")
             upd["menu_families"] = fams
+        if body.menu_families_left is not None:  # p562
+            fams_l = []
+            for f in body.menu_families_left:
+                f = str(f).strip()
+                if f and f not in fams_l:
+                    fams_l.append(f)
+            if len(fams_l) > 50:
+                raise HTTPException(status_code=400, detail="50 عائلة كحد أقصى لكل شاشة")
+            upd["menu_families_left"] = fams_l
         if upd:
             await _screens().update_one({"id": screen_id}, {"$set": upd})
         return _screen_out(await _screens().find_one({"id": screen_id}))
@@ -260,6 +270,7 @@ def create_display_routes(db, main_db, get_tenant_db, get_current_user, get_tena
             "product_ids": s.get("product_ids") or [],   # p333
             "grid_layout": s.get("grid_layout") or 0,    # p333
             "menu_families": s.get("menu_families") or [],  # p552
+            "menu_families_left": s.get("menu_families_left") or [],  # p562
         }
 
     # ---------- p329: لوحة كتالوج عامة لأي نشاط ----------
