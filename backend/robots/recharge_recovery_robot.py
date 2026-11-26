@@ -13,6 +13,7 @@ This ensures a transient wallet error never leaves a task permanently uncompensa
 Runs every 5 minutes across all tenant databases.
 """
 import asyncio
+import uuid
 from datetime import datetime, timezone, timedelta
 import logging
 
@@ -216,8 +217,27 @@ class RechargeRecoveryRobot:
                     )
                     continue
 
-                # Deterministic refund reference: prevents double-credit even if
-                # credit_wallet is called more than once (e.g. concurrent robots).
+                # p562-002: atomic cross-worker refund claim. The old flow was
+                # check-then-act: N concurrent cycles each saw "not refunded"
+                # and credited the wallet N times (proven: x4 aligned cycles
+                # -> 4 credits, balance 3000 on a 1500 expectation). Flip
+                # refund_claimed_at atomically; only the claim winner may
+                # check/credit. Stale claims (crash) are taken over after 10
+                # minutes, and the claim is released on failure so the next
+                # cycle retries immediately.
+                stale_claim = (now - timedelta(minutes=10)).isoformat()
+                claim_token = str(uuid.uuid4())
+                claimed = await tdb.mobile_recharge_tasks.find_one_and_update(
+                    {"id": task_id, "refund_pending": True,
+                     "$or": [{"refund_claimed_at": {"$exists": False}},
+                             {"refund_claimed_at": {"$lt": stale_claim}}]},
+                    {"$set": {"refund_claimed_at": now_iso,
+                              "refund_claim_token": claim_token}},
+                )
+                if not claimed:
+                    continue  # another worker owns this refund right now
+
+                # Deterministic refund reference (kept as defense in depth).
                 recovery_ref = f"recovery_{wallet_txn_id}"
 
                 already_refunded = await self._refund_already_issued(recovery_ref)
@@ -226,7 +246,8 @@ class RechargeRecoveryRobot:
                     # after credit but before the flag update). Clear it now.
                     await tdb.mobile_recharge_tasks.update_one(
                         {"id": task_id},
-                        {"$set": {"refund_pending": False, "refunded_at": now_iso}},
+                        {"$set": {"refund_pending": False, "refunded_at": now_iso},
+                         "$unset": {"refund_claimed_at": "", "refund_claim_token": ""}},
                     )
                     refund_count += 1
                     continue
@@ -246,11 +267,17 @@ class RechargeRecoveryRobot:
                     # Refund succeeded — clear the pending flag.
                     await tdb.mobile_recharge_tasks.update_one(
                         {"id": task_id},
-                        {"$set": {"refund_pending": False, "refunded_at": now_iso}},
+                        {"$set": {"refund_pending": False, "refunded_at": now_iso},
+                         "$unset": {"refund_claimed_at": "", "refund_claim_token": ""}},
                     )
                     refund_count += 1
                 except Exception:
-                    # Leave refund_pending=True so the next run retries.
+                    # p562-002: release the claim so the next cycle retries at
+                    # once; refund_pending stays True (crash-safe).
+                    await tdb.mobile_recharge_tasks.update_one(
+                        {"id": task_id, "refund_claim_token": claim_token},
+                        {"$unset": {"refund_claimed_at": "", "refund_claim_token": ""}},
+                    )
                     logger.exception(
                         "RechargeRecoveryRobot: wallet refund failed for task %s "
                         "(will retry next cycle)",

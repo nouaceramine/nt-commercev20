@@ -59,7 +59,11 @@ class PredictionRobot:
         # Store predictions — p297: one row per (tenant, report_type, day);
         # repeated cycles within a day OVERWRITE the same row (idempotent), and
         # rows older than 90 days are swept. Stops the unbounded pile-up.
-        last_results = {}
+        # p562-003: same leak class as profit — the LAST tenant's revenue
+        # figures/trends were returned to any tenant admin via /robots/run
+        # and persisted in robot_runs. Counts only; per-tenant writes kept.
+        tenants_processed = 0
+        reports_written = 0
         try:
             dbs = await self.client.list_database_names()
             now = datetime.now(timezone.utc)
@@ -76,7 +80,7 @@ class PredictionRobot:
                     "seasonal_patterns": await self._detect_seasonal(),
                 }
                 self.stats["predictions_made"] += 1
-                last_results = results
+                tenants_processed += 1
                 await tdb.auto_reports.create_index(
                     [("report_type", 1), ("day", 1)],
                     unique=True,
@@ -96,11 +100,13 @@ class PredictionRobot:
                     upsert=True,
                 )
                 await tdb.auto_reports.delete_many({"created_at": {"$lt": cutoff}})
+                reports_written += 1
                 await drop_db_if_tenant_deleted(self.db, self.client, db_name)
         except Exception:
             pass
 
-        return last_results
+        return {"tenants_processed": tenants_processed,
+                "reports_written": reports_written}
 
     async def _predict_sales(self, tdb, days) -> dict:
         # p554: per-tenant history, returned sales excluded (doctrine), and a

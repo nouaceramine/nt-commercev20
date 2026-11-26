@@ -2,7 +2,7 @@
 NT Commerce 12.0 - Legendary Build
 Main application entry point with modular architecture
 """
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -1567,6 +1567,11 @@ async def restart_robot(robot_name: str, user: dict = Depends(get_tenant_admin))
 @robot_router.post("/run/{robot_name}")
 async def run_robot_once(robot_name: str, user: dict = Depends(get_tenant_admin)) -> dict:  # p523
     result = await robot_manager.run_robot_once(robot_name)
+    if result is not None and result.get("busy"):
+        # p562: another run (manual or scheduled, this or another worker)
+        # already holds the lease — never execute twice.
+        raise HTTPException(status_code=409,
+                            detail="الروبوت قيد التشغيل حالياً — أعد المحاولة بعد قليل")
     if result is not None:
         return {"message": f"تم تشغيل {robot_name} بنجاح", "stats": result}
     raise HTTPException(status_code=404, detail="الروبوت غير موجود")
@@ -1582,8 +1587,8 @@ async def start_all_robots(user: dict = Depends(get_tenant_admin)) -> dict:  # p
     return {"message": "تم بدء تشغيل جميع الروبوتات"}
 
 @robot_router.get("/history")
-async def get_robot_history(robot: str = None, limit: int = 20, user: dict = Depends(block_cashier)) -> dict:
-    runs = await robot_manager.get_history(robot=robot, limit=min(limit, 100))
+async def get_robot_history(robot: str = None, limit: int = Query(20, ge=1, le=100), user: dict = Depends(block_cashier)) -> dict:  # p562: 0/negative used to slip through the min() clamp
+    runs = await robot_manager.get_history(robot=robot, limit=limit)
     return {"runs": runs, "total": len(runs)}
 
 @robot_router.post("/interval/{robot_name}")

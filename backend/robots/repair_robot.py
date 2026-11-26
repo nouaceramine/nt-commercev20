@@ -64,7 +64,14 @@ class RepairRobot:
                 "message_fr": f"{len(results['low_spare_parts'])} pièces à réapprovisionner",
             })
 
-        return results
+        # p562-003: results carried EVERY tenant's repair tickets WITH
+        # CUSTOMER NAMES (PII) plus spare-part names — returned to any
+        # tenant admin via /robots/run/repair and persisted in robot_runs.
+        # Counts only (recommendations are already aggregate counts, kept).
+        return {"overdue_repairs": len(results["overdue_repairs"]),
+                "low_spare_parts": len(results["low_spare_parts"]),
+                "technicians": len(results["technician_workload"]),
+                "recommendations": results["recommendations"]}
 
     async def _check_overdue(self) -> dict:
         overdue = []

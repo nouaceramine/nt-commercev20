@@ -51,7 +51,13 @@ class ProfitRobot:
         # every tenant DB into ONE combined result and wrote it into EACH
         # tenant's auto_reports (cross-tenant leak of product names and
         # figures, plus wrong numbers for everyone).
-        last_results = {}
+        # p562-003: the old code returned the LAST tenant's full results
+        # (product names, margins, revenue) — POST /robots/run/profit handed
+        # them to ANY tenant admin and robot_runs persisted them where any
+        # non-cashier tenant user could read them. Counts only now; the
+        # per-tenant auto_reports writes below are unchanged.
+        tenants_processed = 0
+        reports_written = 0
         try:
             dbs = await self.client.list_database_names()
             tenant_dbs = [d for d in dbs if is_tenant_db(d)]
@@ -77,7 +83,7 @@ class ProfitRobot:
                         "count": len(results["low_margin_products"]),
                     })
                     self.stats["recommendations"] += 1
-                last_results = results
+                tenants_processed += 1
                 # p297: one row per (tenant, report_type, day); repeated cycles
                 # within a day OVERWRITE the same row (idempotent), and rows
                 # older than 90 days are swept. Stops the unbounded pile-up.
@@ -100,11 +106,13 @@ class ProfitRobot:
                     upsert=True,
                 )
                 await tdb.auto_reports.delete_many({"created_at": {"$lt": cutoff}})
+                reports_written += 1
                 await drop_db_if_tenant_deleted(self.db, self.client, tdb_name)
         except Exception as e:
             logger.error(f"Error storing profit report: {e}")
 
-        return last_results
+        return {"tenants_processed": tenants_processed,
+                "reports_written": reports_written}
 
     async def _analyze_daily(self, tdb) -> dict:
         # p554: sale docs carry `created_at`, never `date` — the old $regex on

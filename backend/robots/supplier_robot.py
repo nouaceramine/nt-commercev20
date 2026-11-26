@@ -56,7 +56,14 @@ class SupplierRobot:
                 "message_fr": f"{len(results['price_alerts'])} changements de prix détectés",
             })
 
-        return results
+        # p562-003: results carried EVERY tenant's supplier names and purchase
+        # counts — returned to any tenant admin via /robots/run/supplier and
+        # persisted in robot_runs. Counts only (recommendations are already
+        # aggregate counts, kept).
+        return {"suppliers_scored": len(results["performance_scores"]),
+                "price_alerts": len(results["price_alerts"]),
+                "best_deals": len(results["best_deals"]),
+                "recommendations": results["recommendations"]}
 
     async def _score_suppliers(self) -> dict:
         scores = []
