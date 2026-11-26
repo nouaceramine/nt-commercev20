@@ -229,6 +229,10 @@ def create_banking_routes(db, get_current_user) -> dict:
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
 
+        # p567-004: a NaN statement balance stored a poisoned reconciliation
+        # document (BSON nan) and crashed the strict-JSON response with a 500
+        if not math.isfinite(float(req.statement_balance)):
+            raise HTTPException(status_code=400, detail="رصيد كشف الحساب غير صالح")
         system_balance = account.get("current_balance", 0)
         difference = round(req.statement_balance - system_balance, 2)
 

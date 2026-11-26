@@ -545,6 +545,30 @@ async def handle_expense_updated(event: Event) -> None:
         log.warning("auto-accounting expense-update %s failed: %s", p.get("expense_id"), exc)
 
 
+async def handle_cashbox_transfer(event: Event) -> None:
+    """Tenant cash-box transfer → auto journal entry (box ↔ box accounts)."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_box_transfer
+        await post_box_transfer(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting box transfer %s failed: %s", p.get("transfer_id"), exc)
+
+
+async def handle_cashbox_adjusted(event: Event) -> None:
+    """Tenant manual cash-box adjustment → auto journal entry (659/759)."""
+    p = event.payload or {}
+    if not event.tenant_id or event.tenant_id == "platform":
+        return
+    try:
+        from services.accounting_auto import post_box_adjustment
+        await post_box_adjustment(get_tenant_db(event.tenant_id), p)
+    except Exception as exc:
+        log.warning("auto-accounting box adjustment %s failed: %s", p.get("adjustment_id"), exc)
+
+
 async def handle_rental_payment_received(event: Event) -> None:
     """Tenant rental contract payment → auto journal entry (Dr box / Cr 701)."""
     p = event.payload or {}
@@ -863,6 +887,8 @@ def register_handlers(bus: RedisEventBus) -> None:
     bus.register("expense.created", handle_expense_created)  # p193
     bus.register("expense.deleted", handle_expense_deleted)  # p193
     bus.register("expense.updated", handle_expense_updated)  # p201
+    bus.register("cashbox.transfer", handle_cashbox_transfer)  # p567
+    bus.register("cashbox.adjusted", handle_cashbox_adjusted)  # p567
     bus.register("rental.payment_received", handle_rental_payment_received)  # p202
     bus.register("supplier.advance_paid", handle_supplier_advance_paid)  # p203
     bus.register("installment.paid", handle_installment_paid)  # p204

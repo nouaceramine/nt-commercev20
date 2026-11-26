@@ -616,7 +616,10 @@ def create_expenses_routes(
         """p111: شراء دولارات (السوق) — يُقيَّد بالسعر الحقيقي ويُخصم من الصندوق المختار."""
         usd = float(body.get("usd_amount") or 0)
         rate = float(body.get("rate") or 0)
-        if usd <= 0 or rate <= 0:
+        # p567-001: NaN/Inf slip past `<= 0` (every comparison with NaN is
+        # False) and poison dzd_total, the box balance (BSON nan) and the
+        # wallet FIFO aggregates — the P556 wall class on this surface.
+        if not math.isfinite(usd) or not math.isfinite(rate) or usd <= 0 or rate <= 0:
             raise HTTPException(status_code=400, detail="أدخل كمية الدولار وسعر الصرف")
         pm = body.get("payment_method")
         if pm:

@@ -185,6 +185,9 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
         payment: dict,
         admin: dict = Depends(require_permission("debts.collect")),
     ):
+        import asyncio as _asyncio
+        from pymongo.errors import PyMongoError as _PyMongoError
+
         from models.schemas import DebtPaymentCreate
 
         p = DebtPaymentCreate(**payment)
@@ -217,106 +220,127 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
             from services.outbox import outbox_write
 
             _tid = admin.get("tenant_id") or "platform"
-            async with await _client.start_session() as _tx:
-                async with _tx.start_transaction():
-                    # p494c: destination must be a real cash box (parity with
-                    # customer_debts p216) — a phantom method wrote ledger rows
-                    # into a box that does not exist
-                    _box = await db.cash_boxes.find_one(
-                        {"id": p.payment_method}, session=_tx)
-                    if not _box:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
-                    if v_party_type == "customer":
-                        await allocate_customer_payment(
-                            db,
-                            v_party_id,
-                            p.amount,
-                            method=p.payment_method,
-                            session=_tx,
-                        )
-                        await adjust_customer_mirror(
-                            db,
-                            v_party_id,
-                            balance=-p.amount,
-                            total_debt=-p.amount,
-                            session=_tx,
-                        )
-                        tx_type, signed = "income", p.amount
-                    else:
-                        await allocate_supplier_payment(
-                            db,
-                            v_party_id,
-                            p.amount,
-                            method=p.payment_method,
-                            session=_tx,
-                        )
-                        await adjust_supplier_mirror(
-                            db, v_party_id, balance=-p.amount, session=_tx
-                        )
-                        tx_type, signed = "expense", -p.amount
-                    if True:  # p68: personal box is a real ledger
-                        await db.cash_boxes.update_one(
-                            {"id": p.payment_method},
-                            {"$inc": {"balance": signed}, "$set": {"updated_at": now}},
-                            session=_tx,
-                        )
-                        await db.transactions.insert_one(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "cash_box_id": p.payment_method,
-                                "type": tx_type,
+            # p567-002: the balance check above runs OUTSIDE the transaction —
+            # two concurrent full payments both passed it, then either crashed
+            # the loser with an unretried WriteConflict 500 or (when the commits
+            # interleaved) BOTH settled: double cash collected for one debt.
+            # Retry the whole unit on transient conflicts and re-validate the
+            # party balance INSIDE the transaction snapshot.
+            for _attempt in range(5):
+                try:
+                    async with await _client.start_session() as _tx:
+                        async with _tx.start_transaction():
+                            # p494c: destination must be a real cash box (parity with
+                            # customer_debts p216) — a phantom method wrote ledger rows
+                            # into a box that does not exist
+                            _box = await db.cash_boxes.find_one(
+                                {"id": p.payment_method}, session=_tx)
+                            if not _box:
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                            _party = await coll.find_one({"id": v_party_id}, session=_tx)
+                            if not _party:
+                                raise HTTPException(status_code=404, detail="Party not found")
+                            _bal = float(_party.get("balance", 0) or 0)
+                            if _bal <= 0:
+                                raise HTTPException(status_code=400, detail="No outstanding balance")
+                            if p.amount > _bal:
+                                raise HTTPException(status_code=400, detail="Payment exceeds remaining")
+                            if v_party_type == "customer":
+                                await allocate_customer_payment(
+                                    db,
+                                    v_party_id,
+                                    p.amount,
+                                    method=p.payment_method,
+                                    session=_tx,
+                                )
+                                await adjust_customer_mirror(
+                                    db,
+                                    v_party_id,
+                                    balance=-p.amount,
+                                    total_debt=-p.amount,
+                                    session=_tx,
+                                )
+                                tx_type, signed = "income", p.amount
+                            else:
+                                await allocate_supplier_payment(
+                                    db,
+                                    v_party_id,
+                                    p.amount,
+                                    method=p.payment_method,
+                                    session=_tx,
+                                )
+                                await adjust_supplier_mirror(
+                                    db, v_party_id, balance=-p.amount, session=_tx
+                                )
+                                tx_type, signed = "expense", -p.amount
+                            if True:  # p68: personal box is a real ledger
+                                await db.cash_boxes.update_one(
+                                    {"id": p.payment_method},
+                                    {"$inc": {"balance": signed}, "$set": {"updated_at": now}},
+                                    session=_tx,
+                                )
+                                await db.transactions.insert_one(
+                                    {
+                                        "id": str(uuid.uuid4()),
+                                        "cash_box_id": p.payment_method,
+                                        "type": tx_type,
+                                        "amount": p.amount,
+                                        "description": f"سداد دين - {party.get('name', '')}",
+                                        "reference_type": "debt_payment",
+                                        "reference_id": payment_id,
+                                        "created_at": now,
+                                        "created_by": admin["name"],
+                                    },
+                                    session=_tx,
+                                )
+                            payment_doc = {
+                                "id": payment_id,
+                                "debt_id": debt_id,
                                 "amount": p.amount,
-                                "description": f"سداد دين - {party.get('name', '')}",
-                                "reference_type": "debt_payment",
-                                "reference_id": payment_id,
+                                "payment_method": p.payment_method,
+                                "notes": p.notes or "",
                                 "created_at": now,
                                 "created_by": admin["name"],
-                            },
-                            session=_tx,
-                        )
-                    payment_doc = {
-                        "id": payment_id,
-                        "debt_id": debt_id,
-                        "amount": p.amount,
-                        "payment_method": p.payment_method,
-                        "notes": p.notes or "",
-                        "created_at": now,
-                        "created_by": admin["name"],
-                    }
-                    await db.debt_payments.insert_one(payment_doc, session=_tx)
-                    if v_party_type == "customer":
-                        await outbox_write(
-                            _main_db,
-                            "customer.payment_received",
-                            {
-                                "payment_id": payment_id,
-                                "customer_id": v_party_id,
-                                "customer_name": party.get("name", ""),
-                                "amount": p.amount,
-                                "payment_method": p.payment_method,
-                            },
-                            tenant_id=_tid,
-                            source="debts_routes",
-                            session=_tx,
-                        )
-                    else:
-                        await outbox_write(
-                            _main_db,
-                            "supplier.payment_made",
-                            {
-                                "payment_id": payment_id,
-                                "supplier_id": v_party_id,
-                                "supplier_name": party.get("name", ""),
-                                "amount": p.amount,
-                                "amount_applied": p.amount,
-                                "payment_method": p.payment_method,
-                            },
-                            tenant_id=_tid,
-                            source="debts_routes",
-                            session=_tx,
-                        )
+                            }
+                            await db.debt_payments.insert_one(payment_doc, session=_tx)
+                            if v_party_type == "customer":
+                                await outbox_write(
+                                    _main_db,
+                                    "customer.payment_received",
+                                    {
+                                        "payment_id": payment_id,
+                                        "customer_id": v_party_id,
+                                        "customer_name": party.get("name", ""),
+                                        "amount": p.amount,
+                                        "payment_method": p.payment_method,
+                                    },
+                                    tenant_id=_tid,
+                                    source="debts_routes",
+                                    session=_tx,
+                                )
+                            else:
+                                await outbox_write(
+                                    _main_db,
+                                    "supplier.payment_made",
+                                    {
+                                        "payment_id": payment_id,
+                                        "supplier_id": v_party_id,
+                                        "supplier_name": party.get("name", ""),
+                                        "amount": p.amount,
+                                        "amount_applied": p.amount,
+                                        "payment_method": p.payment_method,
+                                    },
+                                    tenant_id=_tid,
+                                    source="debts_routes",
+                                    session=_tx,
+                                )
+                    break
+                except _PyMongoError as exc:
+                    if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
+                        raise
+                    await _asyncio.sleep(0.2 * (_attempt + 1))
             payment_doc.pop("_id", None)
             return payment_doc
         debt = await db.debts.find_one({"id": debt_id})
@@ -325,97 +349,115 @@ def create_debts_routes(db, get_current_user, get_tenant_admin, require_tenant) 
         if p.amount > debt["remaining_amount"]:
             raise HTTPException(status_code=400, detail="Payment exceeds remaining")
         payment_id = str(uuid.uuid4())
-        new_paid = debt["paid_amount"] + p.amount
-        new_remaining = debt["remaining_amount"] - p.amount
-        new_status = "paid" if new_remaining <= 0 else "partial"
         # p196: atomic settlement + outbox event → auto journal entry
         from config.database import client as _client, main_db as _main_db
         from services.outbox import outbox_write
 
         _tid = admin.get("tenant_id") or "platform"
-        async with await _client.start_session() as _tx:
-            async with _tx.start_transaction():
-                # p494c: destination must be a real cash box (see virtual path)
-                _box = await db.cash_boxes.find_one(
-                    {"id": p.payment_method}, session=_tx)
-                if not _box:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
-                await db.debts.update_one(
-                    {"id": debt_id},
-                    {
-                        "$set": {
-                            "paid_amount": new_paid,
-                            "remaining_amount": new_remaining,
-                            "status": new_status,
-                        }
-                    },
-                    session=_tx,
-                )
-                payment_doc = {
-                    "id": payment_id,
-                    "debt_id": debt_id,
-                    "amount": p.amount,
-                    "payment_method": p.payment_method,
-                    "notes": p.notes or "",
-                    "created_at": now,
-                    "created_by": admin["name"],
-                }
-                await db.debt_payments.insert_one(payment_doc, session=_tx)
-                tx_type = "income" if debt["type"] == "receivable" else "expense"
-                amt = p.amount if tx_type == "income" else -p.amount
-                if True:  # p68: personal box is a real ledger
-                    await db.cash_boxes.update_one(
-                        {"id": p.payment_method},
-                        {"$inc": {"balance": amt}, "$set": {"updated_at": now}},
-                        session=_tx,
-                    )
-                    await db.transactions.insert_one(
-                        {
-                            "id": str(uuid.uuid4()),
-                            "cash_box_id": p.payment_method,
-                            "type": tx_type,
+        # p567-002: the overpay check above runs OUTSIDE the transaction and
+        # the update used absolute $set computed from that stale read — two
+        # concurrent full payments either crashed the loser with an unretried
+        # WriteConflict 500 or BOTH settled (two payment rows, double cash,
+        # double journal entries). Retry the unit on transient conflicts and
+        # re-read + re-validate the debt INSIDE the transaction snapshot.
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        # p494c: destination must be a real cash box (see virtual path)
+                        _box = await db.cash_boxes.find_one(
+                            {"id": p.payment_method}, session=_tx)
+                        if not _box:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                        debt = await db.debts.find_one({"id": debt_id}, session=_tx)
+                        if not debt:
+                            raise HTTPException(status_code=404, detail="Debt not found")
+                        if p.amount > debt["remaining_amount"]:
+                            raise HTTPException(status_code=400, detail="Payment exceeds remaining")
+                        new_paid = debt["paid_amount"] + p.amount
+                        new_remaining = debt["remaining_amount"] - p.amount
+                        new_status = "paid" if new_remaining <= 0 else "partial"
+                        await db.debts.update_one(
+                            {"id": debt_id},
+                            {
+                                "$set": {
+                                    "paid_amount": new_paid,
+                                    "remaining_amount": new_remaining,
+                                    "status": new_status,
+                                }
+                            },
+                            session=_tx,
+                        )
+                        payment_doc = {
+                            "id": payment_id,
+                            "debt_id": debt_id,
                             "amount": p.amount,
-                            "description": f"سداد دين - {debt['party_name']}",
-                            "reference_type": "debt_payment",
-                            "reference_id": payment_id,
+                            "payment_method": p.payment_method,
+                            "notes": p.notes or "",
                             "created_at": now,
                             "created_by": admin["name"],
-                        },
-                        session=_tx,
-                    )
-                if debt["type"] == "receivable":
-                    await outbox_write(
-                        _main_db,
-                        "customer.payment_received",
-                        {
-                            "payment_id": payment_id,
-                            "customer_id": None,
-                            "customer_name": debt.get("party_name", ""),
-                            "amount": p.amount,
-                            "payment_method": p.payment_method,
-                        },
-                        tenant_id=_tid,
-                        source="debts_routes",
-                        session=_tx,
-                    )
-                else:
-                    await outbox_write(
-                        _main_db,
-                        "supplier.payment_made",
-                        {
-                            "payment_id": payment_id,
-                            "supplier_id": None,
-                            "supplier_name": debt.get("party_name", ""),
-                            "amount": p.amount,
-                            "amount_applied": p.amount,
-                            "payment_method": p.payment_method,
-                        },
-                        tenant_id=_tid,
-                        source="debts_routes",
-                        session=_tx,
-                    )
+                        }
+                        await db.debt_payments.insert_one(payment_doc, session=_tx)
+                        tx_type = "income" if debt["type"] == "receivable" else "expense"
+                        amt = p.amount if tx_type == "income" else -p.amount
+                        if True:  # p68: personal box is a real ledger
+                            await db.cash_boxes.update_one(
+                                {"id": p.payment_method},
+                                {"$inc": {"balance": amt}, "$set": {"updated_at": now}},
+                                session=_tx,
+                            )
+                            await db.transactions.insert_one(
+                                {
+                                    "id": str(uuid.uuid4()),
+                                    "cash_box_id": p.payment_method,
+                                    "type": tx_type,
+                                    "amount": p.amount,
+                                    "description": f"سداد دين - {debt['party_name']}",
+                                    "reference_type": "debt_payment",
+                                    "reference_id": payment_id,
+                                    "created_at": now,
+                                    "created_by": admin["name"],
+                                },
+                                session=_tx,
+                            )
+                        if debt["type"] == "receivable":
+                            await outbox_write(
+                                _main_db,
+                                "customer.payment_received",
+                                {
+                                    "payment_id": payment_id,
+                                    "customer_id": None,
+                                    "customer_name": debt.get("party_name", ""),
+                                    "amount": p.amount,
+                                    "payment_method": p.payment_method,
+                                },
+                                tenant_id=_tid,
+                                source="debts_routes",
+                                session=_tx,
+                            )
+                        else:
+                            await outbox_write(
+                                _main_db,
+                                "supplier.payment_made",
+                                {
+                                    "payment_id": payment_id,
+                                    "supplier_id": None,
+                                    "supplier_name": debt.get("party_name", ""),
+                                    "amount": p.amount,
+                                    "amount_applied": p.amount,
+                                    "payment_method": p.payment_method,
+                                },
+                                tenant_id=_tid,
+                                source="debts_routes",
+                                session=_tx,
+                            )
+                break
+            except _PyMongoError as exc:
+                if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
+                    raise
+                await _asyncio.sleep(0.2 * (_attempt + 1))
         payment_doc.pop("_id", None)
         return payment_doc
 

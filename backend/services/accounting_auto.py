@@ -4,6 +4,7 @@
 # account balance mirrors), but are born approved and tagged source='auto'.
 import asyncio
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -30,6 +31,8 @@ DEFAULT_ACCOUNTS = [
     ("658", "مصاريف العمولات", "expense", None),  # p221
     ("421", "عمولات مستحقة الدفع", "liability", None),  # p221
     ("761", "إيرادات فوائد التقسيط", "revenue", None),  # p494c
+    ("659", "عجز وفروقات الصناديق", "expense", None),   # p567
+    ("759", "زيادات وفروقات الصناديق", "revenue", None),  # p567
 ]
 
 BOX_ACCOUNT = {box: code for code, _, _, box in DEFAULT_ACCOUNTS if box}
@@ -752,5 +755,63 @@ async def post_commission_payout(tdb, *, commission_id: str, amount: float, bene
         reference_id=commission_id,
         source_tag="commission_payout",
         description=f"قيد تلقائي — دفع عمولة لـ {beneficiary}",
+        lines=lines,
+    )
+
+
+async def post_box_transfer(tdb, payload: dict):
+    """cashbox.transfer → Dr destination box account / Cr source box account.
+    p567-003: physical cash movements between boxes were invisible to the
+    books — the 53x ledger drifted from the boxes (its own truth source)."""
+    transfer_id = payload.get("transfer_id")
+    if not transfer_id or await already_posted(tdb, transfer_id, "cashbox_transfer"):
+        return None
+    amount = float(payload.get("amount", 0) or 0)
+    if not math.isfinite(amount) or amount <= 0:
+        return None
+    accounts = await ensure_accounts(tdb)
+    src_code = BOX_ACCOUNT.get(payload.get("from_box"), "530")
+    dst_code = BOX_ACCOUNT.get(payload.get("to_box"), "530")
+    if src_code == dst_code:
+        return None  # one account hosts both boxes — nothing to move
+    lines = [
+        _line(accounts[dst_code], debit=amount),
+        _line(accounts[src_code], credit=amount),
+    ]
+    return await _insert_entry(
+        tdb,
+        reference="TRF-BOX",
+        reference_id=transfer_id,
+        source_tag="cashbox_transfer",
+        description=f"قيد تلقائي — تحويل {amount} من صندوق {payload.get('from_box')} إلى {payload.get('to_box')}",
+        lines=lines,
+    )
+
+
+async def post_box_adjustment(tdb, payload: dict):
+    """cashbox.adjusted → surplus: Dr box / Cr 759; deficit: Dr 659 / Cr box.
+    p567-003: manual inventory corrections moved cash without a journal trace."""
+    adj_id = payload.get("adjustment_id")
+    if not adj_id or await already_posted(tdb, adj_id, "cashbox_adjustment"):
+        return None
+    diff = round(float(payload.get("difference", 0) or 0), 2)
+    if not math.isfinite(diff) or abs(diff) < 0.005:
+        return None
+    accounts = await ensure_accounts(tdb)
+    box_code = BOX_ACCOUNT.get(payload.get("box_id"), "530")
+    if diff > 0:
+        lines = [_line(accounts[box_code], debit=diff),
+                 _line(accounts["759"], credit=diff)]
+        kind = "زيادة"
+    else:
+        lines = [_line(accounts["659"], debit=-diff),
+                 _line(accounts[box_code], credit=-diff)]
+        kind = "عجز"
+    return await _insert_entry(
+        tdb,
+        reference="ADJ-BOX",
+        reference_id=adj_id,
+        source_tag="cashbox_adjustment",
+        description=f"قيد تلقائي — تسوية {kind} لصندوق {payload.get('box_id')} ({payload.get('reason', '')})",
         lines=lines,
     )
