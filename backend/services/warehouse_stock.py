@@ -1,4 +1,5 @@
 """Transactional per-warehouse stock balances."""
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -23,6 +24,11 @@ async def adjust_warehouse_stock(
     writes conflict instead of creating two logical balances. Existing rows
     are changed atomically with `$inc`, never by writing back a stale value.
     """
+    # P568: chokepoint wall — a non-finite delta would poison the balance
+    # forever (BSON nan/inf). Entry points validate their inputs; this is
+    # defense in depth at the one shared stock-mutation service.
+    if not math.isfinite(float(delta)):
+        raise HTTPException(status_code=400, detail="Non-finite stock delta")
     if not warehouse_id or abs(float(delta)) < 1e-12:
         return None
     stock_id = warehouse_stock_id(product_id, warehouse_id)

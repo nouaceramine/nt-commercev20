@@ -152,10 +152,17 @@ def create_serials_routes(db, get_current_user, get_tenant_admin) -> dict:
             raise HTTPException(status_code=409, detail=f"انتقال غير مسموح: {cur} → {data.status}")
         ev = {"from": cur, "to": data.status, "note": (data.note or "").strip(),
               "at": _now().isoformat(), "by": admin.get("id") or admin.get("email")}
-        await _serials().update_one(
-            {"id": serial_id},
+        # P568: claim the observed state in the write filter — two concurrent
+        # transitions out of the same state used to BOTH win (forked event
+        # trail, nondeterministic final status). The loser now matches
+        # nothing and gets a clean 409.
+        r = await _serials().update_one(
+            {"id": serial_id, "status": cur},
             {"$set": {"status": data.status, "updated_at": _now()},
              "$push": {"events": ev}})
+        if not r.matched_count:
+            raise HTTPException(status_code=409,
+                                detail="تغيّرت حالة الرقم التسلسلي بالتزامن — أعد المحاولة")
         return {"ok": True, "status": data.status}
 
     @router.post("/{serial_id}/warranty")

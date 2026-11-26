@@ -33,6 +33,35 @@ def truncate_list_descriptions(products):
 
 
 
+def normalize_variant_quantities(raw_variants):
+    """P568: variant quantities follow the same finite + non-negative
+    contract as every other stock number (p501 doctrine). The dict payload
+    bypassed schema validation: NaN/Inf passed every comparison and were
+    summed straight into products.quantity (BSON nan/inf — strict-JSON 500s
+    on every list endpoint, delete-guard bypass since `nan > 0` is False,
+    int(nan) crashes in auto-reorder), non-numeric strings 500'd via
+    float(), and compensated negatives ([-7, +12]) slipped through the
+    create path that lacked the update-side `< 0` check."""
+    import math
+    norm = []
+    for v in raw_variants or []:
+        item = dict(v or {})
+        try:
+            q = float(item.get("quantity", 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422,
+                                detail="كمية المتغير يجب أن تكون رقمًا")
+        if not math.isfinite(q):
+            raise HTTPException(status_code=422,
+                                detail="كمية المتغير يجب أن تكون رقمًا منتهيًا")
+        if q < 0:
+            raise HTTPException(status_code=422,
+                                detail="كمية المتغير يجب أن تكون صفر أو أكثر")
+        norm.append({"color": item.get("color", ""), "size": item.get("size", ""),
+                     "quantity": q})
+    return norm
+
+
 def product_search_or(search: str):
     """p530: tightened product search — exact barcode hits and index-anchored
     prefix clauses first (barcode/article_code are indexed); free text scans
@@ -224,11 +253,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             "color": p.color or "",
             "sizes": p.sizes or [],
             "has_variants": p.has_variants or False,
-            "variants": [
-                {"color": (v or {}).get("color", ""), "size": (v or {}).get("size", ""),
-                 "quantity": float((v or {}).get("quantity", 0) or 0)}
-                for v in (p.variants or [])
-            ] if p.has_variants else [],
+            "variants": normalize_variant_quantities(p.variants) if p.has_variants else [],
             "created_at": now, "updated_at": now
         }
         if product_doc["has_variants"]:
@@ -645,13 +670,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                             eff_has = update_data.get("has_variants", product.get("has_variants", False))
                             if eff_has:
                                 raw_variants = update_data.get("variants", product.get("variants", [])) or []
-                                norm = [
-                                    {"color": (v or {}).get("color", ""), "size": (v or {}).get("size", ""),
-                                     "quantity": float((v or {}).get("quantity", 0) or 0)}
-                                    for v in raw_variants
-                                ]
-                                if any(v["quantity"] < 0 for v in norm):
-                                    raise HTTPException(status_code=422, detail="كمية المتغير يجب أن تكون صفر أو أكثر")
+                                # P568: shared wall — NaN/Inf/non-numeric/negative all 422
+                                norm = normalize_variant_quantities(raw_variants)
                                 update_data["variants"] = norm
                                 update_data["has_variants"] = True
                                 update_data["quantity"] = sum(v["quantity"] for v in norm)
@@ -814,6 +834,14 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         clone["name_ar"] = (src.get("name_ar") or "") + " (نسخة)" if src.get("name_ar") else ""
                         clone["name_en"] = (src.get("name_en") or "") + " (copy)" if src.get("name_en") else ""
                         clone["quantity"] = 0  # النسخة تبدأ بلا مخزون — لا تضخيم وهمي للمخزون
+                        # P568: the create/update invariant (quantity ==
+                        # sum(variants)) must hold for the clone too —
+                        # copying variant quantities verbatim forked it
+                        # (list showed 0 while variant views showed stock).
+                        clone["variants"] = [
+                            ({**v, "quantity": 0} if isinstance(v, dict) else v)
+                            for v in (src.get("variants") or [])
+                        ]
                         clone["barcode"] = ""
                         clone["additional_barcodes"] = []
                         clone["article_code"] = ""
