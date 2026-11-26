@@ -282,10 +282,10 @@ class RobotManager:
             token = await self._try_lease(name, kind="cycle")
             if token is None:
                 logger.info(f"{name}: cycle skipped — lease held by another worker")
-                return None
+                return {}  # p562b: loops like commission do result.get(...) on it
             try:
                 if not await self._try_cycle_slot(name, slot):
-                    return None  # this slot already ran on another worker
+                    return {}  # this slot already ran on another worker
                 robot._p562_cycle_depth = 1
                 try:
                     return await fn(*args, **kwargs)
