@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { UtensilsCrossed, Plus, Minus, Send, Trash2, RefreshCw, Search, Banknote, Zap, Percent, ReceiptText, Flame } from 'lucide-react';
+import { UtensilsCrossed, Plus, Minus, Send, Trash2, RefreshCw, Search, Banknote, Zap, Percent, ReceiptText, Flame, Wallet, TrendingUp, TrendingDown, Scale } from 'lucide-react';
 import { toast } from 'sonner';
 import { startRealtime, onEvent, stopRealtime } from '../lib/realtime';
 
@@ -38,6 +38,14 @@ export default function RestaurantPOSPage() {
   const [discValue, setDiscValue] = useState('');
   const [custPhone, setCustPhone] = useState('');  // p356: ولاء
   const [exportOpen, setExportOpen] = useState(false);  // p478
+  // p558: لوحة العمليات اليومية
+  const [opsOpen, setOpsOpen] = useState(false);
+  const [ops, setOps] = useState(null);
+  const [opsBusy, setOpsBusy] = useState(false);
+  const [expCat, setExpCat] = useState('أجور عمال');
+  const [expAmount, setExpAmount] = useState('');
+  const [expNotes, setExpNotes] = useState('');
+  const [boxId, setBoxId] = useState('');
 
   // p457: أفضل زبائن الصالة PDF (90 يومًا)
   const downloadTopCustPdf = async () => {
@@ -211,6 +219,37 @@ export default function RestaurantPOSPage() {
     return [...list].sort((a, b) => (rank.get(a.id) ?? 9999) - (rank.get(b.id) ?? 9999));
   }, [products, search, fam, topIds]);
 
+  // p558: جلب ملخص اليوم + تسجيل مصروف سريع
+  const OPS_CATS = ['أجور عمال', 'مشتريات يومية', 'تكاليف تشغيل', 'هدر وتلف', 'أخرى'];
+  const fetchOps = useCallback(async () => {
+    try {
+      const [d, b] = await Promise.all([
+        apiClient.get('/restaurant/daily-ops'),
+        apiClient.get('/cash-boxes').catch(() => ({ data: [] })),
+      ]);
+      setOps(d.data || null);
+      const boxes = Array.isArray(b.data) ? b.data : (b.data?.items || []);
+      setBoxId(prev => prev || (boxes[0]?.id || ''));
+    } catch (_e) { /* صامت */ }
+  }, []);
+
+  const addQuickExpense = async () => {
+    const amt = Number(expAmount);
+    if (!amt || amt <= 0) { toast.error(isAr ? 'أدخل مبلغاً صحيحاً' : 'Montant invalide'); return; }
+    setOpsBusy(true);
+    try {
+      await apiClient.post('/expenses', {
+        title: expNotes.trim() ? `${expCat} — ${expNotes.trim()}` : expCat,
+        category: expCat, amount: amt,
+        payment_method: boxId || '', notes: expNotes.trim(),
+      });
+      toast.success(isAr ? 'سُجّل المصروف' : 'Depense enregistree');
+      setExpAmount(''); setExpNotes('');
+      fetchOps();
+    } catch (e) { toast.error(errText(e)); }
+    finally { setOpsBusy(false); }
+  };
+
   const families = useMemo(() => [...new Set(products.map(p => p.family_name).filter(Boolean))], [products]);
   // p561: أيقونة العائلة = أول صورة منتج فيها
   const familyImgs = useMemo(() => {
@@ -348,6 +387,9 @@ export default function RestaurantPOSPage() {
                 {isAr ? 'سريع' : 'Rapide'}
               </button>
             </div>
+            <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => { setOpsOpen(true); fetchOps(); }} data-testid="pos-mobile-daily-ops-btn">
+              <Wallet className="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setExportOpen(!exportOpen)} data-testid="pos-export-menu-btn">
               {isAr ? 'تصدير ▾' : 'Export ▾'}
             </Button>
@@ -415,9 +457,91 @@ export default function RestaurantPOSPage() {
               title={isAr ? 'تصدير الأكثر مبيعًا CSV (30 يوم)' : 'Top ventes CSV (30j)'}>
               CSV
             </Button>
+            <Button variant="outline" size="sm" className="min-h-[44px] font-bold" onClick={() => { setOpsOpen(true); fetchOps(); }} data-testid="resto-daily-ops-btn">
+              <Wallet className="h-4 w-4 ml-1" />{isAr ? 'اليومية' : 'Journal'}
+            </Button>
             <Button variant="outline" size="sm" onClick={fetchAll} data-testid="resto-refresh"><RefreshCw className="h-4 w-4" /></Button>
           </div>
         </div>
+
+        {/* p558: لوحة العمليات اليومية */}
+        {opsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3" onClick={() => setOpsOpen(false)} data-testid="daily-ops-overlay">
+            <div className="bg-background rounded-2xl border shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto p-4 space-y-4" onClick={e => e.stopPropagation()} data-testid="daily-ops-panel">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-black flex items-center gap-2"><Wallet className="h-5 w-5" />{isAr ? 'العمليات اليومية' : 'Operations du jour'}</h2>
+                <Button variant="ghost" size="sm" onClick={() => setOpsOpen(false)} data-testid="daily-ops-close">✕</Button>
+              </div>
+
+              {/* بطاقات الملخص */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl border-2 border-emerald-500/50 bg-emerald-50/60 dark:bg-emerald-950/30 p-3 text-center" data-testid="daily-ops-income">
+                  <TrendingUp className="h-5 w-5 mx-auto text-emerald-600" />
+                  <div className="text-[11px] font-bold text-muted-foreground mt-1">{isAr ? 'المدخول اليومي' : 'Recette'}</div>
+                  <div className="text-lg font-black text-emerald-700 dark:text-emerald-400">{fmt(ops?.income || 0)}</div>
+                  <div className="text-[10px] text-muted-foreground">{ops?.orders || 0} {isAr ? 'طلب' : 'cmd'}</div>
+                </div>
+                <div className="rounded-xl border-2 border-red-500/50 bg-red-50/60 dark:bg-red-950/30 p-3 text-center" data-testid="daily-ops-out">
+                  <TrendingDown className="h-5 w-5 mx-auto text-red-600" />
+                  <div className="text-[11px] font-bold text-muted-foreground mt-1">{isAr ? 'المخروج اليومي' : 'Sorties'}</div>
+                  <div className="text-lg font-black text-red-700 dark:text-red-400">{fmt(ops?.out_total || 0)}</div>
+                  <div className="text-[10px] text-muted-foreground">{isAr ? `مصاريف ${fmt(ops?.expenses_total || 0)} + مشتريات ${fmt(ops?.purchases_paid || 0)}` : `dep. ${fmt(ops?.expenses_total || 0)} + achats ${fmt(ops?.purchases_paid || 0)}`}</div>
+                </div>
+                <div className={`rounded-xl border-2 p-3 text-center ${(ops?.net || 0) >= 0 ? 'border-primary/60 bg-primary/5' : 'border-orange-500/60 bg-orange-50/60'}`} data-testid="daily-ops-net">
+                  <Scale className="h-5 w-5 mx-auto text-primary" />
+                  <div className="text-[11px] font-bold text-muted-foreground mt-1">{isAr ? 'صافي اليوم' : 'Net'}</div>
+                  <div className={`text-lg font-black ${(ops?.net || 0) >= 0 ? 'text-primary' : 'text-orange-600'}`}>{fmt(ops?.net || 0)}</div>
+                  <div className="text-[10px] text-muted-foreground">{isAr ? 'مدخول − مخروج' : 'entrees - sorties'}</div>
+                </div>
+              </div>
+
+              {/* تسجيل مصروف سريع */}
+              <div className="rounded-xl border p-3 space-y-2" data-testid="daily-ops-quick">
+                <div className="text-sm font-bold">{isAr ? 'تسجيل سريع (أجور / مشتريات / تكاليف / هدر)' : 'Saisie rapide'}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {OPS_CATS.map(c => (
+                    <button key={c} onClick={() => setExpCat(c)} data-testid={`daily-ops-cat-${c}`}
+                      className={`px-3 min-h-[44px] rounded-full border text-sm font-bold ${expCat === c ? 'bg-primary text-primary-foreground border-primary' : 'bg-background'}`}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input type="number" inputMode="decimal" min="0" placeholder={isAr ? 'المبلغ (دج)' : 'Montant'} value={expAmount}
+                    onChange={e => setExpAmount(e.target.value)} className="h-12 text-lg font-bold w-36" data-testid="daily-ops-amount" />
+                  <Input placeholder={isAr ? 'ملاحظة (اختياري)' : 'Note'} value={expNotes}
+                    onChange={e => setExpNotes(e.target.value)} className="h-12 flex-1" data-testid="daily-ops-notes" />
+                  <Button onClick={addQuickExpense} disabled={opsBusy} className="h-12 px-5 font-bold" data-testid="daily-ops-add">
+                    {isAr ? 'تسجيل' : 'OK'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* مصاريف اليوم */}
+              <div className="rounded-xl border p-3" data-testid="daily-ops-list">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-bold">{isAr ? 'مصاريف اليوم المسجلة' : 'Depenses du jour'}</div>
+                  <Button variant="ghost" size="sm" onClick={fetchOps} data-testid="daily-ops-refresh"><RefreshCw className="h-4 w-4" /></Button>
+                </div>
+                {(ops?.expenses || []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-3">{isAr ? 'لا مصاريف مسجلة اليوم' : 'Aucune depense'}</p>
+                ) : (
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {ops.expenses.map(e => (
+                      <div key={e.id} className="flex items-center justify-between border-b last:border-0 py-1.5 text-sm">
+                        <div>
+                          <span className="font-semibold">{e.title}</span>
+                          <span className="text-[10px] text-muted-foreground mr-2">{e.category}</span>
+                        </div>
+                        <span className="font-bold text-red-600" dir="ltr">-{fmt(e.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* table strip (tables mode) */}
         {mode === 'tables' && (

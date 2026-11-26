@@ -31,7 +31,7 @@ import {
 export default function PurchaseDialogs({
   // New Purchase Dialog
   showNewPurchaseDialog, setShowNewPurchaseDialog, purchaseCode,
-  searchQuery, setSearchQuery, searchInputRef, filteredProducts,
+  searchQuery, setSearchQuery, searchInputRef, filteredProducts, showFinalProducts, setShowFinalProducts,
   addToCart, suppliers, selectedSupplier, setSelectedSupplier,
   warehouses = [], selectedWarehouse, setSelectedWarehouse,
   setShowNewSupplierDialog, supplierPreviousDebt,
@@ -102,6 +102,15 @@ export default function PurchaseDialogs({
                   autoComplete="off"
                 />
               </div>
+              {/* p556: عرض المكونات فقط افتراضياً — زر لإظهار المنتجات النهائية عند الحاجة */}
+              {typeof setShowFinalProducts === 'function' && (
+                <button type="button" onClick={() => setShowFinalProducts(!showFinalProducts)}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${showFinalProducts ? 'bg-amber-100 border-amber-400 text-amber-800' : 'bg-muted border-border text-muted-foreground'}`}>
+                  {language === 'ar'
+                    ? (showFinalProducts ? 'عرض: الكل (مكونات + منتجات نهائية)' : 'عرض: المكونات فقط — اضغط لإظهار الكل')
+                    : (showFinalProducts ? 'Tout afficher' : 'Ingrédients seulement')}
+                </button>
+              )}
               <div className="grid grid-cols-2 gap-3 max-h-[400px] overflow-y-auto">
                 {filteredProducts.map(product => (  // p175: no slice — every match renders
                   <div key={product.id} onClick={() => addToCart(product)} className="p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">

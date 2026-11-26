@@ -42,6 +42,7 @@ export default function PurchasesPage() {
   const [scanningInvoice, setScanningInvoice] = useState(false);  // p150
   const invoiceScanRef = useRef(null);                             // p150
   const [searchQuery, setSearchQuery] = useState('');
+  const [showFinalProducts, setShowFinalProducts] = useState(false);  // p556: purchases pick ingredients by default
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [paidAmount, setPaidAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -152,7 +153,7 @@ export default function PurchasesPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const filteredProducts = (searchQuery && Array.isArray(remoteProducts)) ? remoteProducts : (Array.isArray(products) ? products.filter(p => {
+  const _allFiltered = (searchQuery && Array.isArray(remoteProducts)) ? remoteProducts : (Array.isArray(products) ? products.filter(p => {
     const query = searchQuery.toLowerCase();
     return (
       p.name_ar?.toLowerCase().includes(query) ||
@@ -161,6 +162,8 @@ export default function PurchasesPage() {
       p.article_code?.toLowerCase().includes(query)
     );
   }) : []);
+  // p556: في عملية شراء جديد تظهر المكونات فقط افتراضياً (المنتجات النهائية retail_price>0 مخفية)
+  const filteredProducts = showFinalProducts ? _allFiltered : _allFiltered.filter(p => !(Number(p.retail_price) > 0));
 
   const addToCart = (product) => {
     const safeCart = Array.isArray(cart) ? cart : [];
@@ -789,6 +792,7 @@ export default function PurchasesPage() {
           showNewPurchaseDialog={showNewPurchaseDialog} setShowNewPurchaseDialog={setShowNewPurchaseDialog}
           purchaseCode={purchaseCode} searchQuery={searchQuery} setSearchQuery={setSearchQuery}
           searchInputRef={searchInputRef} filteredProducts={filteredProducts} addToCart={addToCart}
+          showFinalProducts={showFinalProducts} setShowFinalProducts={setShowFinalProducts}
           suppliers={suppliers} selectedSupplier={selectedSupplier} setSelectedSupplier={setSelectedSupplier}
           warehouses={warehouses} selectedWarehouse={selectedWarehouse} setSelectedWarehouse={setSelectedWarehouse}
           setShowNewSupplierDialog={setShowNewSupplierDialog} supplierPreviousDebt={supplierPreviousDebt}

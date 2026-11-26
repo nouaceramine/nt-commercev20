@@ -4,6 +4,21 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ChefHat, Ban, WifiOff } from 'lucide-react';
 
+// p563: حركة مستمرة + فيديو خفي — تمنع شاشات العرض (webOS) من الدخول في وضع السكون
+const KB_CSS = `@keyframes tvKenBurns{0%{transform:scale(1) translate(0,0)}100%{transform:scale(1.15) translate(-2%,-2%)}}
+.tv-kb{animation:tvKenBurns 18s ease-in-out infinite alternate;will-change:transform}
+.tv-kb-alt{animation-duration:23s;animation-delay:-7s}`;
+const KEEPALIVE_SRC = "/api/static/uploads/dishes/keepalive.mp4";
+const KeepAlive = () => (
+  <>
+    <style>{KB_CSS}</style>
+    <video autoPlay muted loop playsInline aria-hidden="true"
+      style={{ position: 'fixed', bottom: 0, right: 0, width: 2, height: 2, opacity: 0.02, pointerEvents: 'none' }}>
+      <source src={KEEPALIVE_SRC} type="video/mp4" />
+    </video>
+  </>
+);
+
 export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, menuFamiliesLeft } = {}) {  // p322: props; p552: فلتر عائلات; p562: عمود أيسر اختياري
   const { tenantId: paramTenantId } = useParams();
   const tenantId = tenantIdProp || paramTenantId;
@@ -149,12 +164,13 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
     const s = slides[slideIdx % slides.length];
     return (
       <div className="h-screen w-screen overflow-hidden bg-black relative" dir="rtl" data-testid="tvmenu-slider">
+        <KeepAlive />
         {slides.map((sl, i) => (
           <img
             key={sl.src + i}
             src={sl.src}
             alt={sl.name}
-            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === slideIdx % slides.length ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 tv-kb ${i % 2 ? 'tv-kb-alt' : ''} ${i === slideIdx % slides.length ? 'opacity-100' : 'opacity-0'}`}
           />
         ))}
         {/* تدرّج سفلي للقراءة */}
@@ -197,6 +213,7 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
   // ---------- الوضع الشبكي (افتراضي) ----------
   return (
     <div className="min-h-screen bg-black text-white p-5" dir="rtl" data-testid="tvmenu-page">
+     <KeepAlive />
      <div ref={contentRef} style={fillScale !== 1 ? { transform: `scale(${fillScale})`, transformOrigin: 'top right', width: `${100 / fillScale}%` } : undefined}>
       {/* الترويسة */}
       <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-5">
@@ -238,10 +255,10 @@ export default function TvMenuPage({ tenantIdProp, forceSlider, menuFamilies, me
               <span className="inline-block bg-gradient-to-l from-amber-400 via-orange-500 to-red-500 text-black text-3xl font-black rounded-xl px-8 py-2 shadow-md shadow-orange-950/60 tracking-wide">{fam || 'أصناف عامة'}</span>
             </div>
             <div className={dense ? "grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3" : "grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3"}>
-              {visGroups.map(g => (
+              {visGroups.map((g, gi) => (
                 <div key={g.key} className="rounded-3xl bg-neutral-900 border-2 border-neutral-800 hover:border-amber-500/50 overflow-hidden shadow-xl shadow-black/60" data-testid={`tvmenu-card-${g.key}`}>
                   {g.image_url ? (
-                    <img src={g.image_url} alt={g.name} className="w-full h-28 object-cover" />
+                    <img src={g.image_url} alt={g.name} className={`w-full h-28 object-cover tv-kb ${gi % 2 ? 'tv-kb-alt' : ''}`} />
                   ) : (
                     <div className="w-full h-28 bg-neutral-800 flex items-center justify-center">
                       <ChefHat className="h-10 w-10 text-neutral-700" />

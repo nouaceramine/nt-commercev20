@@ -2883,6 +2883,77 @@ def create_restaurant_routes(db, get_current_user, get_tenant_admin) -> dict:
         d["date"] = day.isoformat()
         return d
 
+    # ---------- p558: لوحة العمليات اليومية — مدخول/مخروج/صافي اليوم داخل POS المطعم ----------
+    @router.get("/daily-ops")
+    async def daily_ops(
+        date: Optional[str] = None, user: dict = Depends(get_current_user)
+    ):
+        dz = timezone(timedelta(hours=1))
+        try:
+            day = (
+                datetime.fromisoformat(str(date)).date()
+                if date
+                else _now().astimezone(dz).date()
+            )
+        except Exception:
+            raise HTTPException(status_code=400, detail="تاريخ غير صالح")
+        start = datetime(day.year, day.month, day.day, tzinfo=dz).astimezone(
+            timezone.utc
+        )
+        end = start + timedelta(days=1)
+        s_iso, e_iso = start.isoformat(), end.isoformat()
+        zr = await _zreport_agg(start, end)
+        income = round(float(zr.get("revenue") or 0), 2)
+
+        exp_docs = await db.expenses.find(
+            {"date": {"$gte": s_iso, "$lt": e_iso}}, {"_id": 0}
+        ).to_list(2000)
+        by_cat = {}
+        exp_total = 0.0
+        for e in exp_docs:
+            if (e.get("currency") or "DZD") != "DZD":
+                continue
+            amt = float(e.get("amount") or 0)
+            exp_total += amt
+            c = (e.get("category") or "أخرى").strip() or "أخرى"
+            by_cat[c] = round(by_cat.get(c, 0.0) + amt, 2)
+        exp_total = round(exp_total, 2)
+
+        pur_docs = await db.purchases.find(
+            {"created_at": {"$gte": s_iso, "$lt": e_iso}},
+            {"_id": 0, "id": 1, "code": 1, "supplier_name": 1, "total": 1, "paid_amount": 1},
+        ).to_list(1000)
+        pur_paid = round(sum(float(p.get("paid_amount") or 0) for p in pur_docs), 2)
+        pur_total = round(sum(float(p.get("total") or 0) for p in pur_docs), 2)
+
+        out_total = round(exp_total + pur_paid, 2)
+        return {
+            "date": day.isoformat(),
+            "income": income,
+            "orders": zr.get("orders", 0),
+            "expenses_total": exp_total,
+            "expenses_by_category": [
+                {"category": k, "amount": v}
+                for k, v in sorted(by_cat.items(), key=lambda kv: -kv[1])
+            ],
+            "purchases_total": pur_total,
+            "purchases_paid": pur_paid,
+            "out_total": out_total,
+            "net": round(income - out_total, 2),
+            "expenses": [
+                {
+                    "id": e.get("id"),
+                    "title": e.get("title"),
+                    "category": e.get("category"),
+                    "amount": e.get("amount"),
+                    "notes": e.get("notes") or "",
+                    "date": e.get("date"),
+                }
+                for e in sorted(exp_docs, key=lambda e: e.get("date") or "", reverse=True)[:50]
+                if (e.get("currency") or "DZD") == "DZD"
+            ],
+        }
+
     @router.get("/z-report")
     async def z_report(
         date: Optional[str] = None, user: dict = Depends(get_current_user)
