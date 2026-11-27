@@ -7,7 +7,7 @@ Features:
 - Level-specific permissions
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -34,12 +34,37 @@ class AgentLevelCreate(BaseModel):
         "max_tenants": 200,
     })
 
+def _level_rate(v, maximum):
+    """p574: level rates must be finite and bounded — NaN/Inf/-5 were stored
+    through the update path (no validators) and poisoned cascade math."""
+    import math
+    if v is None:
+        return v
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError("النسبة غير صالحة")
+    if not math.isfinite(f) or f < 0 or f > maximum:
+        raise ValueError(f"النسبة يجب أن تكون بين 0 و {maximum}")
+    return f
+
+
 class AgentLevelUpdate(BaseModel):
     name_ar: Optional[str] = None
     name_fr: Optional[str] = None
     commission_rate: Optional[float] = None
     cascade_commission_rate: Optional[float] = None
     permissions: Optional[dict] = None
+
+    @field_validator("commission_rate")
+    @classmethod
+    def _validate_commission_rate(cls, v):
+        return _level_rate(v, 100.0)
+
+    @field_validator("cascade_commission_rate")
+    @classmethod
+    def _validate_cascade_rate(cls, v):
+        return _level_rate(v, 50.0)
 
 class AgentHierarchyUpdate(BaseModel):
     parent_agent_id: Optional[str] = None
@@ -144,6 +169,10 @@ def create_agent_hierarchy_routes(db, get_super_admin) -> dict:
                 parent = await db.saas_agents.find_one({"id": data.parent_agent_id})
                 if not parent:
                     raise HTTPException(status_code=404, detail="Parent agent not found")
+                # p574: a disabled agent cannot parent a hierarchy branch —
+                # its cascade commissions and approvals are dead ends.
+                if not parent.get("is_active", True):
+                    raise HTTPException(status_code=400, detail="لا يمكن تعيين وكيل معطل كأب")
                 # Prevent circular hierarchy
                 chain = [data.parent_agent_id]
                 current = parent
@@ -201,6 +230,10 @@ def create_agent_hierarchy_routes(db, get_super_admin) -> dict:
         agent = await db.saas_agents.find_one({"id": agent_id}, {"_id": 0, "password": 0})
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+        # p574: period wall (the P573-006 doctrine) — a garbage period silently
+        # fell into the year branch.
+        if period not in ("month", "quarter", "year"):
+            raise HTTPException(status_code=422, detail="الفترة غير مدعومة")
 
         now = datetime.now(timezone.utc)
         if period == "month":
@@ -254,6 +287,12 @@ def create_agent_hierarchy_routes(db, get_super_admin) -> dict:
         admin: dict = Depends(get_super_admin)
     ):
         """Process cascade commissions up the hierarchy when a tenant pays"""
+        import math as _math
+        # p574: finite wall — sale_amount=inf poisoned total_earnings to inf
+        # (and 500'd the response on serialize); nan/negatives were silently
+        # accepted. Reject before any write.
+        if not _math.isfinite(sale_amount) or sale_amount <= 0:
+            raise HTTPException(status_code=422, detail="مبلغ البيع غير صالح")
         agent = await db.saas_agents.find_one({"id": agent_id})
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")

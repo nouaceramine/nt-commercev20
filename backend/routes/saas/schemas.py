@@ -20,6 +20,26 @@ def _validate_email(value: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+def _finite_money(value, label="المبلغ", maximum=None):
+    """p574: money fields must be finite and non-negative — NaN/Inf prices
+    were stored (200) and later poisoned agent commissions with NaN; negative
+    prices inverted the commission math. None passes through (updates)."""
+    import math
+    if value is None:
+        return value
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} غير صالح")
+    if not math.isfinite(f):
+        raise ValueError(f"{label} غير صالح")
+    if f < 0:
+        raise ValueError(f"{label} يجب ألا يكون سالباً")
+    if maximum is not None and f > maximum:
+        raise ValueError(f"{label} يتجاوز الحد الأقصى ({maximum})")
+    return f
+
+
 class PlanFeatures(BaseModel):
     max_products: int = 100
     max_users: int = 3
@@ -57,6 +77,16 @@ class PlanCreate(BaseModel):
     badge_ar: str = ""
     commission_rate: float = 10.0
 
+    @field_validator("monthly_price", "yearly_price", "six_month_price")
+    @classmethod
+    def _validate_plan_prices(cls, v: float) -> float:
+        return _finite_money(v, "سعر الخطة")
+
+    @field_validator("commission_rate")
+    @classmethod
+    def _validate_plan_commission_rate(cls, v: float) -> float:
+        return _finite_money(v, "نسبة العمولة", maximum=100.0)
+
 
 class PlanUpdate(BaseModel):
     name: Optional[str] = None
@@ -74,6 +104,16 @@ class PlanUpdate(BaseModel):
     badge: Optional[str] = None
     badge_ar: Optional[str] = None
     commission_rate: Optional[float] = None
+
+    @field_validator("monthly_price", "yearly_price", "six_month_price")
+    @classmethod
+    def _validate_plan_update_prices(cls, v):
+        return _finite_money(v, "سعر الخطة")
+
+    @field_validator("commission_rate")
+    @classmethod
+    def _validate_plan_update_commission_rate(cls, v):
+        return _finite_money(v, "نسبة العمولة", maximum=100.0)
 
 
 class PlanResponse(BaseModel):

@@ -309,11 +309,21 @@ async def tenant_statement_pdf(
         {"wallet_id": wallet["id"]}, {"_id": 0}
     ).sort("created_at", -1).limit(50).to_list(50)
     pdf_bytes = _build_statement_pdf(tenant, wallet, txns)
-    safe_name = (tenant.get("name") or tenant_id).replace(" ", "_")
+    # p574: a raw tenant name in Content-Disposition crashed every statement
+    # download for Arabic-named tenants (non-latin-1 header ⇒ UnicodeEncodeError
+    # ⇒ 500, proven). ASCII-safe fallback + RFC 5987 filename* keeps the real
+    # name for browsers that support it.
+    import re as _re
+    from urllib.parse import quote as _quote
+    raw_name = (tenant.get("name") or tenant_id)
+    safe_name = _re.sub(r"[^A-Za-z0-9._-]+", "_", raw_name.replace(" ", "_")).strip("_") or "tenant"
+    quoted = _quote(raw_name)
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="statement_{safe_name}.pdf"'},
+        headers={"Content-Disposition": (
+            f"attachment; filename=\"statement_{safe_name}.pdf\"; "
+            f"filename*=UTF-8''statement_{quoted}.pdf")},
     )
 
 

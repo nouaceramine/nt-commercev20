@@ -57,6 +57,15 @@ async def update_plan(plan_id: str, updates: PlanUpdate, admin: dict = Depends(g
 
 @router.delete("/saas/plans/{plan_id}")
 async def delete_plan(plan_id: str, admin: dict = Depends(get_super_admin)):
+    # p574: a plan referenced by tenants must not be deleted — deleting it
+    # orphans every tenant onto silent default features/limits (the P570-002
+    # ghost-plan doctrine, proven: 200 and the tenant lost its plan).
+    # Deactivate (PUT is_active=false) instead.
+    in_use = await db.saas_tenants.count_documents({"plan_id": plan_id})
+    if in_use > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"الخطة مستخدمة من {in_use} مستأجر — عطّلها بدل حذفها")
     result = await db.saas_plans.delete_one({"id": plan_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Plan not found")

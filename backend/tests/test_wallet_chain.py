@@ -75,6 +75,32 @@ def admin_headers(admin_token):
 # Helpers
 # ──────────────────────────────────────────────────────────
 
+def agent_login_token(base, email, password):
+    """p574: agent login now passes the mandatory email-OTP gate (P570-007) —
+    a password alone returns requires_2fa with a pending_token, never a token.
+    Complete the second step by reading the 6-digit code from the pending
+    login store (test-environment channel) and releasing the payload once."""
+    r = requests.post(f"{base}/api/saas/agent-login",
+                      json={"email": email, "password": password}, timeout=15)
+    assert r.status_code == 200, f"Agent login failed: {r.text}"
+    body = r.json()
+    if not body.get("requires_2fa"):
+        return body["access_token"]
+    import pymongo
+    mc = pymongo.MongoClient(os.environ["MONGO_URL"])
+    try:
+        doc = mc[os.environ["DB_NAME"]].pending_2fa_logins.find_one(
+            {"_id": body["pending_token"]})
+        assert doc and doc.get("email_code"), "no pending OTP code found"
+        code = doc["email_code"]
+    finally:
+        mc.close()
+    rv = requests.post(f"{base}/api/auth/2fa/login-verify",
+                       json={"pending_token": body["pending_token"], "code": code},
+                       timeout=15)
+    assert rv.status_code == 200, f"login-verify failed: {rv.text}"
+    return rv.json()["access_token"]
+
 def get_wallet_balance(base, headers, entity_id=None):
     """Fetch wallet balance.  If entity_id is None → current user's wallet."""
     if entity_id:
@@ -157,12 +183,7 @@ class TestAdminToAgentTopUp:
 
     @pytest.fixture(scope="class")
     def agent_token(self, base, agent_info):
-        r = requests.post(f"{base}/api/saas/agent-login", json={
-            "email": agent_info["email"],
-            "password": agent_info["password"],
-        })
-        assert r.status_code == 200, f"Agent login failed: {r.text}"
-        return r.json()["access_token"]
+        return agent_login_token(base, agent_info["email"], agent_info["password"])
 
     @pytest.fixture(scope="class")
     def agent_headers(self, agent_token):
@@ -480,9 +501,7 @@ class TestConcurrentDoubleApproval:
         agent_id = agent_doc["id"]
 
         # Step 2: agent logs in and submits a topup request
-        rl = requests.post(f"{base}/api/saas/agent-login", json={"email": email, "password": "Race@test123"})
-        assert rl.status_code == 200, rl.text
-        agent_tok = rl.json()["access_token"]
+        agent_tok = agent_login_token(base, email, "Race@test123")
         agent_h = {"Authorization": f"Bearer {agent_tok}"}
 
         rr = requests.post(f"{base}/api/saas/agent/wallet/request", headers=agent_h, json={
@@ -568,9 +587,7 @@ class TestTenantSaleDebit:
         agent_id = agent_doc["id"]
 
         # Login and request a topup so admin can approve
-        rl = requests.post(f"{base}/api/saas/agent-login", json={"email": email, "password": "Sale@agent123"})
-        assert rl.status_code == 200, rl.text
-        agent_tok = rl.json()["access_token"]
+        agent_tok = agent_login_token(base, email, "Sale@agent123")
         agent_h = {"Authorization": f"Bearer {agent_tok}"}
 
         rr = requests.post(f"{base}/api/saas/agent/wallet/request", headers=agent_h, json={

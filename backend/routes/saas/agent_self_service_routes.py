@@ -31,6 +31,13 @@ async def _create_agent_commission(agent: dict, tenant_id: str, tenant_name: str
         }
         subscription_price = price_map.get(subscription_type, 0) or 0
         amount = (subscription_price * plan_commission_rate / 100) + commission_fixed
+        import math as _math
+        if not _math.isfinite(amount):
+            import logging
+            logging.getLogger(__name__).warning(
+                "p574: skipped non-finite commission for plan %s (agent %s)",
+                plan.get("id"), agent.get("id"))
+            return
         if amount <= 0:
             return
         now = datetime.now(timezone.utc)
@@ -353,6 +360,9 @@ async def get_agent_wallet(agent: dict = Depends(get_current_agent)):
 
 @router.get("/saas/agent/wallet/transactions")
 async def get_agent_wallet_transactions(limit: int = 100, agent: dict = Depends(get_current_agent)):
+    # p574: clamp — a negative limit crashed with 500 (pymongo) and an
+    # unbounded one read the whole ledger (the P572 skip/limit doctrine).
+    limit = max(1, min(limit, 500))
     wallet = await get_or_create_wallet(db, agent["id"], "agent")
     return await db.wallet_transactions.find(
         {"wallet_id": wallet["id"]}, {"_id": 0}
@@ -364,6 +374,15 @@ async def create_agent_wallet_request(data: dict, agent: dict = Depends(get_curr
     """Agent buys balance: requests a top-up from its parent agent (if any) or the super admin."""
     from utils.money import parse_amount
     amount = parse_amount(data.get("amount", 0))
+    # p574: pending-request flood wall — an agent could open unlimited pending
+    # top-ups (proven: 12/12 stored), burying the approver's queue. Cap the
+    # open pendings per entity; processed requests never count.
+    pending = await db.wallet_requests.count_documents(
+        {"entity_id": agent["id"], "entity_type": "agent", "status": "pending"})
+    if pending >= 10:
+        raise HTTPException(
+            status_code=400,
+            detail="لديك طلبات شحن معلقة كثيرة — انتظر معالجتها قبل إرسال طلبات جديدة")
     await get_or_create_wallet(db, agent["id"], "agent")
     parent_id = agent.get("parent_agent_id") or ""
     req = {
@@ -453,6 +472,9 @@ async def agent_get_wallet_transfers(
     agent: dict = Depends(get_current_agent),
 ):
     """Paginated ledger of transfers involving this agent, their tenants, and sub-agents."""
+    # p574: clamp pagination — page_size was echoed unbounded (100000 proven).
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
     agent_id = agent["id"]
     # Collect all entity IDs this agent can see transfers for.
     tenant_ids = await db.saas_tenants.distinct("id", {"agent_id": agent_id})
@@ -486,14 +508,21 @@ async def agent_reject_wallet_request(request_id: str, data: dict = None, agent:
     req = await db.wallet_requests.find_one({"id": request_id}, {"_id": 0})
     if not req:
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
-    if req.get("status") != "pending":
-        raise HTTPException(status_code=400, detail="تمت معالجة الطلب مسبقاً")
     if not await _agent_owns_request(agent, req):
         raise HTTPException(status_code=403, detail="هذا الطلب ليس ضمن مستأجريك")
-    await db.wallet_requests.update_one({"id": request_id}, {"$set": {
-        "status": "rejected",
-        "reject_reason": (data or {}).get("reason", ""),
-        "processed_by": agent.get("name", agent.get("email", "")),
-        "processed_at": datetime.now(timezone.utc).isoformat(),
-    }})
+    # p574: atomic claim — the p495c admin-side doctrine. The old read-check-
+    # then-write let a racing reject overwrite a request AFTER its approve had
+    # already moved the money (state/money divergence).
+    claimed = await db.wallet_requests.find_one_and_update(
+        {"id": request_id, "status": "pending"},
+        {"$set": {
+            "status": "rejected",
+            "reject_reason": (data or {}).get("reason", ""),
+            "processed_by": agent.get("name", agent.get("email", "")),
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        projection={"_id": 0},
+    )
+    if not claimed:
+        raise HTTPException(status_code=400, detail="تمت معالجة الطلب مسبقاً")
     return {"message": "تم رفض الطلب"}

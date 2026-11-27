@@ -95,7 +95,9 @@ class PasswordResetIn(BaseModel):
 
 
 def _validate_password(pw: str):
-    if not pw or len(pw) < 8:
+    # p574: an all-whitespace 8-char password passed the length wall (proven:
+    # "        " ⇒ 200 and a working login). Reject blank-content passwords.
+    if not pw or len(pw) < 8 or not pw.strip():
         raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 8 أحرف على الأقل")
 
 
