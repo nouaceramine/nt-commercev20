@@ -3,19 +3,19 @@ Wallet Core Routes - Wallet CRUD, balance, settings, alerts
 Extracted from wallet_routes.py (Refactoring: Extract Class)
 Following Martin Fowler's Large Class -> Extract Class pattern
 """
-from fastapi import APIRouter, HTTPException, Depends
-from datetime import datetime, timezone
 import logging
 import math
 import uuid
+from datetime import datetime, timezone
 
-_logger = logging.getLogger(__name__)
-
+from fastapi import APIRouter, HTTPException, Depends
 from pymongo import ReturnDocument
 
 from services.code_generator import generate_code
 from services.wallet_service import PLATFORM_WALLET_ID
 from utils.money import parse_amount
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_LOW_BALANCE = 1000.0
 
