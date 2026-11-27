@@ -237,10 +237,30 @@ def create_sendgrid_email_routes(db, main_db, get_current_user, get_tenant_admin
             raise HTTPException(status_code=400, detail="يرجى إعداد بريد الإشعارات")
         today = datetime.now(timezone.utc).date()
         today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
-        sales = await db.sales.find({"created_at": {"$gte": today_start.isoformat()}}).to_list(1000)
-        expenses = await db.expenses.find({"created_at": {"$gte": today_start.isoformat()}}).to_list(1000)
+        tomorrow = today_start + timedelta(days=1)
+        # p573-001: the P554 doctrines reached every report except this sender —
+        # returned sales are not revenue (they inflated the emailed total AND
+        # the invoice count: proven 4500/4 instead of 1900/2), sale docs carry
+        # no `profit` field (the old sum was a permanent zero — profit comes
+        # from sale-line cost snapshots, the P554-008 doctrine), and expenses
+        # match the user-facing `date` in a half-open day window (P554-004: a
+        # backdated expense belongs to its own day, not to creation day).
+        sales = await db.sales.find({"created_at": {"$gte": today_start.isoformat()},
+                                     "status": {"$ne": "returned"}}).to_list(1000)
+        expenses = await db.expenses.find({"date": {"$gte": today.strftime("%Y-%m-%d"),
+                                                    "$lt": tomorrow.strftime("%Y-%m-%d")}}).to_list(1000)
         total_sales = sum(s.get("total", 0) for s in sales)
-        total_profit = sum(s.get("profit", 0) for s in sales)
+        from services.reporting import product_price_map
+        _pmap = await product_price_map(
+            db, (it.get("product_id") for s in sales for it in s.get("items", [])))
+        _cogs = 0.0
+        for s in sales:
+            for it in s.get("items", []):
+                _pp = it.get("purchase_price")
+                if _pp is None:
+                    _pp = _pmap.get(it.get("product_id"), 0)
+                _cogs += float(it.get("quantity", 0) or 0) * float(_pp or 0)
+        total_profit = round(total_sales - _cogs, 2)
         total_expenses = sum(e.get("amount", 0) for e in expenses)
         product_sales = {}
         for s in sales:

@@ -16,6 +16,16 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     router = APIRouter(tags=["stats-reports"])
     block_cashier = create_cashier_block(get_current_user)
 
+    # p573-006: the P554-007 walls covered numeric limit/days, but the string
+    # `period` stayed open — a garbage value was silently accepted with the
+    # WRONG window (sales-chart fell back to 30d, the others to 365d).
+    _PERIODS = ("week", "month", "year")
+
+    def _check_period(period: str):
+        if period not in _PERIODS:
+            raise HTTPException(status_code=422,
+                                detail="الفترة غير صالحة — المسموح: week, month, year")
+
     # ── Main Dashboard Stats ──
     @router.get("/stats")
     async def get_stats(admin: dict = Depends(get_tenant_admin)):
@@ -308,6 +318,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     # ── Analytics: Sales Chart ──
     @router.get("/analytics/sales-chart")
     async def get_sales_chart_data(period: str = "week", admin: dict = Depends(get_tenant_admin)):
+        _check_period(period)  # p573-006
         now = datetime.now(timezone.utc)
         if period == "year":
             start_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
@@ -321,6 +332,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     # ── Analytics: Top Products ──
     @router.get("/analytics/top-products")
     async def get_top_products(limit: int = Query(10, ge=1, le=100), period: str = "month", admin: dict = Depends(get_tenant_admin)):  # p554
+        _check_period(period)  # p573-006
         now = datetime.now(timezone.utc)
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -334,12 +346,17 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     # ── Analytics: Top Customers ──
     @router.get("/analytics/top-customers")
     async def get_top_customers(limit: int = Query(10, ge=1, le=100), period: str = "month", admin: dict = Depends(get_tenant_admin)):  # p554
+        _check_period(period)  # p573-006
         now = datetime.now(timezone.utc)
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
 
         pipeline = [
-            {"$match": {"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}, "customer_id": {"$exists": True, "$ne": ""}}},
+            # p573-004: `$ne: ""` keeps customer_id=None — every anonymous
+            # webstore mirror (p87) collapsed into a phantom «زبون المتجر»
+            # bucket that topped the chart (proven: 900). Null is not a
+            # customer; exclude it with the empty string.
+            {"$match": {"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}, "customer_id": {"$exists": True, "$nin": [None, ""]}}},
             {"$group": {"_id": "$customer_id", "customer_name": {"$first": "$customer_name"}, "total_purchases": {"$sum": "$total"}, "orders_count": {"$sum": 1}}},
             {"$sort": {"total_purchases": -1}},
             {"$limit": limit}
@@ -350,6 +367,7 @@ def create_stats_routes(db, get_current_user, get_tenant_admin, require_tenant, 
     # ── Analytics: Employee Performance ──
     @router.get("/analytics/employee-performance")
     async def get_employee_performance(period: str = "month", admin: dict = Depends(get_tenant_admin)):
+        _check_period(period)  # p573-006
         now = datetime.now(timezone.utc)
         days = {"week": 7, "month": 30}.get(period, 365)
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")

@@ -93,8 +93,12 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
             {"_id": 0}).to_list(40)
         present = len([a for a in attendance if a.get("status") == "present"])
         absent = len([a for a in attendance if a.get("status") == "absent"])
+        # p573-003: exclude returned sales from the commission base — a
+        # returned sale used to inflate an OFFICIAL payslip that can actually
+        # be paid out (proven: 4000/400 instead of 1400/140).
         sales = await db.sales.find(
             {"created_by": {"$in": [emp.get("user_email"), emp.get("name")]},
+             "status": {"$ne": "returned"},
              "created_at": {"$gte": start, "$lt": end}},
             {"total": 1}).to_list(2000)
         total_sales = round(sum(s.get("total", 0) for s in sales), 2)
@@ -169,7 +173,10 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
 
     # ── List payslips ──
     @router.get("/payslips")
-    async def list_payslips(month: Optional[str] = None, user: dict = Depends(require_tenant)):
+    # p573-005: payslips carry SALARIES — the nav page is isAdmin-only, yet
+    # require_tenant let the cashier/seller read every net salary (the
+    # P564-001 leak class: cashier exported employee salaries via /data).
+    async def list_payslips(month: Optional[str] = None, user: dict = Depends(get_tenant_admin)):
         q = {"month": month} if month else {}
         items = await db.payslips.find(q, {"_id": 0}).sort("code", 1).to_list(1000)
         return {"items": items, "count": len(items),
@@ -177,7 +184,7 @@ def create_payroll_routes(db, get_current_user, get_tenant_admin, require_tenant
                                        if p.get("status") != "cancelled"), 2)}
 
     @router.get("/payslips/{payslip_id}")
-    async def get_payslip(payslip_id: str, user: dict = Depends(require_tenant)):
+    async def get_payslip(payslip_id: str, user: dict = Depends(get_tenant_admin)):  # p573-005
         p = await db.payslips.find_one({"id": payslip_id}, {"_id": 0})
         if not p:
             raise HTTPException(status_code=404, detail="القسيمة غير موجودة")

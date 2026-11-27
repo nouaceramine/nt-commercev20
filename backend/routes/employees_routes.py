@@ -179,7 +179,16 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
             attendance = await db.attendance.find({"employee_id": emp["id"], "date": {"$gte": start_date.isoformat()[:10], "$lt": end_date.isoformat()[:10]}}, {"_id": 0}).to_list(31)
             present_days = len([a for a in attendance if a.get("status") == "present"])
             absent_days = len([a for a in attendance if a.get("status") == "absent"])
-            sales = await db.sales.find({"created_by": emp.get("user_email") or emp.get("name"), "created_at": {"$gte": start_date.isoformat(), "$lt": end_date.isoformat()}}, {"_id": 0}).to_list(1000)
+            # p573-002: match BOTH the linked account email and the display
+            # name — POS writes created_by=user NAME, so with user_email set
+            # the old `or` chain matched ONLY the email and silently zeroed
+            # every register sale (proven: 600 of an emailed RETURNED sale
+            # instead of 1400 of real ones) — and exclude returned sales (a
+            # return is not commissionable revenue in any report).
+            _creators = [x for x in (emp.get("user_email"), emp.get("name")) if x]
+            sales = await db.sales.find({"created_by": {"$in": _creators},
+                                         "status": {"$ne": "returned"},
+                                         "created_at": {"$gte": start_date.isoformat(), "$lt": end_date.isoformat()}}, {"_id": 0}).to_list(1000)
             total_sales = sum(s.get("total", 0) for s in sales)
             commission = total_sales * (emp.get("commission_rate", 0) / 100)
             report.append({
