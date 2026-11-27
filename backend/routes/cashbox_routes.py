@@ -180,41 +180,56 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         if float(new_balance) < 0 and box_id != "personal":
             raise HTTPException(status_code=400, detail="الرصيد لا يمكن أن يكون سالباً")
         reason = (reason or "").strip() or "تعديل يدوي"
-        box = await db.cash_boxes.find_one({"id": box_id}, {"_id": 0, "id": 1, "balance": 1})
-        if not box:
-            raise HTTPException(status_code=404, detail="صندوق غير موجود")
-        old_balance = box.get("balance", 0)
         now = datetime.now(timezone.utc).isoformat()
         adjustment_id = str(uuid.uuid4())
         from config.database import client as _client, main_db as _main_db
         from services.outbox import outbox_write
-        async with await _client.start_session() as _tx:
-            async with _tx.start_transaction():
-                await db.cash_boxes.update_one(
-                    {"id": box_id},
-                    {"$set": {"balance": new_balance, "updated_at": now}},
-                    session=_tx,
-                )
-                await db.transactions.insert_one(
-                    {"id": str(uuid.uuid4()), "cash_box_id": box_id, "type": "adjustment",
-                     "amount": abs(new_balance - old_balance),
-                     "description": f"{reason} (من {old_balance} إلى {new_balance})",
-                     "reference_type": "manual_adjustment", "reference_id": adjustment_id,
-                     "created_at": now,
-                     "created_by": admin["name"]},
-                    session=_tx,
-                )
-                # p567-003: the books must see the correction — surplus goes to
-                # 759 (revenue), deficit to 659 (expense)
-                await outbox_write(
-                    _main_db, "cashbox.adjusted",
-                    {"adjustment_id": adjustment_id, "box_id": box_id,
-                     "old_balance": float(old_balance or 0),
-                     "new_balance": float(new_balance),
-                     "difference": round(float(new_balance) - float(old_balance or 0), 2),
-                     "reason": reason},
-                    tenant_id=admin.get("tenant_id") or "platform",
-                    source="cashbox_routes", session=_tx)
+        # p575-002: the box read + difference computation move INSIDE the
+        # transaction and the unit retries on transient conflicts — two
+        # concurrent adjusts (4 uvicorn workers) used to WriteConflict into
+        # a bare 500 for the loser, and the outbox difference was computed
+        # from a stale pre-tx read (the P567-002 class on the adjust path).
+        old_balance = None
+        for _attempt in range(5):
+            try:
+                async with await _client.start_session() as _tx:
+                    async with _tx.start_transaction():
+                        box = await db.cash_boxes.find_one(
+                            {"id": box_id}, {"_id": 0, "id": 1, "balance": 1}, session=_tx)
+                        if not box:
+                            raise HTTPException(status_code=404, detail="صندوق غير موجود")
+                        old_balance = box.get("balance", 0)
+                        await db.cash_boxes.update_one(
+                            {"id": box_id},
+                            {"$set": {"balance": new_balance, "updated_at": now}},
+                            session=_tx,
+                        )
+                        await db.transactions.insert_one(
+                            {"id": str(uuid.uuid4()), "cash_box_id": box_id, "type": "adjustment",
+                             "amount": abs(new_balance - old_balance),
+                             "description": f"{reason} (من {old_balance} إلى {new_balance})",
+                             "reference_type": "manual_adjustment", "reference_id": adjustment_id,
+                             "created_at": now,
+                             "created_by": admin["name"]},
+                            session=_tx,
+                        )
+                        # p567-003: the books must see the correction — surplus
+                        # goes to 759 (revenue), deficit to 659 (expense)
+                        await outbox_write(
+                            _main_db, "cashbox.adjusted",
+                            {"adjustment_id": adjustment_id, "box_id": box_id,
+                             "old_balance": float(old_balance or 0),
+                             "new_balance": float(new_balance),
+                             "difference": round(float(new_balance) - float(old_balance or 0), 2),
+                             "reason": reason},
+                            tenant_id=admin.get("tenant_id") or "platform",
+                            source="cashbox_routes", session=_tx)
+                break
+            except PyMongoError as exc:
+                if not exc.has_error_label("TransientTransactionError") or _attempt == 4:
+                    raise
+                adjustment_id = str(uuid.uuid4())  # fresh id per retried unit
+                await asyncio.sleep(0.15 * (_attempt + 1))
         return {"message": "تم تعديل الرصيد بنجاح", "old_balance": old_balance, "new_balance": new_balance, "difference": new_balance - old_balance}
 
     @router.post("/cash-boxes/reset-all")
@@ -226,7 +241,8 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
         # concurrent transfer mid-reset can no longer leave zeroed boxes
         # without their adjustment log.
         now = datetime.now(timezone.utc).isoformat()
-        from config.database import client as _client
+        from config.database import client as _client, main_db as _main_db
+        from services.outbox import outbox_write
         for _attempt in range(5):
             try:
                 async with await _client.start_session() as _tx:
@@ -243,6 +259,20 @@ def create_cashbox_routes(db, get_current_user, get_tenant_admin, require_tenant
                                      "reference_type": "reset", "created_at": now,
                                      "created_by": admin["name"]},
                                     session=_tx)
+                                # p575-003: the mass zeroing moves real cash —
+                                # the books must see it (P567-003 doctrine:
+                                # no box movement without a journal event).
+                                # Surplus/deficit posts to 759/659 per box.
+                                await outbox_write(
+                                    _main_db, "cashbox.adjusted",
+                                    {"adjustment_id": str(uuid.uuid4()),
+                                     "box_id": box["id"],
+                                     "old_balance": float(box.get("balance") or 0),
+                                     "new_balance": 0.0,
+                                     "difference": round(-float(box.get("balance") or 0), 2),
+                                     "reason": "إعادة تعيين الرصيد"},
+                                    tenant_id=admin.get("tenant_id") or "platform",
+                                    source="cashbox_routes", session=_tx)
                 break
             except PyMongoError as exc:
                 if not exc.has_error_label("TransientTransactionError") or _attempt == 4:

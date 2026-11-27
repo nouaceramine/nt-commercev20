@@ -30,6 +30,11 @@ def create_wallet_transactions_routes(main_db, get_current_user, get_super_admin
     ):
         if user.get("role") != "super_admin" or not entity_id:
             entity_id = _entity_ref(user)[0]
+        # p575-006: limit wall (P574-008 twin on the tenant wallet) — a
+        # negative limit hit pymongo's negative-limit quirk (500), and an
+        # unbounded one read the whole collection.
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=400, detail="حدّ الصفوف غير صالح (1..500)")
         wallet = await main_db.wallets.find_one({"entity_id": entity_id}, {"_id": 0})
         if not wallet:
             return []
@@ -69,6 +74,13 @@ def create_wallet_transactions_routes(main_db, get_current_user, get_super_admin
         role = current_user.get("role")
         user_type = current_user.get("user_type") or current_user.get("type")
         is_super = role == "super_admin" or user_type == "super_admin"
+
+        # p575-006: pagination walls (P574-009 twin) — page 0 used to fall
+        # silently to page 1 and page_size had no ceiling at all.
+        if page < 1:
+            raise HTTPException(status_code=400, detail="رقم الصفحة غير صالح")
+        if page_size < 1 or page_size > 100:
+            raise HTTPException(status_code=400, detail="حجم الصفحة غير صالح (1..100)")
 
         query: dict = {}
         if is_super:

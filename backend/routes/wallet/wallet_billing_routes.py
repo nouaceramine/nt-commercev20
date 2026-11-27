@@ -5,6 +5,7 @@ Extracted from the legacy wallet_routes aggregator.
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 from pymongo import ReturnDocument
+import math
 import uuid
 
 from services.code_generator import generate_code
@@ -103,8 +104,11 @@ def create_wallet_billing_routes(db, main_db, get_current_user, get_super_admin)
             raise HTTPException(status_code=404, detail="الخطة غير موجودة")
         sub_type = tenant.get("subscription_type", "monthly")
         amount = float(_plan_price(plan, sub_type) or 0)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="سعر الخطة غير محدد")
+        # p575-001: NaN slips past `<= 0` (every comparison is False) — a
+        # legacy-poisoned plan must be rejected explicitly, not defaulted to
+        # the misleading "insufficient balance" downstream.
+        if not math.isfinite(amount) or amount <= 0:
+            raise HTTPException(status_code=400, detail="سعر الخطة غير صالح")
         wallet = await _get_or_create_wallet(entity_id, "tenant")
         if wallet.get("balance", 0) < amount:
             raise HTTPException(status_code=400, detail="الرصيد غير كافي لدفع الاشتراك")

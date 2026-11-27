@@ -14,7 +14,7 @@ from config.database import db, client as _client, main_db as _main_db
 from utils.auth import get_current_user
 from utils.permissions import create_permission_checker
 from services.accounting_auto import (
-    ensure_accounts, _insert_entry, _line, BOX_ACCOUNT,
+    ensure_accounts, _insert_entry, _line, BOX_ACCOUNT, box_account_code,
 )
 from services.code_generator import next_code
 from services.outbox import outbox_write
@@ -773,6 +773,9 @@ async def get_profit_loss_report(
     """p212: P&L from journal-entry LINES (was SmartReporterAgent document
     math: it summed every sales doc in the window and matched expenses on
     the nonexistent expense_date field). Same response keys as legacy."""
+    # p575: official reports reject garbage dates (P573-006 doctrine)
+    start_date = _iso_date(start_date, "تاريخ البداية")
+    end_date = _iso_date(end_date, "تاريخ النهاية")
     nets = await _jl_window_nets(db, start_date, end_date)
     revenue_accounts = {c: round(-n, 2) for c, n in nets.items() if c.startswith("7")}
     total_revenue = round(sum(revenue_accounts.values()), 2)
@@ -802,6 +805,7 @@ async def get_balance_sheet(
     """p212: balance sheet from journal-entry LINES as of the date (was
     SmartReporterAgent mirror/document snapshot that ignored as_of_date).
     Same response keys as legacy."""
+    as_of_date = _iso_date(as_of_date, "تاريخ المرجع")
     nets = await _jl_window_nets(db, None, as_of_date)
     cash = round(sum(n for c, n in nets.items() if c.startswith("5")), 2)
     receivables = round(nets.get("411", 0.0), 2)
@@ -857,6 +861,8 @@ async def get_cash_flow_report(
     financing = capital 1xx, investing = fixed/inventory 3xx, else operating.
     (Was SmartReporterAgent doc math with the nonexistent expense_date field.)
     Same response keys as legacy."""
+    start_date = _iso_date(start_date, "تاريخ البداية")
+    end_date = _iso_date(end_date, "تاريخ النهاية")
     cursor = db.journal_entries.find(
         {"date": {"$gte": start_date, "$lte": end_date}},
         {"_id": 0, "entry_number": 1, "lines": 1})
@@ -924,6 +930,7 @@ async def get_trial_balance(
     original: same keys plus gross totals, per-account line counts and
     auto/manual entry breakdown.
     """
+    as_of_date = _iso_date(as_of_date, "تاريخ المرجع")
     accounts = await db.accounts.find({"is_active": True}, {"_id": 0}).to_list(500)
 
     # gross debit/credit per account from journal lines within the window
@@ -1004,6 +1011,8 @@ async def get_income_statement(
     """p197: Income statement computed from journal-entry LINES within
     [start_date, end_date]. Class 7 = revenue (credit-nature),
     class 60x = COGS, other class 6 = operating expenses (debit-nature)."""
+    start_date = _iso_date(start_date, "تاريخ البداية")
+    end_date = _iso_date(end_date, "تاريخ النهاية")
     pipeline = [
         {"$match": {"date": {"$gte": start_date, "$lte": end_date}}},
         {"$unwind": "$lines"},
@@ -1064,6 +1073,7 @@ async def get_balance_sheet_journal(
     a date. Assets = 3xx/4xx(debit-nature)/5xx boxes; liabilities = 401;
     equity = period result (7xx net − 6xx net). Double-entry guarantees
     assets == liabilities + equity; is_balanced reports the live check."""
+    as_of_date = _iso_date(as_of_date, "تاريخ المرجع")
     pipeline = [
         {"$match": {"date": {"$lte": as_of_date}}},
         {"$unwind": "$lines"},
@@ -1148,11 +1158,18 @@ async def _compute_opening(tdb):
         inv = {"val": round(r["val"], 2), "n": r["n"]}
 
     boxes = []
+    box_totals = {}
     async for b in tdb.cash_boxes.find({}, {"_id": 0}).sort("id", 1):
-        code = BOX_ACCOUNT.get(b.get("id"))
-        if code:
-            boxes.append({"box_id": b.get("id"), "account_code": code,
-                          "name": b.get("name"), "balance": round(float(b.get("balance") or 0), 2)})
+        # p575: resolve with the JOURNAL's rule (box_account_code) and
+        # accumulate per account — custom tills book to 530, so the target
+        # for 530 is cash + every custom till. The old BOX_ACCOUNT-only
+        # lookup skipped custom boxes entirely: the preview cried "excess
+        # cash" on healthy books and apply posted a false correction.
+        code = box_account_code(b.get("id"))
+        bal = round(float(b.get("balance") or 0), 2)
+        boxes.append({"box_id": b.get("id"), "account_code": code,
+                      "name": b.get("name"), "balance": bal})
+        box_totals[code] = round(box_totals.get(code, 0.0) + bal, 2)
 
     recv = {"val": 0.0, "n": 0}
     async for r in tdb.sales.aggregate([
@@ -1179,8 +1196,8 @@ async def _compute_opening(tdb):
     deltas = {"380": round(inv["val"] - nets.get("380", 0.0), 2),
               "411": round(recv["val"] - nets.get("411", 0.0), 2),
               "401": round(-payb["val"] - nets.get("401", 0.0), 2)}
-    for b in boxes:
-        deltas[b["account_code"]] = round(b["balance"] - nets.get(b["account_code"], 0.0), 2)
+    for code, total in box_totals.items():
+        deltas[code] = round(total - nets.get(code, 0.0), 2)
 
     deltas = {k: v for k, v in deltas.items() if abs(v) >= 0.005}
     # The new entry must balance itself: capital offsets this entry's deltas.
@@ -1292,6 +1309,11 @@ async def get_account_ledger(
     if not acc:
         raise HTTPException(status_code=404, detail="Account not found")
     today = datetime.now(timezone.utc).date().isoformat()
+    # p575: garbage window bounds are rejected, never silently widened
+    if start_date is not None:
+        start_date = _iso_date(start_date, "تاريخ البداية")
+    if end_date is not None:
+        end_date = _iso_date(end_date, "تاريخ النهاية")
     end_date = end_date or today
     if start_date and start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be <= end_date")

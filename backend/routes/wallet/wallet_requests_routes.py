@@ -155,8 +155,24 @@ def create_wallet_requests_routes(main_db, get_current_user, get_super_admin, bl
                 raise HTTPException(status_code=400, detail="الرصيد غير كافي")
             new_balance, txn = await _record_txn(recipient, "debit", amount, "withdraw_request", request_id,
                                                  req.get("note") or "سحب من المحفظة", by_label)
-            await _record_txn(main_wallet, "credit", amount, "withdraw_return", request_id,
-                              f"استرجاع رصيد من {req.get('entity_name', '')}", by_label)
+            # p575-005: compensate the recipient debit if the main-wallet
+            # credit fails — the topup path above already has this leg.
+            # Without it the outer catch resets the request to pending and a
+            # retry debits the recipient TWICE (money lost, books diverge).
+            try:
+                await _record_txn(main_wallet, "credit", amount, "withdraw_return", request_id,
+                                  f"استرجاع رصيد من {req.get('entity_name', '')}", by_label)
+            except Exception:
+                try:
+                    await _record_txn(recipient, "credit", amount, "withdraw_refund", request_id,
+                                      "استرجاع سحب فاشل", by_label)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).critical(
+                        "WALLET WITHDRAW COMPENSATION FAILED: %s debited from "
+                        "%s, main credit failed and refund failed; req=%s",
+                        amount, req.get("entity_id"), request_id)
+                raise
         await main_db.wallet_requests.update_one({"id": request_id}, {"$set": {
             "status": "approved",
             "processed_by": by_label,

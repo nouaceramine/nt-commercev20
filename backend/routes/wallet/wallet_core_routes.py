@@ -5,7 +5,11 @@ Following Martin Fowler's Large Class -> Extract Class pattern
 """
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
+import logging
+import math
 import uuid
+
+_logger = logging.getLogger(__name__)
 
 from pymongo import ReturnDocument
 
@@ -40,7 +44,19 @@ def create_wallet_core_routes(main_db, get_current_user, get_super_admin, block_
             price = plan.get("six_month_price", 0) if plan else 0
         else:
             price = plan.get("yearly_price", 0) if plan else 0
-        return plan, sub_type, float(price or 0)
+        # p575-001: legacy-poisoned plan prices (NaN/Inf, pre-P574 data) used
+        # to flow into subscription_due and kill GET /wallet with a
+        # strict-JSON 500 — the wallet page died for every such tenant.
+        # Sanitize to 0 and warn (the P574-003 defensive-wall doctrine).
+        try:
+            price = float(price or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        if not math.isfinite(price):
+            _logger.warning("poisoned plan price sanitized: tenant=%s plan=%s",
+                            tenant.get("id"), tenant.get("plan_id"))
+            price = 0.0
+        return plan, sub_type, price
 
     @router.get("")
     async def get_wallet(user: dict = Depends(block_cashier)):

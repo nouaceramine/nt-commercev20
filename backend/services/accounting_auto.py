@@ -38,6 +38,15 @@ DEFAULT_ACCOUNTS = [
 BOX_ACCOUNT = {box: code for code, _, _, box in DEFAULT_ACCOUNTS if box}
 
 
+def box_account_code(box_id):
+    """p575: THE box→account resolution rule. Custom worker tills (p167,
+    box_* ids) are cash-equivalent and book to 530 — every journal poster
+    already resolves them via the 530 default below, and the opening-balance
+    reconciliation must use the SAME rule or it "corrects" real till cash
+    out of the books."""
+    return BOX_ACCOUNT.get(box_id, "530")
+
+
 async def ensure_accounts(tdb) -> dict:
     """Lazily seed the default chart of accounts. Returns {code: account_doc}."""
     out = {}
@@ -140,7 +149,7 @@ async def post_sale_entry(tdb, payload: dict):
     paid = float(payload.get("paid_amount", 0) or 0)
     remaining = float(payload.get("remaining", max(0.0, total - paid)) or 0)
     cogs = float(payload.get("cogs", 0) or 0)
-    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    box_code = box_account_code(payload.get("cash_box_id") or "cash")
 
     lines = []
     if paid > 0:
@@ -176,7 +185,7 @@ async def post_sale_reversal(tdb, payload: dict, source_tag: str, label: str):
     paid = float(payload.get("paid_amount", 0) or 0)
     remaining = float(payload.get("remaining", 0) or 0)
     cogs = float(payload.get("cogs", 0) or 0)
-    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    box_code = box_account_code(payload.get("cash_box_id") or "cash")
 
     lines = []
     if total > 0:
@@ -212,7 +221,7 @@ async def post_purchase_entry(tdb, payload: dict):
     total = float(payload.get("total", 0) or 0)
     paid = float(payload.get("paid_amount", 0) or 0)
     remaining = float(payload.get("remaining", max(0.0, total - paid)) or 0)
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
 
     lines = []
     if total > 0:
@@ -245,7 +254,7 @@ async def post_purchase_payment_adjustment(tdb, payload: dict):
     if await already_posted(tdb, purchase_id, tag):
         return None
     accounts = await ensure_accounts(tdb)
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
     amount = abs(diff)
     if diff > 0:
         # More paid now: less supplier debt and less cash.
@@ -276,7 +285,7 @@ async def post_purchase_reactivation(tdb, payload: dict):
     total = float(payload.get("total", 0) or 0)
     paid = float(payload.get("paid_amount", 0) or 0)
     remaining = float(payload.get("remaining", max(0.0, total - paid)) or 0)
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
     lines = []
     if total > 0:
         lines.append(_line(accounts["380"], debit=total))
@@ -366,7 +375,7 @@ async def post_expense_entry(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method"), "530")
+    box_code = box_account_code(payload.get("payment_method"))
     lines = [
         _line(accounts["610"], debit=amount),
         _line(accounts[box_code], credit=amount),
@@ -415,7 +424,7 @@ async def post_expense_reversal(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method"), "530")
+    box_code = box_account_code(payload.get("payment_method"))
     lines = [
         _line(accounts[box_code], debit=amount),
         _line(accounts["610"], credit=amount),
@@ -443,7 +452,7 @@ async def post_installment_payment_entry(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
     # p494c: split principal vs interest — the sale booked only the PRINCIPAL
     # as receivable (411), so crediting 411 with the full amount used to leave
     # the AR account net-credited by the interest forever. Interest is revenue.
@@ -479,7 +488,7 @@ async def post_rental_deposit_held(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    box_code = box_account_code(payload.get("cash_box_id") or "cash")
     return await _insert_entry(
         tdb, reference=payload.get("contract_code", ""), reference_id=payment_id,
         source_tag="rental_deposit",
@@ -498,7 +507,7 @@ async def post_rental_deposit_refund(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    box_code = box_account_code(payload.get("cash_box_id") or "cash")
     return await _insert_entry(
         tdb, reference=payload.get("contract_code", ""), reference_id=payment_id,
         source_tag="rental_deposit_refund",
@@ -560,7 +569,7 @@ async def post_supplier_advance_entry(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
     lines = [
         _line(accounts["402"], debit=amount),
         _line(accounts[box_code], credit=amount),
@@ -588,7 +597,7 @@ async def post_rental_payment_entry(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("cash_box_id") or "cash", "530")
+    box_code = box_account_code(payload.get("cash_box_id") or "cash")
     lines = [
         _line(accounts[box_code], debit=amount),
         _line(accounts["701"], credit=amount),
@@ -630,11 +639,11 @@ async def post_expense_adjustment(tdb, payload: dict):
     accounts = await ensure_accounts(tdb)
     lines = []
     if had_entry and old_amount > 0 and old_method:
-        old_box = BOX_ACCOUNT.get(old_method, "530")
+        old_box = box_account_code(old_method)
         lines.append(_line(accounts[old_box], debit=old_amount))
         lines.append(_line(accounts["610"], credit=old_amount))
     if can_post_new:
-        new_box = BOX_ACCOUNT.get(new_method, "530")
+        new_box = box_account_code(new_method)
         lines.append(_line(accounts["610"], debit=new_amount))
         lines.append(_line(accounts[new_box], credit=new_amount))
     if not lines:
@@ -660,7 +669,7 @@ async def post_customer_payment_entry(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
     lines = [
         _line(accounts[box_code], debit=amount),
         _line(accounts["411"], credit=amount),
@@ -684,7 +693,7 @@ async def post_supplier_payment_entry(tdb, payload: dict):
     amount = float(payload.get("amount", 0) or 0)
     if amount <= 0:
         return None
-    box_code = BOX_ACCOUNT.get(payload.get("payment_method") or "cash", "530")
+    box_code = box_account_code(payload.get("payment_method") or "cash")
     lines = [
         _line(accounts["401"], debit=amount),
         _line(accounts[box_code], credit=amount),
@@ -744,7 +753,7 @@ async def post_commission_payout(tdb, *, commission_id: str, amount: float, bene
     if not commission_id or amount <= 0 or await already_posted(tdb, commission_id, "commission_payout"):
         return None
     accounts = await ensure_accounts(tdb)
-    box_code = BOX_ACCOUNT.get(payment_method or "cash", "530")
+    box_code = box_account_code(payment_method or "cash")
     lines = [
         _line(accounts["421"], debit=amount),
         _line(accounts[box_code], credit=amount),
@@ -770,8 +779,8 @@ async def post_box_transfer(tdb, payload: dict):
     if not math.isfinite(amount) or amount <= 0:
         return None
     accounts = await ensure_accounts(tdb)
-    src_code = BOX_ACCOUNT.get(payload.get("from_box"), "530")
-    dst_code = BOX_ACCOUNT.get(payload.get("to_box"), "530")
+    src_code = box_account_code(payload.get("from_box"))
+    dst_code = box_account_code(payload.get("to_box"))
     if src_code == dst_code:
         return None  # one account hosts both boxes — nothing to move
     lines = [
@@ -798,7 +807,7 @@ async def post_box_adjustment(tdb, payload: dict):
     if not math.isfinite(diff) or abs(diff) < 0.005:
         return None
     accounts = await ensure_accounts(tdb)
-    box_code = BOX_ACCOUNT.get(payload.get("box_id"), "530")
+    box_code = box_account_code(payload.get("box_id"))
     if diff > 0:
         lines = [_line(accounts[box_code], debit=diff),
                  _line(accounts["759"], credit=diff)]
