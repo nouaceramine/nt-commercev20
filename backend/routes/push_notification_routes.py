@@ -2,7 +2,7 @@
 Push Notification Routes
 Web Push notification management - subscribe, unsubscribe, send notifications.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -51,8 +51,11 @@ def create_push_notification_routes(db, get_current_user, get_tenant_admin, requ
 
     @router.post("/unsubscribe")
     async def unsubscribe(subscription: PushSubscription, user: dict = Depends(get_current_user)):
+        # p571-008: only an ACTIVE subscription can be unsubscribed — the
+        # repeat call used to match the inactive doc and return a phantom 200.
         result = await db.push_subscriptions.update_one(
-            {"endpoint": subscription.endpoint, "user_id": user.get("id")},
+            {"endpoint": subscription.endpoint, "user_id": user.get("id"),
+             "active": True},
             {"$set": {"active": False}}
         )
         if result.matched_count == 0:
@@ -143,7 +146,7 @@ def create_push_notification_routes(db, get_current_user, get_tenant_admin, requ
         return {"success": True, "sent": sent, "failed": failed}
 
     @router.get("/logs")
-    async def get_push_logs(limit: int = 50, admin: dict = Depends(get_tenant_admin)):
+    async def get_push_logs(limit: int = Query(50, ge=1, le=200), admin: dict = Depends(get_tenant_admin)):  # p571-007
         logs = await db.push_notification_logs.find(
             {"tenant_id": admin.get("tenant_id")}, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)

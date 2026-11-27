@@ -2,10 +2,11 @@
 Task Management & Internal Chat Routes
 Collections: tasks, task_comments, chat_rooms, chat_messages
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import math
 import uuid
 
 
@@ -24,10 +25,37 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         due_date: Optional[str] = None
         assigned_to: Optional[str] = None
 
+    _TASK_PRIORITIES = {"low", "medium", "high"}
+    _TASK_STATUSES = {"pending", "in_progress", "completed"}
+
+    async def _valid_assignee(uid):
+        # p571-003: ghost assignees were stored verbatim.
+        if uid is None:
+            return
+        u = await db.users.find_one({"id": uid, "is_active": {"$ne": False}},
+                                    {"_id": 0, "id": 1})
+        if not u:
+            raise HTTPException(status_code=400, detail="المكلَّف غير موجود")
+
+    def _valid_due(d):
+        if d is None:
+            return
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="تاريخ الاستحقاق غير صالح")
+
     @router.post("")
     async def create_task(data: TaskCreate, user: dict = Depends(block_cashier)):  # p531
         if not (data.title_ar or "").strip():
             raise HTTPException(status_code=400, detail="عنوان المهمة مطلوب")
+        # p571-003: bogus priorities and garbage due dates were stored.
+        if data.priority not in _TASK_PRIORITIES:
+            raise HTTPException(status_code=400, detail="أولوية غير صالحة")
+        if not isinstance(data.task_type, str) or not data.task_type.strip() or len(data.task_type) > 50:
+            raise HTTPException(status_code=400, detail="نوع المهمة غير صالح")
+        _valid_due(data.due_date)
+        await _valid_assignee(data.assigned_to)
         from services.code_generator import next_code
         task_number = await next_code(db, "tasks", "TASK-", 4, False, field="task_number")
         task = {
@@ -68,13 +96,44 @@ def create_task_routes(db, get_current_user, get_tenant_admin) -> dict:
         task["comments"] = comments
         return task
 
+    # p571-003: updatable business fields. task_number/created_by/id are
+    # system-owned and unwritable.
+    _TASK_UPDATABLE = {"title_ar", "title_fr", "description_ar", "description_fr",
+                       "task_type", "priority", "due_date", "assigned_to",
+                       "status", "progress"}
+
     @router.put("/{task_id}")
     async def update_task(task_id: str, data: dict, user: dict = Depends(block_cashier)):  # p531
-        data.pop("id", None)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        res = await db.tasks.update_one({"id": task_id}, {"$set": data})
-        if res.matched_count == 0:  # p531: no phantom-200 on unknown task id
+        task = await db.tasks.find_one({"id": task_id}, {"_id": 0, "id": 1})
+        if not task:  # p531: no phantom-200 on unknown task id
             raise HTTPException(status_code=404, detail="المهمة غير موجودة")
+        # p571-003: the raw $set accepted bogus statuses, NaN/out-of-range
+        # progress, and overwrote system fields (task_number, created_by).
+        clean = {k: v for k, v in data.items() if k in _TASK_UPDATABLE}
+        if "title_ar" in clean and not (clean["title_ar"] or "").strip():
+            raise HTTPException(status_code=400, detail="عنوان المهمة مطلوب")
+        if "status" in clean and clean["status"] not in _TASK_STATUSES:
+            raise HTTPException(status_code=400, detail="حالة غير صالحة")
+        if "priority" in clean and clean["priority"] not in _TASK_PRIORITIES:
+            raise HTTPException(status_code=400, detail="أولوية غير صالحة")
+        if "task_type" in clean and (not isinstance(clean["task_type"], str)
+                                     or not clean["task_type"].strip()
+                                     or len(clean["task_type"]) > 50):
+            raise HTTPException(status_code=400, detail="نوع المهمة غير صالح")
+        if "progress" in clean:
+            try:
+                prog = float(clean["progress"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="نسبة الإنجاز غير صالحة")
+            if not math.isfinite(prog) or not 0 <= prog <= 100:
+                raise HTTPException(status_code=400, detail="نسبة الإنجاز يجب أن تكون بين 0 و100")
+            clean["progress"] = prog
+        if "due_date" in clean:
+            _valid_due(clean["due_date"])
+        if "assigned_to" in clean:
+            await _valid_assignee(clean["assigned_to"])
+        clean["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.tasks.update_one({"id": task_id}, {"$set": clean})
         return await db.tasks.find_one({"id": task_id}, {"_id": 0})
 
     @router.delete("/{task_id}")
@@ -169,7 +228,7 @@ def create_chat_routes(db, get_current_user) -> dict:
         return rooms
 
     @router.get("/rooms/{room_id}/messages")
-    async def get_messages(room_id: str, limit: int = 50, user: dict = Depends(block_cashier)):  # p531
+    async def get_messages(room_id: str, limit: int = Query(50, ge=1, le=200), user: dict = Depends(block_cashier)):  # p531 / p571-007: negative limits crashed pymongo with a 500
         uid = user.get("id", "")
         await _member_room(room_id, uid)
         # p550: fetching the thread IS the read receipt — the unread badge used

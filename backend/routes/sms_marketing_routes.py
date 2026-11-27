@@ -2,11 +2,15 @@
 SMS Marketing & SMS Reminder System Routes
 Extracted from server.py
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
+import math
+import re
 import uuid
+
+from pymongo.errors import DuplicateKeyError
 
 
 def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -121,18 +125,45 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
 
     # ── SMS Settings ──
 
+    _sms_settings_idx = set()
+
+    async def _ensure_sms_settings_index():
+        """p571-004: one sms_settings doc per tenant DB — the P550-006
+        first-read race class. Lazy unique index; DBs whose legacy duplicates
+        block it still get the DuplicateKeyError-tolerant insert path."""
+        name = getattr(db, "name", None)
+        if not name or name in _sms_settings_idx:
+            return
+        _sms_settings_idx.add(name)
+        try:
+            await db.sms_settings.create_index(
+                [("id", 1)], unique=True, name="p571_sms_settings_id")
+        except Exception:
+            pass
+
     @router.get("/sms/settings")
     async def get_sms_settings(admin: dict = Depends(get_tenant_admin)):
+        await _ensure_sms_settings_index()
         settings = await db.sms_settings.find_one({"id": "global"}, {"_id": 0})
         if not settings:
-            settings = {**DEFAULT_SMS_SETTINGS, "id": "global"}
-            await db.sms_settings.insert_one(settings)
-            settings = {k: v for k, v in settings.items() if k != "_id"}
+            try:
+                await db.sms_settings.insert_one({**DEFAULT_SMS_SETTINGS, "id": "global"})
+            except DuplicateKeyError:
+                pass  # p571-004: lost the first-read race — read the winner
+            settings = await db.sms_settings.find_one({"id": "global"}, {"_id": 0})
         return settings
 
     @router.put("/sms/settings")
     async def update_sms_settings(settings: SMSSettingsUpdate, admin: dict = Depends(get_tenant_admin)):
         update_data = settings.model_dump()
+        # p571-005: NaN min_debt_amount, reminder_day=99 and garbage
+        # reminder_time were stored verbatim.
+        if not math.isfinite(update_data["min_debt_amount"]) or update_data["min_debt_amount"] < 0:
+            raise HTTPException(status_code=400, detail="الحد الأدنى لمبلغ الدين غير صالح")
+        if not 1 <= update_data["reminder_day"] <= 31:
+            raise HTTPException(status_code=400, detail="يوم التذكير غير صالح (1-31)")
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", update_data["reminder_time"] or ""):
+            raise HTTPException(status_code=400, detail="وقت التذكير غير صالح (HH:MM)")
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.sms_settings.update_one({"id": "global"}, {"$set": update_data}, upsert=True)
         return {"success": True, "message": "Settings updated"}
@@ -190,7 +221,7 @@ def create_sms_marketing_routes(db, get_current_user, get_tenant_admin, require_
         return await send_debt_reminder(request, user)
 
     @router.get("/sms/logs")
-    async def get_sms_logs(limit: int = 50, customer_id: Optional[str] = None, user: dict = Depends(require_tenant)):
+    async def get_sms_logs(limit: int = Query(50, ge=1, le=200), customer_id: Optional[str] = None, user: dict = Depends(require_tenant)):  # p571-007
         query = {}
         if customer_id:
             query["customer_id"] = customer_id

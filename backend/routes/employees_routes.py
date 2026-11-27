@@ -159,7 +159,12 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
     async def get_salary_report(month: Optional[str] = None, user: dict = Depends(require_permission("employees.view"))):
         if not month:
             month = datetime.now(timezone.utc).strftime("%Y-%m")
+        # p571-006: a malformed month crashed with a bare 500 (split/int).
+        if not re.match(r"^\d{4}-\d{2}$", month):
+            raise HTTPException(status_code=400, detail="صيغة الشهر غير صالحة (YYYY-MM)")
         year, month_num = map(int, month.split("-"))
+        if not 1 <= month_num <= 12:
+            raise HTTPException(status_code=400, detail="صيغة الشهر غير صالحة (YYYY-MM)")
         start_date = datetime(year, month_num, 1, tzinfo=timezone.utc)
         end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc) if month_num == 12 else datetime(year, month_num + 1, 1, tzinfo=timezone.utc)
         employees = await db.employees.find({}, {"_id": 0}).to_list(100)
@@ -221,12 +226,45 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
             raise HTTPException(status_code=404, detail="Employee not found")
         return emp
 
+    # p571-001: fields the HR UI may legitimately update. Everything else —
+    # total_advances/total_commission (financial counters), user_id/user_email
+    # (account link), code, id, created_at — is system-owned and unwritable.
+    _EMP_UPDATABLE = {"name", "phone", "email", "position", "salary",
+                      "hire_date", "commission_rate", "max_discount_percent",
+                      "max_debt_amount"}
+
     @router.put("/{employee_id}")
     async def update_employee(employee_id: str, updates: dict, admin: dict = Depends(require_permission("employees.edit"))):
         emp = await db.employees.find_one({"id": employee_id})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
-        update_data = {k: v for k, v in updates.items() if v is not None and k != "id"}
+        # p571-001: the raw-dict PUT bypassed every POST wall (p521-002) and
+        # exposed system fields: total_advances injection, user_id re-pointing,
+        # code overwrite, and NaN/blank/negative values committed BEFORE the
+        # response 500'd on strict JSON. Whitelist + POST-parity validation.
+        update_data = {k: v for k, v in updates.items()
+                       if v is not None and k in _EMP_UPDATABLE}
+        if "name" in update_data:
+            nm = (update_data["name"] or "").strip() if isinstance(update_data["name"], str) else ""
+            if not nm or len(nm) > 200:
+                raise HTTPException(status_code=400, detail="اسم الموظف غير صالح")
+            update_data["name"] = nm
+        if "email" in update_data:
+            em = (update_data["email"] or "").strip().lower() if isinstance(update_data["email"], str) else ""
+            if em and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em):
+                raise HTTPException(status_code=400, detail="البريد الإلكتروني غير صالح")
+            update_data["email"] = em
+        for key, label in (("salary", "الراتب"), ("commission_rate", "نسبة العمولة"),
+                           ("max_discount_percent", "حد الخصم"),
+                           ("max_debt_amount", "حد الدين")):
+            if key in update_data:
+                try:
+                    val = float(update_data[key])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"{label} غير صالح")
+                if not math.isfinite(val) or val < 0:
+                    raise HTTPException(status_code=400, detail=f"{label} غير صالح")
+                update_data[key] = val
         if update_data:
             await db.employees.update_one({"id": employee_id}, {"$set": update_data})
         updated = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -311,6 +349,12 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
         # and concurrent posts can no longer inflate attendance counts.
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", a.date or ""):
             raise HTTPException(status_code=400, detail="صيغة التاريخ غير صالحة (YYYY-MM-DD)")
+        # p571-006: the regex alone accepted impossible calendar dates
+        # (2026-13-45) and stored them.
+        try:
+            datetime.strptime(a.date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="تاريخ غير موجود في التقويم")
         emp = await db.employees.find_one({"id": a.employee_id}, {"_id": 0, "name": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
@@ -363,12 +407,37 @@ def create_employees_routes(db, get_current_user, get_tenant_admin, require_tena
     # ── Alert Settings ──
     @router.get("/{employee_id}/alert-settings")
     async def get_alert_settings(employee_id: str, user: dict = Depends(require_permission("employees.view"))):
+        # p571-002: ghost employees used to receive synthetic defaults (200).
+        if not await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=404, detail="Employee not found")
         settings = await db.employee_alerts.find_one({"employee_id": employee_id}, {"_id": 0})
         return settings or {"employee_id": employee_id, "enable_discount_alert": True, "enable_debt_alert": True, "discount_threshold_percent": 80, "debt_threshold_percent": 80}
 
     @router.put("/{employee_id}/alert-settings")
     async def update_alert_settings(employee_id: str, settings: dict, admin: dict = Depends(require_permission("employees.edit"))):
-        await db.employee_alerts.update_one({"employee_id": employee_id}, {"$set": {**settings, "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+        # p571-002: the raw upsert created docs for GHOST employees (including
+        # ids from other tenants) and stored NaN/>100 thresholds and
+        # non-boolean flags. Verify the employee, whitelist the four keys,
+        # wall the values.
+        if not await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=404, detail="Employee not found")
+        clean = {}
+        for key in ("enable_discount_alert", "enable_debt_alert"):
+            if key in settings:
+                if not isinstance(settings[key], bool):
+                    raise HTTPException(status_code=400, detail="قيمة التفعيل غير صالحة")
+                clean[key] = settings[key]
+        for key in ("discount_threshold_percent", "debt_threshold_percent"):
+            if key in settings:
+                try:
+                    val = float(settings[key])
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="العتبة غير صالحة")
+                if not math.isfinite(val) or not 0 <= val <= 100:
+                    raise HTTPException(status_code=400, detail="العتبة يجب أن تكون بين 0 و100")
+                clean[key] = val
+        clean["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.employee_alerts.update_one({"employee_id": employee_id}, {"$set": clean}, upsert=True)
         return {"success": True}
 
     return router
