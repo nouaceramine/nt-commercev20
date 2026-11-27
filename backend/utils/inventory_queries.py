@@ -10,6 +10,39 @@ untouched to preserve their existing behavior.
 """
 
 
+# P576: legacy-poisoned BSON numbers (NaN/Inf written before the write
+# walls existed) must never reach the strict-JSON response — one poisoned
+# document otherwise 500s the whole list (the P575-001 read-path doctrine).
+PRODUCT_NUMBER_FIELDS = (
+    "quantity", "min_quantity", "low_stock_threshold",
+    "purchase_price", "wholesale_price", "retail_price",
+    "super_wholesale_price", "tariff_a", "tariff_b", "tariff_c", "tariff_d",
+    "tax_rate", "qty_per_package",
+)
+
+
+def finite_or_zero(value):
+    """Non-finite / non-numeric -> 0; everything else passes through."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return 0
+    import math as _m
+    return f if _m.isfinite(f) else 0
+
+
+def sanitize_product_numbers(doc):
+    """In-place: clamp legacy non-finite float fields to 0 for READ payloads.
+    Write paths stay walled (422) — this is display defense only."""
+    if isinstance(doc, dict):
+        import math as _m
+        for key in PRODUCT_NUMBER_FIELDS:
+            v = doc.get(key)
+            if isinstance(v, float) and not _m.isfinite(v):
+                doc[key] = 0
+    return doc
+
+
 def low_stock_filter() -> dict:
     """MongoDB filter: products whose quantity is BELOW their low-stock
     threshold (falling back to 10 when no per-product threshold is set)."""

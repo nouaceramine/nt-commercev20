@@ -1,6 +1,6 @@
 # p187: IMEI / serial-number tracking for electronics & appliances
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
@@ -8,7 +8,17 @@ import uuid
 
 class RegisterSerials(BaseModel):
     product_id: str
-    serials: List[str]
+    # P576: bounded batch — the list was unbounded (a 100k-entry request was
+    # a self-DoS of N+1 existence checks) and serial length was unwalled.
+    serials: List[str] = Field(max_length=500)
+
+    @field_validator("serials")
+    @classmethod
+    def _serials_bounded(cls, v):
+        for s in v:
+            if s is not None and len(s) > 64:
+                raise ValueError("الرقم التسلسلي يجب ألا يتجاوز 64 حرفًا")
+        return v
 
 
 def _now():
@@ -77,18 +87,31 @@ def create_serials_routes(db, get_current_user, get_tenant_admin) -> dict:
         if not product:
             raise HTTPException(status_code=404, detail="المنتج غير موجود")
         added, skipped = 0, 0
+        # P576: one $in existence check for the whole batch (was one query per
+        # serial) + in-batch dedupe; per-serial insert keeps the p492
+        # deterministic-_id race wall for concurrent registrations.
+        from pymongo.errors import DuplicateKeyError as _DupKey
+        cleaned, seen = [], set()
         for raw in data.serials:
             sn = (raw or "").strip()
             if not sn:
                 continue
-            exists = await _serials().find_one({"serial": sn})
-            if exists:
+            if sn in seen:
+                skipped += 1
+                continue
+            seen.add(sn)
+            cleaned.append(sn)
+        existing = set()
+        if cleaned:
+            async for _d in _serials().find({"serial": {"$in": cleaned}}, {"serial": 1}):
+                existing.add(_d.get("serial"))
+        for sn in cleaned:
+            if sn in existing:
                 skipped += 1
                 continue
             # p492: deterministic _id per serial closes the check-then-insert
             # race — a concurrent duplicate hits DuplicateKeyError and is
             # counted as skipped, never double-registered.
-            from pymongo.errors import DuplicateKeyError as _DupKey
             try:
                 await _serials().insert_one({
                     "_id": f"sn_{sn}",

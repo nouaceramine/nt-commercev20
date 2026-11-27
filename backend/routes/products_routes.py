@@ -6,8 +6,10 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
-from utils.inventory_queries import low_stock_filter, fefo_projection
+from utils.inventory_queries import (  # noqa: E501
+    low_stock_filter, fefo_projection, sanitize_product_numbers, finite_or_zero)
 from services.warehouse_stock import adjust_warehouse_stock
+import math
 import uuid
 import re
 
@@ -327,6 +329,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 product["family_name"] = ""
             if not product.get("article_code"):
                 product["article_code"] = ""
+        for product in products:
+            sanitize_product_numbers(product)  # P576: legacy nan must not 500 the list
         truncate_list_descriptions(products)
         return products
 
@@ -376,6 +380,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                 product["family_name"] = ""
             if not product.get("article_code"):
                 product["article_code"] = ""
+        for product in products:
+            sanitize_product_numbers(product)  # P576
         truncate_list_descriptions(products)
 
         return {"items": products, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
@@ -410,6 +416,12 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             conditions.append({"$expr": {"$lte": ["$quantity", "$min_quantity"]}})
         elif stock_filter == "available":
             conditions.append({"quantity": {"$gt": 0}})
+        # P576: non-finite price filters silently matched EVERYTHING
+        # (BSON NaN sorts below every number) — the P575-006 query-wall doctrine.
+        if min_price is not None and not math.isfinite(min_price):
+            raise HTTPException(status_code=422, detail="مرشح السعر الأدنى غير صالح")
+        if max_price is not None and not math.isfinite(max_price):
+            raise HTTPException(status_code=422, detail="مرشح السعر الأعلى غير صالح")
         if min_price is not None:
             conditions.append({"retail_price": {"$gte": min_price}})
         if max_price is not None:
@@ -461,6 +473,8 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
         if q:
             products.sort(key=sort_key)
 
+        for product in products:
+            sanitize_product_numbers(product)  # P576
         families_list = None
         if include_families:
             families_list = await db.product_families.find({}, {"_id": 0, "id": 1, "name_ar": 1, "name_en": 1}).to_list(100)
@@ -617,6 +631,7 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
             product["family_name"] = ""
         if not product.get("article_code"):
             product["article_code"] = ""
+        sanitize_product_numbers(product)  # P576
         return product
 
     # ── Update Product ──
@@ -850,6 +865,9 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
                         clone["cloned_from"] = product_id
                         clone.pop("restored_at", None)
                         clone.pop("restored_by", None)
+                        # P576: a legacy-poisoned source must not birth a
+                        # poisoned clone — clamp non-finite numbers to 0.
+                        sanitize_product_numbers(clone)
                         await _assert_product_identities_available(clone, session=tx_session)
                         await _claim_product_identities(clone["id"], clone, tx_session)
                         await db.products.insert_one(clone, session=tx_session)
@@ -891,6 +909,10 @@ def create_products_routes(db, get_current_user, get_tenant_admin, require_tenan
     async def get_product_lots(product_id: str, user: dict = Depends(require_tenant)):
         from datetime import date as date_class
         lots = await db.product_lots.find({"product_id": product_id}, {"_id": 0}).to_list(1000)
+        # P576: legacy nan/inf lot quantities must not 500 the read
+        for _lot in lots:
+            if isinstance(_lot.get("quantity"), float) and not math.isfinite(_lot["quantity"]):
+                _lot["quantity"] = 0
         # p565: additive remaining_quantity (virtual FEFO of the live stock).
         product = await db.products.find_one({"id": product_id}, {"_id": 0, "quantity": 1})
         projection = fefo_projection(lots, (product or {}).get("quantity"))

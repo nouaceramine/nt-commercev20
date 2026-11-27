@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from utils.ids import new_id
-from utils.inventory_queries import low_stock_filter
+from utils.inventory_queries import low_stock_filter, finite_or_zero
 
 SETTINGS_ID = "auto_reorder_settings"
 DEFAULT_SETTINGS = {
@@ -132,10 +132,12 @@ def create_auto_reorder_routes(db, get_current_user, get_tenant_admin, require_t
             if p["id"] in pending:
                 skipped_pending += 1
                 continue
-            threshold = p.get("low_stock_threshold") or 10
-            qty = suggested_qty(p.get("quantity", 0), threshold,
+            # P576: a legacy-poisoned threshold/quantity/price must not kill
+            # the decision rail — sanitize to 0 (P575-001 read-path doctrine).
+            threshold = finite_or_zero(p.get("low_stock_threshold")) or 10
+            qty = suggested_qty(finite_or_zero(p.get("quantity")), threshold,
                                 settings["qty_multiplier"], settings["min_order_qty"])
-            unit_price = p.get("purchase_price") or 0
+            unit_price = finite_or_zero(p.get("purchase_price"))  # P576
             sid = p.get("supplier_id") or ""
             sname = p.get("supplier_name") or await _supplier_name(sid, names_cache)
             g = groups.setdefault(sid or "_none", {
@@ -145,7 +147,7 @@ def create_auto_reorder_routes(db, get_current_user, get_tenant_admin, require_t
                 "product_id": p["id"],
                 "product_name": p.get("name") or p.get("name_en") or "",
                 "barcode": p.get("barcode", ""),
-                "current_quantity": p.get("quantity", 0),
+                "current_quantity": finite_or_zero(p.get("quantity")),  # P576
                 "threshold": threshold,
                 "suggested_qty": qty,
                 "unit_price": unit_price,
@@ -181,7 +183,7 @@ def create_auto_reorder_routes(db, get_current_user, get_tenant_admin, require_t
             if pid in pending:
                 skipped.append({"product_id": pid, "reason": "موجود في مسودة طلب تلقائي مفتوحة"})
                 continue
-            unit_price = p.get("purchase_price") or 0
+            unit_price = finite_or_zero(p.get("purchase_price"))  # P576
             items.append({
                 "product_id": pid,
                 "product_name": p.get("name") or p.get("name_en") or "",

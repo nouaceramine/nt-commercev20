@@ -95,21 +95,40 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
 
     @router.delete("/warehouses/{warehouse_id}")
     async def delete_warehouse(warehouse_id: str, admin: dict = Depends(require_permission("warehouses.edit"))):
-        wh = await db.warehouses.find_one({"id": warehouse_id})
-        if not wh:
-            raise HTTPException(status_code=404, detail="Warehouse not found")
-        if wh.get("is_main"):
-            raise HTTPException(status_code=400, detail="Cannot delete main warehouse")
-        linked_transfer = await db.stock_transfers.find_one({
-            "$or": [{"from_warehouse": warehouse_id}, {"to_warehouse": warehouse_id}],
-        }, {"_id": 1})
-        linked_stock = await db.warehouse_stock.find_one({"warehouse_id": warehouse_id}, {"_id": 1})
-        linked_purchase = await db.purchases.find_one({"warehouse_id": warehouse_id}, {"_id": 1})
-        linked_sale = await db.sales.find_one({"warehouse_id": warehouse_id}, {"_id": 1})
-        if linked_transfer or linked_stock or linked_purchase or linked_sale:
-            raise HTTPException(status_code=400, detail="Cannot delete a warehouse with linked stock or movements")
-        await db.warehouses.delete_one({"id": warehouse_id})
-        return {"message": "Warehouse deleted successfully"}
+        # P576: the four link checks + delete now share ONE transaction with a
+        # TransientTransactionError retry — and the transfer path write-touches
+        # the warehouse doc, so a concurrent transfer either WriteConflicts the
+        # delete (retry re-sees the stock rows -> 400) or loses the race and
+        # re-reads the deleted warehouse (404). Check-then-act without the tx
+        # let a transfer commit orphan stock rows after the checks.
+        for attempt in range(5):
+            try:
+                async with await client.start_session() as tx_session:
+                    async with tx_session.start_transaction():
+                        wh = await db.warehouses.find_one({"id": warehouse_id}, session=tx_session)
+                        if not wh:
+                            raise HTTPException(status_code=404, detail="Warehouse not found")
+                        if wh.get("is_main"):
+                            raise HTTPException(status_code=400, detail="Cannot delete main warehouse")
+                        linked_transfer = await db.stock_transfers.find_one({
+                            "$or": [{"from_warehouse": warehouse_id}, {"to_warehouse": warehouse_id}],
+                        }, {"_id": 1}, session=tx_session)
+                        linked_stock = await db.warehouse_stock.find_one(
+                            {"warehouse_id": warehouse_id}, {"_id": 1}, session=tx_session)
+                        linked_purchase = await db.purchases.find_one(
+                            {"warehouse_id": warehouse_id}, {"_id": 1}, session=tx_session)
+                        linked_sale = await db.sales.find_one(
+                            {"warehouse_id": warehouse_id}, {"_id": 1}, session=tx_session)
+                        if linked_transfer or linked_stock or linked_purchase or linked_sale:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Cannot delete a warehouse with linked stock or movements")
+                        await db.warehouses.delete_one({"id": warehouse_id}, session=tx_session)
+                        return {"message": "Warehouse deleted successfully"}
+            except PyMongoError as exc:
+                if attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+                    raise
+                await asyncio.sleep(0.02 * (2 ** attempt))
 
     # ── Stock Transfers ──
     async def _create_stock_transfer_impl(t, session):
@@ -119,6 +138,16 @@ def create_warehouse_routes(db, get_current_user, get_tenant_admin, require_tena
         to_wh = await db.warehouses.find_one({"id": t.to_warehouse}, session=session)
         if not from_wh or not to_wh:
             raise HTTPException(status_code=404, detail="Warehouse not found")
+        # P576: write-touch BOTH warehouse docs inside the transfer tx — a
+        # concurrent delete_warehouse then WriteConflicts (one side retries
+        # into a clean 400/404) instead of committing orphan stock rows.
+        _touch = datetime.now(timezone.utc).isoformat()
+        await db.warehouses.update_one(
+            {"id": t.from_warehouse},
+            {"$set": {"last_stock_movement_at": _touch}}, session=session)
+        await db.warehouses.update_one(
+            {"id": t.to_warehouse},
+            {"$set": {"last_stock_movement_at": _touch}}, session=session)
         product = await db.products.find_one({"id": t.product_id}, session=session)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")

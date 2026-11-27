@@ -110,6 +110,18 @@ class InventorySessionCreate(BaseModel):
 
     _counted_items_are_valid = field_validator("counted_items")(validate_counted_items)
 
+    @field_validator("started_at")
+    @classmethod
+    def _started_at_is_iso(cls, v):
+        # P576: garbage dates were accepted and stored silently — the
+        # P575-007 ISO-wall doctrine on the inventory-count surface.
+        from datetime import datetime as _dt
+        try:
+            _dt.fromisoformat(str(v).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            raise ValueError("تاريخ بدء الجلسة يجب أن يكون بصيغة ISO")
+        return v
+
 
 class InventorySessionUpdate(BaseModel):
     name: Optional[str] = None
