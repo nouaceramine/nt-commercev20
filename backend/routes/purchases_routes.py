@@ -4,7 +4,7 @@ Full CRUD with supplier balance, cash box updates
 """
 from fastapi import APIRouter, HTTPException, Depends
 from services.balances import adjust_supplier_mirror
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -27,7 +27,12 @@ def create_purchases_routes(db, get_current_user, get_tenant_admin, require_tena
         return f"{prefix}-{today}-{count['seq']:04d}"
 
     class PurchaseUpdate(BaseModel):
-        paid_amount: Optional[float] = None
+        # p572-002: no finite wall — NaN bypassed every range check
+        # (nan < 0 and nan > total are both False), stored paid_amount=nan,
+        # forced new_remaining=max(0, total-nan)=0 → status "paid" with ZERO
+        # cash movement (phantom debt write-off), then strict-JSON 500'd the
+        # response and cascaded 500 on the purchases LIST for every user.
+        paid_amount: Optional[float] = Field(default=None, allow_inf_nan=False)
         notes: Optional[str] = None
 
     # ── Create Purchase ──

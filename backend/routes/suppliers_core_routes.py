@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -15,7 +15,12 @@ def create_suppliers_routes(db, get_current_user, get_tenant_admin, require_tena
     router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
     class SupplierAdvancePayment(BaseModel):
-        amount: float
+        # p572-001: NaN/Inf bypassed `amount <= 0` (comparisons False) and the
+        # $inc poisoned the CASH BOX balance itself to NaN (proven on staging:
+        # safe=nan, advance_balance=nan) — the response then 500'd on strict
+        # JSON AFTER the commit, and every later advance on that supplier
+        # inherited the poison (nan + 100 = nan).
+        amount: float = Field(allow_inf_nan=False)
         payment_method: str = "cash"
         notes: str = ""
 

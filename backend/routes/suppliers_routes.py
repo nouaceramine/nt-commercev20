@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime, timezone
 from repositories.base_repository import BaseRepository
 import uuid
@@ -16,7 +16,11 @@ def create_suppliers_routes(db, get_current_user):
     router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
 
     @router.get("")
-    async def list_items(skip: int = 0, limit: int = 1000, search: str = None, user=Depends(get_current_user)):
+    async def list_items(skip: int = Query(0, ge=0),
+                         limit: int = Query(1000, ge=1, le=5000),
+                         search: str = None, user=Depends(get_current_user)):
+        # p572-006 (p554 doctrine): raw negative skip/limit crashed pymongo
+        # (500). Query walls → 422.
         # Frontend expects a plain array (legacy contract).
         # p492: default limit raised 100 -> 1000 (parity with GET /customers) —
         # tenants with >100 suppliers silently lost rows in SuppliersPage.

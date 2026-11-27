@@ -13,8 +13,9 @@ p493 hardening:
   cancelled or deleted (stock/history integrity)
 """
 import asyncio
+import math
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone
 import uuid
@@ -28,8 +29,10 @@ def create_supplier_tracking_routes(db, get_current_user, get_tenant_admin) -> d
     class SupplierGoodsCreate(BaseModel):
         supplier_id: str
         product_id: str
-        purchase_price: float = 0
-        quality_rating: float = 5.0
+        # p572-005: NaN bypassed `< 0` and was stored (500 on the response
+        # after commit); Inf likewise. Finite walls at the schema.
+        purchase_price: float = Field(default=0, allow_inf_nan=False)
+        quality_rating: float = Field(default=5.0, allow_inf_nan=False)
         is_preferred: bool = False
 
     class SupplierOrderCreate(BaseModel):
@@ -39,11 +42,30 @@ def create_supplier_tracking_routes(db, get_current_user, get_tenant_admin) -> d
         notes: str = ""
 
     def _validate_items(items):
+        # p572-005: NaN quantity/price passed the comparisons (False) and
+        # poisoned total_amount → on receive the NaN $inc would poison product
+        # stock; a non-numeric string ("abc") raised ValueError → 500.
         for it in items:
-            if float(it.get("quantity", 0) or 0) <= 0:
+            try:
+                qty = float(it.get("quantity", 0) or 0)
+                price = float(it.get("unit_price", 0) or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="قيم غير صالحة في البنود")
+            if not math.isfinite(qty) or qty <= 0:
                 raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
-            if float(it.get("unit_price", 0) or 0) < 0:
+            if not math.isfinite(price) or price < 0:
                 raise HTTPException(status_code=400, detail="السعر غير صالح")
+
+    def _validate_delivery_date(v):
+        # p572-008: regex-shaped but impossible calendar dates (2026-13-45)
+        # were stored verbatim. Require a real calendar date when provided.
+        if v is None or str(v).strip() == "":
+            return
+        try:
+            datetime.strptime(str(v).strip(), "%Y-%m-%d")
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400,
+                                detail="تاريخ التسليم المتوقع غير صالح (YYYY-MM-DD)")
 
     # ── Supplier Goods ──
     @router.post("/goods")
@@ -109,6 +131,7 @@ def create_supplier_tracking_routes(db, get_current_user, get_tenant_admin) -> d
         if not supplier:
             raise HTTPException(status_code=404, detail="المورد غير موجود")
         _validate_items(data.items)
+        _validate_delivery_date(data.expected_delivery)
         # p493: atomic counter — count+1 raced concurrent creates and collided
         # after deletions
         from services.code_generator import next_code
@@ -162,8 +185,22 @@ def create_supplier_tracking_routes(db, get_current_user, get_tenant_admin) -> d
         if new_status and new_status != current.get("status"):
             if new_status not in ORDER_FLOW:
                 raise HTTPException(status_code=400, detail="حالة غير صالحة")
-            if new_status == "cancelled" and current.get("status") == "received":
-                raise HTTPException(status_code=400, detail="لا يمكن إلغاء طلبية مستلمة — أجرِ مرتجع شراء")
+            # p572-003: only cancel-after-receive was blocked — rolling a
+            # received order back to pending re-armed the receive claim and
+            # the next receive DOUBLED the stock (proven: qty 18 → 23).
+            if current.get("status") == "received":
+                raise HTTPException(status_code=400,
+                                    detail="طلبية مستلمة لا يمكن تغيير حالتها — أجرِ مرتجع شراء")
+        # p572-004: a single PUT {status: received, items: new} claimed the
+        # receive transition with the NEW items stored while stock was applied
+        # from the OLD ones (proven: stock +5, stored qty 99). Update items
+        # first, then receive in a separate call.
+        if new_status == "received" and current.get("status") != "received" \
+                and "items" in updates:
+            raise HTTPException(status_code=400,
+                                detail="عدّل البنود أولاً ثم أكّد الاستلام في خطوة منفصلة")
+        if "expected_delivery" in updates:
+            _validate_delivery_date(updates["expected_delivery"])
         if "items" in updates:
             if current.get("status") == "received":
                 raise HTTPException(status_code=400, detail="لا يمكن تعديل بنود طلبية مستلمة")

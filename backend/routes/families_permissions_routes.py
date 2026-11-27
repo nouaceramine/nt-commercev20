@@ -912,6 +912,12 @@ async def update_supplier_family(family_id: str, updates: SupplierFamilyUpdate, 
     update_data = {k: v for k, v in updates.model_dump().items() if v is not None}
     if update_data:
         await db.supplier_families.update_one({"id": family_id}, {"$set": update_data})
+        if "name" in update_data:
+            # p572-007: family_name on suppliers is a server-owned derived
+            # mirror (p552-006) — a family rename left it stale. Propagate.
+            await db.suppliers.update_many(
+                {"family_id": family_id},
+                {"$set": {"family_name": update_data["name"]}})
 
     updated = await db.supplier_families.find_one({"id": family_id}, {"_id": 0})
     count = await db.suppliers.count_documents({"family_id": family_id})
