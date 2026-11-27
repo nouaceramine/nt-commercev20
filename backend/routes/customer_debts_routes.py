@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 import uuid
 
+from utils.sale_sanitize import sanitize_sale_numbers  # P577
+
 
 from services.balances import customer_debt_aggregates, adjust_customer_mirror, adjust_supplier_mirror, allocate_customer_payment, allocate_supplier_payment
 
@@ -41,6 +43,7 @@ def create_customer_debts_routes(db, get_current_user, get_tenant_admin, require
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
         sales = await db.sales.find({"customer_id": customer_id, "debt_amount": {"$gt": 0}}, {"_id": 0}).sort("created_at", -1).to_list(100)
+        sales = [sanitize_sale_numbers(s) for s in sales]  # P577
         payments = await db.debt_payments.find({"customer_id": customer_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
         total_debt = sum(s.get("debt_amount", 0) for s in sales)
         return {"customer_id": customer_id, "customer_name": customer.get("name", ""), "total_debt": total_debt, "unpaid_sales": sales, "payment_history": payments}

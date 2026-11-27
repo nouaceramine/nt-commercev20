@@ -10,6 +10,19 @@ sales_service وrestaurant_routes معاً.
 from datetime import datetime, timezone
 import uuid
 
+_EARN_INDEX_READY = False
+
+
+async def _ensure_earn_index(db):
+    """P577-005: lazy + idempotent unique earn-claim per sale reference."""
+    global _EARN_INDEX_READY
+    if _EARN_INDEX_READY:
+        return
+    await db.loyalty_transactions.create_index(
+        [("sale_id", 1)], unique=True, name="p577_earn_ref_unique",
+        partialFilterExpression={"type": "earn", "sale_id": {"$type": "string"}})
+    _EARN_INDEX_READY = True
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
@@ -65,20 +78,33 @@ async def earn_points(db, *, amount, ref_id, ref_label, user_name="",
         pts = int(amount * rate)
         if pts <= 0:
             return None
-        if await db.loyalty_transactions.find_one(
-                {"type": "earn", "sale_id": ref_id}, {"_id": 1}):
-            return None
         cust = await _resolve_customer(db, customer_id, phone)
         if not cust:
             return None
-        new_bal = int(cust.get("loyalty_points") or 0) + pts
-        await db.customers.update_one(
-            {"id": cust["id"]}, {"$set": {"loyalty_points": new_bal}})
-        await db.loyalty_transactions.insert_one({
-            "id": str(uuid.uuid4()), "customer_id": cust["id"],
-            "points": pts, "type": "earn", "sale_id": ref_id,
-            "notes": f"كسب من {ref_label}", "balance_after": new_bal,
-            "created_at": _now(), "created_by": user_name})
+        # P577-005: the old check-then-act + read-modify-$set lost concurrent
+        # points and double-granted a single reference under racing workers
+        # (proven: 12 concurrent unique earns credited 1/12; 12 same-ref earns
+        # granted 2x with 11 ledger rows). Claim the reference FIRST through
+        # the unique partial index — exactly one worker can ever earn a ref —
+        # then move the balance with an atomic $inc.
+        await _ensure_earn_index(db)
+        from pymongo import ReturnDocument
+        from pymongo.errors import DuplicateKeyError
+        tx_id = str(uuid.uuid4())
+        try:
+            await db.loyalty_transactions.insert_one({
+                "id": tx_id, "customer_id": cust["id"],
+                "points": pts, "type": "earn", "sale_id": ref_id,
+                "notes": f"كسب من {ref_label}", "balance_after": None,
+                "created_at": _now(), "created_by": user_name})
+        except DuplicateKeyError:
+            return None  # a racing worker already earned this reference
+        upd = await db.customers.find_one_and_update(
+            {"id": cust["id"]}, {"$inc": {"loyalty_points": pts}},
+            return_document=ReturnDocument.AFTER)
+        new_bal = int((upd or {}).get("loyalty_points") or 0)
+        await db.loyalty_transactions.update_one(
+            {"id": tx_id}, {"$set": {"balance_after": new_bal}})
         return {"customer_id": cust["id"], "points": pts, "balance": new_bal}
     except Exception:
         return None

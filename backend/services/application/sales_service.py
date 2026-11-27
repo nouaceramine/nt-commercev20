@@ -29,7 +29,7 @@ async def create_sale_op(db, s, user: dict) -> dict:
     import asyncio
     from config.database import client
     from pymongo.errors import DuplicateKeyError, PyMongoError
-    for _attempt in range(5):
+    for _attempt in range(10):  # P577-004
         try:
             async with await client.start_session() as _tx_session:
                 async with _tx_session.start_transaction():
@@ -48,19 +48,23 @@ async def create_sale_op(db, s, user: dict) -> dict:
                     result["loyalty_earned"] = earned["points"]
             return result
         except DuplicateKeyError:
-            if _attempt == 4:
+            if _attempt == 9:  # P577-004
                 raise
             # p348: كود مُدخل من العميل تسابق مع عامل آخر (فاتورة مجزأة) —
             # المعاملة أُجهضت بالكامل؛ اسحب كوداً ذرياً جديداً وأعد العملية كلها
             from services.code_generator import next_code as _next_sale_code
             s.code = await _next_sale_code(db, "sales", "BV", 4, True)
         except PyMongoError as exc:
-            # p494: transient conflict with a concurrent sale — back off and
-            # re-run the whole validation+claim on the fresh state (the
-            # retried attempt returns the clean 400 when stock ran out)
-            if _attempt == 4 or not exc.has_error_label("TransientTransactionError"):
+            # p494/P577-004: transient conflict with a concurrent sale — back
+            # off with JITTER and re-run the whole validation+claim on fresh
+            # state. The linear 5-attempt loop let 8+ concurrent POS sales
+            # collide in lockstep and surface bare 500s (proven: 7x500 in 40
+            # racing sales) — the P569-003 jitter doctrine.
+            if _attempt == 9 or not exc.has_error_label("TransientTransactionError"):
                 raise
-            await asyncio.sleep(0.02 * (2 ** _attempt))
+            import random as _random
+            await asyncio.sleep(min(0.02 * (2 ** _attempt), 0.5)
+                                * (0.5 + _random.random()))
 
 
 
@@ -605,6 +609,15 @@ async def _delete_sale_impl(db, sale_id: str, reason: str, user: dict, _tx) -> N
         raise HTTPException(
             status_code=409,
             detail="الفاتورة مُرجعة مسبقاً وأُعيدت آثارها كاملة — لا تُحذف")
+    # P577-003: an installment sale with OPEN installments must not be
+    # deleted — the orphaned rows stayed payable, crediting real cash boxes
+    # against a vanished invoice (proven: orphan pay 200, box +100)
+    _open_inst = await db.installment_payments.count_documents(
+        {"sale_id": sale_id, "status": {"$ne": "paid"}}, session=_tx)
+    if _open_inst:
+        raise HTTPException(
+            status_code=409,
+            detail="فاتورة تقسيط بأقساط غير مسددة — سوّ الأقساط أو أرجع الفاتورة أولاً")
     now = datetime.now(timezone.utc).isoformat()
     for item in sale.get("items", []):
         # p508: non-stockable lines were never claimed at sale time — the old

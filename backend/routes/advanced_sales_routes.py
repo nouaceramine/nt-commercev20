@@ -5,6 +5,7 @@ Advanced reports, employee sales, peak hours, returns analysis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from utils.sale_sanitize import sanitize_sale_numbers  # P577
 
 # p494b: business-hour grouping follows Africa/Algiers (fixed UTC+1, no DST)
 # like every other report in the system (restaurant reports use the same
@@ -40,6 +41,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         if payment_method:
             query["payment_method"] = payment_method
         sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        sales = [sanitize_sale_numbers(s) for s in sales]  # P577
         if product_id:
             sales = [s for s in sales if any(i.get("product_id") == product_id for i in s.get("items", []))]
         total_amount = sum(s.get("total", 0) for s in sales)
@@ -82,6 +84,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         if end_date:
             query.setdefault("created_at", {})["$lte"] = end_date + "T23:59:59"
         sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        sales = [sanitize_sale_numbers(s) for s in sales]  # P577
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         if not employee:
             # p494b: sales made by tenant users (owner/manager) carry their user
@@ -104,6 +107,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
     async def get_peak_hours_report(days: int = Query(30, ge=1, le=366), admin: dict = Depends(get_tenant_admin)):
         start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         sales = await db.sales.find({"created_at": {"$gte": start_date}, "status": {"$ne": "returned"}}, {"_id": 0, "created_at": 1, "total": 1}).to_list(10000)
+        sales = [sanitize_sale_numbers(s) for s in sales]  # P577
         by_hour = {str(i).zfill(2): {"count": 0, "total": 0} for i in range(24)}
         day_names_ar = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
         by_day = {i: {"count": 0, "total": 0, "name_ar": day_names_ar[i]} for i in range(7)}
@@ -126,6 +130,7 @@ def create_advanced_sales_routes(db, get_current_user, get_tenant_admin, require
         if end_date:
             query.setdefault("returned_at", {})["$lte"] = end_date + "T23:59:59"
         returns = await db.sales.find(query, {"_id": 0}).sort("returned_at", -1).to_list(1000)
+        returns = [sanitize_sale_numbers(s) for s in returns]  # P577
         by_reason = {}
         for ret in returns:
             reason = ret.get("return_reason") or "غير محدد"

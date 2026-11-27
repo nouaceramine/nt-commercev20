@@ -5,7 +5,11 @@ Full CRUD, pagination, blacklist management
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone
+import re
 import uuid
+
+from utils.sale_sanitize import (  # P577
+    sanitize_customer_numbers, sanitize_sale_numbers)
 
 
 def create_customers_routes(db, get_current_user, get_tenant_admin, require_tenant) -> dict:
@@ -63,9 +67,9 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             query["sources"] = source
         if search:
             query["$or"] = [
-                {"name": {"$regex": search, "$options": "i"}},
-                {"phone": {"$regex": search, "$options": "i"}},
-                {"code": {"$regex": search, "$options": "i"}}
+                {"name": {"$regex": re.escape(search), "$options": "i"}},
+                {"phone": {"$regex": re.escape(search), "$options": "i"}},
+                {"code": {"$regex": re.escape(search), "$options": "i"}}
             ]
         if family_id:
             query["family_id"] = family_id
@@ -88,7 +92,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
                 customer["family_id"] = ""
             if not customer.get("code"):
                 customer["code"] = ""
-        return customers
+        return [sanitize_customer_numbers(c) for c in customers]  # P577
 
     # ── Paginated Customers ──
     @router.get("/paginated")
@@ -101,9 +105,9 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         query = {}
         if search:
             query["$or"] = [
-                {"name": {"$regex": search, "$options": "i"}},
-                {"phone": {"$regex": search, "$options": "i"}},
-                {"code": {"$regex": search, "$options": "i"}}
+                {"name": {"$regex": re.escape(search), "$options": "i"}},
+                {"phone": {"$regex": re.escape(search), "$options": "i"}},
+                {"code": {"$regex": re.escape(search), "$options": "i"}}
             ]
         if family_id:
             query["family_id"] = family_id
@@ -132,7 +136,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             if not customer.get("code"):
                 customer["code"] = ""
 
-        return {"items": customers, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
+        return {"items": [sanitize_customer_numbers(c) for c in customers], "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
 
     # ── Generate Customer Code ──
     @router.get("/generate-code")
@@ -166,6 +170,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             {"sources": {"$all": [have], "$ne": missing}},
             {"_id": 0, "id": 1, "name": 1, "phone": 1, "sources": 1, "balance": 1}
         ).limit(min(limit, 500)).to_list(min(limit, 500))
+        rows = [sanitize_customer_numbers(r) for r in rows]  # P577
         return {"have": have, "missing": missing, "count": len(rows), "customers": rows}
 
     # ── p172: Customer 360° overview ──
@@ -174,6 +179,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
         if not customer:
             raise HTTPException(status_code=404, detail="الزبون غير موجود")
+        customer = sanitize_customer_numbers(customer)  # P577
         phone = (customer.get("phone") or "").strip()
         RECHARGE_TYPES = ("recharge_credit", "recharge_cash", "idoom_credit", "sim_activation", "card_sale")
 
@@ -186,6 +192,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
             {"_id": 0, "total": 1, "type": 1, "created_at": 1}
         ).to_list(1000)
         for s in sales:
+            s = sanitize_sale_numbers(s)  # P577: poison must not 500 the 360 view
             t = s.get("type") or ""
             bucket = digital if t == "digital_subscription" else (recharge if t in RECHARGE_TYPES else pos)
             bucket["count"] += 1
@@ -235,6 +242,7 @@ def create_customers_routes(db, get_current_user, get_tenant_admin, require_tena
         customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
+        customer = sanitize_customer_numbers(customer)  # P577
         if customer.get("family_id") and not customer.get("family_name"):
             family = await db.customer_families.find_one({"id": customer["family_id"]}, {"_id": 0, "name": 1})
             customer["family_name"] = family["name"] if family else ""

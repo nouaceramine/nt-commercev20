@@ -4,6 +4,7 @@ services/application/sales_service.py
 """
 from fastapi import APIRouter, HTTPException, Depends
 from services.balances import adjust_customer_mirror
+from utils.sale_sanitize import sanitize_sale_numbers  # P577
 from typing import Optional
 
 
@@ -36,7 +37,9 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
                 query["created_at"]["$lte"] = end_date
             else:
                 query["created_at"] = {"$lte": end_date}
-        return await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        # P577: legacy-poisoned numbers must not blind the whole list
+        sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        return [sanitize_sale_numbers(s) for s in sales]
 
     # ── Paginated Sales ──
     @router.get("/paginated")
@@ -60,7 +63,7 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
         total_pages = (total + page_size - 1) // page_size if page_size > 0 else 1
         skip = (page - 1) * page_size
         sales = await db.sales.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
-        return {"items": sales, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
+        return {"items": [sanitize_sale_numbers(s) for s in sales], "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
 
     # ── Generate Sale Code ──
     @router.get("/generate-code")
@@ -107,7 +110,7 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
         sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
         if not sale:
             raise HTTPException(status_code=404, detail="Sale not found")
-        return sale
+        return sanitize_sale_numbers(sale)  # P577
 
     # ── Update Sale (notes, customer, record payment) ──
     @router.put("/{sale_id}")
@@ -143,6 +146,15 @@ def create_sales_routes(db, get_current_user, get_tenant_admin, require_tenant) 
                         sale = await db.sales.find_one({"id": sale_id}, session=_tx)
                         if not sale:
                             raise HTTPException(status_code=404, detail="Sale not found")
+                        # P577-002: a returned sale has already reversed every
+                        # effect once — a payment or reassignment here used to
+                        # RESURRECT it (status flipped back, mirrors and boxes
+                        # moved) and make it deletable again, reopening the
+                        # P569-001 double-reversal class through the back door
+                        if sale.get("status") == "returned":
+                            raise HTTPException(
+                                status_code=409,
+                                detail="الفاتورة مُرجعة وأُعيدت آثارها كاملة — لا تُعدَّل")
                         now = datetime.now(timezone.utc).isoformat()
                         updates = {"updated_at": now}
 

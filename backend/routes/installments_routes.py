@@ -8,7 +8,10 @@ POST /installments/{id}/pay     — mark an installment as paid
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 from datetime import datetime, timezone
+import math
 import uuid
+
+from utils.sale_sanitize import sanitize_installment_numbers  # P577
 
 
 def create_installments_routes(db, get_current_user, require_tenant) -> APIRouter:
@@ -22,6 +25,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
     async def get_summary(user: dict = Depends(require_tenant)):
         today = datetime.now(timezone.utc).date().isoformat()
         all_inst = await db.installment_payments.find({}, {"_id": 0}).to_list(length=10000)
+        all_inst = [sanitize_installment_numbers(i) for i in all_inst]  # P577
         total_owed       = sum(i["amount"] for i in all_inst if i["status"] != "paid")
         total_collected  = sum(i["amount"] for i in all_inst if i["status"] == "paid")
         overdue_count    = sum(1 for i in all_inst if i["status"] == "overdue" or (i["status"] == "pending" and i.get("due_date", "") < today))
@@ -55,6 +59,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
             query["customer_id"] = customer_id
 
         items = await db.installment_payments.find(query, {"_id": 0}).sort("due_date", 1).to_list(length=10000)
+        items = [sanitize_installment_numbers(i) for i in items]  # P577
 
         today = datetime.now(timezone.utc).date().isoformat()
         for item in items:
@@ -70,6 +75,7 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
         items = await db.installment_payments.find(
             {"sale_id": sale_id}, {"_id": 0}
         ).sort("installment_number", 1).to_list(length=100)
+        items = [sanitize_installment_numbers(i) for i in items]  # P577
         return items
 
     # ── Pay an installment ──
@@ -80,6 +86,20 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
         inst = await db.installment_payments.find_one({"id": installment_id}, {"_id": 0})
         if not inst:
             raise HTTPException(status_code=404, detail="Installment not found")
+
+        # P577-003: a legacy-poisoned row (NaN amount) must never cross the
+        # money rails — it used to $inc nan straight into the cash box
+        def _bad_number(v):
+            if v is None:
+                return False
+            try:
+                return not math.isfinite(float(v))
+            except (TypeError, ValueError):
+                return True
+        if any(_bad_number(inst.get(k))
+               for k in ("amount", "principal_share", "interest_share")):
+            raise HTTPException(status_code=400,
+                                detail="قسط موروث بقيمة غير صالحة — راجع الإدارة")
 
         now = _now()
         payment_method = data.get("payment_method", "cash")
@@ -108,6 +128,17 @@ def create_installments_routes(db, get_current_user, require_tenant) -> APIRoute
                         raise HTTPException(
                             status_code=400,
                             detail="صندوق غير موجود — اختر صندوقاً من الصناديق المتوفرة")
+                # P577-003: the parent sale must be alive and not returned —
+                # paying into a returned/deleted sale booked money against
+                # reversed or vanished goods (orphan rows stayed payable)
+                _parent = await db.sales.find_one(
+                    {"id": inst["sale_id"]}, {"_id": 0, "status": 1}, session=_tx)
+                if not _parent:
+                    raise HTTPException(status_code=404,
+                                        detail="الفاتورة المرتبطة غير موجودة")
+                if _parent.get("status") == "returned":
+                    raise HTTPException(status_code=409,
+                                        detail="الفاتورة مُرجعة — لا تُسدَّد أقساطها")
                 # p494c: atomic claim — the old check-then-act let two
                 # concurrent pays both pass and double-credit the box
                 claimed = await db.installment_payments.find_one_and_update(

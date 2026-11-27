@@ -2,11 +2,14 @@
 Shipping Loyalty Routes - Extracted from legacy_inline_routes.py
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import logging
+import math
+
+from utils.sale_sanitize import sanitize_sale_numbers  # P577
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +62,8 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
     class ShippingRateRequest(BaseModel):
         from_wilaya: str
         to_wilaya: str
-        weight: float = 0.5  # kg
+        # P577-007: NaN 500'd the response; negatives priced shipping < 0
+        weight: float = Field(0.5, gt=0, le=1000, allow_inf_nan=False)  # kg
         company_id: str = ""
 
     @router.get("/shipping/companies")
@@ -252,14 +256,18 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
 
     class LoyaltySettings(BaseModel):
         enabled: bool = False
-        points_per_dinar: float = 0.01  # نقطة لكل دينار
-        points_value: float = 0.1  # قيمة النقطة بالدينار
-        min_redeem_points: int = 100
-        welcome_bonus: int = 0  # نقاط ترحيبية للعميل الجديد
+        # P577-006: bare floats accepted NaN/Inf/negatives — a poisoned rate
+        # crashed every redeem AFTER the decrement (write-then-crash) and
+        # blinded the whole loyalty read surface
+        points_per_dinar: float = Field(0.01, ge=0, le=1000, allow_inf_nan=False)
+        points_value: float = Field(0.1, ge=0, le=100000, allow_inf_nan=False)
+        min_redeem_points: int = Field(100, ge=0, le=10000000)
+        welcome_bonus: int = Field(0, ge=0, le=10000000)
 
     class LoyaltyTransaction(BaseModel):
         customer_id: str
-        points: int
+        # P577-006: int64-safe bounds — 10**20 overflowed the $inc (500)
+        points: int = Field(ge=-1000000000, le=1000000000)
         type: str  # earn, redeem
         sale_id: Optional[str] = None
         notes: Optional[str] = ""
@@ -297,7 +305,10 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
         if not customer:
             raise HTTPException(status_code=404, detail="العميل غير موجود")
 
+        # P577: legacy poison in the stored balance must not 500 the read
         points = customer.get("loyalty_points", 0)
+        if not isinstance(points, (int, float)) or not math.isfinite(points):
+            points = 0
 
         # Get transaction history
         transactions = await db.loyalty_transactions.find(
@@ -308,6 +319,8 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
         # Get loyalty settings for point value
         settings = await db.loyalty_settings.find_one({"id": "global"}, {"_id": 0})
         points_value = settings.get("points_value", 0.1) if settings else 0.1
+        if not isinstance(points_value, (int, float)) or not math.isfinite(points_value):
+            points_value = 0.1  # P577: legacy-poisoned rate falls back
 
         return {
             "customer_id": customer_id,
@@ -338,18 +351,28 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
 
         now = datetime.now(timezone.utc).isoformat()
 
-        # Log transaction
-        await db.loyalty_transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "customer_id": transaction.customer_id,
-            "points": transaction.points,
-            "type": "earn",
-            "sale_id": transaction.sale_id,
-            "notes": transaction.notes or "",
-            "balance_after": new_points,
-            "created_at": now,
-            "created_by": user.get("name", "")
-        })
+        # Log transaction — P577: the unique earn-claim index (pos_loyalty)
+        # allows exactly ONE earn per sale reference; a duplicate manual claim
+        # rolls its $inc back and reports a clean conflict
+        from pymongo.errors import DuplicateKeyError as _DKE
+        try:
+            await db.loyalty_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "customer_id": transaction.customer_id,
+                "points": transaction.points,
+                "type": "earn",
+                "sale_id": transaction.sale_id,
+                "notes": transaction.notes or "",
+                "balance_after": new_points,
+                "created_at": now,
+                "created_by": user.get("name", "")
+            })
+        except _DKE:
+            await db.customers.update_one(
+                {"id": transaction.customer_id},
+                {"$inc": {"loyalty_points": -transaction.points}})
+            raise HTTPException(status_code=409,
+                                detail="نقاط هذه المرجعية مُضافة مسبقاً")
 
         return {"message": f"تم إضافة {transaction.points} نقطة", "new_balance": new_points}
 
@@ -386,6 +409,8 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
 
         # Log transaction
         points_value = settings.get("points_value", 0.1) if settings else 0.1
+        if not isinstance(points_value, (int, float)) or not math.isfinite(points_value):
+            points_value = 0.1  # P577: legacy-poisoned rate falls back
         discount_amount = transaction.points * points_value
 
         await db.loyalty_transactions.insert_one({
@@ -476,6 +501,7 @@ def create_shipping_loyalty_routes(db, require_tenant, get_tenant_admin, CURRENC
         sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
         if not sale:
             raise HTTPException(status_code=404, detail="البيع غير موجود")
+        sale = sanitize_sale_numbers(sale)  # P577
 
         template = await db.invoice_templates.find_one({"id": template_id}, {"_id": 0})
         branding = await db.branding_settings.find_one({"id": "global"}, {"_id": 0})

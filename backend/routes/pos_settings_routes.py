@@ -17,13 +17,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ShortcutItem(BaseModel):
-    productId: Optional[str] = None
-    color: Optional[str] = None
-    label: Optional[str] = None
+    # P577-009: bounded — an unbounded grid/label bloated the settings doc
+    productId: Optional[str] = Field(None, max_length=64)
+    color: Optional[str] = Field(None, max_length=32)
+    label: Optional[str] = Field(None, max_length=80)
 
 
 class ShortcutsPayload(BaseModel):
-    shortcuts: List[ShortcutItem]
+    shortcuts: List[ShortcutItem] = Field(max_length=200)
 
 
 class ScaleConfigPayload(BaseModel):
